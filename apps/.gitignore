@@ -1,4 +1,9 @@
 # Python
+.env
+config/__pycache__/
+apps/**/__pycache__/
+
+
 __pycache__/
 *.py[cod]
 *.pyo
