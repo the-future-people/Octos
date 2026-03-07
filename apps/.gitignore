@@ -1,29 +1,30 @@
+git rm --cached .env
+git rm --cached -r config/__pycache__/
+```
+
+Then open `.gitignore` and replace the entire contents with this:
+```
 # Python
-.env
-config/__pycache__/
-apps/**/__pycache__/
-
-
-__pycache__/
+__pycache__
 *.py[cod]
 *.pyo
 *.pyd
 .Python
 *.egg
-*.egg-info/
-dist/
-build/
+*.egg-info
+dist
+build
 
 # Virtual Environment
-venv/
-env/
+venv
+env
 
 # Django
 *.log
 *.pot
 local_settings.py
 db.sqlite3
-media/
+media
 
 # Environment variables
 .env
@@ -32,8 +33,8 @@ media/
 *.docx
 
 # IDE
-.vscode/
-.idea/
+.vscode
+.idea
 *.swp
 *.swo
 
@@ -42,11 +43,8 @@ media/
 Thumbs.db
 
 # Static files collected
-staticfiles/
+staticfiles
 
 # Coverage
 .coverage
-htmlcov/
-
-# Migrations (we'll track these intentionally)
-# Do NOT ignore migrations
+htmlcov
