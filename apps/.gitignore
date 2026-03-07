@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+
+# Django
+*.log
+*.pot
+local_settings.py
+db.sqlite3
+media/
+
+# Environment variables
+.env
+
+# Architecture document
+*.docx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Static files collected
+staticfiles/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Migrations (we'll track these intentionally)
+# Do NOT ignore migrations
