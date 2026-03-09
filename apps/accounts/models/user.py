@@ -53,6 +53,8 @@ class CustomUser(AbstractBaseUser, AuditModel):
     is_clocked_in = models.BooleanField(default=False)
     last_clock_in = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
+    must_change_password = models.BooleanField(default=False)
+    must_change_password = models.BooleanField(default=False)
 
     objects = CustomUserManager()
 
