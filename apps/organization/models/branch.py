@@ -27,6 +27,12 @@ class Branch(AuditModel):
     capacity_score = models.PositiveIntegerField(default=100)
     current_load = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    services = models.ManyToManyField(
+        'jobs.Service',
+        blank=True,
+        related_name='branches',
+        help_text='Services offered at this branch'
+    )
 
     class Meta:
         ordering = ['name']
