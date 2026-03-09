@@ -35,7 +35,7 @@ class CustomUser(AbstractBaseUser, AuditModel):
     branch = models.ForeignKey(
         'organization.Branch',
         on_delete=models.PROTECT,
-        related_name='employees',
+        related_name='user_accounts',
         null=True,
         blank=True
     )
