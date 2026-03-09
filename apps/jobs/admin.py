@@ -1,5 +1,5 @@
 from django.contrib import admin
-from apps.jobs.models import Job, JobFile, Service, PricingRule, PriceOverrideLog
+from apps.jobs.models import Job, JobFile, Service, PricingRule, PriceOverrideLog, JobStatusLog
 
 
 class JobFileInline(admin.TabularInline):
@@ -14,13 +14,20 @@ class PriceOverrideInline(admin.TabularInline):
     readonly_fields = ['created_at']
 
 
+class JobStatusLogInline(admin.TabularInline):
+    model = JobStatusLog
+    extra = 0
+    readonly_fields = ['from_status', 'to_status', 'actor', 'notes', 'transitioned_at']
+    can_delete = False
+
+
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
     list_display = ['job_number', 'title', 'job_type', 'status', 'priority', 'branch', 'assigned_to', 'is_routed', 'estimated_cost', 'final_cost', 'created_at']
     list_filter = ['job_type', 'status', 'priority', 'is_routed', 'branch']
     search_fields = ['job_number', 'title', 'description']
     readonly_fields = ['job_number', 'created_at', 'updated_at']
-    inlines = [JobFileInline, PriceOverrideInline]
+    inlines = [JobFileInline, PriceOverrideInline, JobStatusLogInline]
 
 
 @admin.register(JobFile)
@@ -47,3 +54,10 @@ class PricingRuleAdmin(admin.ModelAdmin):
 class PriceOverrideLogAdmin(admin.ModelAdmin):
     list_display = ['job', 'original_price', 'overridden_price', 'authorized_by', 'created_at']
     readonly_fields = ['created_at']
+
+
+@admin.register(JobStatusLog)
+class JobStatusLogAdmin(admin.ModelAdmin):
+    list_display = ['job', 'from_status', 'to_status', 'actor', 'transitioned_at']
+    list_filter = ['from_status', 'to_status']
+    readonly_fields = ['job', 'from_status', 'to_status', 'actor', 'notes', 'transitioned_at']
