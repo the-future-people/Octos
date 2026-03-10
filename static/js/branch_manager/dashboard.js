@@ -38,6 +38,7 @@ const Dashboard = (() => {
       loadRecentJobs(),
       loadServices(),
     ]);
+    Notifications.startPolling();
   }
 
   // ─────────────────────────────────────────
@@ -486,3 +487,106 @@ const Dashboard = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', Dashboard.init);
+
+// ─────────────────────────────────────────────────────────────
+// Notifications module
+// ─────────────────────────────────────────────────────────────
+const Notifications = (() => {
+
+  let open = false;
+
+  async function load() {
+    const list = document.getElementById('notif-list');
+    if (!list) return;
+
+    try {
+      const res  = await Auth.fetch('/api/v1/notifications/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!data.length) {
+        list.innerHTML = '<div class="notif-empty">You\'re all caught up ✓</div>';
+        return;
+      }
+
+      list.innerHTML = data.map(n => `
+        <div class="notif-item ${n.is_read ? '' : 'unread'}"
+             onclick="Notifications.markRead(${n.id}, this, '${n.link}')">
+          <span class="notif-dot"></span>
+          <span class="notif-msg">${_esc(n.message)}</span>
+          <span class="notif-time">${n.time_ago}</span>
+        </div>`).join('');
+
+    } catch {
+      list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>';
+    }
+  }
+
+  async function loadCount() {
+    try {
+      const res  = await Auth.fetch('/api/v1/notifications/unread-count/');
+      if (!res.ok) return;
+      const data = await res.json();
+      const count = data.count || 0;
+      const badge = document.getElementById('db-notif-badge');
+      if (badge) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = count > 0 ? 'flex' : 'none';
+      }
+    } catch { /* silent */ }
+  }
+
+  function toggle() {
+    open ? close() : openDropdown();
+  }
+
+  function openDropdown() {
+    open = true;
+    document.getElementById('notif-dropdown')?.classList.add('open');
+    load();
+  }
+
+  function close() {
+    open = false;
+    document.getElementById('notif-dropdown')?.classList.remove('open');
+  }
+
+  async function markRead(id, el, link) {
+    try {
+      await Auth.fetch(`/api/v1/notifications/${id}/read/`, { method: 'POST' });
+      el?.classList.remove('unread');
+      await loadCount();
+    } catch { /* silent */ }
+    if (link) { close(); window.location = link; }
+  }
+
+  async function markAllRead() {
+    try {
+      await Auth.fetch('/api/v1/notifications/read-all/', { method: 'POST' });
+      document.querySelectorAll('.notif-item.unread').forEach(el => {
+        el.classList.remove('unread');
+      });
+      await loadCount();
+    } catch { /* silent */ }
+  }
+
+  function startPolling(intervalMs = 30000) {
+    loadCount();
+    setInterval(loadCount, intervalMs);
+  }
+
+  function _esc(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {
+      close();
+    }
+  });
+
+  return { toggle, close, markRead, markAllRead, loadCount, startPolling };
+
+})();
