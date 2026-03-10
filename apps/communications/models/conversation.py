@@ -26,11 +26,13 @@ class Conversation(AuditModel):
     WHATSAPP = 'WHATSAPP'
     EMAIL = 'EMAIL'
     PHONE = 'PHONE'
+    WALK_IN = 'WALK_IN'
 
     CHANNEL_CHOICES = [
         (WHATSAPP, 'WhatsApp'),
         (EMAIL, 'Email'),
         (PHONE, 'Phone'),
+        (WALK_IN, 'Walk-in'),
     ]
 
     branch = models.ForeignKey(

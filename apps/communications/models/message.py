@@ -22,12 +22,14 @@ class Message(AuditModel):
     WHATSAPP = 'WHATSAPP'
     EMAIL = 'EMAIL'
     PHONE = 'PHONE'
+    WALK_IN = 'WALK_IN'
     SYSTEM = 'SYSTEM'
 
     CHANNEL_CHOICES = [
         (WHATSAPP, 'WhatsApp'),
         (EMAIL, 'Email'),
         (PHONE, 'Phone'),
+        (WALK_IN, 'Walk-in'),
         (SYSTEM, 'System'),
     ]
 
