@@ -13,9 +13,9 @@ from .services import notify, notify_many
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Jobs
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _wire_job_signals():
     try:
@@ -25,12 +25,11 @@ def _wire_job_signals():
         def on_job_created(sender, instance, created, **kwargs):
             if not created:
                 return
-            # Notify the branch manager of the branch this job belongs to
             recipients = _branch_managers(instance.branch)
             notify_many(
                 recipients=recipients,
                 verb='job_created',
-                message=f'New job created: {instance.title or instance.reference}',
+                message=f'New job created: {instance.title or instance.job_number}',
                 link='/portal/jobs/',
             )
 
@@ -38,26 +37,26 @@ def _wire_job_signals():
         def on_job_status_changed(sender, instance, created, **kwargs):
             if not created:
                 return
-            job = instance.job
+            job        = instance.job
             recipients = _branch_managers(job.branch)
             notify_many(
                 recipients=recipients,
                 verb='job_status_changed',
                 message=(
-                    f'Job {job.reference or job.title} '
-                    f'moved to {instance.new_status}'
+                    f'Job {job.job_number or job.title} '
+                    f'moved to {instance.to_status}'
                 ),
                 link='/portal/jobs/',
-                actor=instance.changed_by if hasattr(instance, 'changed_by') else None,
+                actor=instance.actor,
             )
 
     except Exception as exc:
         logger.warning('Could not wire job signals: %s', exc)
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Communications
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _wire_comms_signals():
     try:
@@ -67,7 +66,6 @@ def _wire_comms_signals():
         def on_message_received(sender, instance, created, **kwargs):
             if not created:
                 return
-            # Only notify for inbound messages
             if hasattr(instance, 'direction') and instance.direction == 'OUTBOUND':
                 return
 
@@ -87,7 +85,6 @@ def _wire_comms_signals():
         def on_conversation_assigned(sender, instance, created, **kwargs):
             if created:
                 return
-            # Fire when assigned_to changes
             if not hasattr(instance, '_previous_assigned_to'):
                 return
             if instance.assigned_to and instance.assigned_to != instance._previous_assigned_to:
@@ -102,9 +99,9 @@ def _wire_comms_signals():
         logger.warning('Could not wire comms signals: %s', exc)
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _branch_managers(branch):
     """Return all active users in a branch who have a branch manager role."""
@@ -134,9 +131,9 @@ def _conversation_assignees(conversation):
     return recipients
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Entry point — called from apps.py ready()
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def connect_all():
     _wire_job_signals()

@@ -2,11 +2,16 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # Jobs
+    # Jobs CRUD
     path('', views.JobListView.as_view(), name='job-list'),
     path('create/', views.JobCreateView.as_view(), name='job-create'),
     path('<int:pk>/', views.JobDetailView.as_view(), name='job-detail'),
+
+    # Job actions
     path('<int:pk>/transition/', views.JobTransitionView.as_view(), name='job-transition'),
+    path('<int:pk>/files/', views.JobFileUploadView.as_view(), name='job-file-upload'),
+
+    # Routing
     path('<int:pk>/route/suggest/', views.JobRouteSuggestView.as_view(), name='job-route-suggest'),
     path('<int:pk>/route/confirm/', views.JobRouteConfirmView.as_view(), name='job-route-confirm'),
 
