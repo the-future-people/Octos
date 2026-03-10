@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Jobs — Octos{% endblock %}
+
+{% block content %}
+
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+  <div>
+    <h1>Jobs</h1>
+    <p>Manage print jobs for your branch</p>
+  </div>
+  <button class="btn btn-yellow" id="btn-new-job">
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Job
+  </button>
+</div>
+
+<!-- Stats Row -->
+<div class="stats-grid" id="job-stats-grid" style="margin-bottom:24px;">
+  <div class="stat-card accent-yellow">
+    <div class="stat-icon yellow">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    </div>
+    <div class="stat-label">Total Jobs</div>
+    <div class="stat-value" id="stat-total">—</div>
+  </div>
+  <div class="stat-card accent-red">
+    <div class="stat-icon red">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div class="stat-label">In Progress</div>
+    <div class="stat-value" id="stat-inprogress">—</div>
+  </div>
+  <div class="stat-card accent-green">
+    <div class="stat-icon green">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div class="stat-label">Completed</div>
+    <div class="stat-value" id="stat-done">—</div>
+  </div>
+  <div class="stat-card accent-grey">
+    <div class="stat-icon" style="background:var(--surface-3);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted);"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    </div>
+    <div class="stat-label">Revenue (GHS)</div>
+    <div class="stat-value" id="stat-revenue">—</div>
+  </div>
+</div>
+
+<!-- Toolbar -->
+<div class="jobs-toolbar">
+  <div class="jobs-filters" id="status-filters">
+    <button class="filter-tab active" data-status="all">All</button>
+    <button class="filter-tab" data-status="PENDING">Pending</button>
+    <button class="filter-tab" data-status="IN_PROGRESS">In Progress</button>
+    <button class="filter-tab" data-status="READY">Ready</button>
+    <button class="filter-tab" data-status="COMPLETED">Completed</button>
+    <button class="filter-tab" data-status="CANCELLED" style="color:var(--red);">Cancelled</button>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <div style="position:relative;">
+      <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-muted);pointer-events:none;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="jobs-search" type="text" placeholder="Search jobs…" style="padding:8px 12px 8px 32px;font-size:13px;width:220px;">
+    </div>
+    <select id="jobs-type-filter" class="form-input form-select" style="width:140px;padding:8px 32px 8px 12px;font-size:13px;">
+      <option value="">All Types</option>
+      <option value="INSTANT">Instant</option>
+      <option value="PRODUCTION">Production</option>
+      <option value="DESIGN">Design</option>
+    </select>
+  </div>
+</div>
+
+<!-- Jobs Table -->
+<div class="card" style="padding:0;overflow:hidden;">
+  <div class="table-wrap">
+    <table id="jobs-table">
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Customer</th>
+          <th>Type</th>
+          <th>Service</th>
+          <th>Status</th>
+          <th>Price (GHS)</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="jobs-tbody">
+        <tr class="loading-row">
+          <td colspan="8">
+            <div class="spinner" style="margin:0 auto 10px;"></div>
+            Loading jobs…
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div id="pagination" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted);">
+    <span id="pagination-info">—</span>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-ghost btn-sm" id="btn-prev" disabled>← Prev</button>
+      <button class="btn btn-ghost btn-sm" id="btn-next" disabled>Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Job Detail Side Panel ── -->
+<div class="job-detail-overlay" id="job-detail-overlay" onclick="closeJobDetail(event)">
+  <div class="job-detail-panel" id="job-detail-panel">
+    <div class="job-detail-header">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-bottom:4px;">JOB DETAILS</div>
+        <h3 id="detail-ref">—</h3>
+        <div style="margin-top:6px;" id="detail-status-badge"></div>
+      </div>
+      <button class="modal-close" onclick="closeJobDetail()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="job-detail-body">
+
+      <!-- Overview -->
+      <div class="detail-section">
+        <div class="detail-section-title">Overview</div>
+        <div class="detail-row"><span class="key">Customer</span><span class="val" id="detail-customer">—</span></div>
+        <div class="detail-row"><span class="key">Service</span><span class="val" id="detail-service">—</span></div>
+        <div class="detail-row"><span class="key">Type</span><span class="val" id="detail-type">—</span></div>
+        <div class="detail-row"><span class="key">Quantity</span><span class="val" id="detail-qty">—</span></div>
+        <div class="detail-row"><span class="key">Price</span><span class="val" id="detail-price" style="color:var(--yellow);font-family:var(--font-mono);">—</span></div>
+        <div class="detail-row"><span class="key">Branch</span><span class="val" id="detail-branch">—</span></div>
+        <div class="detail-row"><span class="key">Created</span><span class="val" id="detail-created">—</span></div>
+      </div>
+
+      <!-- Notes -->
+      <div class="detail-section" id="detail-notes-section" style="display:none;">
+        <div class="detail-section-title">Notes</div>
+        <p id="detail-notes" style="font-size:13.5px;color:var(--text-secondary);line-height:1.6;"></p>
+      </div>
+
+      <!-- Status Timeline -->
+      <div class="detail-section">
+        <div class="detail-section-title">Status History</div>
+        <div class="timeline" id="detail-timeline">
+          <div style="font-size:13px;color:var(--text-muted);">No history available.</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="detail-section">
+        <div class="detail-section-title">Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px;" id="detail-actions"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── New Job Modal ── -->
+<div class="modal-overlay" id="new-job-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>New Job</h3>
+      <button class="modal-close" onclick="closeModal('new-job-modal')">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label class="form-label">Customer *</label>
+          <select id="nj-customer" class="form-input form-select">
+            <option value="">Select customer…</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Service *</label>
+          <select id="nj-service" class="form-input form-select" onchange="calculatePrice()">
+            <option value="">Select service…</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Job Type *</label>
+          <select id="nj-type" class="form-input form-select">
+            <option value="INSTANT">Instant</option>
+            <option value="PRODUCTION">Production</option>
+            <option value="DESIGN">Design</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Quantity *</label>
+          <input type="number" id="nj-qty" class="form-input" value="1" min="1" onInput="calculatePrice()">
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label class="form-label">Notes</label>
+          <textarea id="nj-notes" class="form-input" rows="3" placeholder="Any special instructions…" style="resize:vertical;"></textarea>
+        </div>
+      </div>
+
+      <!-- Price preview -->
+      <div id="price-preview" style="display:none;margin-top:8px;padding:14px 16px;background:var(--yellow-soft);border:1px solid rgba(232,200,74,0.2);border-radius:var(--radius-sm);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:13px;color:var(--text-muted);">Estimated Price</span>
+          <span id="price-amount" style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--yellow);">GHS —</span>
+        </div>
+        <div id="price-breakdown" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('new-job-modal')">Cancel</button>
+      <button class="btn btn-yellow" id="btn-create-job">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create Job
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Transition Modal -->
+<div class="modal-overlay" id="transition-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Update Job Status</h3>
+      <button class="modal-close" onclick="closeModal('transition-modal')">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">New Status</label>
+        <select id="transition-status" class="form-input form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Note (optional)</label>
+        <input type="text" id="transition-note" class="form-input" placeholder="Add a note…">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('transition-modal')">Cancel</button>
+      <button class="btn btn-yellow" id="btn-confirm-transition">Update Status</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/branch_manager/jobs.js' %}"></script>
+{% endblock %}

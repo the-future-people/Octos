@@ -1,4 +1,3 @@
-# apps/analytics/views.py
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,6 +6,10 @@ from .services import get_branch_summary, get_branch_trend
 
 
 class BranchSummaryView(APIView):
+    """
+    GET /api/v1/analytics/branch/summary/
+    Returns live metrics for the authenticated user's branch.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -14,8 +17,11 @@ class BranchSummaryView(APIView):
         branch = getattr(user, 'branch', None)
 
         if branch is None:
-            return Response({'detail': 'No branch assigned.'}, status=400)
+            return Response({
+                'detail': 'No branch assigned to this user.'
+            }, status=400)
 
+        # If branch is a bare ID (not expanded), fetch it
         if isinstance(branch, int):
             try:
                 from apps.organization.models import Branch
@@ -28,6 +34,10 @@ class BranchSummaryView(APIView):
 
 
 class BranchSnapshotTrendView(APIView):
+    """
+    GET /api/v1/analytics/branch/trend/?days=30
+    Returns historical daily snapshots for trend charts.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -46,7 +56,7 @@ class BranchSnapshotTrendView(APIView):
 
         try:
             days = int(request.query_params.get('days', 30))
-            days = max(7, min(days, 365))
+            days = max(7, min(days, 365))  # clamp between 7 and 365
         except ValueError:
             days = 30
 

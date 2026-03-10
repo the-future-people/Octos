@@ -33,11 +33,11 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'role_detail', 'branch', 'phone', 'employee_id',
-            'is_active', 'date_joined'
+            'is_active', 'created_at'
         ]
 
     def get_full_name(self, obj):
-        return obj.get_full_name() or obj.email
+        return obj.full_name or obj.email
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

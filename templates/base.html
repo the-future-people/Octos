@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Octos{% endblock %} — Farhat Printing Press</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Octos Design System -->
+  <link rel="stylesheet" href="/static/css/octos.css" />
+
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+{% block full_page %}
+<div class="octos-layout">
+
+  <!-- Topbar -->
+  <header class="octos-topbar">
+    <a href="/portal/dashboard/" class="octos-logo">OCT<span>OS</span></a>
+    <span class="topbar-branch" id="topbar-branch">Loading...</span>
+    <div class="topbar-spacer"></div>
+
+    <!-- Notifications -->
+    <button class="btn btn-ghost btn-sm" style="position:relative;">
+      🔔
+      <span class="notif-dot" style="position:absolute;top:6px;right:6px;" id="notif-dot" hidden></span>
+    </button>
+
+    <!-- User -->
+    <div class="topbar-user" onclick="Auth.logout()">
+      <div class="topbar-avatar" id="topbar-avatar">--</div>
+      <div class="topbar-user-info">
+        <span class="topbar-user-name" id="topbar-user-name">Loading...</span>
+        <span class="topbar-user-role" id="topbar-user-role"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="octos-sidebar">
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Overview</div>
+      <a href="/portal/dashboard/" class="sidebar-nav-item {% block nav_dashboard %}{% endblock %}">
+        <span class="nav-icon">⬡</span> Dashboard
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Operations</div>
+      <a href="/portal/jobs/" class="sidebar-nav-item {% block nav_jobs %}{% endblock %}">
+        <span class="nav-icon">◈</span> Jobs
+        <span class="sidebar-badge" id="badge-jobs" hidden></span>
+      </a>
+      <a href="/portal/inbox/" class="sidebar-nav-item {% block nav_inbox %}{% endblock %}">
+        <span class="nav-icon">◉</span> Inbox
+        <span class="sidebar-badge" id="badge-inbox" hidden></span>
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Branch</div>
+      <a href="#" class="sidebar-nav-item">
+        <span class="nav-icon">◎</span> Staff
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <span class="nav-icon">◇</span> Reports
+      </a>
+    </div>
+
+    <div class="sidebar-section" style="margin-top: auto; padding-top: 24px;">
+      <button onclick="Auth.logout()" class="sidebar-nav-item" style="color: var(--color-accent);">
+        <span class="nav-icon">⏻</span> Sign Out
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- Main Content -->
+  <main class="octos-main">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+{% endblock %}
+
+<!-- Auth -->
+<script src="/static/js/auth.js"></script>
+
+{% block extra_js %}{% endblock %}
+
+<script>
+  // Guard every portal page
+  Auth.guard();
+  Auth.loadUserInfo();
+</script>
+
+</body>
+</html>

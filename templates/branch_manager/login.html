@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — Octos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/octos.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-body);
+      background: #F4F4F5;
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* ---- SPLIT LAYOUT ---- */
+    .login-wrapper {
+      display: grid;
+      grid-template-columns: 1fr 480px;
+      min-height: 100vh;
+      width: 100%;
+    }
+
+    /* ---- LEFT VISUAL PANEL ---- */
+    .login-visual {
+      background: var(--color-surface);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 48px;
+    }
+
+    .login-visual-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(107,47,217,0.2) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 20%, rgba(232,41,74,0.1) 0%, transparent 50%),
+        var(--color-bg);
+    }
+
+    /* Grid pattern overlay */
+    .login-visual-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(107,47,217,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(107,47,217,0.06) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* Floating print elements */
+    .print-element {
+      position: absolute;
+      font-family: var(--font-mono);
+      color: rgba(107,47,217,0.15);
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      user-select: none;
+    }
+
+    .print-block {
+      position: absolute;
+      border: 1px solid rgba(107,47,217,0.12);
+      border-radius: 4px;
+    }
+
+    /* CMYK circles */
+    .cmyk-c { position:absolute; width:180px; height:180px; border-radius:50%; background: rgba(0,188,212,0.08); top: 80px; left: 60px; }
+    .cmyk-m { position:absolute; width:140px; height:140px; border-radius:50%; background: rgba(232,41,74,0.07); top: 120px; left: 140px; }
+    .cmyk-y { position:absolute; width:120px; height:120px; border-radius:50%; background: rgba(245,166,35,0.08); top: 60px; left: 200px; }
+    .cmyk-k { position:absolute; width:100px; height:100px; border-radius:50%; background: rgba(255,255,255,0.03); top: 100px; left: 100px; }
+
+    /* Large decorative text */
+    .deco-text {
+      position: absolute;
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 12rem;
+      color: rgba(107,47,217,0.04);
+      letter-spacing: -0.05em;
+      line-height: 1;
+      top: -20px;
+      left: -20px;
+      user-select: none;
+    }
+
+    /* Octos logo top left */
+    .visual-logo {
+      position: absolute;
+      top: 40px;
+      left: 48px;
+      z-index: 10;
+    }
+
+    .visual-logo img {
+      height: 52px;
+    }
+
+    /* Bottom text */
+    .visual-content {
+      position: relative;
+      z-index: 10;
+    }
+
+    .visual-headline {
+      font-family: var(--font-display);
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: var(--color-text);
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+
+    .visual-headline span { color: var(--color-primary-light); }
+
+    .visual-desc {
+      font-size: 0.9rem;
+      color: var(--color-text-muted);
+      line-height: 1.7;
+      max-width: 420px;
+      margin-bottom: 32px;
+    }
+
+    .visual-stats {
+      display: flex;
+      gap: 32px;
+    }
+
+    .visual-stat-value {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--color-text);
+    }
+
+    .visual-stat-label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Floating job cards */
+    .floating-card {
+      position: absolute;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      z-index: 5;
+      min-width: 200px;
+    }
+
+    .fc-label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+
+    .fc-value {
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+
+    .fc-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      margin-top: 6px;
+    }
+
+    /* ---- RIGHT FORM PANEL ---- */
+    .login-form-panel {
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 64px 48px;
+      position: relative;
+    }
+
+    .form-panel-header {
+      margin-bottom: 40px;
+    }
+
+    .form-panel-title {
+      font-family: var(--font-display);
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: #111827;
+      letter-spacing: -0.02em;
+      margin-bottom: 6px;
+    }
+
+    .form-panel-sub {
+      font-size: 0.875rem;
+      color: #6B7280;
+    }
+
+    .form-label-light {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    .form-input-light {
+      width: 100%;
+      background: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: #111827;
+      font-size: 0.875rem;
+      font-family: var(--font-body);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      outline: none;
+    }
+
+    .form-input-light:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(107,47,217,0.1);
+      background: #fff;
+    }
+
+    .form-input-light::placeholder { color: #9CA3AF; }
+
+    .btn-login {
+      width: 100%;
+      padding: 12px;
+      background: var(--color-primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-family: var(--font-display);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 8px;
+      letter-spacing: 0.01em;
+    }
+
+    .btn-login:hover { background: var(--color-primary-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(107,47,217,0.3); }
+    .btn-login:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .error-msg {
+      background: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 0.875rem;
+      color: #DC2626;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .error-msg.show { display: block; }
+
+    .form-group { margin-bottom: 20px; }
+
+    .login-footer {
+      position: absolute;
+      bottom: 24px;
+      left: 48px;
+      right: 48px;
+      font-size: 0.7rem;
+      color: #9CA3AF;
+      font-family: var(--font-mono);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    @media (max-width: 900px) {
+      .login-wrapper { grid-template-columns: 1fr; }
+      .login-visual { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-wrapper">
+
+    <!-- LEFT VISUAL -->
+    <div class="login-visual">
+      <div class="login-visual-bg"></div>
+      <div class="login-visual-grid"></div>
+      <div class="deco-text">FP</div>
+
+      <!-- CMYK circles -->
+      <div class="cmyk-c"></div>
+      <div class="cmyk-m"></div>
+      <div class="cmyk-y"></div>
+      <div class="cmyk-k"></div>
+
+      <!-- Print elements -->
+      <div class="print-element" style="top:30%;left:5%;">CMYK · OFFSET · DIGITAL</div>
+      <div class="print-element" style="top:45%;right:8%;">300 DPI · BLEED · TRIM</div>
+      <div class="print-element" style="top:60%;left:8%;">PANTONE · RGB · HEX</div>
+      <div class="print-block" style="width:80px;height:80px;top:25%;right:15%;"></div>
+      <div class="print-block" style="width:120px;height:40px;top:55%;right:20%;"></div>
+      <div class="print-block" style="width:50px;height:50px;top:70%;left:20%;"></div>
+
+      <!-- Floating job cards -->
+      <div class="floating-card" style="top:22%;right:10%;">
+        <div class="fc-label">Active Job</div>
+        <div class="fc-value">FP-ACC-2026-00142</div>
+        <div class="fc-badge" style="background:rgba(245,166,35,0.15);color:#F5A623;">IN PROGRESS</div>
+      </div>
+
+      <div class="floating-card" style="top:42%;left:5%;">
+        <div class="fc-label">New Message</div>
+        <div class="fc-value">WhatsApp · Accra Central</div>
+        <div class="fc-badge" style="background:rgba(34,201,138,0.15);color:#22C98A;">UNREAD · 3</div>
+      </div>
+
+      <div class="floating-card" style="top:62%;right:8%;">
+        <div class="fc-label">Route Suggestion</div>
+        <div class="fc-value">→ HQ · Score 87.4</div>
+        <div class="fc-badge" style="background:rgba(107,47,217,0.15);color:#8B5CF6;">PENDING CONFIRM</div>
+      </div>
+
+      <!-- Logo -->
+      <div class="visual-logo">
+        <img src="/static/images/Octos_Logo.png" alt="Octos" />
+      </div>
+
+      <!-- Bottom content -->
+      <div class="visual-content">
+        <div class="visual-headline">
+          Every print job.<br/>
+          Every branch.<br/>
+          <span>One platform.</span>
+        </div>
+        <div class="visual-desc">
+          Octos keeps Farhat Printing Press running — from the moment a customer walks in to the moment their job ships out.
+        </div>
+        <div class="visual-stats">
+          <div>
+            <div class="visual-stat-value">3</div>
+            <div class="visual-stat-label">Belts</div>
+          </div>
+          <div>
+            <div class="visual-stat-value">∞</div>
+            <div class="visual-stat-label">Branches</div>
+          </div>
+          <div>
+            <div class="visual-stat-value">1</div>
+            <div class="visual-stat-label">Platform</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT FORM -->
+    <div class="login-form-panel">
+      <div class="form-panel-header">
+        <div class="form-panel-title">Sign in to Octos</div>
+        <div class="form-panel-sub">Enter your credentials to access your branch portal</div>
+      </div>
+
+      <div class="error-msg" id="error-msg"></div>
+
+      <div class="form-group">
+        <label class="form-label-light">Email Address</label>
+        <input
+          type="email"
+          id="email"
+          class="form-input-light"
+          placeholder="you@farhatprinting.com"
+          autocomplete="email"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label-light">Password</label>
+        <input
+          type="password"
+          id="password"
+          class="form-input-light"
+          placeholder="••••••••••••"
+          autocomplete="current-password"
+        />
+      </div>
+
+      <button class="btn-login" id="login-btn" onclick="handleLogin()">
+        <span id="btn-text">Sign In</span>
+        <span class="loading-spinner" id="btn-spinner" style="display:none;border-color:#ffffff40;border-top-color:#fff;"></span>
+      </button>
+
+      <div class="login-footer">
+        <span>Octos v2.0 · The Future People</span>
+        <span>© 2026 All rights reserved</span>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/js/auth.js"></script>
+  <script>
+    if (Auth.isAuthenticated()) {
+      window.location.href = '/portal/dashboard/';
+    }
+
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') handleLogin();
+    });
+
+    async function handleLogin() {
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('login-btn');
+      const btnText = document.getElementById('btn-text');
+      const spinner = document.getElementById('btn-spinner');
+      const errorMsg = document.getElementById('error-msg');
+
+      if (!email || !password) {
+        showError('Please enter your email and password.');
+        return;
+      }
+
+      btn.disabled = true;
+      btnText.textContent = 'Signing in...';
+      spinner.style.display = 'inline-block';
+      errorMsg.classList.remove('show');
+
+      try {
+        const res = await fetch('/api/v1/auth/token/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.detail || 'Invalid email or password.');
+          return;
+        }
+
+        Auth.setTokens(data.access, data.refresh);
+
+        const userRes = await fetch('/api/v1/accounts/me/', {
+          headers: { 'Authorization': `Bearer ${data.access}` }
+        });
+        const user = await userRes.json();
+        Auth.setUser(user);
+
+        window.location.href = '/portal/dashboard/';
+
+      } catch (err) {
+        showError('Connection error. Please try again.');
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Sign In';
+        spinner.style.display = 'none';
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.classList.add('show');
+    }
+  </script>
+</body>
+</html>
