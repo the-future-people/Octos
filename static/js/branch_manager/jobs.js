@@ -1,447 +1,246 @@
 /**
- * Octos — Branch Manager Jobs
- * Handles: job list, filters, pagination, detail panel,
- *          new job modal with price calculation, status transitions
+ * Octos — Branch Manager / Jobs
+ * Matches jobs.html v2 (dashboard-aligned design)
+ *
+ * API endpoints:
+ *   GET  /api/v1/jobs/                — list (branch-scoped, filters)
+ *   GET  /api/v1/jobs/<id>/           — detail + status_logs + allowed_transitions
+ *   POST /api/v1/jobs/create/         — create job
+ *   POST /api/v1/jobs/<id>/transition/ — { to_status, notes }
+ *   GET  /api/v1/jobs/services/       — active services
+ *   GET  /api/v1/jobs/price/calculate/ — ?service=&branch=&quantity=&pages=&is_color=
+ *   GET  /api/v1/customers/           — customer list
+ *   GET  /api/v1/organization/me/     — branch/user context
  */
 
 'use strict';
 
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 // State
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 const State = {
-  jobs:        [],
-  filtered:    [],
-  page:        1,
-  pageSize:    20,
-  totalCount:  0,
-  status:      'all',
-  jobType:     '',
-  searchQuery: '',
-  activeJobId: null,
-  services:    [],
-  customers:   [],
-  priceTimer:  null,
-};
-
-const STATUS_TRANSITIONS = {
-  PENDING:     ['IN_PROGRESS', 'CANCELLED'],
-  IN_PROGRESS: ['READY', 'CANCELLED'],
-  READY:       ['COMPLETED', 'IN_PROGRESS'],
-  COMPLETED:   [],
-  CANCELLED:   [],
+  jobs        : [],
+  page        : 1,
+  pageSize    : 25,
+  totalCount  : 0,
+  status      : 'all',
+  jobType     : '',
+  searchQuery : '',
+  services    : [],
+  customers   : [],
+  branchId    : null,
+  // for transition modal
+  pendingTransition : { jobId: null, toStatus: null },
 };
 
 const STATUS_LABELS = {
-  PENDING:     'Pending',
-  IN_PROGRESS: 'In Progress',
-  READY:       'Ready for Pickup',
-  COMPLETED:   'Completed',
-  CANCELLED:   'Cancelled',
+  DRAFT              : 'Draft',
+  PENDING_PAYMENT    : 'Pending Payment',
+  PAID               : 'Paid',
+  CONFIRMED          : 'Confirmed',
+  IN_PROGRESS        : 'In Progress',
+  READY              : 'Ready',
+  OUT_FOR_DELIVERY   : 'Out for Delivery',
+  COMPLETE           : 'Complete',
+  CANCELLED          : 'Cancelled',
+  HALTED             : 'Halted',
+  SAMPLE_SENT        : 'Sample Sent',
+  REVISION_REQUESTED : 'Revision Requested',
+  DESIGN_APPROVED    : 'Design Approved',
 };
 
-// ─────────────────────────────────────────
+const STATUS_BADGE = {
+  DRAFT              : 'badge-grey',
+  PENDING_PAYMENT    : 'badge-yellow',
+  PAID               : 'badge-green',
+  CONFIRMED          : 'badge-yellow',
+  IN_PROGRESS        : 'badge-blue',
+  READY              : 'badge-green',
+  OUT_FOR_DELIVERY   : 'badge-green',
+  COMPLETE           : 'badge-green',
+  CANCELLED          : 'badge-grey',
+  HALTED             : 'badge-red',
+  SAMPLE_SENT        : 'badge-yellow',
+  REVISION_REQUESTED : 'badge-red',
+  DESIGN_APPROVED    : 'badge-green',
+};
+
+// ─────────────────────────────────────────────────────────────
 // Bootstrap
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   Auth.guard();
+  loadContext();
   loadJobs();
   loadServices();
   loadCustomers();
   bindFilters();
-  bindNewJobModal();
-  bindTransitionModal();
-  bindModalClose();
+  Notifications.init({
+    badgeEl   : document.getElementById('jobs-notif-badge'),
+    dropdownEl: document.getElementById('notif-dropdown'),
+    listEl    : document.getElementById('notif-list'),
+  });
+
+  // Meta date
+  document.getElementById('meta-date').textContent =
+    new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
 });
 
-// ─────────────────────────────────────────
-// Load Jobs
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Context (branch / user info)
+// ─────────────────────────────────────────────────────────────
+async function loadContext() {
+  try {
+    const res  = await Auth.fetch('/api/v1/organization/me/');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const user   = data.user   || {};
+    const branch = data.branch || {};
+
+    document.getElementById('jobs-branch-name').textContent = branch.name || 'Branch Manager';
+    document.getElementById('jobs-user-name').textContent   = user.full_name || user.email || '—';
+    const initials = (user.full_name || '').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || 'KA';
+    document.getElementById('jobs-user-initials').textContent = initials;
+
+    document.getElementById('meta-branch').textContent = branch.name || '—';
+    document.getElementById('meta-region').textContent = branch.region || '—';
+
+    State.branchId = branch.id || null;
+  } catch (e) {
+    console.warn('loadContext failed:', e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Jobs List
+// ─────────────────────────────────────────────────────────────
 async function loadJobs() {
   setTableLoading();
 
   const params = new URLSearchParams();
-  params.set('page', State.page);
+  params.set('page',      State.page);
   params.set('page_size', State.pageSize);
-  if (State.status   && State.status !== 'all') params.set('status', State.status);
-  if (State.jobType)   params.set('job_type', State.jobType);
-  if (State.searchQuery) params.set('search', State.searchQuery);
+  if (State.status && State.status !== 'all') params.set('status',   State.status);
+  if (State.jobType)                          params.set('job_type', State.jobType);
+  if (State.searchQuery)                      params.set('search',   State.searchQuery);
 
   try {
     const res  = await Auth.fetch(`/api/v1/jobs/?${params}`);
-    if (!res.ok) throw new Error('Failed');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    if (Array.isArray(data)) {
-      State.jobs       = data;
-      State.totalCount = data.length;
-    } else {
-      State.jobs       = data.results || [];
-      State.totalCount = data.count   || 0;
-    }
+    State.jobs       = data.results || data;
+    State.totalCount = data.count   || State.jobs.length;
 
-    renderJobs();
+    renderTable();
+    renderStats();
     renderPagination();
-    computeStats();
-  } catch {
-    document.getElementById('jobs-tbody').innerHTML = `
-      <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">
-        Could not load jobs. <a href="#" onclick="loadJobs()" style="color:var(--yellow);">Retry</a>
-      </td></tr>`;
+  } catch (err) {
+    console.error('loadJobs failed:', err);
+    setTableError();
   }
 }
 
-// ─────────────────────────────────────────
-// Render Jobs Table
-// ─────────────────────────────────────────
-function renderJobs() {
+function renderTable() {
   const tbody = document.getElementById('jobs-tbody');
 
   if (!State.jobs.length) {
     tbody.innerHTML = `
-      <tr><td colspan="8" style="text-align:center;padding:60px;">
-        <div class="empty-state" style="padding:0;">
-          <div class="empty-icon" style="margin:0 auto 12px;">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <tr>
+        <td colspan="7" class="empty-cell">
+          <div class="empty-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </div>
-          <h4>No jobs found</h4>
-          <p>Try adjusting filters or create a new job.</p>
-        </div>
-      </td></tr>`;
+          <div class="empty-text">No jobs found</div>
+        </td>
+      </tr>`;
     return;
   }
 
-  tbody.innerHTML = State.jobs.map(j => `
-    <tr style="cursor:pointer;" onclick="openJobDetail(${j.id})">
-      <td class="td-primary" style="font-family:var(--font-mono);font-size:12.5px;">${escHtml(j.reference || '#' + j.id)}</td>
-      <td>${escHtml(j.customer_name || j.customer || '—')}</td>
-      <td><span class="badge badge-grey">${escHtml(j.job_type || '—')}</span></td>
-      <td style="color:var(--text-secondary);">${escHtml(j.service_name || j.service || '—')}</td>
-      <td>${statusBadge(j.status)}</td>
-      <td style="font-family:var(--font-mono);color:var(--yellow);">${j.final_price != null ? Number(j.final_price).toFixed(2) : '—'}</td>
-      <td style="color:var(--text-muted);font-size:12.5px;">${formatDate(j.created_at)}</td>
-      <td onclick="event.stopPropagation()">
-        <button class="btn btn-ghost btn-sm btn-icon" title="View details" onclick="openJobDetail(${j.id})">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>
-      </td>
-    </tr>`).join('');
+  tbody.innerHTML = State.jobs.map(j => {
+    const badgeCls = STATUS_BADGE[j.status] || 'badge-grey';
+    const label    = STATUS_LABELS[j.status] || j.status;
+    const typeHtml = typeTag(j.job_type);
+    const price    = j.estimated_cost ? `GHS ${parseFloat(j.estimated_cost).toLocaleString('en-GH', {minimumFractionDigits:2})}` : '—';
+    const date     = j.created_at ? new Date(j.created_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : '—';
+    const customer = escHtml(j.customer_name || '—');
+
+    return `
+      <tr onclick="Jobs.openDetail(${j.id})">
+        <td>
+          <div class="td-job-title">${escHtml(j.title || '—')}</div>
+          <div class="td-job-ref">${escHtml(j.job_number || '#' + j.id)}</div>
+        </td>
+        <td>${customer}</td>
+        <td>${typeHtml}</td>
+        <td><span class="badge ${badgeCls}">${label}</span></td>
+        <td style="font-family:monospace;font-size:12.5px;">${price}</td>
+        <td style="font-size:12px;color:#bbb;">${date}</td>
+      </tr>`;
+  }).join('');
 }
 
-// ─────────────────────────────────────────
-// Compute & Display Stats
-// ─────────────────────────────────────────
-function computeStats() {
-  const jobs = State.jobs;
+function renderStats() {
+  const total      = State.totalCount;
+  const inProgress = State.jobs.filter(j => j.status === 'IN_PROGRESS').length;
+  const complete   = State.jobs.filter(j => j.status === 'COMPLETE').length;
+  const revenue    = State.jobs
+    .filter(j => ['PAID','COMPLETE'].includes(j.status))
+    .reduce((sum, j) => sum + parseFloat(j.final_cost || j.estimated_cost || 0), 0);
 
-  document.getElementById('stat-total').textContent      = State.totalCount;
-  document.getElementById('stat-inprogress').textContent = jobs.filter(j => j.status === 'IN_PROGRESS').length;
-  document.getElementById('stat-done').textContent       = jobs.filter(j => j.status === 'COMPLETED').length;
-
-  const revenue = jobs
-    .filter(j => j.status === 'COMPLETED')
-    .reduce((sum, j) => sum + (parseFloat(j.final_price) || 0), 0);
-
-  document.getElementById('stat-revenue').textContent = revenue >= 1000
-    ? (revenue / 1000).toFixed(1) + 'k'
-    : revenue.toFixed(0);
+  document.getElementById('stat-total').textContent       = total;
+  document.getElementById('stat-in-progress').textContent = inProgress;
+  document.getElementById('stat-complete').textContent    = complete;
+  document.getElementById('stat-revenue').textContent     =
+    revenue > 0 ? revenue.toLocaleString('en-GH', {minimumFractionDigits:2}) : '0';
 }
 
-// ─────────────────────────────────────────
-// Pagination
-// ─────────────────────────────────────────
 function renderPagination() {
-  const total = State.totalCount;
-  const from  = (State.page - 1) * State.pageSize + 1;
-  const to    = Math.min(State.page * State.pageSize, total);
+  const pag     = document.getElementById('pagination');
+  const info    = document.getElementById('page-info');
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
 
-  document.getElementById('pagination-info').textContent =
-    total ? `Showing ${from}–${to} of ${total} jobs` : 'No jobs';
-
-  const prevBtn = document.getElementById('btn-prev');
-  const nextBtn = document.getElementById('btn-next');
-  prevBtn.disabled = State.page <= 1;
-  nextBtn.disabled = to >= total;
-}
-
-// ─────────────────────────────────────────
-// Job Detail Panel
-// ─────────────────────────────────────────
-async function openJobDetail(id) {
-  State.activeJobId = id;
-  const overlay = document.getElementById('job-detail-overlay');
-  overlay.classList.add('open');
-
-  // Clear and show loading
-  document.getElementById('detail-ref').textContent      = 'Loading…';
-  document.getElementById('detail-status-badge').innerHTML = '';
-  document.getElementById('detail-timeline').innerHTML   = '<div style="font-size:13px;color:var(--text-muted);">Loading…</div>';
-  document.getElementById('detail-actions').innerHTML    = '';
-
-  try {
-    const res = await Auth.fetch(`/api/v1/jobs/${id}/`);
-    if (!res.ok) throw new Error('Failed');
-    const job = await res.json();
-    populateJobDetail(job);
-  } catch {
-    document.getElementById('detail-ref').textContent = 'Could not load job';
-  }
-}
-
-function closeJobDetail(event) {
-  if (event && event.target !== document.getElementById('job-detail-overlay')) return;
-  document.getElementById('job-detail-overlay').classList.remove('open');
-  State.activeJobId = null;
-}
-
-function populateJobDetail(job) {
-  document.getElementById('detail-ref').textContent      = job.reference || `#${job.id}`;
-  document.getElementById('detail-status-badge').innerHTML = statusBadge(job.status);
-  document.getElementById('detail-customer').textContent = job.customer_name || job.customer || '—';
-  document.getElementById('detail-service').textContent  = job.service_name  || job.service  || '—';
-  document.getElementById('detail-type').textContent     = job.job_type || '—';
-  document.getElementById('detail-qty').textContent      = job.quantity  != null ? job.quantity : '—';
-  document.getElementById('detail-price').textContent    = job.final_price != null ? `GHS ${Number(job.final_price).toFixed(2)}` : '—';
-  document.getElementById('detail-branch').textContent   = job.branch_name || job.branch || '—';
-  document.getElementById('detail-created').textContent  = formatDateFull(job.created_at);
-
-  const notesSection = document.getElementById('detail-notes-section');
-  const notesEl      = document.getElementById('detail-notes');
-  if (job.notes) {
-    notesSection.style.display = 'block';
-    notesEl.textContent        = job.notes;
-  } else {
-    notesSection.style.display = 'none';
-  }
-
-  // Timeline
-  const timeline = document.getElementById('detail-timeline');
-  const logs     = job.status_logs || [];
-  if (logs.length) {
-    timeline.innerHTML = logs.map((log, i) => `
-      <div class="timeline-item">
-        <div class="timeline-dot ${i === 0 ? 'active' : 'done'}"></div>
-        <div class="timeline-content">
-          <div class="timeline-label">${STATUS_LABELS[log.status] || log.status}</div>
-          <div class="timeline-meta">${formatDateFull(log.created_at)}${log.note ? ' · ' + escHtml(log.note) : ''}</div>
-        </div>
-      </div>`).join('');
-  } else {
-    timeline.innerHTML = `<div style="font-size:13px;color:var(--text-muted);">No status history.</div>`;
-  }
-
-  // Actions
-  const actionsEl   = document.getElementById('detail-actions');
-  const transitions = STATUS_TRANSITIONS[job.status] || [];
-
-  if (transitions.length) {
-    actionsEl.innerHTML = `
-      <button class="btn btn-yellow" onclick="openTransitionModal(${job.id}, '${job.status}')">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        Update Status
-      </button>`;
-  } else {
-    actionsEl.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">No further actions available.</p>`;
-  }
-}
-
-// ─────────────────────────────────────────
-// Status Transitions
-// ─────────────────────────────────────────
-function openTransitionModal(jobId, currentStatus) {
-  const transitions = STATUS_TRANSITIONS[currentStatus] || [];
-  if (!transitions.length) return;
-
-  const select = document.getElementById('transition-status');
-  select.innerHTML = transitions
-    .map(s => `<option value="${s}">${STATUS_LABELS[s] || s}</option>`)
-    .join('');
-
-  document.getElementById('transition-note').value = '';
-
-  // Store job id for confirm
-  document.getElementById('btn-confirm-transition').dataset.jobId = jobId;
-
-  openModal('transition-modal');
-}
-
-function bindTransitionModal() {
-  document.getElementById('btn-confirm-transition').addEventListener('click', async () => {
-    const jobId  = document.getElementById('btn-confirm-transition').dataset.jobId;
-    const status = document.getElementById('transition-status').value;
-    const note   = document.getElementById('transition-note').value.trim();
-
-    if (!jobId || !status) return;
-
-    const btn = document.getElementById('btn-confirm-transition');
-    btn.disabled = true;
-    btn.innerHTML = `<div class="spinner spinner-sm"></div> Updating…`;
-
-    try {
-      const res = await Auth.fetch(`/api/v1/jobs/${jobId}/transition/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note }),
-      });
-      if (!res.ok) throw new Error('Failed');
-      closeModal('transition-modal');
-      closeJobDetail();
-      toast(`Status updated to ${STATUS_LABELS[status]}`, 'success');
-      loadJobs();
-    } catch {
-      toast('Could not update status', 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Update Status';
-    }
-  });
-}
-
-// ─────────────────────────────────────────
-// New Job Modal
-// ─────────────────────────────────────────
-function bindNewJobModal() {
-  document.getElementById('btn-new-job').addEventListener('click', () => {
-    resetNewJobForm();
-    openModal('new-job-modal');
-  });
-  document.getElementById('btn-create-job').addEventListener('click', createJob);
-  document.getElementById('nj-qty').addEventListener('input', () => {
-    clearTimeout(State.priceTimer);
-    State.priceTimer = setTimeout(calculatePrice, 350);
-  });
-}
-
-function resetNewJobForm() {
-  ['nj-customer', 'nj-service', 'nj-notes'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  document.getElementById('nj-type').value      = 'INSTANT';
-  document.getElementById('nj-qty').value       = '1';
-  document.getElementById('price-preview').style.display = 'none';
-}
-
-async function loadServices() {
-  try {
-    const res = await Auth.fetch('/api/v1/jobs/services/');
-    if (!res.ok) return;
-    const data = await res.json();
-    State.services = Array.isArray(data) ? data : (data.results || []);
-
-    const select = document.getElementById('nj-service');
-    if (select) {
-      select.innerHTML = '<option value="">Select service…</option>' +
-        State.services.map(s => `<option value="${s.id}">${escHtml(s.name)}</option>`).join('');
-    }
-  } catch { /* silent */ }
-}
-
-async function loadCustomers() {
-  try {
-    const res = await Auth.fetch('/api/v1/customers/');
-    if (!res.ok) return;
-    const data = await res.json();
-    State.customers = Array.isArray(data) ? data : (data.results || []);
-
-    const select = document.getElementById('nj-customer');
-    if (select) {
-      select.innerHTML = '<option value="">Select customer…</option>' +
-        State.customers.map(c => `<option value="${c.id}">${escHtml(c.name || c.company_name || c.email)}</option>`).join('');
-    }
-  } catch { /* silent */ }
-}
-
-async function calculatePrice() {
-  const serviceId = document.getElementById('nj-service').value;
-  const qty       = parseInt(document.getElementById('nj-qty').value) || 1;
-  const preview   = document.getElementById('price-preview');
-
-  if (!serviceId) { preview.style.display = 'none'; return; }
-
-  try {
-    const res = await Auth.fetch('/api/v1/jobs/price/calculate/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ service: serviceId, quantity: qty }),
-    });
-    if (!res.ok) throw new Error('Failed');
-    const data = await res.json();
-
-    document.getElementById('price-amount').textContent = `GHS ${Number(data.total || data.price || 0).toFixed(2)}`;
-    document.getElementById('price-breakdown').textContent = data.breakdown || '';
-    preview.style.display = 'block';
-  } catch {
-    preview.style.display = 'none';
-  }
-}
-
-async function createJob() {
-  const customer = document.getElementById('nj-customer').value;
-  const service  = document.getElementById('nj-service').value;
-  const jobType  = document.getElementById('nj-type').value;
-  const qty      = document.getElementById('nj-qty').value;
-  const notes    = document.getElementById('nj-notes').value.trim();
-
-  if (!customer || !service) {
-    toast('Customer and Service are required', 'error');
+  if (State.totalCount <= State.pageSize) {
+    pag.style.display = 'none';
     return;
   }
 
-  const btn = document.getElementById('btn-create-job');
-  btn.disabled = true;
-  btn.innerHTML = `<div class="spinner spinner-sm"></div> Creating…`;
+  const totalPages = Math.ceil(State.totalCount / State.pageSize);
+  const start      = (State.page - 1) * State.pageSize + 1;
+  const end        = Math.min(State.page * State.pageSize, State.totalCount);
 
-  try {
-    const res = await Auth.fetch('/api/v1/jobs/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer,
-        service,
-        job_type: jobType,
-        quantity: qty,
-        notes: notes || undefined,
-      }),
-    });
-    if (!res.ok) throw new Error('Failed');
-    closeModal('new-job-modal');
-    toast('Job created successfully', 'success');
-    State.page = 1;
-    loadJobs();
-  } catch {
-    toast('Could not create job', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      Create Job`;
-  }
+  pag.style.display     = 'flex';
+  info.textContent      = `Showing ${start}–${end} of ${State.totalCount} jobs`;
+  btnPrev.disabled      = State.page <= 1;
+  btnNext.disabled      = State.page >= totalPages;
 }
 
-// ─────────────────────────────────────────
+function setTableLoading() {
+  document.getElementById('jobs-tbody').innerHTML =
+    `<tr><td colspan="7" class="loading-cell"><span class="spin"></span> Loading jobs…</td></tr>`;
+}
+
+function setTableError() {
+  document.getElementById('jobs-tbody').innerHTML =
+    `<tr><td colspan="7" class="loading-cell" style="color:#e8294a;">Failed to load jobs. Try refreshing.</td></tr>`;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Filters
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 function bindFilters() {
-  // Status tabs
-  document.getElementById('status-filters').addEventListener('click', e => {
-    const tab = e.target.closest('.filter-tab');
-    if (!tab) return;
-    document.querySelectorAll('#status-filters .filter-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    State.status = tab.dataset.status;
+  document.getElementById('filter-tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.filter-tab');
+    if (!btn) return;
+    document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    State.status = btn.dataset.status;
     State.page   = 1;
     loadJobs();
   });
 
-  // Type filter
-  document.getElementById('jobs-type-filter').addEventListener('change', e => {
-    State.jobType = e.target.value;
-    State.page    = 1;
-    loadJobs();
-  });
-
-  // Search
   let searchTimer;
   document.getElementById('jobs-search').addEventListener('input', e => {
     clearTimeout(searchTimer);
@@ -452,98 +251,283 @@ function bindFilters() {
     }, 350);
   });
 
-  // Pagination
-  document.getElementById('btn-prev').addEventListener('click', () => {
+  document.getElementById('jobs-type').addEventListener('change', e => {
+    State.jobType = e.target.value;
+    State.page    = 1;
+    loadJobs();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Services & Customers
+// ─────────────────────────────────────────────────────────────
+async function loadServices() {
+  try {
+    const res  = await Auth.fetch('/api/v1/jobs/services/');
+    if (!res.ok) return;
+    const data = await res.json();
+    State.services = data.results || data;
+  } catch (e) {
+    console.warn('loadServices failed:', e);
+  }
+}
+
+async function loadCustomers() {
+  try {
+    const res  = await Auth.fetch('/api/v1/customers/');
+    if (!res.ok) return;
+    const data = await res.json();
+    State.customers = data.results || data;
+  } catch (e) {
+    console.warn('loadCustomers failed:', e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Jobs Object (detail + transitions + pagination)
+// ─────────────────────────────────────────────────────────────
+const Jobs = {
+
+  async openDetail(jobId) {
+    const overlay = document.getElementById('job-detail-modal');
+    const body    = document.getElementById('detail-body');
+    overlay.classList.add('open');
+    body.innerHTML = `<div style="text-align:center;padding:40px;color:#ccc;"><span class="spin"></span> Loading…</div>`;
+
+    try {
+      const res = await Auth.fetch(`/api/v1/jobs/${jobId}/`);
+      if (!res.ok) throw new Error('Not found');
+      const job = await res.json();
+
+      document.getElementById('detail-title').textContent = job.title || 'Job Detail';
+      document.getElementById('detail-ref').textContent   = job.job_number || `#${job.id}`;
+
+      const price = job.final_cost ?? job.estimated_cost;
+      const priceStr = price ? `GHS ${parseFloat(price).toLocaleString('en-GH', {minimumFractionDigits:2})}` : '—';
+
+      const logs = (job.status_logs || []).map(log => {
+        const isGood = ['COMPLETE','PAID','DESIGN_APPROVED','CONFIRMED','READY'].includes(log.to_status);
+        const isBad  = ['CANCELLED','REVISION_REQUESTED','HALTED'].includes(log.to_status);
+        const dotCls = isGood ? 'green' : (isBad ? 'red' : '');
+        const from   = STATUS_LABELS[log.from_status] || log.from_status || '—';
+        const to     = STATUS_LABELS[log.to_status]   || log.to_status   || '—';
+        const when   = log.transitioned_at ? new Date(log.transitioned_at).toLocaleString('en-GB', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+        const notesHtml = log.notes ? `<div class="tl-notes">${escHtml(log.notes)}</div>` : '';
+        return `
+          <div class="timeline-item">
+            <div class="tl-dot ${dotCls}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="tl-body">
+              <div class="tl-status">${from} → ${to}</div>
+              <div class="tl-meta">${escHtml(log.actor_name || '—')} · ${when}</div>
+              ${notesHtml}
+            </div>
+          </div>`;
+      }).join('') || '<div style="color:#ccc;font-size:13px;">No status history yet.</div>';
+
+      const transitions = job.allowed_transitions || [];
+      const transitionHtml = transitions.length
+        ? `<div class="transition-btns">${transitions.map(s =>
+            `<button class="transition-btn" onclick="Jobs.openTransitionModal(${job.id}, '${s}', '${escHtml(job.job_number || '#' + job.id)}')">${STATUS_LABELS[s] || s}</button>`
+          ).join('')}</div>`
+        : `<span style="font-size:13px;color:#ccc;">No transitions available.</span>`;
+
+      body.innerHTML = `
+        <div class="detail-section">
+          <div class="detail-section-title">Job Information</div>
+          <div class="detail-grid">
+            <div class="detail-field"><span class="detail-label">Status</span><span class="detail-val"><span class="badge ${STATUS_BADGE[job.status] || 'badge-grey'}">${STATUS_LABELS[job.status] || job.status}</span></span></div>
+            <div class="detail-field"><span class="detail-label">Type</span><span class="detail-val">${typeTag(job.job_type)}</span></div>
+            <div class="detail-field"><span class="detail-label">Customer</span><span class="detail-val">${escHtml(job.customer_name || '—')}</span></div>
+            <div class="detail-field"><span class="detail-label">Assigned To</span><span class="detail-val">${escHtml(job.assigned_to_name || '—')}</span></div>
+            <div class="detail-field"><span class="detail-label">Est. Cost</span><span class="detail-val" style="font-family:monospace;">${priceStr}</span></div>
+            <div class="detail-field"><span class="detail-label">Channel</span><span class="detail-val">${escHtml(job.intake_channel || '—')}</span></div>
+            <div class="detail-field"><span class="detail-label">Created</span><span class="detail-val">${job.created_at ? new Date(job.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Deadline</span><span class="detail-val">${job.deadline ? new Date(job.deadline).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '—'}</span></div>
+          </div>
+          ${job.description ? `<div style="margin-top:12px;"><div class="detail-label" style="margin-bottom:4px;">Description</div><div style="font-size:13px;color:#555;line-height:1.5;">${escHtml(job.description)}</div></div>` : ''}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Move Status</div>
+          ${transitionHtml}
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Status History</div>
+          <div class="timeline">${logs}</div>
+        </div>`;
+    } catch (e) {
+      body.innerHTML = `<div style="text-align:center;padding:40px;color:#e8294a;font-size:13px;">Failed to load job detail.</div>`;
+    }
+  },
+
+  openTransitionModal(jobId, toStatus, jobRef) {
+    State.pendingTransition = { jobId, toStatus };
+
+    document.getElementById('transition-job-ref').textContent = jobRef;
+    document.getElementById('transition-notes').value = '';
+    document.getElementById('transition-submit-btn').disabled = false;
+
+    const btns  = document.getElementById('transition-btns');
+    const label = STATUS_LABELS[toStatus] || toStatus;
+    btns.innerHTML = `<button class="transition-btn" style="background:#111;color:#fff;border-color:#111;">${label}</button>`;
+
+    document.getElementById('job-detail-modal').classList.remove('open');
+    document.getElementById('transition-modal').classList.add('open');
+  },
+
+  async confirmTransition() {
+    const { jobId, toStatus } = State.pendingTransition;
+    if (!jobId || !toStatus) return;
+
+    const notes = document.getElementById('transition-notes').value.trim();
+    const btn   = document.getElementById('transition-submit-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Updating…';
+
+    try {
+      const res = await Auth.fetch(`/api/v1/jobs/${jobId}/transition/`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ to_status: toStatus, notes }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Transition failed.', 'error');
+        return;
+      }
+
+      showToast(`Status updated to ${STATUS_LABELS[toStatus] || toStatus}.`, 'success');
+      closeTransitionModal();
+      State.pendingTransition = { jobId: null, toStatus: null };
+      loadJobs();
+    } catch (e) {
+      showToast('Network error.', 'error');
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Confirm Transition';
+    }
+  },
+
+  prevPage() {
     if (State.page > 1) { State.page--; loadJobs(); }
-  });
-  document.getElementById('btn-next').addEventListener('click', () => {
-    const maxPage = Math.ceil(State.totalCount / State.pageSize);
-    if (State.page < maxPage) { State.page++; loadJobs(); }
-  });
-}
+  },
 
-// ─────────────────────────────────────────
-// Modal Helpers
-// ─────────────────────────────────────────
-function openModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.add('open');
-}
+  nextPage() {
+    const totalPages = Math.ceil(State.totalCount / State.pageSize);
+    if (State.page < totalPages) { State.page++; loadJobs(); }
+  },
+};
 
-function closeModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.remove('open');
-}
+// ─────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────
+const Notifications = {
+  _badge: null, _dropdown: null, _list: null,
 
-function bindModalClose() {
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) overlay.classList.remove('open');
+  init({ badgeEl, dropdownEl, listEl }) {
+    this._badge    = badgeEl;
+    this._dropdown = dropdownEl;
+    this._list     = listEl;
+    this.poll();
+    setInterval(() => this.poll(), 30000);
+
+    document.addEventListener('click', e => {
+      if (!dropdownEl.contains(e.target) && e.target.id !== 'jobs-notif-btn' && !e.target.closest('#jobs-notif-btn')) {
+        this.close();
+      }
     });
-  });
-}
+  },
 
-// ─────────────────────────────────────────
-// Toast
-// ─────────────────────────────────────────
-function toast(msg, type = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  const icons = {
-    success: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
-    error:   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
-    info:    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
-  };
-  el.innerHTML = (icons[type] || icons.info) + `<span>${escHtml(msg)}</span>`;
-  container.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
-}
+  async poll() {
+    try {
+      const res  = await Auth.fetch('/api/v1/notifications/unread-count/');
+      if (!res.ok) return;
+      const data = await res.json();
+      const cnt  = data.count || 0;
+      if (this._badge) {
+        this._badge.textContent   = cnt;
+        this._badge.style.display = cnt > 0 ? 'flex' : 'none';
+      }
+    } catch (e) { /* silent */ }
+  },
 
-// ─────────────────────────────────────────
+  async toggle() {
+    const isOpen = this._dropdown.classList.contains('open');
+    if (isOpen) { this.close(); return; }
+    this._dropdown.classList.add('open');
+    await this.load();
+  },
+
+  async load() {
+    this._list.innerHTML = '<div class="notif-empty">Loading…</div>';
+    try {
+      const res  = await Auth.fetch('/api/v1/notifications/?page_size=20');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = data.results || data;
+      if (!items.length) {
+        this._list.innerHTML = '<div class="notif-empty">No notifications</div>';
+        return;
+      }
+      this._list.innerHTML = items.map(n => `
+        <div class="notif-item ${n.is_read ? 'read' : 'unread'}" onclick="Notifications.markRead(${n.id}, this)">
+          <div class="notif-dot"></div>
+          <div style="flex:1;">
+            <div class="notif-text">${escHtml(n.message || n.title || '')}</div>
+            <div class="notif-time">${n.created_at ? new Date(n.created_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</div>
+          </div>
+        </div>`).join('');
+    } catch (e) {
+      this._list.innerHTML = '<div class="notif-empty">Failed to load</div>';
+    }
+  },
+
+  async markRead(id, el) {
+    try {
+      await Auth.fetch(`/api/v1/notifications/${id}/read/`, { method: 'POST' });
+      el.classList.remove('unread');
+      el.classList.add('read');
+      this.poll();
+    } catch (e) { /* silent */ }
+  },
+
+  async markAllRead() {
+    try {
+      await Auth.fetch('/api/v1/notifications/mark-all-read/', { method: 'POST' });
+      document.querySelectorAll('.notif-item.unread').forEach(el => {
+        el.classList.remove('unread');
+        el.classList.add('read');
+      });
+      this.poll();
+    } catch (e) { /* silent */ }
+  },
+
+  close() { this._dropdown.classList.remove('open'); },
+};
+
+// ─────────────────────────────────────────────────────────────
 // Helpers
-// ─────────────────────────────────────────
-function setTableLoading() {
-  document.getElementById('jobs-tbody').innerHTML = `
-    <tr class="loading-row">
-      <td colspan="8">
-        <div class="spinner" style="margin:0 auto 10px;"></div>
-        Loading jobs…
-      </td>
-    </tr>`;
-}
-
-function statusBadge(status) {
-  const map = {
-    PENDING:     'badge-yellow',
-    IN_PROGRESS: 'badge-red',
-    READY:       'badge-green',
-    COMPLETED:   'badge-green',
-    CANCELLED:   'badge-grey',
-  };
-  const cls  = map[status] || 'badge-grey';
-  const label = STATUS_LABELS[status] || status || '—';
-  return `<span class="badge ${cls}">${escHtml(label)}</span>`;
+// ─────────────────────────────────────────────────────────────
+function typeTag(type) {
+  if (!type) return '—';
+  const cls = { INSTANT: 'type-instant', PRODUCTION: 'type-production', DESIGN: 'type-design' }[type] || '';
+  return `<span class="type-badge ${cls}">${type}</span>`;
 }
 
 function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
+function closeNewJobModal()     { document.getElementById('new-job-modal').classList.remove('open'); }
+function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }
 
-function formatDateFull(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const toast     = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
 }

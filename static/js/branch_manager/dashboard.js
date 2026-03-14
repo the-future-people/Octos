@@ -173,60 +173,29 @@ const Dashboard = (() => {
   // ─────────────────────────────────────────
   // Jobs Tab (lazy)
   // ─────────────────────────────────────────
-  async function loadJobsTab() {
-    if (jobsLoaded) return;
-    jobsLoaded = true;
+async function loadJobsTab() {
+  if (jobsLoaded) return;
+  jobsLoaded = true;
 
-    const tbody = document.getElementById('jobs-tab-tbody');
-    if (!tbody) return;
+  const pane = document.getElementById('pane-jobs');
+  if (!pane) return;
 
-    const render = async () => {
-      const search = document.getElementById('jobs-search')?.value.trim() || '';
-      const status = document.getElementById('jobs-status')?.value || '';
+  pane.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
-      tbody.innerHTML = `<tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading…</td></tr>`;
-
-      const params = new URLSearchParams({ page_size: 50 });
-      if (search) params.set('search', search);
-      if (status) params.set('status', status);
-
-      try {
-        const res  = await Auth.fetch(`/api/v1/jobs/?${params}`);
-        if (!res.ok) throw new Error();
-        const data = await res.json();
-        const jobs = Array.isArray(data) ? data : (data.results || []);
-
-        if (!jobs.length) {
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:#ccc;font-size:13px;">No jobs found.</td></tr>`;
-          return;
-        }
-
-        tbody.innerHTML = jobs.map(j => `
-          <tr onclick="window.location='/portal/jobs/'">
-            <td class="td-bold" style="font-family:monospace;font-size:12.5px;">${esc(j.reference || '#' + j.id)}</td>
-            <td>${esc(j.customer_name || j.customer || '—')}</td>
-            <td>${esc(j.service_name || j.service || '—')}</td>
-            <td>${statusBadge(j.status)}</td>
-            <td style="font-family:monospace;">${j.final_price != null ? Number(j.final_price).toFixed(2) : '—'}</td>
-            <td style="font-size:12.5px;color:#aaa;">${formatDate(j.created_at)}</td>
-          </tr>`).join('');
-
-      } catch {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:#ccc;">Could not load.</td></tr>`;
-      }
-    };
-
-    // Bind search/filter
-    let searchTimer;
-    document.getElementById('jobs-search')?.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(render, 350);
+  try {
+    const res = await fetch('/portal/jobs-tab/');
+    if (!res.ok) throw new Error();
+    const html = await res.text();
+    pane.innerHTML = html;
+    pane.querySelectorAll('script').forEach(old => {
+      const s = document.createElement('script');
+      s.textContent = old.textContent;
+      old.replaceWith(s);
     });
-    document.getElementById('jobs-status')?.addEventListener('change', render);
-
-    await render();
+  } catch(e) {
+    pane.innerHTML = '<div class="loading-cell" style="color:#e8294a;">Could not load jobs tab.</div>';
   }
-
+}
   // ─────────────────────────────────────────
   // Inbox Tab (lazy)
   // ─────────────────────────────────────────

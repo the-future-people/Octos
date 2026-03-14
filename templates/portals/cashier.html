@@ -1,0 +1,699 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cashier — Octos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="{% static 'css/octos.css' %}">
+  <style>
+
+    /* ── Layout ─────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #f7f7f7;
+      min-height: 100vh;
+      color: #111;
+    }
+
+    /* ── Top bar ─────────────────────────────────────────────── */
+    .cashier-topbar {
+      height: 56px;
+      background: #fff;
+      border-bottom: 1px solid #ebebeb;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .topbar-brand {
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 800;
+      color: #111;
+      letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .topbar-brand span {
+      font-size: 12px;
+      font-weight: 600;
+      color: #aaa;
+      background: #f4f4f4;
+      padding: 3px 9px;
+      border-radius: 20px;
+      letter-spacing: 0.3px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .topbar-branch {
+      font-size: 13px;
+      color: #888;
+      font-weight: 500;
+    }
+
+    .topbar-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #555;
+    }
+
+    .user-avatar {
+      width: 30px;
+      height: 30px;
+      background: #111;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'Syne', sans-serif;
+    }
+
+    .live-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: #1a7a4a;
+      font-weight: 600;
+    }
+
+    .live-dot::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      background: #1a7a4a;
+      border-radius: 50%;
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(1.3); }
+    }
+
+    /* ── Main content ────────────────────────────────────────── */
+    .cashier-main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    .cashier-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .cashier-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: #111;
+      letter-spacing: -0.4px;
+    }
+
+    .cashier-subtitle {
+      font-size: 13px;
+      color: #aaa;
+      margin-top: 3px;
+    }
+
+    .queue-count {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #888;
+      background: #f4f4f4;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #eaeaea;
+    }
+
+    .queue-count strong {
+      color: #111;
+      font-size: 15px;
+    }
+
+    /* ── Queue cards ─────────────────────────────────────────── */
+    .queue-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .queue-card {
+      background: #fff;
+      border: 1px solid #ebebeb;
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .queue-card:hover {
+      border-color: #ccc;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    .queue-card-index {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: #ccc;
+      min-width: 24px;
+      text-align: center;
+    }
+
+    .queue-card-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .queue-card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #111;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+
+    .queue-card-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .queue-card-ref {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #bbb;
+    }
+
+    .queue-card-attendant {
+      font-size: 12px;
+      color: #999;
+    }
+
+    .type-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .type-pill.INSTANT    { background: #f0f4ff; color: #3355cc; }
+    .type-pill.PRODUCTION { background: #f9f0ff; color: #7733cc; }
+    .type-pill.DESIGN     { background: #fff0f7; color: #cc3388; }
+
+    .queue-card-cost {
+      text-align: right;
+      min-width: 100px;
+    }
+
+    .cost-amount {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: #111;
+    }
+
+    .cost-label {
+      font-size: 11px;
+      color: #bbb;
+      margin-top: 2px;
+    }
+
+    .confirm-btn {
+      padding: 9px 20px;
+      background: #111;
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+
+    .confirm-btn:hover { background: #333; }
+    .confirm-btn:active { transform: scale(0.97); }
+
+    /* ── Empty state ─────────────────────────────────────────── */
+    .queue-empty {
+      text-align: center;
+      padding: 80px 24px;
+      background: #fff;
+      border: 1px solid #ebebeb;
+      border-radius: 14px;
+    }
+
+    .queue-empty-icon {
+      width: 48px;
+      height: 48px;
+      background: #f5f5f5;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+
+    .queue-empty-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    .queue-empty-sub {
+      font-size: 13px;
+      color: #bbb;
+    }
+
+    /* ── Loading skeleton ────────────────────────────────────── */
+    .skeleton-card {
+      background: #fff;
+      border: 1px solid #ebebeb;
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .skel {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 6px;
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── Payment confirmation modal ──────────────────────────── */
+    .confirm-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s;
+    }
+
+    .confirm-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .confirm-modal {
+      background: #fff;
+      border-radius: 16px;
+      width: 420px;
+      max-width: 94vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+      transform: translateY(12px);
+      transition: transform 0.18s;
+      overflow: hidden;
+    }
+
+    .confirm-overlay.open .confirm-modal {
+      transform: translateY(0);
+    }
+
+    .confirm-modal-header {
+      padding: 22px 24px 0;
+    }
+
+    .confirm-modal-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 17px;
+      font-weight: 800;
+      color: #111;
+      margin-bottom: 4px;
+    }
+
+    .confirm-modal-ref {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #bbb;
+    }
+
+    .confirm-modal-body {
+      padding: 20px 24px;
+    }
+
+    .confirm-job-summary {
+      background: #f8f8f8;
+      border: 1px solid #ebebeb;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 18px;
+    }
+
+    .confirm-job-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 8px;
+    }
+
+    .confirm-job-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .confirm-detail {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .confirm-detail strong {
+      color: #333;
+      display: block;
+      font-size: 13px;
+      margin-top: 1px;
+    }
+
+    .deposit-selector {
+      margin-bottom: 16px;
+    }
+
+    .deposit-selector label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      color: #aaa;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .deposit-options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .deposit-option {
+      border: 2px solid #ebebeb;
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      text-align: center;
+    }
+
+    .deposit-option.selected {
+      border-color: #111;
+      background: #111;
+      color: #fff;
+    }
+
+    .deposit-option-pct {
+      font-family: 'Syne', sans-serif;
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+
+    .deposit-option-label {
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    .deposit-option.selected .deposit-option-label {
+      color: #ccc;
+    }
+
+    .confirm-amount-due {
+      background: #f0faf5;
+      border: 1px solid #b0e0c8;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .confirm-amount-label {
+      font-size: 12px;
+      color: #1a7a4a;
+      font-weight: 600;
+    }
+
+    .confirm-amount-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a7a4a;
+    }
+
+    .confirm-notes {
+      width: 100%;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: 'DM Sans', sans-serif;
+      resize: none;
+      outline: none;
+      color: #333;
+    }
+
+    .confirm-notes:focus { border-color: #aaa; }
+
+    .confirm-modal-footer {
+      padding: 0 24px 22px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-cancel-payment {
+      flex: 1;
+      padding: 11px;
+      border: 1px solid #e0e0e0;
+      border-radius: 9px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      transition: border-color 0.15s;
+    }
+
+    .btn-cancel-payment:hover { border-color: #bbb; }
+
+    .btn-confirm-payment {
+      flex: 2;
+      padding: 11px;
+      background: #111;
+      border: none;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      transition: background 0.15s;
+    }
+
+    .btn-confirm-payment:hover    { background: #333; }
+    .btn-confirm-payment:disabled { background: #ccc; cursor: not-allowed; }
+
+    /* ── Toast ───────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      padding: 12px 18px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      animation: toast-in 0.2s ease;
+    }
+
+    .toast.success { background: #1a7a4a; }
+    .toast.error   { background: #cc3300; }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <div class="cashier-topbar">
+    <div class="topbar-brand">
+      Octos <span>Cashier</span>
+    </div>
+    <div class="topbar-right">
+      <span class="live-dot">Live</span>
+      <span class="topbar-branch" id="cashier-branch-name">—</span>
+      <div class="topbar-user">
+        <div class="user-avatar" id="cashier-user-initials">—</div>
+        <span id="cashier-user-name">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="cashier-main">
+
+    <div class="cashier-header">
+      <div>
+        <div class="cashier-title">Payment Queue</div>
+        <div class="cashier-subtitle">Jobs waiting for payment confirmation</div>
+      </div>
+      <div class="queue-count">
+        <strong id="queue-count-num">—</strong> pending
+      </div>
+    </div>
+
+    <div class="queue-list" id="queue-list">
+      <!-- skeleton loading -->
+      <div class="skeleton-card">
+        <div class="skel" style="width:24px;height:16px;"></div>
+        <div style="flex:1;">
+          <div class="skel" style="width:60%;height:14px;margin-bottom:8px;"></div>
+          <div class="skel" style="width:40%;height:11px;"></div>
+        </div>
+        <div class="skel" style="width:80px;height:18px;"></div>
+        <div class="skel" style="width:100px;height:36px;border-radius:9px;"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Payment Confirmation Modal -->
+  <div class="confirm-overlay" id="confirm-overlay" onclick="if(event.target===this)Cashier.closeConfirm()">
+    <div class="confirm-modal">
+
+      <div class="confirm-modal-header">
+        <div class="confirm-modal-title">Confirm Payment</div>
+        <div class="confirm-modal-ref" id="confirm-job-ref">—</div>
+      </div>
+
+      <div class="confirm-modal-body">
+
+        <!-- Job summary -->
+        <div class="confirm-job-summary">
+          <div class="confirm-job-name" id="confirm-job-name">—</div>
+          <div class="confirm-job-details">
+            <div class="confirm-detail">
+              Attendant
+              <strong id="confirm-attendant">—</strong>
+            </div>
+            <div class="confirm-detail">
+              Type
+              <strong id="confirm-type">—</strong>
+            </div>
+            <div class="confirm-detail">
+              Customer
+              <strong id="confirm-customer">—</strong>
+            </div>
+            <div class="confirm-detail">
+              Est. Cost
+              <strong id="confirm-est-cost">—</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deposit selector -->
+        <div class="deposit-selector">
+          <label>SELECT PAYMENT AMOUNT</label>
+          <div class="deposit-options">
+            <div class="deposit-option" id="opt-100" onclick="Cashier.selectDeposit(100)">
+              <div class="deposit-option-pct">100%</div>
+              <div class="deposit-option-label">Full payment</div>
+            </div>
+            <div class="deposit-option" id="opt-70" onclick="Cashier.selectDeposit(70)">
+              <div class="deposit-option-pct">70%</div>
+              <div class="deposit-option-label">Deposit</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Amount due display -->
+        <div class="confirm-amount-due">
+          <span class="confirm-amount-label">COLLECT FROM CUSTOMER</span>
+          <span class="confirm-amount-value" id="confirm-amount-due">—</span>
+        </div>
+
+        <!-- Optional notes -->
+        <textarea class="confirm-notes" id="confirm-notes"
+          rows="2" placeholder="Notes (optional)…"></textarea>
+
+      </div>
+
+      <div class="confirm-modal-footer">
+        <button class="btn-cancel-payment" onclick="Cashier.closeConfirm()">Cancel</button>
+        <button class="btn-confirm-payment" id="confirm-submit-btn" onclick="Cashier.confirmPayment()">
+          ✓ Confirm Payment
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <script src="{% static 'js/auth.js' %}"></script>
+  <script src="{% static 'js/cashier.js' %}"></script>
+</body>
+</html>

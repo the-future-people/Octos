@@ -13,9 +13,13 @@ from apps.organization.models import Branch
 from .serializers import (
     JobListSerializer, JobDetailSerializer, JobCreateSerializer,
     JobTransitionSerializer, JobRouteSerializer, JobFileUploadSerializer,
-    ServiceSerializer, PricingRuleSerializer,
+    ServiceSerializer, PricingRuleSerializer, CashierPaymentSerializer,
 )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Jobs
+# ─────────────────────────────────────────────────────────────────────────────
 
 class JobListView(generics.ListAPIView):
     serializer_class   = JobListSerializer
@@ -29,11 +33,9 @@ class JobListView(generics.ListAPIView):
             'branch', 'assigned_to', 'customer', 'intake_by'
         )
 
-        # Scope to user's branch by default
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)
 
-        # Optional filter overrides
         branch_id    = self.request.query_params.get('branch')
         job_type     = self.request.query_params.get('job_type')
         status_param = self.request.query_params.get('status')
@@ -77,6 +79,7 @@ class JobTransitionView(APIView):
     POST /api/v1/jobs/<id>/transition/
     Body: { to_status, notes? }
     Advances job through its lifecycle using the status engine.
+    Role-based guards are enforced inside the engine.
     """
     permission_classes = [IsAuthenticated]
 
@@ -95,20 +98,106 @@ class JobTransitionView(APIView):
 
         try:
             result = JobStatusEngine.advance(
-                job=job,
-                to_status=serializer.validated_data['to_status'],
-                actor=request.user,
-                notes=serializer.validated_data.get('notes', ''),
+                job       = job,
+                to_status = serializer.validated_data['to_status'],
+                actor     = request.user,
+                notes     = serializer.validated_data.get('notes', ''),
             )
             return Response(result)
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cashier
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CashierQueueView(generics.ListAPIView):
+    """
+    GET /api/v1/jobs/cashier/queue/
+    Returns all PENDING_PAYMENT jobs for the cashier's branch.
+    Ordered oldest-first so the cashier works the queue in sequence.
+    """
+    serializer_class   = JobListSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs   = Job.objects.select_related(
+            'branch', 'customer', 'intake_by'
+        ).filter(status=Job.PENDING_PAYMENT)
+
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+
+        return qs.order_by('created_at')  # FIFO
+
+
+class CashierConfirmPaymentView(APIView):
+    """
+    POST /api/v1/jobs/<id>/cashier/confirm/
+    Body: { deposit_percentage: 70|100, notes? }
+
+    Cashier selects the deposit tier, system calculates amount_paid,
+    then advances the job to PAID via the status engine.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+            try:
+                job = Job.objects.get(pk=pk, status=Job.PENDING_PAYMENT)
+            except Job.DoesNotExist:
+                return Response(
+                    {'detail': 'Job not found or not awaiting payment.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            serializer = CashierPaymentSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            deposit_pct = serializer.validated_data['deposit_percentage']
+            notes       = serializer.validated_data.get('notes', '')
+
+            # Calculate amount paid
+            if job.estimated_cost:
+                amount_paid = (job.estimated_cost * deposit_pct) / 100
+            else:
+                amount_paid = None
+
+            # Persist deposit info on the job
+            job.deposit_percentage = deposit_pct
+            job.amount_paid        = amount_paid
+            job.save(update_fields=['deposit_percentage', 'amount_paid', 'updated_at'])
+
+            # Advance FSM to COMPLETE — for INSTANT jobs, payment = job done
+            try:
+                result = JobStatusEngine.advance(
+                    job       = job,
+                    to_status = Job.COMPLETE,
+                    actor     = request.user,
+                    notes     = notes or f"Payment confirmed: {deposit_pct}% deposit",
+                )
+            except (ValueError, PermissionError) as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+            result['deposit_percentage'] = deposit_pct
+            result['amount_paid']        = str(amount_paid) if amount_paid else None
+            result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
+
+            return Response(result)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Files
+# ─────────────────────────────────────────────────────────────────────────────
+
 class JobFileUploadView(APIView):
     """
     POST /api/v1/jobs/<id>/files/
-    Upload a file attachment to a job (artwork, sample, final, reference).
+    Upload a file attachment to a job.
     """
     permission_classes = [IsAuthenticated]
     parser_classes     = [MultiPartParser, FormParser]
@@ -139,40 +228,31 @@ class JobFileUploadView(APIView):
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing
+# ─────────────────────────────────────────────────────────────────────────────
+
 class JobRouteSuggestView(APIView):
-    """
-    GET /api/v1/jobs/<id>/route/suggest/?service=<id>
-    Returns ranked branch suggestions for routing this job.
-    """
+    """GET /api/v1/jobs/<id>/route/suggest/?service=<id>"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         try:
             job = Job.objects.select_related('branch').get(pk=pk)
         except Job.DoesNotExist:
-            return Response(
-                {'detail': 'Job not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({'detail': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         service_id = request.query_params.get('service')
         if not service_id:
-            return Response(
-                {'detail': 'service query param is required.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({'detail': 'service query param is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             service = Service.objects.get(pk=service_id)
         except Service.DoesNotExist:
-            return Response(
-                {'detail': 'Service not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({'detail': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         result = RoutingEngine.suggest(job=job, service=service)
 
-        # Serialize branch objects out of the result
         if result['success']:
             result['suggestions'] = [
                 {
@@ -200,21 +280,14 @@ class JobRouteSuggestView(APIView):
 
 
 class JobRouteConfirmView(APIView):
-    """
-    POST /api/v1/jobs/<id>/route/confirm/
-    Body: { branch_id, notes? }
-    Confirms routing this job to the specified branch.
-    """
+    """POST /api/v1/jobs/<id>/route/confirm/"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         try:
             job = Job.objects.get(pk=pk)
         except Job.DoesNotExist:
-            return Response(
-                {'detail': 'Job not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({'detail': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = JobRouteSerializer(data=request.data)
         if not serializer.is_valid():
@@ -223,10 +296,7 @@ class JobRouteConfirmView(APIView):
         try:
             branch = Branch.objects.get(pk=serializer.validated_data['branch_id'])
         except Branch.DoesNotExist:
-            return Response(
-                {'detail': 'Branch not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         job.assigned_to    = branch
         job.is_routed      = True
@@ -240,6 +310,10 @@ class JobRouteConfirmView(APIView):
             'routed_to_id' : branch.id,
         })
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Services & Pricing
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ServiceListView(generics.ListAPIView):
     serializer_class   = ServiceSerializer
@@ -270,8 +344,7 @@ class PricingRuleListView(generics.ListAPIView):
 
 class PriceCalculateView(APIView):
     """
-    GET /api/v1/jobs/price/calculate/?service=<id>&branch=<id>&quantity=1&pages=1&is_color=false
-    Returns a full price breakdown before creating a job.
+    GET /api/v1/jobs/price/calculate/?service=&branch=&quantity=&pages=&is_color=
     """
     permission_classes = [IsAuthenticated]
 
@@ -305,10 +378,10 @@ class PriceCalculateView(APIView):
             return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         result = PricingEngine.get_price(
-            service=service,
-            branch=branch,
-            quantity=quantity,
-            is_color=is_color,
-            pages=pages,
+            service  = service,
+            branch   = branch,
+            quantity = quantity,
+            is_color = is_color,
+            pages    = pages,
         )
         return Response(result)
