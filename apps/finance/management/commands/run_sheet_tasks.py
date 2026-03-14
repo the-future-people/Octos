@@ -30,8 +30,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             'mode',
-            choices=['open', 'close', 'warn'],
-            help='Task mode: open | close | warn',
+            choices=['open', 'close', 'warn', 'suspend'],
+            help='Task mode: open | close | warn | suspend',
         )
 
     def handle(self, *args, **options) -> None:
@@ -43,7 +43,8 @@ class Command(BaseCommand):
             self._run_close()
         elif mode == 'warn':
             self._run_warn()
-
+        elif mode == 'suspend':
+            self._run_suspend()
     # ── Open ──────────────────────────────────────────────────────
 
     def _run_open(self) -> None:
@@ -234,4 +235,25 @@ class Command(BaseCommand):
             logger.exception(
                 'run_sheet_tasks warn: notification failed for branch %s',
                 branch.code,
+            )
+    # ── Suspend overdue credit accounts ───────────────────────────
+
+    def _run_suspend(self) -> None:
+        """
+        Auto-suspend credit accounts that have breached payment terms.
+        Run once daily — recommended at 6:00am after sheets open.
+        """
+        from apps.finance.credit_engine import CreditEngine
+
+        try:
+            count = CreditEngine.suspend_overdue_accounts()
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'suspend complete — {count} account(s) suspended'
+                )
+            )
+        except Exception as exc:
+            logger.exception('run_sheet_tasks suspend: failed')
+            self.stdout.write(
+                self.style.ERROR(f'ERROR during suspend: {exc}')
             )
