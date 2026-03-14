@@ -20,6 +20,7 @@ urlpatterns = [
     path('api/v1/jobs/', include('apps.jobs.api.urls')),
     path('api/v1/hr/', include('apps.hr.api.urls')),
     path('api/v1/communications/', include('apps.communications.api.urls')),
+    path('api/v1/finance/', include('apps.finance.api.urls')),
     # Portal
     path('portal/login/', login_view, name='login'),
     path('portal/dashboard/', dashboard_view, name='dashboard'),
