@@ -17,8 +17,9 @@ urlpatterns = [
 
     # Cashier
     path('cashier/queue/',           views.CashierQueueView.as_view(),          name='cashier-queue'),
+    path('cashier/summary/',         views.CashierSummaryView.as_view(),         name='cashier-summary'),
     path('<int:pk>/cashier/confirm/', views.CashierConfirmPaymentView.as_view(), name='cashier-confirm'),
-
+    
     # Services
     path('services/', views.ServiceListView.as_view(), name='service-list'),
 

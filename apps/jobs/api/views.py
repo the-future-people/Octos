@@ -134,7 +134,54 @@ class CashierQueueView(generics.ListAPIView):
 
         return qs.order_by('created_at')  # FIFO
 
+class CashierSummaryView(APIView):
+    """
+    GET /api/v1/jobs/cashier/summary/
+    Returns today's payment totals per method for the cashier's branch.
+    Used to populate the summary strip on page load.
+    """
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        from django.db.models import Sum, Count
+        from django.utils import timezone
+
+        user = request.user
+        if not hasattr(user, 'branch') or not user.branch:
+            return Response(
+                {'detail': 'User has no branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = timezone.localdate()
+
+        jobs = Job.objects.filter(
+            branch       = user.branch,
+            status       = Job.COMPLETE,
+            updated_at__date = today,
+            amount_paid__isnull = False,
+        )
+
+        def _total(method):
+            result = jobs.filter(payment_method=method).aggregate(
+                total = Sum('amount_paid'),
+                count = Count('id'),
+            )
+            return {
+                'total': str(result['total'] or 0),
+                'count': result['count'] or 0,
+            }
+
+        return Response({
+            'CASH' : _total('CASH'),
+            'MOMO' : _total('MOMO'),
+            'POS'  : _total('POS'),
+            'total': {
+                'total': str(jobs.aggregate(t=Sum('amount_paid'))['t'] or 0),
+                'count': jobs.count(),
+            },
+        })
+    
 class CashierConfirmPaymentView(APIView):
     """
     POST /api/v1/jobs/<id>/cashier/confirm/
@@ -168,9 +215,17 @@ class CashierConfirmPaymentView(APIView):
                 amount_paid = None
 
             # Persist deposit info on the job
+            # Persist deposit and payment info on the job
             job.deposit_percentage = deposit_pct
             job.amount_paid        = amount_paid
-            job.save(update_fields=['deposit_percentage', 'amount_paid', 'updated_at'])
+            job.payment_method     = serializer.validated_data.get('payment_method', 'CASH')
+            job.momo_reference     = serializer.validated_data.get('momo_reference', '')
+            job.pos_approval_code  = serializer.validated_data.get('pos_approval_code', '')
+            job.save(update_fields=[
+                'deposit_percentage', 'amount_paid',
+                'payment_method', 'momo_reference',
+                'pos_approval_code', 'updated_at',
+            ])
 
             # Advance FSM to COMPLETE — for INSTANT jobs, payment = job done
             try:
@@ -186,6 +241,8 @@ class CashierConfirmPaymentView(APIView):
             result['deposit_percentage'] = deposit_pct
             result['amount_paid']        = str(amount_paid) if amount_paid else None
             result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
+            result['payment_method']     = serializer.validated_data.get('payment_method', 'CASH')
+            result['receipt_number']     = None  # populated after ReceiptEngine is wired in
 
             return Response(result)
 

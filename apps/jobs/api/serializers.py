@@ -223,9 +223,12 @@ class JobRouteSerializer(serializers.Serializer):
 
 
 class CashierPaymentSerializer(serializers.Serializer):
-    """
-    Used by the cashier to confirm payment.
-    deposit_percentage is the only decision the cashier makes — 70% or 100%.
-    """
     deposit_percentage = serializers.ChoiceField(choices=[70, 100])
+    payment_method     = serializers.ChoiceField(
+        choices=['CASH', 'MOMO', 'POS'],
+        default='CASH',
+    )
+    momo_reference     = serializers.CharField(required=False, allow_blank=True)
+    pos_approval_code  = serializers.CharField(required=False, allow_blank=True)
+    customer_phone     = serializers.CharField(required=False, allow_blank=True)
     notes              = serializers.CharField(required=False, allow_blank=True)
