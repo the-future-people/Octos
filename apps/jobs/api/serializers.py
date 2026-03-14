@@ -200,6 +200,15 @@ class JobCreateSerializer(serializers.ModelSerializer):
         if validated_data.get('job_type') != 'DESIGN':
             validated_data['status'] = Job.PENDING_PAYMENT
 
+        # Link to today's open sheet — fallback open if missed
+        from apps.finance.sheet_engine import SheetEngine
+        from django.utils import timezone
+
+        branch = validated_data['branch']
+        sheet, _ = SheetEngine(branch).get_or_open_today()
+        if sheet is not None:
+            validated_data['daily_sheet'] = sheet
+
         validated_data['intake_by'] = self.context['request'].user
         return Job.objects.create(**validated_data)
 
