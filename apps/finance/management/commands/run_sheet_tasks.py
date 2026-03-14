@@ -228,8 +228,7 @@ class Command(BaseCommand):
                         f"Branch closes at {close_str}. "
                         f"Complete all pending work and payments before close."
                     ),
-                    target_id=sheet.pk,
-                    target_type='DailySalesSheet',
+                    link='/portal/jobs/',
                 )
         except Exception:
             logger.exception(

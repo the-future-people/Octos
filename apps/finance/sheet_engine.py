@@ -360,10 +360,6 @@ class SheetEngine:
     # ── Notifications ─────────────────────────────────────────────
 
     def _notify_bm_pending_payments(self, sheet, count: int) -> None:
-        """
-        Notify the branch manager that pending payments
-        are blocking auto-close. Plugs into the notifications app.
-        """
         try:
             from apps.notifications.services import notify
             from apps.accounts.models import CustomUser
@@ -382,14 +378,12 @@ class SheetEngine:
                         f"{count} job(s) still pending payment on today's sheet. "
                         f"Resolve before the sheet can close."
                     ),
-                    target_id=sheet.pk,
-                    target_type='DailySalesSheet',
+                    link='/portal/jobs/?status=PENDING_PAYMENT',
                 )
         except Exception:
             logger.exception(
                 'SheetEngine: failed to notify BM for sheet %s', sheet.pk
             )
-
     # ── Class-level convenience ───────────────────────────────────
 
     @classmethod
