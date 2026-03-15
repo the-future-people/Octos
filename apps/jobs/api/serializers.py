@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.jobs.models import Job, JobFile, Service, PricingRule, JobStatusLog
+from apps.jobs.models import Job, JobFile, JobLineItem, Service, PricingRule, JobStatusLog
 from apps.jobs.pricing_engine import PricingEngine
 
 
@@ -11,6 +11,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'description', 'requires_design', 'requires_file_upload',
             'is_active', 'spec_template',
         ]
+
 
 class PricingRuleSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source='service.name', read_only=True)
@@ -59,12 +60,66 @@ class JobStatusLogSerializer(serializers.ModelSerializer):
         return obj.actor.full_name if obj.actor else None
 
 
+# ─────────────────────────────────────────────────────────────
+# Job Line Item Serializers
+# ─────────────────────────────────────────────────────────────
+
+class JobLineItemSerializer(serializers.ModelSerializer):
+    """Read serializer — used in job detail responses."""
+    service_name = serializers.CharField(source='service.name', read_only=True)
+    service_code = serializers.CharField(source='service.code', read_only=True)
+
+    class Meta:
+        model  = JobLineItem
+        fields = [
+            'id', 'service', 'service_name', 'service_code',
+            'quantity', 'pages', 'sets', 'is_color',
+            'paper_size', 'sides', 'specifications',
+            'file_source', 'unit_price', 'line_total',
+            'label', 'position',
+        ]
+        read_only_fields = ['id', 'unit_price', 'line_total', 'label']
+
+
+class JobLineItemCreateSerializer(serializers.Serializer):
+    """
+    Write serializer — used when creating a job with line items.
+    Accepts one line item's parameters and returns pricing.
+    """
+    service     = serializers.PrimaryKeyRelatedField(queryset=Service.objects.all())
+    quantity    = serializers.IntegerField(default=1, min_value=1)
+    pages       = serializers.IntegerField(default=1, min_value=1)
+    sets        = serializers.IntegerField(default=1, min_value=1)
+    is_color    = serializers.BooleanField(default=False)
+    paper_size  = serializers.CharField(default='A4', max_length=10)
+    sides       = serializers.ChoiceField(
+        choices=['SINGLE', 'DOUBLE'],
+        default='SINGLE',
+    )
+    specifications = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False,
+        default=dict,
+    )
+    file_source = serializers.ChoiceField(
+        choices=[c[0] for c in JobLineItem.FILE_SOURCE_CHOICES],
+        default=JobLineItem.NA,
+    )
+    position    = serializers.IntegerField(default=0, min_value=0)
+
+
+# ─────────────────────────────────────────────────────────────
+# Job Serializers
+# ─────────────────────────────────────────────────────────────
+
 class JobListSerializer(serializers.ModelSerializer):
     branch_name      = serializers.CharField(source='branch.name', read_only=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
     deposit_due      = serializers.SerializerMethodField()
+    line_items       = JobLineItemSerializer(many=True, read_only=True)
+    line_item_count  = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
@@ -74,6 +129,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
+            'line_items', 'line_item_count',
         ]
 
     def get_customer_name(self, obj):
@@ -83,10 +139,12 @@ class JobListSerializer(serializers.ModelSerializer):
         return obj.intake_by.full_name if obj.intake_by else None
 
     def get_deposit_due(self, obj):
-        """Amount the cashier should collect based on deposit_percentage."""
         if obj.estimated_cost is None:
             return None
         return str((obj.estimated_cost * obj.deposit_percentage) / 100)
+
+    def get_line_item_count(self, obj):
+        return obj.line_items.count()
 
 
 class JobDetailSerializer(serializers.ModelSerializer):
@@ -99,6 +157,8 @@ class JobDetailSerializer(serializers.ModelSerializer):
     allowed_transitions = serializers.SerializerMethodField()
     balance_due         = serializers.SerializerMethodField()
     deposit_due         = serializers.SerializerMethodField()
+    line_items          = JobLineItemSerializer(many=True, read_only=True)
+    computed_total      = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
@@ -111,6 +171,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
             'deposit_percentage', 'amount_paid', 'deposit_due', 'balance_due',
             'deadline', 'is_routed', 'routing_reason', 'notes',
             'files', 'status_logs', 'allowed_transitions',
+            'line_items', 'computed_total',
             'created_at', 'updated_at',
         ]
 
@@ -135,25 +196,40 @@ class JobDetailSerializer(serializers.ModelSerializer):
             return None
         return str((obj.estimated_cost * obj.deposit_percentage) / 100)
 
+    def get_computed_total(self, obj):
+        return str(obj.computed_total)
+
 
 class JobCreateSerializer(serializers.ModelSerializer):
     """
-    Create a new job.
-    - title is auto-set to the service name (no manual entry needed)
-    - Price is auto-calculated from service + branch
-    - Branch defaults to requesting user's branch
+    Create a new job — supports both:
+      1. Multi-line-item (new POS-style): pass `line_items` list
+      2. Single-service (legacy): pass `service`, `quantity`, `pages`, `is_color`
+
+    For multi-line jobs:
+      - title is auto-generated from line items
+      - estimated_cost is sum of all line item totals
+      - each line item is priced individually via PricingEngine
+
+    For single-service jobs (Production/Design):
+      - title defaults to service name
+      - estimated_cost calculated from single service params
     """
-    quantity           = serializers.IntegerField(write_only=True, default=1, min_value=1)
-    pages              = serializers.IntegerField(write_only=True, default=1, min_value=1)
-    is_color           = serializers.BooleanField(write_only=True, default=False)
-    service            = serializers.PrimaryKeyRelatedField(
+
+    # ── Multi-line-item path ──────────────────────────────────
+    line_items = JobLineItemCreateSerializer(many=True, required=False)
+
+    # ── Single-service legacy path ────────────────────────────
+    quantity = serializers.IntegerField(write_only=True, default=1, min_value=1, required=False)
+    pages    = serializers.IntegerField(write_only=True, default=1, min_value=1, required=False)
+    is_color = serializers.BooleanField(write_only=True, default=False, required=False)
+    service  = serializers.PrimaryKeyRelatedField(
         queryset=Service.objects.all(),
         write_only=True,
+        required=False,
     )
-    deposit_percentage = serializers.ChoiceField(
-        choices=[70, 100],
-        default=100,
-    )
+
+    deposit_percentage = serializers.ChoiceField(choices=[70, 100], default=100)
 
     class Meta:
         model  = Job
@@ -161,7 +237,10 @@ class JobCreateSerializer(serializers.ModelSerializer):
             'job_type', 'priority', 'branch',
             'customer', 'description', 'specifications',
             'intake_channel', 'deadline', 'notes',
+            # single-service
             'service', 'quantity', 'pages', 'is_color',
+            # multi-line
+            'line_items',
             'deposit_percentage',
         ]
         extra_kwargs = {
@@ -169,48 +248,132 @@ class JobCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        # Branch — default to user's branch
         request = self.context.get('request')
         if not attrs.get('branch') and request and hasattr(request.user, 'branch'):
             attrs['branch'] = request.user.branch
         if not attrs.get('branch'):
             raise serializers.ValidationError({'branch': 'Branch is required.'})
+
+        # Must have either line_items or service
+        has_line_items = bool(attrs.get('line_items'))
+        has_service    = bool(attrs.get('service'))
+        if not has_line_items and not has_service:
+            raise serializers.ValidationError(
+                'Provide either line_items (multi-service) or service (single-service).'
+            )
+
         return attrs
 
     def create(self, validated_data):
-        service            = validated_data.pop('service')
+        line_items_data    = validated_data.pop('line_items', None)
+        service            = validated_data.pop('service', None)
         quantity           = validated_data.pop('quantity', 1)
         pages              = validated_data.pop('pages', 1)
         is_color           = validated_data.pop('is_color', False)
+        branch             = validated_data['branch']
 
-        # Title is always the service name — no manual entry
-        validated_data['title'] = service.name
+        # ── Multi-line-item path ──────────────────────────────
+        if line_items_data:
+            total = 0
+            priced_items = []
 
-        pricing = PricingEngine.get_price(
-            service  = service,
-            branch   = validated_data['branch'],
-            quantity = quantity,
-            is_color = is_color,
-            pages    = pages,
-        )
-        if pricing['success']:
-            validated_data['estimated_cost'] = pricing['total']
+            for item_data in line_items_data:
+                svc      = item_data['service']
+                qty      = item_data.get('quantity', 1)
+                pg       = item_data.get('pages', 1)
+                sets     = item_data.get('sets', 1)
+                color    = item_data.get('is_color', False)
 
-        # INSTANT and PRODUCTION go straight to PENDING_PAYMENT.
-        # DESIGN stays DRAFT until the brief is submitted.
+                # Effective quantity for pricing = pages × sets (for print/copy)
+                # or just quantity for simple items (binding, envelopes)
+                effective_qty = pg * sets if pg > 1 or sets > 1 else qty
+
+                pricing = PricingEngine.get_price(
+                    service  = svc,
+                    branch   = branch,
+                    quantity = effective_qty,
+                    is_color = color,
+                    pages    = pg,
+                )
+
+                unit_price = float(pricing['base_price']) if pricing['success'] else 0
+                line_total = float(pricing['total'])      if pricing['success'] else 0
+                total     += line_total
+
+                priced_items.append({
+                    **item_data,
+                    'unit_price': unit_price,
+                    'line_total': line_total,
+                })
+
+            # Auto-generate title from services
+            names = [i['service'].name for i in priced_items]
+            if len(names) == 1:
+                validated_data['title'] = names[0]
+            elif len(names) <= 3:
+                validated_data['title'] = ', '.join(names)
+            else:
+                validated_data['title'] = ', '.join(names[:3]) + f' +{len(names)-3} more'
+
+            validated_data['estimated_cost'] = total
+
+        # ── Single-service legacy path ────────────────────────
+        else:
+            validated_data['title'] = service.name
+            pricing = PricingEngine.get_price(
+                service  = service,
+                branch   = branch,
+                quantity = quantity,
+                is_color = is_color,
+                pages    = pages,
+            )
+            if pricing['success']:
+                validated_data['estimated_cost'] = pricing['total']
+            priced_items = None
+
+        # ── Status ────────────────────────────────────────────
         if validated_data.get('job_type') != 'DESIGN':
             validated_data['status'] = Job.PENDING_PAYMENT
 
-        # Link to today's open sheet — fallback open if missed
+        # ── Daily sheet ───────────────────────────────────────
         from apps.finance.sheet_engine import SheetEngine
-        from django.utils import timezone
-
-        branch = validated_data['branch']
         sheet, _ = SheetEngine(branch).get_or_open_today()
         if sheet is not None:
             validated_data['daily_sheet'] = sheet
 
         validated_data['intake_by'] = self.context['request'].user
-        return Job.objects.create(**validated_data)
+
+        # ── Create job ────────────────────────────────────────
+        job = Job.objects.create(**validated_data)
+
+        # ── Create line items ─────────────────────────────────
+        if priced_items:
+            for i, item_data in enumerate(priced_items):
+                item_data['position'] = item_data.get('position', i)
+                JobLineItem.objects.create(job=job, **item_data)
+        elif service:
+            # Single-service — create one line item for consistency
+            pricing = PricingEngine.get_price(
+                service  = service,
+                branch   = branch,
+                quantity = quantity,
+                is_color = is_color,
+                pages    = pages,
+            )
+            JobLineItem.objects.create(
+                job        = job,
+                service    = service,
+                quantity   = quantity,
+                pages      = pages,
+                is_color   = is_color,
+                unit_price = pricing['base_price'] if pricing['success'] else 0,
+                line_total = pricing['total']      if pricing['success'] else 0,
+                position   = 0,
+            )
+
+        return job
+
 
 class JobTransitionSerializer(serializers.Serializer):
     to_status = serializers.CharField()
