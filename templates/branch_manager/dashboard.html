@@ -6,865 +6,362 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard — Octos</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
- <style>
-
-/* ══════════════════════════════════════════
-RESET
-══════════════════════════════════════════ */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-
-html{
-font-size:16px;
--webkit-font-smoothing:antialiased;
-}
-
-body{
-font-family:'DM Sans',sans-serif;
-min-height:100vh;
-overflow-x:hidden;
-background:#f6f7f9;
-}
-
-a{text-decoration:none;color:inherit}
-
-button{
-cursor:pointer;
-font-family:inherit;
-border:none;
-background:none
-}
-
-input,select,textarea{font-family:inherit}
-
-
-/* ══════════════════════════════════════════
-FULL PAGE CANVAS
-══════════════════════════════════════════ */
-
-.page-bg{
-min-height:100vh;
-width:100%;
-display:flex;
-flex-direction:column;
-background:#f6f7f9;
-}
-
-
-/* ══════════════════════════════════════════
-MAIN APP PANEL (NO FLOATING)
-══════════════════════════════════════════ */
-
-.panel{
-width:100%;
-min-height:100vh;
-background:#f6f7f9;
-display:flex;
-flex-direction:column;
-}
-
-
-/* ══════════════════════════════════════════
-TOP BAR
-══════════════════════════════════════════ */
-
-.p-topbar{
-display:flex;
-align-items:center;
-justify-content:space-between;
-padding:18px 28px;
-border-bottom:1px solid #e8eaef;
-background:#ffffff;
-position:sticky;
-top:0;
-z-index:100;
-}
-
-.p-title{
-font-family:'Syne',sans-serif;
-font-size:22px;
-font-weight:800;
-color:#111;
-letter-spacing:-.4px;
-}
-
-.p-breadcrumb{
-display:flex;
-gap:6px;
-margin-top:3px;
-font-size:12px;
-color:#aaa;
-}
-
-.p-breadcrumb span.cur{
-color:#666;
-font-weight:500;
-}
-
-.p-topbar-right{
-display:flex;
-align-items:center;
-gap:10px;
-}
-
-
-/* ══════════════════════════════════════════
-ACTIVE STATUS PILL
-══════════════════════════════════════════ */
-
-.pill-active{
-display:inline-flex;
-align-items:center;
-gap:6px;
-padding:6px 14px;
-border-radius:20px;
-background:#edfaf4;
-border:1px solid #b6ecd4;
-font-size:12px;
-font-weight:600;
-color:#1a9e5c;
-}
-
-.pill-dot{
-width:7px;
-height:7px;
-border-radius:50%;
-background:#22c98a;
-}
-
-
-/* ══════════════════════════════════════════
-USER CHIP
-══════════════════════════════════════════ */
-
-.pill-user{
-display:inline-flex;
-align-items:center;
-gap:8px;
-padding:4px 14px 4px 4px;
-border-radius:24px;
-background:#f7f7f7;
-border:1px solid #ececec;
-}
-
-.user-avatar{
-width:30px;
-height:30px;
-border-radius:50%;
-background:#111;
-color:#fff;
-display:flex;
-align-items:center;
-justify-content:center;
-font-family:'Syne',sans-serif;
-font-size:11px;
-font-weight:700;
-}
-
-.user-name{
-font-size:13px;
-font-weight:600;
-color:#222;
-}
-
-.user-role{
-font-size:11px;
-color:#bbb;
-}
-
-
-/* ══════════════════════════════════════════
-ICON BUTTONS
-══════════════════════════════════════════ */
-
-.icon-btn{
-width:34px;
-height:34px;
-border-radius:10px;
-border:1px solid #ececec;
-background:#fafafa;
-color:#aaa;
-display:flex;
-align-items:center;
-justify-content:center;
-transition:.15s;
-position:relative;
-}
-
-.icon-btn:hover{
-border-color:#ccc;
-background:#fff;
-color:#333;
-}
-
-.notif-badge{
-position:absolute;
-top:-4px;
-right:-4px;
-width:16px;
-height:16px;
-border-radius:50%;
-background:#e8294a;
-border:2px solid #fff;
-font-size:9px;
-font-weight:700;
-color:#fff;
-display:flex;
-align-items:center;
-justify-content:center;
-font-family:monospace;
-display:none;
-}
-
-
-/* ══════════════════════════════════════════
-STAT CARDS
-══════════════════════════════════════════ */
-
-.stat-strip{
-display:grid;
-grid-template-columns:repeat(6,1fr);
-gap:14px;
-padding:24px 28px;
-background:#f6f7f9;
-border-bottom:1px solid #e8eaef;
-}
-
-.stat-cell{
-padding:18px;
-border-radius:12px;
-background:#ffffff;
-border:1px solid #e6e8ec;
-text-align:center;
-transition:.15s;
-}
-
-.stat-cell:hover{
-border-color:#d0d4da;
-box-shadow:0 3px 10px rgba(0,0,0,.04);
-}
-
-.stat-num{
-font-size:26px;
-font-weight:800;
-color:#111;
-}
-
-.stat-lbl{
-font-size:11px;
-color:#888;
-margin-top:4px;
-}
-
-
-/* ══════════════════════════════════════════
-META ROW
-══════════════════════════════════════════ */
-
-.meta-row{
-display:flex;
-gap:28px;
-padding:14px 28px;
-border-bottom:1px solid #e8eaef;
-background:#fff;
-flex-wrap:wrap;
-}
-
-.meta-item{
-display:flex;
-gap:6px;
-align-items:center;
-}
-
-.meta-key{
-font-size:10px;
-letter-spacing:.8px;
-text-transform:uppercase;
-color:#aaa;
-font-weight:600;
-}
-
-.meta-val{
-font-size:13px;
-font-weight:600;
-color:#444;
-}
-
-
-/* ══════════════════════════════════════════
-TAB BAR
-══════════════════════════════════════════ */
-
-.tab-bar{
-display:flex;
-align-items:center;
-padding:0 28px;
-border-bottom:1px solid #e8eaef;
-background:#fff;
-gap:6px;
-}
-
-.tab-btn{
-display:inline-flex;
-align-items:center;
-gap:6px;
-padding:14px 16px;
-font-size:13px;
-color:#888;
-border-radius:8px;
-transition:.15s;
-}
-
-.tab-btn:hover{
-background:#f5f6f8;
-color:#111;
-}
-
-.tab-btn.active{
-background:#111;
-color:#fff;
-}
-
-.tab-count{
-font-size:10px;
-font-weight:700;
-padding:1px 6px;
-border-radius:8px;
-background:#f0f0f0;
-color:#888;
-display:none;
-}
-
-.tab-count.show{display:inline}
-.tab-count.red{background:#fdecea;color:#e8294a}
-
-.tab-bar-right{
-margin-left:auto;
-display:flex;
-align-items:center;
-gap:10px;
-}
-
-
-/* ══════════════════════════════════════════
-LINK BUTTON
-══════════════════════════════════════════ */
-
-.link-btn{
-font-size:12px;
-color:#888;
-}
-
-.link-btn:hover{
-color:#333;
-}
-
-
-/* ══════════════════════════════════════════
-NEW JOB BUTTON
-══════════════════════════════════════════ */
-
-.new-btn{
-display:inline-flex;
-align-items:center;
-gap:6px;
-padding:8px 18px;
-background:#111;
-color:#fff;
-border-radius:10px;
-font-size:13px;
-font-weight:700;
-transition:.15s;
-}
-
-.new-btn:hover{
-background:#333;
-}
-
-
-/* ══════════════════════════════════════════
-TAB BODY
-══════════════════════════════════════════ */
-
-.tab-body{
-padding:28px 32px 40px;
-max-width:1280px;
-width:100%;
-margin:0 auto;
-}
-
-.tab-pane{display:none}
-
-.tab-pane.active{
-display:block;
-animation:fadein .18s ease;
-}
-
-@keyframes fadein{
-from{opacity:0;transform:translateY(4px)}
-to{opacity:1;transform:translateY(0)}
-}
-
-.pane-head{
-display:flex;
-align-items:center;
-justify-content:space-between;
-margin-bottom:18px;
-font-family:'Syne',sans-serif;
-font-size:14px;
-font-weight:700;
-color:#111;
-}
-
-
-/* ══════════════════════════════════════════
-TABLE
-══════════════════════════════════════════ */
-
-.p-table{
-width:100%;
-border-collapse:separate;
-border-spacing:0;
-background:#fff;
-border:1px solid #e6e8ec;
-border-radius:10px;
-overflow:hidden;
-}
-
-.p-table thead th{
-text-align:left;
-padding:12px 16px;
-font-size:11px;
-text-transform:uppercase;
-letter-spacing:.6px;
-color:#888;
-background:#fafbfc;
-border-bottom:1px solid #eceef2;
-}
-
-.p-table td{
-padding:14px 16px;
-color:#444;
-border-bottom:1px solid #f2f3f6;
-}
-
-.p-table tbody tr:hover{
-background:#fafbfc;
-}
-
-.td-bold{
-color:#111!important;
-font-weight:600;
-}
-
-.loading-cell{
-text-align:center!important;
-padding:44px!important;
-color:#ccc!important;
-font-size:13px;
-}
-
-
-/* ══════════════════════════════════════════
-SPINNER
-══════════════════════════════════════════ */
-
-.spin{
-display:inline-block;
-width:16px;
-height:16px;
-border:2px solid #eee;
-border-top-color:#aaa;
-border-radius:50%;
-animation:spin .7s linear infinite;
-margin-right:6px;
-}
-
-@keyframes spin{
-to{transform:rotate(360deg)}
-}
-
-
-/* ══════════════════════════════════════════
-SERVICES GRID
-══════════════════════════════════════════ */
-
-.services-grid{
-display:grid;
-grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
-gap:16px;
-}
-
-.service-card{
-padding:18px;
-border-radius:12px;
-border:1px solid #e6e8ec;
-background:#fff;
-transition:.15s;
-}
-
-.service-card:hover{
-border-color:#d0d4da;
-box-shadow:0 3px 10px rgba(0,0,0,.04);
-}
-
-.service-card-name{
-font-size:14px;
-font-weight:700;
-color:#111;
-margin-bottom:4px;
-}
-
-.service-card-price{
-font-size:13px;
-font-weight:700;
-color:#888;
-font-family:monospace;
-}
-
-.service-card-desc{
-font-size:11px;
-color:#aaa;
-margin-top:4px;
-}
-
-
-/* ══════════════════════════════════════════
-FORM CONTROLS
-══════════════════════════════════════════ */
-
-.inp-sm{
-padding:6px 12px;
-font-size:12.5px;
-border:1px solid #e0e2e6;
-border-radius:7px;
-background:#fff;
-color:#333;
-outline:none;
-}
-
-.inp-sm::placeholder{color:#ccc}
-
-.sel-sm{
-padding:6px 26px 6px 10px;
-font-size:12.5px;
-border:1px solid #e0e2e6;
-border-radius:7px;
-background:#fff;
-color:#555;
-outline:none;
-appearance:none;
-cursor:pointer;
-}
-
-
-/* ══════════════════════════════════════════
-MODAL
-══════════════════════════════════════════ */
-
-.modal-overlay{
-position:fixed;
-inset:0;
-background:rgba(0,0,0,.3);
-backdrop-filter:blur(6px);
-display:flex;
-align-items:center;
-justify-content:center;
-padding:20px;
-opacity:0;
-pointer-events:none;
-transition:.2s;
-}
-
-.modal-overlay.open{
-opacity:1;
-pointer-events:all;
-}
-
-.modal{
-background:#fff;
-border-radius:16px;
-width:100%;
-max-width:560px;
-max-height:90vh;
-overflow-y:auto;
-box-shadow:0 24px 64px rgba(0,0,0,.16);
-transform:translateY(10px) scale(.98);
-transition:.22s cubic-bezier(.34,1.56,.64,1);
-}
-
-.modal-overlay.open .modal{
-transform:translateY(0) scale(1);
-}
-
-
-/* ══════════════════════════════════════════
-TOAST
-══════════════════════════════════════════ */
-
-#toast-container{
-position:fixed;
-bottom:24px;
-right:24px;
-display:flex;
-flex-direction:column;
-gap:8px;
-z-index:9999;
-}
-
-.toast{
-display:flex;
-align-items:center;
-gap:10px;
-padding:11px 16px;
-border-radius:10px;
-background:#fff;
-border:1px solid #eaeaea;
-box-shadow:0 4px 20px rgba(0,0,0,.1);
-font-size:13px;
-min-width:240px;
-animation:toast-in .2s ease;
-}
-
-.toast.success{border-left:3px solid #22c98a}
-.toast.error{border-left:3px solid #e8294a}
-.toast.info{border-left:3px solid #aaa}
-
-@keyframes toast-in{
-from{opacity:0;transform:translateX(14px)}
-to{opacity:1;transform:translateX(0)}
-}
-
-</style>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
 </head>
 <body>
 
-<div class="page-bg">
-  <div class="panel">
+<div class="app-shell" id="app-shell">
 
-    <!-- ── Top Bar ── -->
-    <div class="p-topbar">
-      <div>
-        <div class="p-title" id="db-branch-name">Loading branch…</div>
-        <div class="p-breadcrumb">
-          Branch Manager <span style="color:#ddd;margin:0 4px;">›</span>
-          <span class="cur">Dashboard</span>
+  <!-- ── Topbar ──────────────────────────────────────────── -->
+<header class="topbar">
+    <div class="topbar-inner">
+
+    <!-- Brand + collapse toggle -->
+    <div class="topbar-toggle">
+      <span class="brand-logo">Octos</span>
+      <span class="brand-divider"></span>
+      <span class="brand-role">Branch Manager</span>
+      <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Breadcrumb -->
+    <div class="topbar-center">
+      <nav class="breadcrumb" id="breadcrumb">
+        <div class="breadcrumb-item">
+          <span class="breadcrumb-current" id="db-branch-name">Loading…</span>
+        </div>
+        <span class="breadcrumb-sep">›</span>
+        <div class="breadcrumb-item">
+          <span class="breadcrumb-current" id="breadcrumb-current">Overview</span>
+        </div>
+      </nav>
+    </div>
+
+    <!-- Right side -->
+    <div class="topbar-right">
+      <div class="live-indicator">
+        <div class="live-dot"></div>
+        Active
+      </div>
+      <div class="branch-pill" id="db-branch-pill">—</div>
+      <div class="user-chip">
+        <div class="user-avatar" id="db-user-initials">—</div>
+        <span class="user-name" id="db-user-name">—</span>
+      </div>
+      <div style="position:relative;">
+        <button class="icon-btn" id="db-notif-btn" title="Notifications" onclick="Notifications.toggle()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="db-notif-badge">0</span>
+        </button>
+        <div class="notif-dropdown" id="notif-dropdown">
+          <div class="notif-dropdown-head">
+            <span class="notif-dropdown-title">Notifications</span>
+            <button class="notif-read-all" onclick="Notifications.markAllRead()">Mark all read</button>
+          </div>
+          <div class="notif-list" id="notif-list">
+            <div class="notif-empty">Loading…</div>
+          </div>
+          <div class="notif-footer" onclick="Notifications.close()">Close</div>
         </div>
       </div>
-      <div class="p-topbar-right">
-        <span class="pill-active">
-          <span class="pill-dot"></span> Active
-        </span>
-        <span class="pill-user">
-          <span class="user-avatar" id="db-user-initials">—</span>
-          <span class="user-name" id="db-user-name">—</span>
-          <span class="user-role">Branch Manager</span>
-        </span>
-       <div style="position:relative;">
-          <button class="icon-btn" id="db-notif-btn" title="Notifications" onclick="Notifications.toggle()">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span class="notif-badge" id="db-notif-badge">0</span>
-          </button>
-          <div class="notif-dropdown" id="notif-dropdown">
-            <div class="notif-dropdown-head">
-              <span class="notif-dropdown-title">Notifications</span>
-              <button class="notif-read-all" onclick="Notifications.markAllRead()">Mark all read</button>
+      <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+
+</div><!-- /topbar-inner -->
+  </header>
+
+  <!-- ── Body layout ─────────────────────────────────────── -->
+  <div class="body-layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+
+        <div class="sidebar-section">Workspace</div>
+
+        <div class="sidebar-item active" data-pane="overview" data-label="Overview"
+          onclick="Dashboard.switchPane('overview', 'Overview')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span class="sidebar-label">Overview</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="jobs" data-label="Jobs"
+          onclick="Dashboard.switchPane('jobs', 'Jobs')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="sidebar-label">Jobs</span>
+          <span class="sidebar-badge" id="sidebar-badge-jobs">0</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="finance" data-label="Finance"
+          onclick="Dashboard.switchPane('finance', 'Finance')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span class="sidebar-label">Finance</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="inbox" data-label="Inbox"
+          onclick="Dashboard.switchPane('inbox', 'Inbox')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="sidebar-label">Inbox</span>
+          <span class="sidebar-badge" id="sidebar-badge-inbox">0</span>
+        </div>
+
+        <div class="sidebar-section">Branch</div>
+
+        <div class="sidebar-item" data-pane="services" data-label="Services"
+          onclick="Dashboard.switchPane('services', 'Services')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+          <span class="sidebar-label">Services</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="staff" data-label="Staff"
+          onclick="Dashboard.switchPane('staff', 'Staff')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span class="sidebar-label">Staff</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="reports" data-label="Reports"
+          onclick="Dashboard.switchPane('reports', 'Reports')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span class="sidebar-label">Reports</span>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-content">
+
+      <!-- Info strip -->
+      <div class="info-strip">
+        <div class="info-item">
+          <span class="info-key">Region</span>
+          <span class="info-val" id="meta-region">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Belt</span>
+          <span class="info-val" id="meta-belt">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Date</span>
+          <span class="info-val" id="meta-date">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Branch Load</span>
+          <span class="info-val" id="meta-load">0%</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Active Services</span>
+          <span class="info-val" id="meta-services">—</span>
+        </div>
+      </div>
+
+      <!-- Pane area -->
+      <div class="pane-area">
+
+        <!-- ── OVERVIEW ──────────────────────────────────── -->
+        <div class="pane active" id="pane-overview">
+
+          <!-- Hero actions -->
+          <div class="hero-actions">
+            <button class="hero-btn hero-btn-primary" onclick="NJ.open()">
+              <div class="hero-btn-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </div>
+              <div class="hero-btn-label">
+                <span class="hero-btn-title">New Job</span>
+                <span class="hero-btn-sub">Create an instant, production or design job</span>
+              </div>
+            </button>
+            <button class="hero-btn hero-btn-secondary" onclick="Dashboard.openOutsourceModal()">
+              <div class="hero-btn-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><path d="M10 14L21 3"/><path d="M21 16v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+              </div>
+              <div class="hero-btn-label">
+                <span class="hero-btn-title">Outsource Job</span>
+                <span class="hero-btn-sub">Route a job to another branch</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- Stat cards -->
+          <div class="stat-grid">
+            <div class="stat-card blue">
+              <div class="stat-num" id="stat-total-jobs">0</div>
+              <div class="stat-lbl">Total Jobs</div>
             </div>
-            <div class="notif-list" id="notif-list">
-              <div class="notif-empty">Loading…</div>
+            <div class="stat-card amber">
+              <div class="stat-num" id="stat-in-progress">0</div>
+              <div class="stat-lbl">In Progress</div>
             </div>
-            <div class="notif-footer" onclick="Notifications.close()">Close</div>
+            <div class="stat-card green">
+              <div class="stat-num" id="stat-complete">0</div>
+              <div class="stat-lbl">Complete</div>
+            </div>
+            <div class="stat-card orange">
+              <div class="stat-num" id="stat-pending-payment">0</div>
+              <div class="stat-lbl">Pending Payment</div>
+            </div>
+            <div class="stat-card red">
+              <div class="stat-num" id="stat-unread">0</div>
+              <div class="stat-lbl">Unread Messages</div>
+            </div>
+            <div class="stat-card purple">
+              <div class="stat-num" id="stat-routed">0</div>
+              <div class="stat-lbl">Routed Out</div>
+            </div>
+          </div>
+
+          <!-- Metrics -->
+          <div class="metrics-section">
+            <div class="metrics-head">
+              <span class="metrics-title">Branch Performance</span>
+              <div class="period-tabs">
+                <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
+                <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
+                <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
+              </div>
+            </div>
+            <div class="metrics-grid" id="metrics-grid">
+              <!-- Rendered by JS -->
+              <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+                <span class="spin"></span> Loading metrics…
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent jobs -->
+          <div class="section-head">
+            <span class="section-title">Recent Jobs</span>
+            <a href="/portal/jobs/" class="section-link">View all →</a>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+            <table class="p-table">
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Est. Cost</th>
+                  <th>Created</th>
+                  <th>Routing</th>
+                </tr>
+              </thead>
+              <tbody id="recent-jobs-tbody">
+                <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div><!-- /pane-overview -->
+
+        <!-- ── JOBS ─────────────────────────────────────── -->
+        <div class="pane" id="pane-jobs">
+          <div class="loading-cell"><span class="spin"></span> Loading jobs…</div>
+        </div>
+
+        <!-- ── FINANCE ──────────────────────────────────── -->
+        <div class="pane" id="pane-finance">
+          <div class="loading-cell"><span class="spin"></span> Loading finance…</div>
+        </div>
+
+        <!-- ── INBOX ────────────────────────────────────── -->
+        <div class="pane" id="pane-inbox">
+          <div class="section-head">
+            <span class="section-title">Recent Conversations</span>
+            <a href="/portal/inbox/" class="section-link">Open full inbox →</a>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;padding:8px 0;">
+            <div id="inbox-tab-list" class="inbox-list">
+              <div class="loading-cell"><span class="spin"></span> Loading…</div>
+            </div>
           </div>
         </div>
-        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
-      </div>
-    </div>
 
-    <!-- ── Stat Strip ── -->
-<div class="stat-strip">
-      <div class="stat-cell" style="background:#DCE8FF; border:1.5px solid #A8C4FF;">
-        <div class="stat-num" style="color:#1A4FCC;" id="stat-total-jobs">0</div>
-        <div class="stat-lbl">Total Jobs</div>
-      </div>
-      <div class="stat-cell" style="background:#FFF0C2; border:1.5px solid #F5C842;">
-        <div class="stat-num" style="color:#B8860B;" id="stat-in-progress">0</div>
-        <div class="stat-lbl">In Progress</div>
-      </div>
-      <div class="stat-cell" style="background:#D6F5E8; border:1.5px solid #6DDBA8;">
-        <div class="stat-num" style="color:#1A7A4A;" id="stat-complete">0</div>
-        <div class="stat-lbl">Complete</div>
-      </div>
-      <div class="stat-cell" style="background:#FFE4D0; border:1.5px solid #FFB085;">
-        <div class="stat-num" style="color:#CC4400;" id="stat-pending-payment">0</div>
-        <div class="stat-lbl">Pending Payment</div>
-      </div>
-      <div class="stat-cell" style="background:#FDDDE0; border:1.5px solid #F5A0AA;">
-        <div class="stat-num" style="color:#CC1A2E;" id="stat-unread">0</div>
-        <div class="stat-lbl">Unread Messages</div>
-      </div>
-      <div class="stat-cell" style="background:#EAE0FF; border:1.5px solid #B89EFF;">
-        <div class="stat-num" style="color:#5B21CC;" id="stat-routed">0</div>
-        <div class="stat-lbl">Routed Out</div>
-      </div>
-    </div>
-
-    <!-- ── Meta Row ── -->
-    <div class="meta-row">
-      <div class="meta-item"><span class="meta-key">Region</span><span class="meta-val" id="meta-region">—</span></div>
-      <div class="meta-item"><span class="meta-key">Belt</span><span class="meta-val" id="meta-belt">—</span></div>
-      <div class="meta-item"><span class="meta-key">Date</span><span class="meta-val" id="meta-date">—</span></div>
-      <div class="meta-item"><span class="meta-key">Branch Load</span><span class="meta-val" id="meta-load">—</span></div>
-      <div class="meta-item"><span class="meta-key">Active Services</span><span class="meta-val" id="meta-services">—</span></div>
-    </div>
-
-    <!-- ── Tab Bar ── -->
-    <div class="tab-bar">
-      <button class="tab-btn active" data-tab="overview">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Overview
-      </button>
-      <button class="tab-btn" data-tab="jobs">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Jobs <span class="tab-count" id="tab-count-jobs"></span>
-      </button>
-      <button class="tab-btn" data-tab="inbox">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        Inbox <span class="tab-count red" id="tab-count-inbox"></span>
-      </button>
-      <button class="tab-btn" data-tab="services">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-        Services
-      </button>
-      <div class="tab-bar-right">
-        <a href="/portal/jobs/" class="link-btn">View All Jobs →</a>
-        <button class="new-btn" onclick="openJobModal()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New Job
-        </button>
-      </div>
-    </div>
-
-    <!-- ── Tab Body ── -->
-    <div class="tab-body">
-
-      <!-- OVERVIEW -->
-      <div class="tab-pane active" id="pane-overview">
-        <div class="pane-head"><span>Recent Jobs</span></div>
-        <table class="p-table">
-          <thead>
-            <tr>
-              <th>Job No.</th>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Est. Cost</th>
-              <th>Routing</th>
-            </tr>
-          </thead>
-          <tbody id="recent-jobs-tbody">
-            <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- JOBS -->
-      <div class="tab-pane" id="pane-jobs">
-        <div class="pane-head">
-          <span>All Jobs</span>
-          <div style="display:flex;gap:8px;">
-            <input id="jobs-search" type="text" placeholder="Search…" class="inp-sm" style="width:180px;">
-            <select id="jobs-status" class="sel-sm">
-              <option value="">All Statuses</option>
-              <option value="PENDING">Pending</option>
-              <option value="IN_PROGRESS">In Progress</option>
-              <option value="READY">Ready</option>
-              <option value="COMPLETED">Completed</option>
-              <option value="CANCELLED">Cancelled</option>
-            </select>
+        <!-- ── SERVICES ─────────────────────────────────── -->
+        <div class="pane" id="pane-services">
+          <div class="section-head">
+            <span class="section-title">Active Services</span>
+            <span id="meta-services-count" class="section-link"></span>
+          </div>
+          <div id="services-grid" class="services-grid">
+            <div class="loading-cell" style="grid-column:1/-1;"><span class="spin"></span> Loading…</div>
           </div>
         </div>
-        <table class="p-table">
-          <thead>
-            <tr>
-              <th>Reference</th>
-              <th>Customer</th>
-              <th>Service</th>
-              <th>Status</th>
-              <th>Price (GHS)</th>
-              <th>Date</th>
-            </tr>
-          </thead>
-          <tbody id="jobs-tab-tbody">
-            <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
 
-      <!-- INBOX -->
-      <div class="tab-pane" id="pane-inbox">
-        <div class="pane-head">
-          <span>Recent Conversations</span>
-          <a href="/portal/inbox/" class="link-btn">Open Full Inbox →</a>
+        <!-- ── STAFF ────────────────────────────────────── -->
+        <div class="pane" id="pane-staff">
+          <div class="section-head">
+            <span class="section-title">Staff</span>
+          </div>
+          <div class="loading-cell">Coming soon.</div>
         </div>
-        <div id="inbox-tab-list" class="inbox-list">
-          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+
+        <!-- ── REPORTS ───────────────────────────────────── -->
+        <div class="pane" id="pane-reports">
+          <div class="section-head">
+            <span class="section-title">Reports</span>
+          </div>
+          <div class="loading-cell">Coming soon.</div>
         </div>
-      </div>
 
-      <!-- SERVICES -->
-      <div class="tab-pane" id="pane-services">
-        <div class="pane-head">
-          <span>Active Services</span>
-          <span id="services-count" style="font-size:12px;color:#ccc;font-weight:400;"></span>
-        </div>
-        <div id="services-grid" class="services-grid">
-          <div class="loading-cell" style="grid-column:1/-1;"><span class="spin"></span> Loading…</div>
-        </div>
-      </div>
-
-    </div>
-
-  </div><!-- /panel -->
-</div><!-- /page-bg -->
+      </div><!-- /pane-area -->
+    </div><!-- /main-content -->
+  </div><!-- /body-layout -->
+</div><!-- /app-shell -->
 
 
-<!-- ══ NEW JOB MODAL ══ -->
-<div class="modal-overlay" id="new-job-modal">
-  <div class="modal">
+<!-- ═══════════════════════════════════════
+     NEW JOB MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="new-job-modal" onclick="if(event.target===this)closeNewJobModal()">
+  <div class="modal" style="max-width:520px;">
     <div class="modal-head">
-      <span class="modal-title">Create New Job</span>
-      <button class="modal-x" onclick="closeJobModal()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      <div>
+        <div class="modal-title">New Job</div>
+        <div class="modal-subtitle">Record a new job for this branch</div>
+      </div>
+      <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
-    <div class="modal-body">
-      <div class="form-grid">
-        <div class="fg">
-          <label>Job Title</label>
-          <input type="text" id="nj-title" placeholder="e.g. Business Cards – 500 copies">
-        </div>
-        <div class="fg">
-          <label>Job Type</label>
-          <select id="nj-type">
-            <option value="INSTANT">Instant</option>
-            <option value="PRODUCTION">Production</option>
-            <option value="DESIGN">Design</option>
-          </select>
-        </div>
+
+    <!-- Job Type Toggle -->
+    <div style="padding:20px 24px 0;">
+      <div class="nj-toggle" id="nj-type-toggle">
+        <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
+        <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
+        <button class="nj-toggle-btn"        data-type="DESIGN"     onclick="NJ.setType('DESIGN')">Design</button>
+        <div class="nj-toggle-pill" id="nj-toggle-pill"></div>
+      </div>
+    </div>
+
+    <div class="modal-body" style="padding-top:16px;">
+
+      <div class="form-row">
         <div class="fg">
           <label>Service</label>
-          <select id="nj-service" onchange="Dashboard.calculatePrice()">
-            <option value="">Loading services…</option>
+          <select id="nj-service" onchange="NJ.onServiceChange()">
+            <option value="">Select service…</option>
           </select>
         </div>
-        <div class="fg">
+        <div class="fg" id="nj-priority-row">
           <label>Priority</label>
           <select id="nj-priority">
             <option value="NORMAL">Normal</option>
             <option value="HIGH">High</option>
             <option value="URGENT">Urgent</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="fg">
+          <label>Customer <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+          <select id="nj-customer">
+            <option value="">Walk-in / Unknown</option>
           </select>
         </div>
         <div class="fg">
@@ -876,62 +373,113 @@ to{opacity:1;transform:translateX(0)}
             <option value="PHONE">Phone</option>
           </select>
         </div>
-        <div class="fg" style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+      </div>
+
+      <!-- Dynamic spec fields -->
+      <div id="nj-spec-fields"></div>
+
+      <div id="nj-deposit-deadline-row">
+        <div class="form-row">
           <div class="fg">
-            <label>Quantity</label>
-            <input type="number" id="nj-quantity" value="1" min="1" oninput="Dashboard.calculatePrice()">
-          </div>
-          <div class="fg">
-            <label>Pages</label>
-            <input type="number" id="nj-pages" value="1" min="1" oninput="Dashboard.calculatePrice()">
-          </div>
-          <div class="fg">
-            <label>Color?</label>
-            <select id="nj-color" onchange="Dashboard.calculatePrice()">
-              <option value="false">B&amp;W</option>
-              <option value="true">Color</option>
+            <label>Deposit</label>
+            <select id="nj-deposit">
+              <option value="100">100% — Full Payment</option>
+              <option value="70">70% — Deposit</option>
             </select>
+          </div>
+          <div class="fg">
+            <label>Deadline <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+            <input type="datetime-local" id="nj-deadline">
           </div>
         </div>
       </div>
-      <div class="price-box" id="price-box">
-        <span class="price-label">Estimated Price</span>
-        <span class="price-val" id="nj-price">GHS —</span>
+
+      <div class="fg" id="nj-notes-row">
+        <label>Notes <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+        <textarea id="nj-notes" rows="2" placeholder="Any special instructions…"></textarea>
       </div>
+
+      <!-- Price preview -->
+      <div class="price-box" id="nj-price-box">
+        <span class="price-label">Estimated Cost</span>
+        <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--green-text);">—</span>
+      </div>
+
     </div>
+
     <div class="modal-foot">
-      <button class="btn-ghost" onclick="closeJobModal()">Cancel</button>
-      <button class="btn-dark" onclick="Dashboard.createJob()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
+      <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Create Job
       </button>
     </div>
   </div>
 </div>
 
+
+<!-- ═══════════════════════════════════════
+     OUTSOURCE MODAL (placeholder)
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="outsource-modal" onclick="if(event.target===this)closeOutsourceModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Outsource Job</div>
+        <div class="modal-subtitle">Route a job to another Farhat branch</div>
+      </div>
+      <button class="modal-x" onclick="closeOutsourceModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="fg">
+        <label>Select Job</label>
+        <select id="outsource-job-select">
+          <option value="">Loading jobs…</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Route To Branch</label>
+        <select id="outsource-branch-select">
+          <option value="">Select branch…</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Reason</label>
+        <textarea id="outsource-reason" rows="2" placeholder="Why is this being routed?"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeOutsourceModal()">Cancel</button>
+      <button class="btn-dark" onclick="Dashboard.confirmOutsource()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 3 21 3 21 9"/><path d="M10 14L21 3"/></svg>
+        Outsource Job
+      </button>
+    </div>
+  </div>
+</div>
+
+
 <div id="toast-container"></div>
 
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/dashboard.js' %}"></script>
+<script src="{% static 'js/nj_controller.js' %}"></script>
+
 <script>
-  // Tab switching
-  document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('pane-' + btn.dataset.tab).classList.add('active');
-      if (btn.dataset.tab === 'jobs')     Dashboard.loadJobsTab();
-      if (btn.dataset.tab === 'inbox')    Dashboard.loadInboxTab();
-      if (btn.dataset.tab === 'services') Dashboard.loadServicesTab();
-    });
+  // Sidebar collapse
+  document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    document.getElementById('app-shell').classList.toggle('collapsed');
   });
 
-  function openJobModal()  { document.getElementById('new-job-modal').classList.add('open'); }
-  function closeJobModal() { document.getElementById('new-job-modal').classList.remove('open'); }
+  // Modal helpers
+  function closeNewJobModal()     { document.getElementById('new-job-modal').classList.remove('open'); }
+  function closeOutsourceModal()  { document.getElementById('outsource-modal').classList.remove('open'); }
 
-  document.getElementById('new-job-modal').addEventListener('click', function(e) {
-    if (e.target === this) closeJobModal();
+  // Close notif on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {
+      Notifications.close();
+    }
   });
 </script>
 

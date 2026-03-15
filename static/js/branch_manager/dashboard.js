@@ -1,52 +1,52 @@
 /**
  * Octos — Branch Manager Dashboard
- * Handles: boot, stats, meta, recent jobs,
- *          jobs tab, inbox tab, services tab,
- *          new job modal with price calculation
+ * dashboard.js
+ *
+ * Handles:
+ *  - Boot, user context, stats, meta strip
+ *  - Sidebar pane switching with breadcrumb update
+ *  - Collapsible sidebar state
+ *  - Metrics rings (Day / Week / Month)
+ *  - Recent jobs table
+ *  - Jobs pane (fetched partial)
+ *  - Inbox pane (lazy)
+ *  - Services pane (lazy)
+ *  - New Job modal (delegates to NJ controller)
+ *  - Outsource Job modal
+ *  - Notifications polling
  */
 
 'use strict';
 
 const Dashboard = (() => {
 
-  // ─────────────────────────────────────────
-  // State
-  // ─────────────────────────────────────────
-  let services    = [];
-  let jobsLoaded  = false;
-  let inboxLoaded = false;
-  let svcLoaded   = false;
-  let priceTimer  = null;
+  // ── State ──────────────────────────────────────────────────
+  let branchId      = null;
+  let services      = [];
+  let customers     = [];
+  let jobsLoaded    = false;
+  let inboxLoaded   = false;
+  let svcLoaded     = false;
+  let currentPeriod = 'day';
 
-  const STATUS_LABELS = {
-    PENDING:     'Pending',
-    IN_PROGRESS: 'In Progress',
-    READY:       'Ready',
-    COMPLETED:   'Completed',
-    CANCELLED:   'Cancelled',
-  };
-
-  // ─────────────────────────────────────────
-  // Boot
-  // ─────────────────────────────────────────
+  // ── Boot ───────────────────────────────────────────────────
   async function init() {
     Auth.guard();
-    setDate();
+    _setDate();
     await Promise.all([
-      loadUser(),
+      loadContext(),
       loadStats(),
       loadRecentJobs(),
-      loadServices(),
+      _loadServicesAndCustomers(),
     ]);
+    _renderMetrics(currentPeriod);
     Notifications.startPolling();
   }
 
-  // ─────────────────────────────────────────
-  // User
-  // ─────────────────────────────────────────
-  async function loadUser() {
+  // ── Context ────────────────────────────────────────────────
+  async function loadContext() {
     try {
-      const res  = await Auth.fetch('/api/v1/accounts/me/');
+      const res = await Auth.fetch('/api/v1/accounts/me/');
       if (!res.ok) return;
       const user = await res.json();
 
@@ -54,29 +54,33 @@ const Dashboard = (() => {
       const initials = fullName.split(' ').slice(0, 2)
         .map(w => w[0]?.toUpperCase() || '').join('');
 
-      set('db-user-name',     fullName);
-      set('db-user-initials', initials);
+      _set('db-user-name',     fullName);
+      _set('db-user-initials', initials);
 
-      // Branch - may be bare ID, object, or null
       if (user.branch && typeof user.branch === 'object') {
-        set('db-branch-name', user.branch.name);
-        if (user.branch.region_name) set('meta-region', user.branch.region_name);
+        const b = user.branch;
+        branchId = b.id;
+        _set('db-branch-name', b.name || '—');
+        _set('db-branch-pill', b.name || '—');
+        if (b.region_name)      _set('meta-region', b.region_name);
+        if (b.belt_name)        _set('meta-belt',   b.belt_name);
+        if (b.load_percentage != null) _set('meta-load', b.load_percentage + '%');
       } else if (user.branch && typeof user.branch === 'number') {
-        const br = await Auth.fetch('/api/v1/organization/branches/' + user.branch + '/');
+        branchId = user.branch;
+        const br = await Auth.fetch(`/api/v1/organization/branches/${user.branch}/`);
         if (br.ok) {
-          const branch = await br.json();
-          set('db-branch-name', branch.name);
-          if (branch.region_name)    set('meta-region', branch.region_name);
-          if (branch.belt_name)      set('meta-belt',   branch.belt_name);
-          if (branch.load_percentage != null) set('meta-load', branch.load_percentage + '%');
+          const b = await br.json();
+          _set('db-branch-name', b.name || '—');
+          _set('db-branch-pill', b.name || '—');
+          if (b.region_name)      _set('meta-region', b.region_name);
+          if (b.belt_name)        _set('meta-belt',   b.belt_name);
+          if (b.load_percentage != null) _set('meta-load', b.load_percentage + '%');
         }
       }
     } catch { /* silent */ }
   }
 
-  // ─────────────────────────────────────────
-  // Stats
-  // ─────────────────────────────────────────
+  // ── Stats ──────────────────────────────────────────────────
   async function loadStats() {
     try {
       const res  = await Auth.fetch('/api/v1/jobs/?page_size=200');
@@ -86,26 +90,26 @@ const Dashboard = (() => {
 
       const total      = data.count || jobs.length;
       const inProgress = jobs.filter(j => j.status === 'IN_PROGRESS').length;
-      const complete   = jobs.filter(j => j.status === 'COMPLETED').length;
-      const pending    = jobs.filter(j => j.status === 'PENDING').length;
-      const routed     = jobs.filter(j => j.routed_to).length;
+      const complete   = jobs.filter(j => j.status === 'COMPLETE').length;
+      const pending    = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
+      const routed     = jobs.filter(j => j.is_routed).length;
 
-      set('stat-total-jobs',     total);
-      set('stat-in-progress',    inProgress);
-      set('stat-complete',       complete);
-      set('stat-pending-payment',pending);
-      set('stat-routed',         routed);
+      _set('stat-total-jobs',      total);
+      _set('stat-in-progress',     inProgress);
+      _set('stat-complete',        complete);
+      _set('stat-pending-payment', pending);
+      _set('stat-routed',          routed);
 
-      // Tab badge
-      const jobsBadge = document.getElementById('tab-count-jobs');
+      // Sidebar badge
+      const jobsBadge = document.getElementById('sidebar-badge-jobs');
       if (jobsBadge && total > 0) {
         jobsBadge.textContent = total;
-        jobsBadge.classList.add('show');
+        jobsBadge.style.display = 'flex';
       }
 
-      // Branch load (in-progress / total)
+      // Branch load
       const load = total > 0 ? Math.round((inProgress / total) * 100) + '%' : '0%';
-      set('meta-load', load);
+      _set('meta-load', load);
 
     } catch { /* silent */ }
 
@@ -114,32 +118,20 @@ const Dashboard = (() => {
       const res  = await Auth.fetch('/api/v1/communications/');
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const convos  = Array.isArray(data) ? data : (data.results || []);
-      const unread  = convos.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+      const convos = Array.isArray(data) ? data : (data.results || []);
+      const unread = convos.reduce((sum, c) => sum + (c.unread_count || 0), 0);
 
-      set('stat-unread', unread);
+      _set('stat-unread', unread);
 
-      const inboxBadge = document.getElementById('tab-count-inbox');
+      const inboxBadge = document.getElementById('sidebar-badge-inbox');
       if (inboxBadge && unread > 0) {
         inboxBadge.textContent = unread;
-        inboxBadge.classList.add('show');
+        inboxBadge.style.display = 'flex';
       }
-
-      // Notif badge
-      if (unread > 0) {
-        const badge = document.getElementById('db-notif-badge');
-        if (badge) {
-          badge.textContent = unread;
-          badge.style.display = 'flex';
-        }
-      }
-
     } catch { /* silent */ }
   }
 
-  // ─────────────────────────────────────────
-  // Recent Jobs (Overview tab)
-  // ─────────────────────────────────────────
+  // ── Recent jobs ────────────────────────────────────────────
   async function loadRecentJobs() {
     const tbody = document.getElementById('recent-jobs-tbody');
     if (!tbody) return;
@@ -151,54 +143,216 @@ const Dashboard = (() => {
       const jobs = Array.isArray(data) ? data : (data.results || []);
 
       if (!jobs.length) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:#ccc;font-size:13px;">No jobs yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No jobs yet.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = jobs.map(j => `
         <tr onclick="window.location='/portal/jobs/'">
-          <td class="td-bold" style="font-family:monospace;font-size:12.5px;">${esc(j.reference || '#' + j.id)}</td>
-          <td>${esc(j.title || j.service_name || '—')}</td>
-          <td>${typeBadge(j.job_type)}</td>
-          <td>${statusBadge(j.status)}</td>
-          <td style="font-family:monospace;">${j.final_price != null ? 'GHS ' + Number(j.final_price).toFixed(2) : '—'}</td>
-          <td>${j.routed_to ? `<span style="font-size:12px;color:#888;">→ ${esc(j.routed_to_name || j.routed_to)}</span>` : '<span style="color:#ccc;font-size:12px;">Local</span>'}</td>
+          <td>
+            <div class="td-job-title">${_esc(j.title || '—')}</div>
+            <div class="td-job-ref">${_esc(j.job_number || '#' + j.id)}</div>
+          </td>
+          <td>${_typeBadge(j.job_type)}</td>
+          <td>${_statusBadge(j.status)}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:12.5px;">
+            ${j.estimated_cost != null ? 'GHS ' + Number(j.estimated_cost).toFixed(2) : '—'}
+          </td>
+          <td style="font-size:12px;color:var(--text-3);">${_formatDate(j.created_at)}</td>
+          <td>
+            ${j.is_routed
+              ? `<span style="font-size:12px;color:var(--purple-text);">→ Routed</span>`
+              : `<span style="font-size:12px;color:var(--text-3);">Local</span>`}
+          </td>
         </tr>`).join('');
 
     } catch {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:#ccc;font-size:13px;">Could not load jobs.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);">Could not load jobs.</td></tr>`;
     }
   }
 
-  // ─────────────────────────────────────────
-  // Jobs Tab (lazy)
-  // ─────────────────────────────────────────
-async function loadJobsTab() {
-  if (jobsLoaded) return;
-  jobsLoaded = true;
-
-  const pane = document.getElementById('pane-jobs');
-  if (!pane) return;
-
-  pane.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
-
-  try {
-    const res = await fetch('/portal/jobs-tab/');
-    if (!res.ok) throw new Error();
-    const html = await res.text();
-    pane.innerHTML = html;
-    pane.querySelectorAll('script').forEach(old => {
-      const s = document.createElement('script');
-      s.textContent = old.textContent;
-      old.replaceWith(s);
+  // ── Metrics ────────────────────────────────────────────────
+  function setPeriod(period) {
+    currentPeriod = period;
+    document.querySelectorAll('.period-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.period === period);
     });
-  } catch(e) {
-    pane.innerHTML = '<div class="loading-cell" style="color:#e8294a;">Could not load jobs tab.</div>';
+    _renderMetrics(period);
   }
-}
-  // ─────────────────────────────────────────
-  // Inbox Tab (lazy)
-  // ─────────────────────────────────────────
+
+  function _renderMetrics(period) {
+    const grid = document.getElementById('metrics-grid');
+    if (!grid) return;
+
+    // For now render with placeholder data
+    // These will be wired to real API when analytics endpoint is ready
+    const metrics = _getMetricData(period);
+
+    grid.innerHTML = metrics.map(m => `
+      <div class="metric-card">
+        <div class="metric-ring">
+          <svg viewBox="0 0 72 72" width="72" height="72">
+            <circle class="metric-ring-bg" cx="36" cy="36" r="30"/>
+            <circle class="metric-ring-fill"
+              cx="36" cy="36" r="30"
+              stroke="${m.color}"
+              stroke-dasharray="${2 * Math.PI * 30}"
+              stroke-dashoffset="${2 * Math.PI * 30 * (1 - m.value / 100)}"
+            />
+          </svg>
+          <div class="metric-ring-label">${m.value}%</div>
+        </div>
+        <div class="metric-name">${m.name}</div>
+        <div class="metric-sub">${m.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  function _getMetricData(period) {
+    // Placeholder — will be replaced with real API data
+    const map = {
+      day:   [
+        { name: 'Completion Rate',   value: 0,  color: '#22c98a', sub: 'Jobs completed today' },
+        { name: 'Collection Rate',   value: 0,  color: '#3355cc', sub: 'Revenue collected' },
+        { name: 'Growth',            value: 0,  color: '#e8c84a', sub: 'vs yesterday' },
+        { name: 'Queue Clearance',   value: 0,  color: '#7733cc', sub: 'Pending cleared' },
+      ],
+      week:  [
+        { name: 'Completion Rate',   value: 0,  color: '#22c98a', sub: 'Jobs completed this week' },
+        { name: 'Collection Rate',   value: 0,  color: '#3355cc', sub: 'Revenue collected' },
+        { name: 'Growth',            value: 0,  color: '#e8c84a', sub: 'vs last week' },
+        { name: 'Queue Clearance',   value: 0,  color: '#7733cc', sub: 'Pending cleared' },
+      ],
+      month: [
+        { name: 'Completion Rate',   value: 0,  color: '#22c98a', sub: 'Jobs completed this month' },
+        { name: 'Collection Rate',   value: 0,  color: '#3355cc', sub: 'Revenue collected' },
+        { name: 'Growth',            value: 0,  color: '#e8c84a', sub: 'vs last month' },
+        { name: 'Queue Clearance',   value: 0,  color: '#7733cc', sub: 'Pending cleared' },
+      ],
+    };
+    return map[period] || map.day;
+  }
+
+  // ── Pane switching ─────────────────────────────────────────
+  function switchPane(paneId, label) {
+    // Update sidebar active state
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.pane === paneId);
+    });
+
+    // Update pane visibility
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    const target = document.getElementById(`pane-${paneId}`);
+    if (target) target.classList.add('active');
+
+    // Update breadcrumb
+    _set('breadcrumb-current', label);
+
+    // Lazy load pane content
+    if (paneId === 'jobs'    && !jobsLoaded)  _loadJobsPane();
+    if (paneId === 'inbox'   && !inboxLoaded) loadInboxTab();
+    if (paneId === 'services'&& !svcLoaded)   loadServicesTab();
+    if (paneId === 'finance')                 _loadFinancePane();
+  }
+
+  // ── Jobs pane ──────────────────────────────────────────────
+  async function _loadJobsPane() {
+    jobsLoaded = true;
+    const pane = document.getElementById('pane-jobs');
+    if (!pane) return;
+
+    pane.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading jobs…</div>';
+
+    try {
+      const res = await fetch('/portal/jobs-tab/');
+      if (!res.ok) throw new Error();
+      const html = await res.text();
+      pane.innerHTML = html;
+      pane.querySelectorAll('script').forEach(old => {
+        const s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      });
+    } catch {
+      pane.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load jobs.</div>';
+    }
+  }
+
+  // ── Finance pane ───────────────────────────────────────────
+  async function _loadFinancePane() {
+    const pane = document.getElementById('pane-finance');
+    if (!pane || pane.dataset.loaded) return;
+    pane.dataset.loaded = '1';
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/sheets/today/');
+      if (!res.ok) throw new Error();
+      const sheet = await res.json();
+
+      pane.innerHTML = `
+        <div class="section-head">
+          <span class="section-title">Today's Sales Sheet</span>
+          <span class="section-link" style="color:${sheet.status === 'OPEN' ? 'var(--green-text)' : 'var(--text-3)'};">
+            ${sheet.status}
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+          <div class="stat-card green">
+            <div class="stat-num">${_fmt(sheet.total_cash)}</div>
+            <div class="stat-lbl">Cash</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-num">${_fmt(sheet.total_momo)}</div>
+            <div class="stat-lbl">MoMo</div>
+          </div>
+          <div class="stat-card blue">
+            <div class="stat-num">${_fmt(sheet.total_pos)}</div>
+            <div class="stat-lbl">POS</div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-num">${_fmt(sheet.net_cash_in_till)}</div>
+            <div class="stat-lbl">Net Cash In Till</div>
+          </div>
+        </div>
+        <div class="section-head">
+          <span class="section-title">Sheet Details</span>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Total Jobs</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${sheet.total_jobs_created}</div></div>
+          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Refunds</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_refunds)}</div></div>
+          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Petty Cash Out</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_petty_cash_out)}</div></div>
+          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Credit Issued</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_credit_issued)}</div></div>
+        </div>
+        ${sheet.status === 'OPEN' ? `
+        <div style="margin-top:20px;display:flex;gap:10px;">
+          <button class="btn-dark" onclick="Dashboard.closeSheet(${sheet.id})">Close Day Sheet</button>
+        </div>` : ''}
+        ${sheet.notes ? `<div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">${_esc(sheet.notes)}</div>` : ''}
+      `;
+    } catch {
+      pane.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
+    }
+  }
+
+  async function closeSheet(sheetId) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/close/`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        _toast('Sheet closed successfully.', 'success');
+        document.getElementById('pane-finance').dataset.loaded = '';
+        _loadFinancePane();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not close sheet.', 'error');
+      }
+    } catch {
+      _toast('Network error.', 'error');
+    }
+  }
+
+  // ── Inbox pane ─────────────────────────────────────────────
   async function loadInboxTab() {
     if (inboxLoaded) return;
     inboxLoaded = true;
@@ -209,24 +363,24 @@ async function loadJobsTab() {
     try {
       const res  = await Auth.fetch('/api/v1/communications/');
       if (!res.ok) throw new Error();
-      const data = await res.json();
+      const data   = await res.json();
       const convos = Array.isArray(data) ? data : (data.results || []);
 
       if (!convos.length) {
-        list.innerHTML = `<div style="text-align:center;padding:40px;color:#ccc;font-size:13px;">No conversations yet.</div>`;
+        list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No conversations yet.</div>`;
         return;
       }
 
       list.innerHTML = convos.slice(0, 12).map(c => {
-        const initials = getInitials(c.customer_name || 'Unknown');
-        const time     = timeAgo(c.updated_at || c.created_at);
-        const preview  = esc(truncate(c.last_message || 'No messages yet', 55));
+        const initials  = _initials(c.customer_name || 'Unknown');
+        const time      = _timeAgo(c.updated_at || c.created_at);
+        const preview   = _esc(_truncate(c.last_message || 'No messages yet', 55));
         const hasUnread = c.unread_count > 0;
 
         return `
           <div class="inbox-row" onclick="window.location='/portal/inbox/'">
             <div class="inbox-av">${initials}</div>
-            <span class="inbox-name">${esc(c.customer_name || 'Unknown')}</span>
+            <span class="inbox-name">${_esc(c.customer_name || 'Unknown')}</span>
             <span class="inbox-preview">${preview}</span>
             <span class="inbox-time">${time}</span>
             ${hasUnread ? '<span class="inbox-unread"></span>' : ''}
@@ -234,29 +388,33 @@ async function loadJobsTab() {
       }).join('');
 
     } catch {
-      list.innerHTML = `<div style="text-align:center;padding:40px;color:#ccc;font-size:13px;">Could not load inbox.</div>`;
+      list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-3);">Could not load inbox.</div>`;
     }
   }
 
-  // ─────────────────────────────────────────
-  // Services Tab (lazy) + modal population
-  // ─────────────────────────────────────────
-  async function loadServices() {
+  // ── Services pane ──────────────────────────────────────────
+  async function _loadServicesAndCustomers() {
     try {
-      const res  = await Auth.fetch('/api/v1/jobs/services/');
-      if (!res.ok) return;
-      const data = await res.json();
-      services   = Array.isArray(data) ? data : (data.results || []);
+      const [svcRes, custRes] = await Promise.all([
+        Auth.fetch('/api/v1/jobs/services/'),
+        Auth.fetch('/api/v1/customers/'),
+      ]);
 
-      // Populate modal select
-      const sel = document.getElementById('nj-service');
-      if (sel) {
-        sel.innerHTML = '<option value="">Select service…</option>' +
-          services.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      if (svcRes.ok) {
+        const data = await svcRes.json();
+        services = Array.isArray(data) ? data : (data.results || []);
+        _set('meta-services', services.length);
+        _set('meta-services-count', `${services.length} services`);
+
+        // Pass to NJ controller
+        if (typeof State !== 'undefined') State.services = services;
       }
 
-      // Meta row count
-      set('meta-services', services.length);
+      if (custRes.ok) {
+        const data = await custRes.json();
+        customers = Array.isArray(data) ? data : (data.results || []);
+        if (typeof State !== 'undefined') State.customers = customers;
+      }
 
     } catch { /* silent */ }
   }
@@ -269,196 +427,208 @@ async function loadJobsTab() {
     if (!grid) return;
 
     if (!services.length) {
-      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:#ccc;font-size:13px;">No services available.</div>`;
-      set('services-count', '0 services');
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-3);">No services available.</div>`;
       return;
     }
-
-    set('services-count', `${services.length} service${services.length !== 1 ? 's' : ''}`);
 
     grid.innerHTML = services.map(s => `
       <div class="service-card">
-        <div class="service-card-name">${esc(s.name)}</div>
+        <div class="service-card-name">${_esc(s.name)}</div>
         <div class="service-card-price">${s.base_price != null ? 'GHS ' + Number(s.base_price).toFixed(2) : '—'}</div>
-        <div class="service-card-desc">${esc(s.description || '')}</div>
+        <div class="service-card-desc">${_esc(s.description || '')}</div>
       </div>`).join('');
   }
 
-  // ─────────────────────────────────────────
-  // Price Calculation
-  // ─────────────────────────────────────────
-  async function calculatePrice() {
-    clearTimeout(priceTimer);
-    priceTimer = setTimeout(_doCalculate, 400);
-  }
+  // ── Outsource modal ────────────────────────────────────────
+  async function openOutsourceModal() {
+    document.getElementById('outsource-modal').classList.add('open');
 
-  async function _doCalculate() {
-    const serviceId = document.getElementById('nj-service')?.value;
-    const qty       = parseInt(document.getElementById('nj-quantity')?.value) || 1;
-    const pages     = parseInt(document.getElementById('nj-pages')?.value)    || 1;
-    const color     = document.getElementById('nj-color')?.value === 'true';
-    const priceBox  = document.getElementById('price-box');
-    const priceEl   = document.getElementById('nj-price');
-
-    if (!serviceId) {
-      if (priceBox) priceBox.classList.remove('show');
-      return;
-    }
-
+    // Load pending jobs into select
     try {
-      const res = await Auth.fetch('/api/v1/jobs/price/calculate/', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ service: serviceId, quantity: qty, pages, color }),
-      });
-
-      if (!res.ok) throw new Error();
+      const res  = await Auth.fetch('/api/v1/jobs/?status=PENDING_PAYMENT&page_size=50');
       const data = await res.json();
+      const jobs = Array.isArray(data) ? data : (data.results || []);
+      const sel  = document.getElementById('outsource-job-select');
+      if (sel) {
+        sel.innerHTML = '<option value="">Select job…</option>' +
+          jobs.map(j => `<option value="${j.id}">${_esc(j.job_number)} — ${_esc(j.title)}</option>`).join('');
+      }
+    } catch { /* silent */ }
 
-      if (priceEl)  priceEl.textContent = `GHS ${Number(data.total || data.price || 0).toFixed(2)}`;
-      if (priceBox) priceBox.classList.add('show');
-
-    } catch {
-      if (priceBox) priceBox.classList.remove('show');
-    }
+    // Load branches into select
+    try {
+      const res     = await Auth.fetch('/api/v1/organization/branches/');
+      const data    = await res.json();
+      const branches = Array.isArray(data) ? data : (data.results || []);
+      const sel     = document.getElementById('outsource-branch-select');
+      if (sel) {
+        sel.innerHTML = '<option value="">Select branch…</option>' +
+          branches.map(b => `<option value="${b.id}">${_esc(b.name)}</option>`).join('');
+      }
+    } catch { /* silent */ }
   }
 
-  // ─────────────────────────────────────────
-  // Create Job
-  // ─────────────────────────────────────────
-  async function createJob() {
-    const title    = document.getElementById('nj-title')?.value.trim();
-    const type     = document.getElementById('nj-type')?.value;
-    const service  = document.getElementById('nj-service')?.value;
-    const priority = document.getElementById('nj-priority')?.value;
-    const channel  = document.getElementById('nj-channel')?.value;
-    const qty      = document.getElementById('nj-quantity')?.value;
-    const pages    = document.getElementById('nj-pages')?.value;
-    const color    = document.getElementById('nj-color')?.value === 'true';
+  async function confirmOutsource() {
+    const jobId    = document.getElementById('outsource-job-select')?.value;
+    const branchId = document.getElementById('outsource-branch-select')?.value;
+    const reason   = document.getElementById('outsource-reason')?.value.trim();
 
-    if (!service) { toast('Please select a service', 'error'); return; }
-
-    const btn = document.querySelector('#new-job-modal .btn-dark');
-    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    if (!jobId)    { _toast('Please select a job.', 'error');    return; }
+    if (!branchId) { _toast('Please select a branch.', 'error'); return; }
 
     try {
-      const res = await Auth.fetch('/api/v1/jobs/', {
-        method:  'POST',
+      const res = await Auth.fetch(`/api/v1/jobs/${jobId}/route/confirm/`, {
+        method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          title, job_type: type, service, priority,
-          intake_channel: channel, quantity: qty, pages, color,
-        }),
+        body   : JSON.stringify({ branch_id: parseInt(branchId), notes: reason }),
       });
 
-      if (!res.ok) throw new Error('Failed');
-
-      document.getElementById('new-job-modal')?.classList.remove('open');
-      toast('Job created successfully', 'success');
-
-      // Refresh
-      jobsLoaded  = false;
-      inboxLoaded = false;
-      await Promise.all([loadStats(), loadRecentJobs()]);
-
+      if (res.ok) {
+        _toast('Job outsourced successfully.', 'success');
+        document.getElementById('outsource-modal').classList.remove('open');
+        jobsLoaded = false;
+        await Promise.all([loadStats(), loadRecentJobs()]);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not outsource job.', 'error');
+      }
     } catch {
-      toast('Could not create job', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create Job`; }
+      _toast('Network error.', 'error');
     }
   }
 
-  // ─────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────
-  function set(id, val) {
+  // ── NJ controller integration ──────────────────────────────
+  // Called by NJ after job creation to refresh dashboard
+  function onJobCreated() {
+    jobsLoaded = false;
+    Promise.all([loadStats(), loadRecentJobs()]);
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+  function _set(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val;
   }
 
-  function esc(str) {
-    return String(str)
+  function _esc(str) {
+    return String(str ?? '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;')
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  function truncate(str, len) {
+  function _truncate(str, len) {
     return str.length > len ? str.slice(0, len) + '…' : str;
   }
 
-  function getInitials(name) {
-    return name.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
+  function _initials(name) {
+    return String(name).split(' ').slice(0, 2)
+      .map(w => w[0]?.toUpperCase() || '').join('') || '?';
   }
 
-  function setDate() {
+  function _setDate() {
     const now = new Date();
-    set('meta-date', now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+    _set('meta-date', now.toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    }));
   }
 
-  function formatDate(iso) {
+  function _formatDate(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    return new Date(iso).toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    });
   }
 
-  function timeAgo(iso) {
+  function _timeAgo(iso) {
     if (!iso) return '—';
     const diff = Date.now() - new Date(iso).getTime();
     if (diff < 60000)    return 'just now';
     if (diff < 3600000)  return `${Math.floor(diff / 60000)}m`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
-    return formatDate(iso);
+    return _formatDate(iso);
   }
 
-  function statusBadge(status) {
+  function _fmt(val) {
+    const n = parseFloat(val || 0);
+    return `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+  }
+
+  function _statusBadge(status) {
     const map = {
-      PENDING:     'badge-pending',
-      IN_PROGRESS: 'badge-progress',
-      READY:       'badge-ready',
-      COMPLETED:   'badge-done',
-      CANCELLED:   'badge-cancelled',
+      DRAFT           : 'badge-draft',
+      PENDING_PAYMENT : 'badge-pending',
+      PAID            : 'badge-pending',
+      IN_PROGRESS     : 'badge-progress',
+      CONFIRMED       : 'badge-progress',
+      READY           : 'badge-ready',
+      COMPLETE        : 'badge-done',
+      CANCELLED       : 'badge-cancelled',
+      HALTED          : 'badge-halted',
     };
-    return `<span class="badge ${map[status] || 'badge-cancelled'}">${STATUS_LABELS[status] || status || '—'}</span>`;
+    const labels = {
+      DRAFT           : 'Draft',
+      PENDING_PAYMENT : 'Pending Payment',
+      PAID            : 'Paid',
+      IN_PROGRESS     : 'In Progress',
+      CONFIRMED       : 'Confirmed',
+      READY           : 'Ready',
+      COMPLETE        : 'Complete',
+      CANCELLED       : 'Cancelled',
+      HALTED          : 'Halted',
+    };
+    return `<span class="badge ${map[status] || 'badge-draft'}">${labels[status] || status || '—'}</span>`;
   }
 
-  function typeBadge(type) {
+  function _typeBadge(type) {
     const map = {
-      INSTANT:    'badge-instant',
-      PRODUCTION: 'badge-production',
-      DESIGN:     'badge-design',
+      INSTANT    : 'badge-instant',
+      PRODUCTION : 'badge-production',
+      DESIGN     : 'badge-design',
     };
-    return `<span class="badge ${map[type] || 'badge-cancelled'}">${esc(type || '—')}</span>`;
+    return `<span class="badge ${map[type] || 'badge-draft'}">${_esc(type || '—')}</span>`;
   }
 
-  function toast(msg, type = 'info') {
+  function _toast(msg, type = 'info') {
     const container = document.getElementById('toast-container');
     if (!container) return;
-    const el = document.createElement('div');
+    const el     = document.createElement('div');
     el.className = `toast ${type}`;
     el.textContent = msg;
     container.appendChild(el);
     setTimeout(() => el.remove(), 3500);
   }
 
-  // ─────────────────────────────────────────
-  // Public API
-  // ─────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────
   return {
     init,
-    loadJobsTab,
+    switchPane,
+    setPeriod,
     loadInboxTab,
     loadServicesTab,
-    calculatePrice,
-    createJob,
+    openOutsourceModal,
+    confirmOutsource,
+    closeSheet,
+    onJobCreated,
   };
 
 })();
 
 document.addEventListener('DOMContentLoaded', Dashboard.init);
 
+
 // ─────────────────────────────────────────────────────────────
-// Notifications module
+// State — shared with NJ controller
+// ─────────────────────────────────────────────────────────────
+const State = {
+  branchId  : null,
+  services  : [],
+  customers : [],
+  page      : 1,
+};
+
+
+// ─────────────────────────────────────────────────────────────
+// Notifications
 // ─────────────────────────────────────────────────────────────
 const Notifications = (() => {
 
@@ -479,11 +649,11 @@ const Notifications = (() => {
       }
 
       list.innerHTML = data.map(n => `
-        <div class="notif-item ${n.is_read ? '' : 'unread'}"
-             onclick="Notifications.markRead(${n.id}, this, '${n.link}')">
+        <div class="notif-item ${n.is_read ? 'read' : 'unread'}"
+          onclick="Notifications.markRead(${n.id}, this, '${n.link || ''}')">
           <span class="notif-dot"></span>
           <span class="notif-msg">${_esc(n.message)}</span>
-          <span class="notif-time">${n.time_ago}</span>
+          <span class="notif-time">${n.time_ago || ''}</span>
         </div>`).join('');
 
     } catch {
@@ -495,21 +665,19 @@ const Notifications = (() => {
     try {
       const res  = await Auth.fetch('/api/v1/notifications/unread-count/');
       if (!res.ok) return;
-      const data = await res.json();
+      const data  = await res.json();
       const count = data.count || 0;
       const badge = document.getElementById('db-notif-badge');
       if (badge) {
-        badge.textContent = count > 99 ? '99+' : count;
+        badge.textContent   = count > 99 ? '99+' : count;
         badge.style.display = count > 0 ? 'flex' : 'none';
       }
     } catch { /* silent */ }
   }
 
-  function toggle() {
-    open ? close() : openDropdown();
-  }
+  function toggle() { open ? close() : _open(); }
 
-  function openDropdown() {
+  function _open() {
     open = true;
     document.getElementById('notif-dropdown')?.classList.add('open');
     load();
@@ -524,6 +692,7 @@ const Notifications = (() => {
     try {
       await Auth.fetch(`/api/v1/notifications/${id}/read/`, { method: 'POST' });
       el?.classList.remove('unread');
+      el?.classList.add('read');
       await loadCount();
     } catch { /* silent */ }
     if (link) { close(); window.location = link; }
@@ -534,6 +703,7 @@ const Notifications = (() => {
       await Auth.fetch('/api/v1/notifications/read-all/', { method: 'POST' });
       document.querySelectorAll('.notif-item.unread').forEach(el => {
         el.classList.remove('unread');
+        el.classList.add('read');
       });
       await loadCount();
     } catch { /* silent */ }
@@ -545,16 +715,10 @@ const Notifications = (() => {
   }
 
   function _esc(str) {
-    return String(str)
+    return String(str ?? '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;')
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
-
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {
-      close();
-    }
-  });
 
   return { toggle, close, markRead, markAllRead, loadCount, startPolling };
 
