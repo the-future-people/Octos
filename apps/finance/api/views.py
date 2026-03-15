@@ -720,3 +720,54 @@ class BranchTransferCreditReconcileView(APIView):
         ])
 
         return Response(BranchTransferCreditSerializer(transfer).data)
+
+class DailySalesSheetPDFView(APIView):
+    """
+    GET /api/v1/finance/sheets/<pk>/pdf/
+    Generates and serves the day sheet as a read-only PDF.
+    Only accessible by branch manager of that branch.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            sheet = DailySalesSheet.objects.get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response({'detail': 'Sheet not found.'}, status=404)
+
+        # Only allow access to own branch
+        if request.user.branch != sheet.branch:
+            return Response({'detail': 'Access denied.'}, status=403)
+
+        # Only closed sheets can be downloaded
+        if sheet.status != DailySalesSheet.Status.CLOSED:
+            return Response(
+                {'detail': 'Sheet must be closed before downloading.'},
+                status=400
+            )
+
+        # Generate PDF
+        import os
+        from django.conf import settings
+        from io import BytesIO
+        from django.core.management import call_command
+
+        media_root = getattr(settings, 'MEDIA_ROOT', 'media')
+        sheets_dir = os.path.join(media_root, 'sheets')
+        os.makedirs(sheets_dir, exist_ok=True)
+        output_path = os.path.join(sheets_dir, f"sheet_{sheet.pk}_{sheet.date}.pdf")
+
+        # Regenerate if file doesn't exist
+        if not os.path.exists(output_path):
+            call_command('generate_sheet_pdf', sheet_id=sheet.pk, output=output_path)
+
+        # Serve the file
+        from django.http import FileResponse
+        response = FileResponse(
+            open(output_path, 'rb'),
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
+        )
+        return response

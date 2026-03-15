@@ -146,62 +146,76 @@ const NJ = (() => {
           <!-- Configurator — shown after service selected -->
           <div id="nj-configurator" style="display:none;">
             <div class="nj-configurator-head" id="nj-configurator-title">Configure</div>
-
-            <!-- Core params -->
+            <!-- Just two questions -->
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Paper Size</label>
-                <select id="nj-paper-size" class="form-input" onchange="NJ._triggerLinePrice()">
-                  <option value="A4">A4</option>
-                  <option value="A3">A3</option>
-                  <option value="A5">A5</option>
-                  <option value="A2">A2</option>
-                  <option value="NA">N/A</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Colour Mode</label>
-                <select id="nj-color-mode" class="form-input" onchange="NJ._triggerLinePrice()">
-                  <option value="BW">Black &amp; White</option>
-                  <option value="COLOR">Colour</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">Pages</label>
+                <label class="form-label">Sheets</label>
                 <input type="number" id="nj-pages" class="form-input"
-                  value="1" min="1" oninput="NJ._triggerLinePrice()">
+                  value="1" min="1" oninput="NJ._triggerLinePrice()"
+                  placeholder="How many sheets?">
               </div>
               <div class="form-group">
-                <label class="form-label">Sets / Copies</label>
+                <label class="form-label">Copies</label>
                 <input type="number" id="nj-sets" class="form-input"
-                  value="1" min="1" oninput="NJ._triggerLinePrice()">
+                  value="1" min="1" oninput="NJ._triggerLinePrice()"
+                  placeholder="How many copies?">
               </div>
             </div>
 
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">Sides</label>
-                <select id="nj-sides" class="form-input" onchange="NJ._triggerLinePrice()">
-                  <option value="SINGLE">Single-sided</option>
-                  <option value="DOUBLE">Double-sided</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">File Source</label>
-                <select id="nj-file-source" class="form-input">
-                  <option value="HARDCOPY">Walk-in Hardcopy</option>
-                  <option value="WHATSAPP">WhatsApp</option>
-                  <option value="EMAIL">Email</option>
-                  <option value="USB">USB</option>
-                  <option value="TYPING">Typing Request</option>
-                  <option value="NA">N/A</option>
-                </select>
-              </div>
+            <!-- Advanced toggle -->
+            <div style="margin-bottom:10px;">
+              <button type="button" onclick="NJ._toggleAdvanced()" style="
+                font-size:11.5px;color:var(--text-3);background:none;border:none;
+                cursor:pointer;padding:0;font-family:inherit;display:flex;
+                align-items:center;gap:4px;
+              ">
+                <span id="nj-advanced-arrow">▶</span>
+                <span>Advanced options</span>
+              </button>
             </div>
 
+            <!-- Advanced fields — hidden by default -->
+            <div id="nj-advanced-fields" style="display:none;">
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Paper Size</label>
+                  <select id="nj-paper-size" class="form-input" onchange="NJ._triggerLinePrice()">
+                    <option value="A4">A4</option>
+                    <option value="A3">A3</option>
+                    <option value="A5">A5</option>
+                    <option value="A2">A2</option>
+                    <option value="NA">N/A</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Colour Mode</label>
+                  <select id="nj-color-mode" class="form-input" onchange="NJ._triggerLinePrice()">
+                    <option value="BW">Black &amp; White</option>
+                    <option value="COLOR">Colour</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Sides</label>
+                  <select id="nj-sides" class="form-input" onchange="NJ._triggerLinePrice()">
+                    <option value="SINGLE">Single-sided</option>
+                    <option value="DOUBLE">Double-sided</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">File Source</label>
+                  <select id="nj-file-source" class="form-input">
+                    <option value="HARDCOPY">Walk-in Hardcopy</option>
+                    <option value="WHATSAPP">WhatsApp</option>
+                    <option value="EMAIL">Email</option>
+                    <option value="USB">USB</option>
+                    <option value="TYPING">Typing Request</option>
+                    <option value="NA">N/A</option>
+                  </select>
+                </div>
+              </div>
+            </div>
             <!-- Dynamic spec fields from spec_template -->
             <div id="nj-spec-fields"></div>
 
@@ -244,7 +258,7 @@ const NJ = (() => {
   }
 
   // ── Service chip selection ─────────────────────────────────
-  function _selectServiceChip(serviceId) {
+function _selectServiceChip(serviceId) {
     currentService = State.services.find(s => s.id === serviceId) || null;
     if (!currentService) return;
 
@@ -260,11 +274,42 @@ const NJ = (() => {
     const title = document.getElementById('nj-configurator-title');
     if (title) title.textContent = currentService.name;
 
-    // Render spec template fields
-    _renderSpecFields();
+    // Apply smart defaults silently
+    const d = currentService.smart_defaults || {};
+
+    // Pages defaults to 1 always
+    const pagesEl = document.getElementById('nj-pages');
+    if (pagesEl) pagesEl.value = d.pages || 1;
+
+    const setsEl = document.getElementById('nj-sets');
+    if (setsEl) setsEl.value = d.sets || 1;
+
+    // Pre-fill advanced fields from smart_defaults (hidden but set)
+    const paperEl = document.getElementById('nj-paper-size');
+    if (paperEl) paperEl.value = d.paper_size || 'A4';
+
+    const colorEl = document.getElementById('nj-color-mode');
+    if (colorEl) colorEl.value = d.is_color ? 'COLOR' : 'BW';
+
+    const sidesEl = document.getElementById('nj-sides');
+    if (sidesEl) sidesEl.value = d.sides || 'SINGLE';
+
+    // Reset advanced panel to closed
+    const adv = document.getElementById('nj-advanced-fields');
+    const arr = document.getElementById('nj-advanced-arrow');
+    if (adv) adv.style.display = 'none';
+    if (arr) arr.textContent = '▶';
+
+    // Render any extra spec_template fields
+    // Instant uses smart_defaults only — no spec_template fields needed
+    if (currentType !== 'INSTANT') {
+      _renderSpecFields();
+    } else {
+      const specFields = document.getElementById('nj-spec-fields');
+      if (specFields) specFields.innerHTML = '';
+    }
     _triggerLinePrice();
   }
-
   // ── Line price calculation (per item being configured) ─────
   function _triggerLinePrice() {
     clearTimeout(priceTimer);
@@ -813,6 +858,15 @@ const NJ = (() => {
     requestAnimationFrame(_positionPill);
   }
 
+function _toggleAdvanced() {
+    const adv = document.getElementById('nj-advanced-fields');
+    const arr = document.getElementById('nj-advanced-arrow');
+    if (!adv) return;
+    const open = adv.style.display === 'none';
+    adv.style.display = open ? 'block' : 'none';
+    if (arr) arr.textContent = open ? '▼' : '▶';
+  }
+
   return {
     setType,
     onServiceChange,
@@ -825,6 +879,7 @@ const NJ = (() => {
     _selectServiceChip,
     _addToCart,
     _removeFromCart,
+    _toggleAdvanced,
   };
 
 })();

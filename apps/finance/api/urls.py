@@ -20,6 +20,7 @@ from .views import (
     CreditSettlementView,
     BranchTransferCreditListView,
     BranchTransferCreditReconcileView,
+    DailySalesSheetPDFView,
 )
 
 urlpatterns = [
@@ -54,4 +55,5 @@ urlpatterns = [
     # ── Branch Transfer Credits ───────────────────────────────
     path('transfers/',                      BranchTransferCreditListView.as_view(),       name='transfer-list'),
     path('transfers/<int:pk>/reconcile/',   BranchTransferCreditReconcileView.as_view(),  name='transfer-reconcile'),
+    path('sheets/<int:pk>/pdf/', DailySalesSheetPDFView.as_view(), name='sheet-pdf'),
 ]

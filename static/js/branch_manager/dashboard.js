@@ -323,10 +323,20 @@ const Dashboard = (() => {
           <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Petty Cash Out</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_petty_cash_out)}</div></div>
           <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Credit Issued</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_credit_issued)}</div></div>
         </div>
-        ${sheet.status === 'OPEN' ? `
         <div style="margin-top:20px;display:flex;gap:10px;">
+        ${sheet.status === 'OPEN' ? `
           <button class="btn-dark" onclick="Dashboard.closeSheet(${sheet.id})">Close Day Sheet</button>
-        </div>` : ''}
+        ` : `
+          <a href="/api/v1/finance/sheets/${sheet.id}/pdf/" 
+             target="_blank"
+             style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;
+                    background:var(--text);color:#fff;border-radius:var(--radius-sm);
+                    font-size:13px;font-weight:700;text-decoration:none;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Sheet PDF
+          </a>
+        `}
+      </div>
         ${sheet.notes ? `<div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">${_esc(sheet.notes)}</div>` : ''}
       `;
     } catch {
