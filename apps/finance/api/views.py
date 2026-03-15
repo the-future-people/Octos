@@ -113,10 +113,26 @@ class DailySalesSheetTodayView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = DailySalesSheetDetailSerializer(
+        from django.db.models import Sum
+        from apps.jobs.models import Job
+
+        data = DailySalesSheetDetailSerializer(
             sheet, context={'request': request}
-        )
-        return Response(serializer.data)
+        ).data
+
+       # If sheet is still open, inject live totals from actual jobs
+        if sheet.status == DailySalesSheet.Status.OPEN:
+            jobs = Job.objects.filter(
+                daily_sheet=sheet,
+                status=Job.COMPLETE,
+            )
+            data['total_cash']         = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
+            data['total_momo']         = str(jobs.filter(payment_method='MOMO').aggregate(t=Sum('amount_paid'))['t'] or 0)
+            data['total_pos']          = str(jobs.filter(payment_method='POS').aggregate(t=Sum('amount_paid'))['t'] or 0)
+            data['total_jobs_created'] = jobs.count()
+            data['net_cash_in_till']   = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
+
+        return Response(data)
 
 
 class DailySalesSheetNotesView(APIView):

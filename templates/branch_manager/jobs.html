@@ -5,727 +5,446 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jobs — Octos</title>
-  <link rel="stylesheet" href="{% static 'css/octos.css' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
   <style>
-
-  /* ══════════════════════════════════════════
-     PAGE BG + PANEL  (light shell)
-  ══════════════════════════════════════════ */
-  body { background: #f0f0ef; font-family: 'DM Sans', sans-serif; }
-
-  .page-bg {
-    min-height: 100vh;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 12px;
-    overflow: hidden;
-  }
-
-  .panel {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 1440px;
-    min-height: calc(100vh - 24px);
-    background: #ffffff;
-    border-radius: 18px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* ══════════════════════════════════════════
-     TOP BAR
-  ══════════════════════════════════════════ */
-  .p-topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 28px 16px;
-    border-bottom: 1px solid #f0f0f0;
-    flex-shrink: 0;
-  }
-
-  .p-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 21px;
-    font-weight: 800;
-    color: #111;
-    letter-spacing: -0.4px;
-  }
-
-  .p-breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 3px;
-    font-size: 12.5px;
-    color: #aaa;
-  }
-
-  .p-breadcrumb a { color: #aaa; transition: color 0.15s; }
-  .p-breadcrumb a:hover { color: #555; }
-  .p-breadcrumb span.cur { color: #666; font-weight: 500; }
-
-  .p-topbar-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .pill-active {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 13px;
-    border-radius: 20px;
-    background: #edfaf4;
-    border: 1px solid #b6ecd4;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: #1a9e5c;
-  }
-
-  .pill-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c98a; flex-shrink: 0; }
-
-  .pill-user {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 14px 4px 4px;
-    border-radius: 24px;
-    background: #f5f5f5;
-    border: 1px solid #eaeaea;
-  }
-
-  .user-avatar {
-    width: 30px; height: 30px;
-    border-radius: 50%;
-    background: #111;
-    color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Syne', sans-serif;
-    font-size: 11px; font-weight: 700;
-    flex-shrink: 0;
-  }
-
-  .user-name { font-size: 13px; font-weight: 600; color: #222; }
-  .user-role { font-size: 11px; color: #bbb; font-weight: 400; }
-
-  .icon-btn {
-    width: 34px; height: 34px;
-    border-radius: 9px;
-    border: 1px solid #eaeaea;
-    background: #fafafa;
-    color: #aaa;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.15s ease;
-    position: relative;
-  }
-  .icon-btn:hover { border-color: #ccc; color: #444; }
-
-  .notif-badge {
-    position: absolute;
-    top: -4px; right: -4px;
-    width: 16px; height: 16px;
-    border-radius: 50%;
-    background: #e8294a;
-    border: 2px solid #fff;
-    font-size: 9px; font-weight: 700;
-    color: #fff;
-    display: none;
-    align-items: center; justify-content: center;
-    font-family: monospace;
-  }
-
-  /* ══════════════════════════════════════════
-     STAT STRIP
-  ══════════════════════════════════════════ */
-  .stat-strip {
-    display: flex;
-    align-items: stretch;
-    background: #fafafa;
-    border-bottom: 1px solid #f0f0f0;
-    flex-shrink: 0;
-  }
-
-  .stat-cell {
-    flex: 1;
-    padding: 20px 16px 16px;
-    text-align: center;
-    position: relative;
-  }
-
-  .stat-cell + .stat-cell::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 14px; bottom: 14px;
-    width: 1px;
-    background: #ebebeb;
-  }
-
-  .stat-num {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 28px; font-weight: 700;
-    color: #111;
-    letter-spacing: -0.5px;
-    line-height: 1;
-    margin-bottom: 6px;
-  }
-
-  .stat-lbl { font-size: 11px; color: #bbb; font-weight: 500; letter-spacing: 0.2px; }
-
-  /* ══════════════════════════════════════════
-     META ROW
-  ══════════════════════════════════════════ */
-  .meta-row {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    padding: 11px 28px;
-    border-bottom: 1px solid #f0f0f0;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-
-  .meta-item { display: flex; align-items: center; gap: 7px; }
-  .meta-key { font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #ccc; }
-  .meta-val { font-size: 13px; font-weight: 600; color: #555; }
-
-  /* ══════════════════════════════════════════
-     TOOLBAR
-  ══════════════════════════════════════════ */
-  .jobs-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 26px;
-    border-bottom: 1px solid #f0f0f0;
-    gap: 12px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-    margin-bottom: 0;
-  }
-
-  .filter-tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-
-  .filter-tab {
-    padding: 6px 14px;
-    border-radius: 20px;
-    border: 1px solid #eaeaea;
-    background: #fafafa;
-    font-size: 12.5px; font-weight: 500;
-    color: #888;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .filter-tab:hover { border-color: #ccc; color: #333; background: #f0f0f0; }
-
-  .filter-tab.active                             { background: #111;    border-color: #111;    color: #fff; font-weight: 600; }
-  .filter-tab[data-status="DRAFT"].active        { background: #888;    border-color: #888;    color: #fff; }
-  .filter-tab[data-status="PENDING_PAYMENT"].active { background: #e8c84a; border-color: #e8c84a; color: #111; }
-  .filter-tab[data-status="IN_PROGRESS"].active  { background: #3355cc; border-color: #3355cc; color: #fff; }
-  .filter-tab[data-status="READY"].active        { background: #22c98a; border-color: #22c98a; color: #fff; }
-  .filter-tab[data-status="HALTED"].active       { background: #e8294a; border-color: #e8294a; color: #fff; }
-  .filter-tab[data-status="COMPLETE"].active     { background: #22c98a; border-color: #22c98a; color: #fff; }
-  .filter-tab[data-status="CANCELLED"].active    { background: #ccc;    border-color: #ccc;    color: #fff; }
-
-  .toolbar-right { display: flex; align-items: center; gap: 8px; }
-
-  .inp-sm {
-    padding: 7px 12px; font-size: 12.5px;
-    border: 1px solid #eaeaea; border-radius: 8px;
-    background: #fafafa; color: #333;
-    outline: none; transition: border-color 0.15s;
-    font-family: inherit;
-  }
-  .inp-sm:focus { border-color: #bbb; background: #fff; }
-  .inp-sm::placeholder { color: #ccc; }
-
-  .sel-sm {
-    padding: 7px 26px 7px 10px; font-size: 12.5px;
-    border: 1px solid #eaeaea; border-radius: 8px;
-    background: #fafafa url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23aaa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 8px center;
-    color: #555; outline: none; appearance: none;
-    cursor: pointer; transition: border-color 0.15s;
-    font-family: inherit;
-  }
-  .sel-sm:focus { border-color: #bbb; }
-
-  .new-btn {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 8px 18px;
-    background: #111; color: #fff;
-    border-radius: 9px; font-size: 13px; font-weight: 700;
-    transition: background 0.15s; white-space: nowrap;
-    font-family: inherit;
-  }
-  .new-btn:hover { background: #333; }
-
-  /* ══════════════════════════════════════════
-     TABLE AREA
-  ══════════════════════════════════════════ */
-  .jobs-body { flex: 1; overflow-y: auto; padding: 0 26px 32px; }
-
-  .p-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-
-  .p-table thead th {
-    text-align: left;
-    padding: 16px 14px 8px;
-    font-size: 10.5px; font-weight: 700;
-    letter-spacing: 0.8px; text-transform: uppercase;
-    color: #ccc;
-    border-bottom: 2px solid #f0f0f0;
-    position: sticky; top: 0;
-    background: #fff; z-index: 2;
-  }
-
-  .p-table tbody td {
-    padding: 13px 14px;
-    border-bottom: 1px solid #eeeeee;
-    color: #666; vertical-align: middle;
-  }
-
-  .p-table tbody tr:last-child td { border-bottom: none; }
-  .p-table tbody tr { transition: background 0.12s; cursor: pointer; }
-  .p-table tbody tr:hover { background: #fafafa; }
-
-  .td-job-title { font-size: 13.5px; font-weight: 600; color: #111; line-height: 1.3; margin-bottom: 3px; }
-  .td-job-ref   { font-family: monospace; font-size: 11px; color: #bbb; }
-
-  .loading-cell { text-align: center !important; padding: 60px !important; color: #ccc !important; font-size: 13px; }
-  .empty-cell   { text-align: center !important; padding: 60px 20px !important; }
-
-  .empty-icon {
-    width: 40px; height: 40px; border-radius: 12px;
-    background: #f5f5f5;
-    display: flex; align-items: center; justify-content: center;
-    margin: 0 auto 12px; color: #ccc;
-  }
-  .empty-text { font-size: 13.5px; color: #bbb; font-weight: 500; }
-
-  /* ══════════════════════════════════════════
-     SPINNER
-  ══════════════════════════════════════════ */
-  .spin {
-    display: inline-block;
-    width: 16px; height: 16px;
-    border: 2px solid #eee; border-top-color: #aaa;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    vertical-align: middle; margin-right: 6px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ══════════════════════════════════════════
-     STATUS / TYPE BADGES  (light overrides)
-  ══════════════════════════════════════════ */
-  .badge {
-    display: inline-flex; align-items: center;
-    padding: 3px 10px; border-radius: 20px;
-    font-size: 11px; font-weight: 600; white-space: nowrap;
-  }
-
-  .badge-grey   { background: #f5f5f5;  color: #999;    border: 1px solid #e8e8e8; }
-  .badge-yellow { background: #fef9ec;  color: #b8860b; border: 1px solid #f0dda0; }
-  .badge-red    { background: #fff3f0;  color: #cc3300; border: 1px solid #ffc5b5; }
-  .badge-green  { background: #edfaf4;  color: #1a7a4a; border: 1px solid #b0e0c8; }
-  .badge-blue   { background: #f0f4ff;  color: #3355cc; border: 1px solid #c0ceff; }
-
-  .type-badge {
-    display: inline-flex; align-items: center;
-    padding: 2px 8px; border-radius: 5px;
-    font-size: 10.5px; font-weight: 700;
-    letter-spacing: 0.3px; text-transform: uppercase;
-  }
-  .type-instant    { background: #f0f4ff; color: #3355cc; }
-  .type-production { background: #f9f0ff; color: #7733cc; }
-  .type-design     { background: #fff0f7; color: #cc3388; }
-
-  /* ══════════════════════════════════════════
-     PAGINATION
-  ══════════════════════════════════════════ */
-  .pagination {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 26px 20px;
-    border-top: 1px solid #f0f0f0; flex-shrink: 0;
-  }
-  .page-info { font-size: 12.5px; color: #bbb; }
-  .page-btns { display: flex; gap: 6px; }
-  .page-btn {
-    padding: 5px 14px; border-radius: 7px;
-    border: 1px solid #eaeaea; background: #fafafa;
-    font-size: 12.5px; color: #666; cursor: pointer;
-    transition: all 0.15s; font-family: inherit;
-  }
-  .page-btn:hover:not(:disabled) { border-color: #ccc; color: #111; }
-  .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* ══════════════════════════════════════════
-     MODAL  (light override — standalone page)
-  ══════════════════════════════════════════ */
-  .modal-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.3);
-    backdrop-filter: blur(6px);
-    z-index: 1000;
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px;
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.2s ease;
-  }
-  .modal-overlay.open { opacity: 1; pointer-events: all; }
-
-  .modal {
-    background: #fff;
-    border-radius: 16px;
-    width: 100%; max-width: 560px;
-    max-height: 90vh; overflow-y: auto;
-    box-shadow: 0 24px 64px rgba(0,0,0,0.16);
-    transform: translateY(10px) scale(0.98);
-    transition: transform 0.22s cubic-bezier(0.34,1.56,0.64,1);
-    border: 1px solid #eaeaea;
-  }
-  .modal-overlay.open .modal { transform: translateY(0) scale(1); }
-  .modal.wide { max-width: 760px; }
-
-  /* header */
-  .modal-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 24px 16px;
-    border-bottom: 1px solid #f0f0f0;
-  }
-  .modal-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 16px; font-weight: 700; color: #111;
-  }
-  .modal-subtitle { font-size: 12px; color: #bbb; margin-top: 2px; }
-
-  .modal-close {
-    width: 28px; height: 28px;
-    border-radius: 6px;
-    border: 1px solid #eaeaea; background: #fafafa;
-    color: #aaa; font-size: 18px; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; transition: all 0.15s;
-  }
-  .modal-close:hover { background: #fdecea; border-color: #f5c0c6; color: #e8294a; }
-
-  /* body */
-  .modal-body { padding: 20px 24px; }
-
-  /* footer */
-  .modal-footer {
-    display: flex; align-items: center; justify-content: flex-end;
-    gap: 10px;
-    padding: 14px 24px 18px;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  /* buttons inside modals */
-  .btn-ghost-light {
-    padding: 8px 18px; border-radius: 8px;
-    border: 1px solid #eaeaea; background: #fff;
-    color: #aaa; font-size: 13px; font-weight: 500;
-    cursor: pointer; transition: all 0.15s; font-family: inherit;
-  }
-  .btn-ghost-light:hover { border-color: #ccc; color: #333; }
-
-  .btn-primary {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 20px;
-    background: #111; color: #fff;
-    border: none; border-radius: 8px;
-    font-size: 13px; font-weight: 700;
-    cursor: pointer; transition: background 0.15s;
-    font-family: inherit;
-  }
-  .btn-primary:hover { background: #333; }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-dark {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 20px;
-    background: #111; color: #fff;
-    border: none; border-radius: 8px;
-    font-size: 13px; font-weight: 700;
-    cursor: pointer; transition: background 0.15s;
-    font-family: inherit;
-  }
-  .btn-dark:hover { background: #333; }
-  .btn-dark:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  /* ══════════════════════════════════════════
-     FORM ELEMENTS  (light modal forms)
-  ══════════════════════════════════════════ */
-  .form-row-2 {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 14px; margin-bottom: 14px;
-  }
-
-  .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 0; }
-
-  .form-label {
-    font-size: 11.5px; font-weight: 600;
-    color: #aaa; letter-spacing: 0.2px;
-    text-transform: uppercase;
-    display: block;
-    margin-bottom: 0;
-  }
-
-  .form-input {
-    padding: 9px 12px; font-size: 13.5px;
-    border: 1px solid #eaeaea; border-radius: 8px;
-    background: #fafafa; color: #111;
-    outline: none; width: 100%; appearance: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-    font-family: inherit;
-    box-shadow: none;
-  }
-  .form-input:focus { border-color: #bbb; background: #fff; box-shadow: 0 0 0 3px rgba(0,0,0,0.04); }
-  textarea.form-input { resize: vertical; min-height: 60px; }
-
-  /* ══════════════════════════════════════════
-     NEW JOB TOGGLE
-  ══════════════════════════════════════════ */
-.nj-toggle {
-  position: relative;
-  display: inline-flex;
-  border-radius: 10px;
-  padding: 3px;
-  width: 100%;
-  margin-bottom: 4px;
-  transition: background 0.25s ease;
-}
-
-.nj-toggle.type-instant    { background: #e8eeff; }
-.nj-toggle.type-production { background: #f3eaff; }
-.nj-toggle.type-design     { background: #ffe8f5; }
-
-.nj-toggle-btn {
-  position: relative; z-index: 1;
-  flex: 1; padding: 8px 0;
-  border: none; background: transparent; border-radius: 8px;
-  font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: color 0.2s;
-  font-family: inherit; letter-spacing: 0.2px;
-}
-
-.nj-toggle.type-instant    .nj-toggle-btn { color: #7799dd; }
-.nj-toggle.type-production .nj-toggle-btn { color: #aa88cc; }
-.nj-toggle.type-design     .nj-toggle-btn { color: #cc88aa; }
-
-.nj-toggle.type-instant    .nj-toggle-btn.active { color: #3355cc; }
-.nj-toggle.type-production .nj-toggle-btn.active { color: #7733cc; }
-.nj-toggle.type-design     .nj-toggle-btn.active { color: #cc3388; }
-
-.nj-toggle-pill {
-  position: absolute; top: 3px;
-  height: calc(100% - 6px);
-  border-radius: 8px;
-  transition: left 0.22s cubic-bezier(0.4,0,0.2,1), width 0.22s cubic-bezier(0.4,0,0.2,1), background 0.25s ease;
-  pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
-}
-
-.nj-toggle.type-instant    .nj-toggle-pill { background: #fff; }
-.nj-toggle.type-production .nj-toggle-pill { background: #fff; }
-.nj-toggle.type-design     .nj-toggle-pill { background: #fff; }
-  .spec-field-row {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 12px; margin-bottom: 12px;
-  }
-  .spec-field-row.full { grid-template-columns: 1fr; }
-
-  /* ══════════════════════════════════════════
-     JOB DETAIL MODAL INTERNALS
-  ══════════════════════════════════════════ */
-  .modal-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 24px 16px; border-bottom: 1px solid #f0f0f0;
-  }
-  .modal-x {
-    width: 28px; height: 28px; border-radius: 6px;
-    border: 1px solid #eaeaea; background: #fafafa; color: #aaa;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; transition: all 0.15s; flex-shrink: 0;
-  }
-  .modal-x:hover { background: #fdecea; border-color: #f5c0c6; color: #e8294a; }
-  .modal-foot {
-    display: flex; align-items: center; justify-content: flex-end;
-    gap: 10px; padding: 14px 24px 18px;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .detail-section { margin-bottom: 20px; }
-  .detail-section-title {
-    font-size: 10.5px; font-weight: 700;
-    letter-spacing: 0.8px; text-transform: uppercase;
-    color: #ccc; margin-bottom: 10px;
-    padding-bottom: 8px; border-bottom: 1px solid #f5f5f5;
-  }
-  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .detail-field { display: flex; flex-direction: column; gap: 3px; }
-  .detail-label { font-size: 10.5px; font-weight: 600; color: #ccc; text-transform: uppercase; letter-spacing: 0.3px; }
-  .detail-val   { font-size: 13.5px; color: #333; font-weight: 500; }
-
-  .timeline { display: flex; flex-direction: column; gap: 0; }
-
-  .timeline-item {
-    display: flex; gap: 12px;
-    padding: 10px 0; position: relative;
-  }
-  .timeline-item + .timeline-item::before {
-    content: ''; position: absolute;
-    left: 11px; top: 0;
-    width: 2px; height: 10px;
-    background: #f0f0f0;
-  }
-
-  .tl-dot {
-    width: 24px; height: 24px; border-radius: 50%;
-    background: #f5f5f5; border: 2px solid #eaeaea;
-    flex-shrink: 0; margin-top: 1px;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .tl-dot.green { background: #edfaf4; border-color: #b0e0c8; }
-  .tl-dot.red   { background: #fff3f0; border-color: #ffc5b5; }
-
-  .tl-body  { flex: 1; }
-  .tl-status { font-size: 13px; font-weight: 600; color: #111; line-height: 1.3; }
-  .tl-meta  { font-size: 11.5px; color: #bbb; margin-top: 2px; }
-  .tl-notes {
-    font-size: 12px; color: #888; margin-top: 4px;
-    padding: 6px 10px; background: #fafafa;
-    border-radius: 6px; border: 1px solid #f0f0f0;
-  }
-
-  .transition-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-  .transition-btn {
-    padding: 7px 16px; border-radius: 8px;
-    border: 1px solid #eaeaea; background: #fafafa;
-    font-size: 12.5px; font-weight: 600; color: #555;
-    cursor: pointer; transition: all 0.15s; font-family: inherit;
-  }
-  .transition-btn:hover { border-color: #111; background: #111; color: #fff; }
-
-  /* ══════════════════════════════════════════
-     NOTIFICATIONS DROPDOWN
-  ══════════════════════════════════════════ */
-  .notif-dropdown {
-    position: absolute;
-    top: 44px; right: 0;
-    width: 340px;
-    background: #fff;
-    border: 1px solid #e6e8ec;
-    border-radius: 12px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.12);
-    z-index: 500;
-    display: none;
-  }
-  .notif-dropdown.open { display: block; animation: fadein .15s ease; }
-  @keyframes fadein { from { opacity:0; transform:translateY(-4px);} to { opacity:1; transform:none;} }
-
-  .notif-dropdown-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 16px 10px; border-bottom: 1px solid #f5f5f5;
-  }
-  .notif-dropdown-title { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: #111; }
-  .notif-read-all {
-    font-size: 11px; color: #aaa; cursor: pointer;
-    padding: 3px 8px; border-radius: 5px;
-    border: 1px solid #eaeaea; background: #fafafa;
-    transition: all 0.15s; font-family: inherit;
-  }
-  .notif-read-all:hover { color: #333; border-color: #ccc; }
-
-  .notif-list { max-height: 320px; overflow-y: auto; }
-  .notif-item {
-    display: flex; gap: 10px; padding: 11px 16px;
-    border-bottom: 1px solid #f9f9f9;
-    cursor: pointer; transition: background 0.12s;
-  }
-  .notif-item:last-child { border-bottom: none; }
-  .notif-item:hover { background: #fafafa; }
-  .notif-item.unread { background: #fafeff; }
-  .notif-dot { width: 7px; height: 7px; border-radius: 50%; background: #e8294a; flex-shrink: 0; margin-top: 5px; }
-  .notif-item.read .notif-dot { background: transparent; }
-  .notif-text { font-size: 12.5px; color: #444; line-height: 1.4; flex: 1; }
-  .notif-time { font-size: 11px; color: #ccc; flex-shrink: 0; font-family: monospace; margin-top: 2px; }
-  .notif-empty { padding: 28px; text-align: center; font-size: 13px; color: #ccc; }
-  .notif-footer {
-    padding: 10px 16px; text-align: center;
-    font-size: 12px; color: #aaa; cursor: pointer;
-    border-top: 1px solid #f5f5f5; transition: color 0.15s;
-  }
-  .notif-footer:hover { color: #333; }
-
-  /* ══════════════════════════════════════════
-     TOAST  (light page override)
-  ══════════════════════════════════════════ */
-  #toast-container {
-    position: fixed; bottom: 24px; right: 24px;
-    z-index: 9999; display: flex; flex-direction: column; gap: 8px;
-  }
-  .toast {
-    display: flex; align-items: center; gap: 10px;
-    padding: 11px 16px; border-radius: 10px;
-    background: #fff; border: 1px solid #eaeaea;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-    font-size: 13.5px; font-weight: 500; color: #333;
-    min-width: 240px;
-    animation: toast-in 0.2s ease;
-  }
-  .toast.success { border-left: 3px solid #22c98a; }
-  .toast.error   { border-left: 3px solid #e8294a; }
-  .toast.info    { border-left: 3px solid #aaa; }
-  @keyframes toast-in { from { opacity:0; transform:translateX(14px);} to { opacity:1; transform:none;} }
-
-  /* ── misc fg helper (transition modal notes field) ── */
-  .fg { display: flex; flex-direction: column; gap: 5px; }
-  .fg label { font-size: 11.5px; font-weight: 600; color: #aaa; letter-spacing: 0.2px; text-transform: uppercase; }
-  .fg textarea {
-    padding: 9px 12px; font-size: 13.5px;
-    border: 1px solid #eaeaea; border-radius: 8px;
-    background: #fafafa; color: #111; outline: none;
-    width: 100%; resize: vertical; min-height: 70px;
-    font-family: inherit; transition: border-color 0.15s;
-  }
-  .fg textarea:focus { border-color: #bbb; background: #fff; }
-  .modal.type-instant    { background: #f5f8ff; }
-  .modal.type-production { background: #f8f3ff; }
-  .modal.type-design     { background: #fff5fb; }
+    /* ── Jobs-page specific overrides ────────────────────── */
+
+    .jobs-shell {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    .jobs-topbar {
+      height: var(--topbar-h);
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+    }
+
+    .jobs-topbar-inner {
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 28px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .jobs-topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .jobs-brand {
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.4px;
+    }
+
+    .jobs-brand-divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border-dark);
+    }
+
+    .jobs-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    .jobs-breadcrumb-link {
+      color: var(--text-3);
+      font-weight: 500;
+      transition: color var(--transition);
+    }
+    .jobs-breadcrumb-link:hover { color: var(--text); }
+
+    .jobs-breadcrumb-sep { color: var(--border-dark); }
+
+    .jobs-breadcrumb-current {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    /* ── Main content area ───────────────────────────────── */
+    .jobs-body {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 28px 28px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Page header ─────────────────────────────────────── */
+    .jobs-page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .jobs-page-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.4px;
+    }
+
+    .jobs-page-sub {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 3px;
+    }
+
+    /* ── Stat strip ──────────────────────────────────────── */
+    .jobs-stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    /* ── Toolbar ─────────────────────────────────────────── */
+    .jobs-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+    }
+
+    .filter-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .filter-tab {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .filter-tab:hover { border-color: var(--border-dark); color: var(--text); }
+    .filter-tab.active { background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
+
+    .filter-tab[data-status="DRAFT"].active        { background: #888;    border-color: #888; }
+    .filter-tab[data-status="PENDING_PAYMENT"].active { background: var(--amber-text); border-color: var(--amber-text); }
+    .filter-tab[data-status="IN_PROGRESS"].active  { background: var(--blue-text);   border-color: var(--blue-text); }
+    .filter-tab[data-status="READY"].active        { background: var(--green-text);  border-color: var(--green-text); }
+    .filter-tab[data-status="HALTED"].active       { background: var(--red-text);    border-color: var(--red-text); }
+    .filter-tab[data-status="COMPLETE"].active     { background: var(--green-text);  border-color: var(--green-text); }
+    .filter-tab[data-status="CANCELLED"].active    { background: #aaa;    border-color: #aaa; }
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .inp-sm {
+      padding: 7px 12px;
+      font-size: 12.5px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      transition: border-color var(--transition);
+      font-family: inherit;
+    }
+    .inp-sm:focus { border-color: var(--border-dark); background: var(--panel); }
+    .inp-sm::placeholder { color: var(--text-3); }
+
+    .sel-sm {
+      padding: 7px 26px 7px 10px;
+      font-size: 12.5px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text-2);
+      outline: none;
+      appearance: none;
+      cursor: pointer;
+      transition: border-color var(--transition);
+      font-family: inherit;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239a9690' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+    }
+    .sel-sm:focus { border-color: var(--border-dark); }
+
+    /* ── Table container ─────────────────────────────────── */
+    .jobs-table-container {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      flex: 1;
+    }
+
+    /* ── Pagination ──────────────────────────────────────── */
+    .jobs-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+
+    .page-info { font-size: 12.5px; color: var(--text-3); }
+
+    .page-btns { display: flex; gap: 6px; }
+
+    .page-btn {
+      padding: 5px 14px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border);
+      background: var(--bg);
+      font-size: 12.5px;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all var(--transition);
+      font-family: inherit;
+    }
+    .page-btn:hover:not(:disabled) { border-color: var(--border-dark); color: var(--text); }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Empty / error states ────────────────────────────── */
+    .empty-cell {
+      text-align: center !important;
+      padding: 60px 20px !important;
+    }
+
+    .empty-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px;
+      color: var(--text-3);
+    }
+
+    .empty-text { font-size: 13.5px; color: var(--text-3); font-weight: 500; }
+
+    /* ── Detail + Transition modal internals ─────────────── */
+    .detail-section { margin-bottom: 20px; }
+
+    .detail-section-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    .detail-field { display: flex; flex-direction: column; gap: 3px; }
+
+    .detail-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .detail-val { font-size: 13.5px; color: var(--text-2); font-weight: 500; }
+
+    .timeline { display: flex; flex-direction: column; gap: 0; }
+
+    .timeline-item {
+      display: flex; gap: 12px;
+      padding: 10px 0;
+      position: relative;
+    }
+
+    .timeline-item + .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: 11px; top: 0;
+      width: 2px; height: 10px;
+      background: var(--border);
+    }
+
+    .tl-dot {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      flex-shrink: 0; margin-top: 1px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-3);
+    }
+
+    .tl-dot.green { background: var(--green-bg); border-color: var(--green-border); color: var(--green-text); }
+    .tl-dot.red   { background: var(--red-bg);   border-color: var(--red-border);   color: var(--red-text); }
+
+    .tl-body  { flex: 1; }
+    .tl-status { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .tl-meta  { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+
+    .tl-notes {
+      font-size: 12px; color: var(--text-2); margin-top: 4px;
+      padding: 6px 10px;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+
+    .transition-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .transition-btn {
+      padding: 7px 16px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border);
+      background: var(--bg);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all var(--transition);
+      font-family: inherit;
+    }
+    .transition-btn:hover { border-color: var(--text); background: var(--text); color: #fff; }
+
+    /* ── NJ price box override ───────────────────────────── */
+    .nj-price-box {
+      display: none;
+      padding: 12px 16px;
+      background: var(--green-bg);
+      border: 1px solid var(--green-border);
+      border-radius: var(--radius-sm);
+      margin-top: 4px;
+    }
+    .nj-price-box.show { display: block; }
+
+    /* ── Type badges ─────────────────────────────────────── */
+    .type-badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 5px;
+      font-size: 10.5px; font-weight: 700;
+      letter-spacing: 0.3px; text-transform: uppercase;
+    }
+    .type-instant    { background: #eef3ff; color: #3355cc; }
+    .type-production { background: #f5f0ff; color: #7733cc; }
+    .type-design     { background: #fff0f7; color: #cc3388; }
+
+    /* ── Form elements for modal ─────────────────────────── */
+    .form-input {
+      padding: 9px 12px; font-size: 13.5px;
+      border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--text);
+      outline: none; width: 100%; appearance: none;
+      transition: border-color var(--transition);
+      font-family: inherit;
+    }
+    .form-input:focus { border-color: var(--border-dark); background: var(--panel); }
+    textarea.form-input { resize: vertical; min-height: 60px; }
+
+    .form-label {
+      font-size: 11px; font-weight: 700;
+      color: var(--text-3); letter-spacing: 0.3px;
+      text-transform: uppercase; display: block; margin-bottom: 5px;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+    .spec-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .spec-field-row.full { grid-template-columns: 1fr; }
+
+    .btn-ghost-light {
+      padding: 8px 18px; border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border); background: var(--panel);
+      font-size: 13px; font-weight: 500; color: var(--text-3);
+      cursor: pointer; transition: all var(--transition); font-family: inherit;
+    }
+    .btn-ghost-light:hover { border-color: var(--border-dark); color: var(--text); }
+
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 20px; background: var(--text); color: #fff;
+      border: none; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: background var(--transition); font-family: inherit;
+    }
+    .btn-primary:hover { background: #333; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
 
-<div class="page-bg">
-  <div class="panel">
+<div class="jobs-shell">
 
-    <!-- ── Top Bar ── -->
-    <div class="p-topbar">
-      <div>
-        <div class="p-title" id="jobs-branch-name">Loading…</div>
-        <div class="p-breadcrumb">
-          <a href="/portal/dashboard/" title="Dashboard">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+  <!-- ── Topbar ──────────────────────────────────────────── -->
+  <header class="jobs-topbar">
+    <div class="jobs-topbar-inner">
+
+      <div class="jobs-topbar-left">
+        <span class="jobs-brand">Octos</span>
+        <span class="jobs-brand-divider"></span>
+        <nav class="jobs-breadcrumb">
+          <a href="/portal/dashboard/" class="jobs-breadcrumb-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             Dashboard
           </a>
-          <span style="color:#ddd;margin:0 4px;">›</span>
-          <span class="cur">Jobs</span>
-        </div>
+          <span class="jobs-breadcrumb-sep">›</span>
+          <span class="jobs-breadcrumb-current" id="jobs-branch-name">Jobs</span>
+          <span class="jobs-breadcrumb-sep">›</span>
+          <span class="jobs-breadcrumb-current">All Jobs</span>
+        </nav>
       </div>
-      <div class="p-topbar-right">
-        <span class="pill-active"><span class="pill-dot"></span> Active</span>
-        <span class="pill-user">
-          <span class="user-avatar" id="jobs-user-initials">—</span>
+
+      <div class="topbar-right">
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          Active
+        </div>
+        <div class="branch-pill" id="jobs-branch-pill">—</div>
+        <div class="user-chip">
+          <div class="user-avatar" id="jobs-user-initials">—</div>
           <span class="user-name" id="jobs-user-name">—</span>
-          <span class="user-role">Branch Manager</span>
-        </span>
+        </div>
         <div style="position:relative;">
           <button class="icon-btn" id="jobs-notif-btn" title="Notifications" onclick="Notifications.toggle()">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -746,39 +465,53 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
+
+    </div>
+  </header>
+
+  <!-- ── Page body ────────────────────────────────────────── -->
+  <div class="jobs-body">
+
+    <!-- Page header -->
+    <div class="jobs-page-head">
+      <div>
+        <div class="jobs-page-title">Jobs</div>
+        <div class="jobs-page-sub" id="meta-date">—</div>
+      </div>
+      <button class="hero-btn hero-btn-primary" style="padding:10px 20px;" onclick="NJ.open()">
+        <div class="hero-btn-icon" style="width:26px;height:26px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div class="hero-btn-label">
+          <span class="hero-btn-title" style="font-size:13px;">New Job</span>
+        </div>
+      </button>
     </div>
 
-    <!-- ── Stat Strip ── -->
-    <div class="stat-strip">
-      <div class="stat-cell" style="background:#DCE8FF;border:1.5px solid #A8C4FF;">
-        <div class="stat-num" style="color:#1A4FCC;" id="stat-total">0</div>
+    <!-- Stat strip -->
+    <div class="jobs-stat-strip">
+      <div class="stat-card blue">
+        <div class="stat-num" id="stat-total">0</div>
         <div class="stat-lbl">Total Jobs</div>
       </div>
-      <div class="stat-cell" style="background:#FFF0C2;border:1.5px solid #F5C842;">
-        <div class="stat-num" style="color:#B8860B;" id="stat-in-progress">0</div>
+      <div class="stat-card amber">
+        <div class="stat-num" id="stat-in-progress">0</div>
         <div class="stat-lbl">In Progress</div>
       </div>
-      <div class="stat-cell" style="background:#D6F5E8;border:1.5px solid #6DDBA8;">
-        <div class="stat-num" style="color:#1A7A4A;" id="stat-complete">0</div>
+      <div class="stat-card green">
+        <div class="stat-num" id="stat-complete">0</div>
         <div class="stat-lbl">Complete</div>
       </div>
-      <div class="stat-cell" style="background:#EAE0FF;border:1.5px solid #B89EFF;">
-        <div class="stat-num" style="color:#5B21CC;" id="stat-revenue">0</div>
+      <div class="stat-card purple">
+        <div class="stat-num" id="stat-revenue">0</div>
         <div class="stat-lbl">Revenue (GHS)</div>
       </div>
     </div>
 
-    <!-- ── Meta Row ── -->
-    <div class="meta-row">
-      <div class="meta-item"><span class="meta-key">Branch</span><span class="meta-val" id="meta-branch">—</span></div>
-      <div class="meta-item"><span class="meta-key">Region</span><span class="meta-val" id="meta-region">—</span></div>
-      <div class="meta-item"><span class="meta-key">Date</span><span class="meta-val" id="meta-date">—</span></div>
-    </div>
-
-    <!-- ── Toolbar ── -->
+    <!-- Toolbar -->
     <div class="jobs-toolbar">
       <div class="filter-tabs" id="filter-tabs">
-        <button class="filter-tab active"  data-status="all">All</button>
+        <button class="filter-tab active" data-status="all">All</button>
         <button class="filter-tab" data-status="DRAFT">Draft</button>
         <button class="filter-tab" data-status="PENDING_PAYMENT">Pending Payment</button>
         <button class="filter-tab" data-status="IN_PROGRESS">In Progress</button>
@@ -788,22 +521,18 @@
         <button class="filter-tab" data-status="CANCELLED">Cancelled</button>
       </div>
       <div class="toolbar-right">
-        <input type="text" id="jobs-search" class="inp-sm" placeholder="Search jobs…" style="width:190px;">
+        <input type="text" id="jobs-search" class="inp-sm" placeholder="Search jobs…" style="width:180px;">
         <select id="jobs-type" class="sel-sm">
           <option value="">All Types</option>
           <option value="INSTANT">Instant</option>
           <option value="PRODUCTION">Production</option>
           <option value="DESIGN">Design</option>
         </select>
-        <button class="new-btn" onclick="NJ.open()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New Job
-        </button>
       </div>
     </div>
 
-    <!-- ── Table ── -->
-    <div class="jobs-body">
+    <!-- Table -->
+    <div class="jobs-table-container">
       <table class="p-table">
         <thead>
           <tr>
@@ -811,7 +540,7 @@
             <th>Customer</th>
             <th>Type</th>
             <th>Status</th>
-            <th>Est. Price (GHS)</th>
+            <th>Est. Price</th>
             <th>Created</th>
           </tr>
         </thead>
@@ -819,37 +548,35 @@
           <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading jobs…</td></tr>
         </tbody>
       </table>
-    </div>
 
-    <!-- ── Pagination ── -->
-    <div class="pagination" id="pagination" style="display:none;">
-      <span class="page-info" id="page-info"></span>
-      <div class="page-btns">
-        <button class="page-btn" id="btn-prev" onclick="Jobs.prevPage()">← Prev</button>
-        <button class="page-btn" id="btn-next" onclick="Jobs.nextPage()">Next →</button>
+      <!-- Pagination inside container -->
+      <div class="jobs-pagination" id="pagination" style="display:none;">
+        <span class="page-info" id="page-info"></span>
+        <div class="page-btns">
+          <button class="page-btn" id="btn-prev" onclick="Jobs.prevPage()">← Prev</button>
+          <button class="page-btn" id="btn-next" onclick="Jobs.nextPage()">Next →</button>
+        </div>
       </div>
     </div>
 
-  </div><!-- /panel -->
-</div><!-- /page-bg -->
+  </div><!-- /jobs-body -->
+
+</div><!-- /jobs-shell -->
 
 
-<!-- ═══════════════════════════════════════════════════════════
+<!-- ═══════════════════════════════════════
      NEW JOB MODAL
-═══════════════════════════════════════════════════════════════ -->
+═══════════════════════════════════════ -->
 <div class="modal-overlay" id="new-job-modal" onclick="if(event.target===this)closeNewJobModal()">
-  <div class="modal" style="max-width:520px;width:100%;">
-
-    <!-- Header -->
-    <div class="modal-header">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-head">
       <div>
         <div class="modal-title">New Job</div>
         <div class="modal-subtitle">Record a new job for this branch</div>
       </div>
-      <button class="modal-close" onclick="closeNewJobModal()">×</button>
+      <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
 
-    <!-- Job Type Toggle -->
     <div style="padding:20px 24px 0;">
       <div class="nj-toggle" id="nj-type-toggle">
         <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
@@ -859,19 +586,17 @@
       </div>
     </div>
 
-    <!-- Form Body -->
     <div class="modal-body" style="padding-top:16px;">
 
-      <!-- Service + Priority -->
       <div class="form-row-2">
         <div class="form-group">
-          <label class="form-label">SERVICE</label>
+          <label class="form-label">Service</label>
           <select id="nj-service" class="form-input" onchange="NJ.onServiceChange()">
             <option value="">Select service…</option>
           </select>
         </div>
         <div class="form-group" id="nj-priority-row">
-          <label class="form-label">PRIORITY</label>
+          <label class="form-label">Priority</label>
           <select id="nj-priority" class="form-input">
             <option value="NORMAL">Normal</option>
             <option value="HIGH">High</option>
@@ -880,16 +605,15 @@
         </div>
       </div>
 
-      <!-- Customer + Channel -->
       <div class="form-row-2">
         <div class="form-group">
-          <label class="form-label">CUSTOMER <span style="color:#ccc;font-weight:400;">(optional)</span></label>
+          <label class="form-label">Customer <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
           <select id="nj-customer" class="form-input">
             <option value="">Walk-in / Unknown</option>
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">INTAKE CHANNEL</label>
+          <label class="form-label">Intake Channel</label>
           <select id="nj-channel" class="form-input">
             <option value="WALK_IN">Walk-in</option>
             <option value="WHATSAPP">WhatsApp</option>
@@ -899,82 +623,78 @@
         </div>
       </div>
 
-      <!-- Dynamic spec fields -->
       <div id="nj-spec-fields"></div>
 
-      <!-- Deposit + Deadline -->
-      <div class="form-row-2" id="nj-deposit-deadline-row">
-        <div class="form-group">
-          <label class="form-label">DEPOSIT</label>
-          <select id="nj-deposit" class="form-input">
-            <option value="100">100% — Full Payment</option>
-            <option value="70">70% — Deposit</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">DEADLINE <span style="color:#ccc;font-weight:400;">(optional)</span></label>
-          <input type="datetime-local" id="nj-deadline" class="form-input">
+      <div id="nj-deposit-deadline-row">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Deposit</label>
+            <select id="nj-deposit" class="form-input">
+              <option value="100">100% — Full Payment</option>
+              <option value="70">70% — Deposit</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Deadline <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+            <input type="datetime-local" id="nj-deadline" class="form-input">
+          </div>
         </div>
       </div>
-      
-      <!-- Notes -->
+
       <div class="form-group" id="nj-notes-row">
-        <label class="form-label">NOTES <span style="color:#ccc;font-weight:400;">(optional)</span></label>
+        <label class="form-label">Notes <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
         <textarea id="nj-notes" class="form-input" rows="2" placeholder="Any special instructions…"></textarea>
       </div>
 
-      <!-- Price preview -->
       <div class="nj-price-box" id="nj-price-box">
         <div style="display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:12px;color:#888;font-weight:600;letter-spacing:0.5px;">ESTIMATED COST</span>
-          <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#111;">—</span>
+          <span style="font-size:12px;color:var(--green-text);font-weight:600;letter-spacing:0.5px;">ESTIMATED COST</span>
+          <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--green-text);">—</span>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-          <span style="font-size:11.5px;color:#aaa;">Amount due at payment</span>
-          <span id="nj-deposit-due" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#666;">—</span>
+          <span style="font-size:11.5px;color:var(--green-text);opacity:0.7;">Amount due at payment</span>
+          <span id="nj-deposit-due" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--green-text);">—</span>
         </div>
       </div>
 
-    </div><!-- /.modal-body -->
+    </div>
 
-    <!-- Footer -->
-    <div class="modal-footer">
+    <div class="modal-foot">
       <button class="btn-ghost-light" onclick="closeNewJobModal()">Cancel</button>
       <button class="btn-primary" id="nj-submit-btn" onclick="NJ.createJob()">
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Create Job
       </button>
     </div>
-
   </div>
 </div>
 
 
-<!-- ═══════════════════════════════════════════════════════════
+<!-- ═══════════════════════════════════════
      JOB DETAIL MODAL
-═══════════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" id="job-detail-modal">
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="job-detail-modal" onclick="if(event.target===this)closeDetailModal()">
   <div class="modal wide">
     <div class="modal-head">
       <div>
         <div class="modal-title" id="detail-title">Job Detail</div>
-        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:#aaa;"></div>
+        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:var(--text-3);"></div>
       </div>
       <button class="modal-x" onclick="closeDetailModal()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body" id="detail-body">
-      <div style="text-align:center;padding:40px;color:#ccc;"><span class="spin"></span> Loading…</div>
+      <div style="text-align:center;padding:40px;color:var(--text-3);"><span class="spin"></span> Loading…</div>
     </div>
   </div>
 </div>
 
 
-<!-- ═══════════════════════════════════════════════════════════
+<!-- ═══════════════════════════════════════
      TRANSITION MODAL
-═══════════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" id="transition-modal">
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="transition-modal" onclick="if(event.target===this)closeTransitionModal()">
   <div class="modal">
     <div class="modal-head">
       <div>
@@ -982,7 +702,7 @@
         <div class="modal-subtitle" id="transition-job-ref"></div>
       </div>
       <button class="modal-x" onclick="closeTransitionModal()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body">
@@ -990,9 +710,9 @@
         <div class="detail-section-title">Move to</div>
         <div class="transition-btns" id="transition-btns"></div>
       </div>
-      <div class="fg" style="margin-top:16px;">
-        <label>NOTES (optional)</label>
-        <textarea id="transition-notes" placeholder="Add context about this status change…"></textarea>
+      <div class="form-group" style="margin-top:16px;">
+        <label class="form-label">Notes (optional)</label>
+        <textarea id="transition-notes" class="form-input" rows="2" placeholder="Add context about this status change…"></textarea>
       </div>
     </div>
     <div class="modal-foot">
@@ -1007,7 +727,6 @@
 
 <div id="toast-container"></div>
 
-<!-- ── Scripts: load order matters ── -->
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/jobs.js' %}"></script>
 <script src="{% static 'js/nj_controller.js' %}"></script>
@@ -1017,12 +736,12 @@
   function closeDetailModal()     { document.getElementById('job-detail-modal').classList.remove('open'); }
   function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }
 
-  // Close on overlay click
-  ['new-job-modal','job-detail-modal','transition-modal'].forEach(id => {
-    document.getElementById(id).addEventListener('click', function(e) {
-      if (e.target === this) this.classList.remove('open');
-    });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#jobs-notif-btn') && !e.target.closest('#notif-dropdown')) {
+      if (typeof Notifications !== 'undefined') Notifications.close();
+    }
   });
 </script>
+
 </body>
 </html>

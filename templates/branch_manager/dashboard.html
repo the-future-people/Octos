@@ -14,65 +14,62 @@
 <div class="app-shell" id="app-shell">
 
   <!-- ── Topbar ──────────────────────────────────────────── -->
-<header class="topbar">
+  <header class="topbar">
     <div class="topbar-inner">
 
-    <!-- Brand + collapse toggle -->
-    <div class="topbar-toggle">
-      <span class="brand-logo">Octos</span>
-      <span class="brand-divider"></span>
-      <span class="brand-role">Branch Manager</span>
-      <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      </button>
-    </div>
-
-    <!-- Breadcrumb -->
-    <div class="topbar-center">
-      <nav class="breadcrumb" id="breadcrumb">
-        <div class="breadcrumb-item">
-          <span class="breadcrumb-current" id="db-branch-name">Loading…</span>
-        </div>
-        <span class="breadcrumb-sep">›</span>
-        <div class="breadcrumb-item">
-          <span class="breadcrumb-current" id="breadcrumb-current">Overview</span>
-        </div>
-      </nav>
-    </div>
-
-    <!-- Right side -->
-    <div class="topbar-right">
-      <div class="live-indicator">
-        <div class="live-dot"></div>
-        Active
-      </div>
-      <div class="branch-pill" id="db-branch-pill">—</div>
-      <div class="user-chip">
-        <div class="user-avatar" id="db-user-initials">—</div>
-        <span class="user-name" id="db-user-name">—</span>
-      </div>
-      <div style="position:relative;">
-        <button class="icon-btn" id="db-notif-btn" title="Notifications" onclick="Notifications.toggle()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span class="notif-badge" id="db-notif-badge">0</span>
+      <div class="topbar-toggle">
+        <span class="brand-logo">Octos</span>
+        <span class="brand-divider"></span>
+        <span class="brand-role">Branch Manager</span>
+        <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
-        <div class="notif-dropdown" id="notif-dropdown">
-          <div class="notif-dropdown-head">
-            <span class="notif-dropdown-title">Notifications</span>
-            <button class="notif-read-all" onclick="Notifications.markAllRead()">Mark all read</button>
-          </div>
-          <div class="notif-list" id="notif-list">
-            <div class="notif-empty">Loading…</div>
-          </div>
-          <div class="notif-footer" onclick="Notifications.close()">Close</div>
-        </div>
       </div>
-      <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      </button>
-    </div>
 
-</div><!-- /topbar-inner -->
+      <div class="topbar-center">
+        <nav class="breadcrumb" id="breadcrumb">
+          <div class="breadcrumb-item">
+            <span class="breadcrumb-current" id="db-branch-name">Loading…</span>
+          </div>
+          <span class="breadcrumb-sep">›</span>
+          <div class="breadcrumb-item">
+            <span class="breadcrumb-current" id="breadcrumb-current">Overview</span>
+          </div>
+        </nav>
+      </div>
+
+      <div class="topbar-right">
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          Active
+        </div>
+        <div class="branch-pill" id="db-branch-pill">—</div>
+        <div class="user-chip">
+          <div class="user-avatar" id="db-user-initials">—</div>
+          <span class="user-name" id="db-user-name">—</span>
+        </div>
+        <div style="position:relative;">
+          <button class="icon-btn" id="db-notif-btn" title="Notifications" onclick="Notifications.toggle()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="notif-badge" id="db-notif-badge">0</span>
+          </button>
+          <div class="notif-dropdown" id="notif-dropdown">
+            <div class="notif-dropdown-head">
+              <span class="notif-dropdown-title">Notifications</span>
+              <button class="notif-read-all" onclick="Notifications.markAllRead()">Mark all read</button>
+            </div>
+            <div class="notif-list" id="notif-list">
+              <div class="notif-empty">Loading…</div>
+            </div>
+            <div class="notif-footer" onclick="Notifications.close()">Close</div>
+          </div>
+        </div>
+        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+
+    </div>
   </header>
 
   <!-- ── Body layout ─────────────────────────────────────── -->
@@ -112,6 +109,12 @@
 
         <div class="sidebar-section">Branch</div>
 
+        <div class="sidebar-item" data-pane="performance" data-label="Performance"
+          onclick="Dashboard.switchPane('performance', 'Performance')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span class="sidebar-label">Performance</span>
+        </div>
+
         <div class="sidebar-item" data-pane="services" data-label="Services"
           onclick="Dashboard.switchPane('services', 'Services')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -126,7 +129,7 @@
 
         <div class="sidebar-item" data-pane="reports" data-label="Reports"
           onclick="Dashboard.switchPane('reports', 'Reports')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span class="sidebar-label">Reports</span>
         </div>
 
@@ -166,7 +169,6 @@
         <!-- ── OVERVIEW ──────────────────────────────────── -->
         <div class="pane active" id="pane-overview">
 
-          <!-- Hero actions -->
           <div class="hero-actions">
             <button class="hero-btn hero-btn-primary" onclick="NJ.open()">
               <div class="hero-btn-icon">
@@ -188,7 +190,6 @@
             </button>
           </div>
 
-          <!-- Stat cards -->
           <div class="stat-grid">
             <div class="stat-card blue">
               <div class="stat-num" id="stat-total-jobs">0</div>
@@ -216,25 +217,6 @@
             </div>
           </div>
 
-          <!-- Metrics -->
-          <div class="metrics-section">
-            <div class="metrics-head">
-              <span class="metrics-title">Branch Performance</span>
-              <div class="period-tabs">
-                <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
-                <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
-                <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
-              </div>
-            </div>
-            <div class="metrics-grid" id="metrics-grid">
-              <!-- Rendered by JS -->
-              <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
-                <span class="spin"></span> Loading metrics…
-              </div>
-            </div>
-          </div>
-
-          <!-- Recent jobs -->
           <div class="section-head">
             <span class="section-title">Recent Jobs</span>
             <a href="/portal/jobs/" class="section-link">View all →</a>
@@ -278,6 +260,25 @@
           <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;padding:8px 0;">
             <div id="inbox-tab-list" class="inbox-list">
               <div class="loading-cell"><span class="spin"></span> Loading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PERFORMANCE ───────────────────────────────── -->
+        <div class="pane" id="pane-performance">
+          <div class="section-head">
+            <span class="section-title">Branch Performance</span>
+            <div class="period-tabs">
+              <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
+              <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
+              <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
+            </div>
+          </div>
+          <div class="metrics-section">
+            <div class="metrics-grid" id="metrics-grid">
+              <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+                <span class="spin"></span> Loading metrics…
+              </div>
             </div>
           </div>
         </div>
@@ -328,7 +329,6 @@
       <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
 
-    <!-- Job Type Toggle -->
     <div style="padding:20px 24px 0;">
       <div class="nj-toggle" id="nj-type-toggle">
         <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
@@ -375,7 +375,6 @@
         </div>
       </div>
 
-      <!-- Dynamic spec fields -->
       <div id="nj-spec-fields"></div>
 
       <div id="nj-deposit-deadline-row">
@@ -399,7 +398,6 @@
         <textarea id="nj-notes" rows="2" placeholder="Any special instructions…"></textarea>
       </div>
 
-      <!-- Price preview -->
       <div class="price-box" id="nj-price-box">
         <span class="price-label">Estimated Cost</span>
         <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--green-text);">—</span>
@@ -419,7 +417,7 @@
 
 
 <!-- ═══════════════════════════════════════
-     OUTSOURCE MODAL (placeholder)
+     OUTSOURCE MODAL
 ═══════════════════════════════════════ -->
 <div class="modal-overlay" id="outsource-modal" onclick="if(event.target===this)closeOutsourceModal()">
   <div class="modal">
@@ -466,16 +464,13 @@
 <script src="{% static 'js/nj_controller.js' %}"></script>
 
 <script>
-  // Sidebar collapse
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     document.getElementById('app-shell').classList.toggle('collapsed');
   });
 
-  // Modal helpers
-  function closeNewJobModal()     { document.getElementById('new-job-modal').classList.remove('open'); }
-  function closeOutsourceModal()  { document.getElementById('outsource-modal').classList.remove('open'); }
+  function closeNewJobModal()    { document.getElementById('new-job-modal').classList.remove('open'); }
+  function closeOutsourceModal() { document.getElementById('outsource-modal').classList.remove('open'); }
 
-  // Close notif on outside click
   document.addEventListener('click', e => {
     if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {
       Notifications.close();

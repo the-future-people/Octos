@@ -4,9 +4,10 @@
  * Octos — Cashier Portal
  *
  * API:
- *   GET  /api/v1/jobs/cashier/queue/          — PENDING_PAYMENT jobs for branch
- *   POST /api/v1/jobs/<id>/cashier/confirm/   — confirm payment
- *   GET  /api/v1/accounts/me/                 — user/branch context
+ *   GET  /api/v1/jobs/cashier/queue/           — PENDING_PAYMENT jobs for branch
+ *   GET  /api/v1/jobs/cashier/summary/         — today's totals per payment method
+ *   POST /api/v1/jobs/<id>/cashier/confirm/    — confirm payment
+ *   GET  /api/v1/accounts/me/                  — user/branch context
  *   POST /api/v1/finance/receipts/<id>/send-whatsapp/ — send receipt
  */
 
@@ -18,9 +19,9 @@ const Cashier = (() => {
   let activeJob       = null;
   let selectedDeposit = 100;
   let selectedMethod  = 'CASH';
-  let lastReceipt     = null;   // result from last confirmed payment
+  let lastReceipt     = null;
+  let currentPane     = 'queue';
 
-  // Daily running totals (frontend-only, refreshed on each queue load)
   const totals = { CASH: 0, MOMO: 0, POS: 0, count: 0 };
 
   const POLL_INTERVAL   = 8000;
@@ -28,7 +29,7 @@ const Cashier = (() => {
   const WAIT_RED_MINS   = 20;
 
   // ── Bootstrap ──────────────────────────────────────────────
-async function init() {
+  async function init() {
     Auth.guard();
     await loadContext();
     await loadSummary();
@@ -36,6 +37,45 @@ async function init() {
     _startPolling();
   }
 
+  // ── Context ────────────────────────────────────────────────
+  async function loadContext() {
+    try {
+      const res = await Auth.fetch('/api/v1/accounts/me/');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const user = data;
+
+      const branchEl = document.getElementById('cashier-branch-name');
+      const nameEl   = document.getElementById('cashier-user-name');
+      const initEl   = document.getElementById('cashier-user-initials');
+
+      // branch comes back as integer ID — fetch the branch name separately
+      if (branchEl) {
+        if (typeof data.branch === 'object' && data.branch) {
+          branchEl.textContent = data.branch.name || '—';
+        } else if (data.branch) {
+          try {
+            const br = await Auth.fetch(`/api/v1/organization/branches/${data.branch}/`);
+            if (br.ok) {
+              const b = await br.json();
+              branchEl.textContent = b.name || '—';
+            }
+          } catch { branchEl.textContent = '—'; }
+        }
+      }
+      if (nameEl)   nameEl.textContent   = user.full_name || user.email || '—';
+
+      const initials = (user.full_name || '')
+        .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??';
+      if (initEl) initEl.textContent = initials;
+
+    } catch (e) {
+      console.warn('loadContext failed:', e);
+    }
+  }
+
+  // ── Summary ────────────────────────────────────────────────
   async function loadSummary() {
     try {
       const res = await Auth.fetch('/api/v1/jobs/cashier/summary/');
@@ -53,32 +93,106 @@ async function init() {
     }
   }
 
-  // ── Context ────────────────────────────────────────────────
-  async function loadContext() {
-    try {
-      const res = await Auth.fetch('/api/v1/accounts/me/');
-      if (!res.ok) return;
-      const data = await res.json();
+  // ── Pane switching ─────────────────────────────────────────
+  function switchPane(paneId) {
+    currentPane = paneId;
 
-      const user   = data.user   || data;
-      const branch = data.branch || {};
+    // Update sidebar active states
+    document.querySelectorAll('.sidebar-item[data-pane]').forEach(item => {
+      item.classList.toggle('active', item.dataset.pane === paneId);
+    });
 
-      document.getElementById('cashier-branch-name').textContent =
-        branch.name || '—';
-      document.getElementById('cashier-user-name').textContent =
-        user.full_name || user.email || '—';
+    const main = document.getElementById('cashier-main-content');
+    if (!main) return;
 
-      const initials = (user.full_name || '')
-        .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??';
-      document.getElementById('cashier-user-initials').textContent = initials;
-
-    } catch (e) {
-      console.warn('loadContext failed:', e);
+    if (paneId === 'queue') {
+      _renderQueuePane(main);
+      loadQueue();
+      _updateSummaryStrip();
+    } else {
+      const labels = {
+        receipts : 'Receipts',
+        log      : "Today's Log",
+        credit   : 'Credit Accounts',
+      };
+      main.innerHTML = `
+        <div style="
+          display:flex;flex-direction:column;align-items:center;
+          justify-content:center;height:320px;gap:12px;
+          color:var(--text-3);
+        ">
+          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--text);">
+            ${labels[paneId] || paneId}
+          </div>
+          <div style="font-size:13px;">This section is coming soon.</div>
+        </div>`;
     }
+  }
+
+  function _renderQueuePane(container) {
+    container.innerHTML = `
+      <!-- Summary strip -->
+      <div class="summary-strip">
+        <div class="summary-card cash">
+          <div class="summary-label">Cash</div>
+          <div class="summary-amount" id="sum-cash">GHS 0.00</div>
+          <div class="summary-count" id="sum-total-count">0 transactions</div>
+        </div>
+        <div class="summary-card momo">
+          <div class="summary-label">MoMo</div>
+          <div class="summary-amount" id="sum-momo">GHS 0.00</div>
+          <div class="summary-count">0 transactions</div>
+        </div>
+        <div class="summary-card pos">
+          <div class="summary-label">POS</div>
+          <div class="summary-amount" id="sum-pos">GHS 0.00</div>
+          <div class="summary-count">0 transactions</div>
+        </div>
+        <div class="summary-card total">
+          <div class="summary-label">Total Collected</div>
+          <div class="summary-amount" id="sum-total">GHS 0.00</div>
+          <div class="summary-count" id="sum-jobs-count">0 jobs confirmed</div>
+        </div>
+      </div>
+
+      <!-- Queue header -->
+      <div class="queue-header">
+        <div>
+          <div class="queue-title">Payment Queue</div>
+          <div class="queue-subtitle">Jobs waiting for payment confirmation — oldest first</div>
+        </div>
+        <div class="queue-meta">
+          <div class="queue-pill">
+            <span id="queue-count-num">—</span> pending
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue list -->
+      <div class="queue-list" id="queue-list">
+        <div class="skeleton-card">
+          <div class="skel" style="width:22px;height:14px;"></div>
+          <div style="flex:1;">
+            <div class="skel" style="width:55%;height:14px;margin-bottom:8px;"></div>
+            <div class="skel" style="width:38%;height:11px;"></div>
+          </div>
+          <div class="skel" style="width:90px;height:18px;"></div>
+          <div class="skel" style="width:110px;height:34px;border-radius:8px;"></div>
+        </div>
+      </div>`;
   }
 
   // ── Queue ──────────────────────────────────────────────────
   async function loadQueue() {
+    // Only update queue if on queue pane
+    if (currentPane !== 'queue') return;
+
     try {
       const res = await Auth.fetch('/api/v1/jobs/cashier/queue/');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -93,13 +207,17 @@ async function init() {
 
   function _renderQueue() {
     const list  = document.getElementById('queue-list');
+    if (!list) return;
+
     const count = queue.length;
 
-    // Update count badges
-    document.getElementById('queue-count-num').textContent        = count;
-    document.getElementById('sidebar-queue-count').textContent    = count;
-    document.getElementById('sidebar-queue-count').style.display  =
-      count > 0 ? 'flex' : 'none';
+    const countEl = document.getElementById('queue-count-num');
+    const badgeEl = document.getElementById('sidebar-queue-count');
+    if (countEl) countEl.textContent = count;
+    if (badgeEl) {
+      badgeEl.textContent    = count;
+      badgeEl.style.display  = count > 0 ? 'flex' : 'none';
+    }
 
     if (!count) {
       list.innerHTML = `
@@ -119,23 +237,20 @@ async function init() {
     }
 
     list.innerHTML = queue.map((job, i) => {
-      const cost = job.estimated_cost
+      const cost      = job.estimated_cost
         ? `GHS ${parseFloat(job.estimated_cost).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
         : '—';
-
       const priority  = job.priority || 'NORMAL';
       const waitClass = _waitClass(job.created_at);
       const waitLabel = _waitLabel(job.created_at);
-      const customer  = _esc(job.customer_name || 'Walk-in');
+      const customer  = _esc(job.customer_name  || 'Walk-in');
       const attendant = _esc(job.intake_by_name || '—');
-
       const priorityTag = priority !== 'NORMAL'
         ? `<span class="priority-tag ${priority}">${priority}</span>`
         : '';
 
       return `
-        <div class="queue-card priority-${priority}"
-          onclick="Cashier.openConfirm(${job.id})">
+        <div class="queue-card priority-${priority}" onclick="Cashier.openConfirm(${job.id})">
           <div class="queue-card-index">${String(i + 1).padStart(2, '0')}</div>
           <div class="queue-card-info">
             <div class="queue-card-title">${_esc(job.title || '—')}</div>
@@ -162,11 +277,11 @@ async function init() {
   }
 
   function _renderQueueError() {
-    document.getElementById('queue-list').innerHTML = `
+    const list = document.getElementById('queue-list');
+    if (!list) return;
+    list.innerHTML = `
       <div class="queue-empty">
-        <div class="queue-empty-title" style="color:#cc3300;">
-          Failed to load queue
-        </div>
+        <div class="queue-empty-title" style="color:#cc3300;">Failed to load queue</div>
         <div class="queue-empty-sub">Check your connection and refresh</div>
       </div>`;
   }
@@ -201,77 +316,62 @@ async function init() {
     activeJob = queue.find(j => j.id === jobId);
     if (!activeJob) return;
 
-    // Reset state
     selectedDeposit = 100;
     selectedMethod  = 'CASH';
 
-    // Populate job summary
-    document.getElementById('confirm-job-ref').textContent =
-      activeJob.job_number || '#' + activeJob.id;
-    document.getElementById('confirm-job-name').textContent =
-      activeJob.title || '—';
-    document.getElementById('confirm-attendant').textContent =
-      activeJob.intake_by_name || '—';
-    document.getElementById('confirm-type').textContent =
-      activeJob.job_type || '—';
-    document.getElementById('confirm-customer').textContent =
-      activeJob.customer_name || 'Walk-in';
+    const _s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const _v = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
 
-    const cost = activeJob.estimated_cost
+    _s('confirm-job-ref',  activeJob.job_number || '#' + activeJob.id);
+    _s('confirm-job-name', activeJob.title || '—');
+    _s('confirm-attendant', activeJob.intake_by_name || '—');
+    _s('confirm-type',     activeJob.job_type || '—');
+    _s('confirm-customer', activeJob.customer_name || 'Walk-in');
+    _s('confirm-est-cost', activeJob.estimated_cost
       ? `GHS ${parseFloat(activeJob.estimated_cost).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
-      : '—';
-    document.getElementById('confirm-est-cost').textContent = cost;
+      : '—');
 
-    // Pre-fill phone if customer has one
-    document.getElementById('confirm-phone').value =
-      activeJob.customer_phone || '';
+    _v('confirm-phone', activeJob.customer_phone || '');
+    _v('confirm-notes', '');
+    _v('momo-ref', '');
+    _v('pos-ref',  '');
 
-    // Reset fields
-    document.getElementById('confirm-notes').value = '';
-    document.getElementById('momo-ref').value       = '';
-    document.getElementById('pos-ref').value        = '';
-
-    // Reset UI state
     selectMethod('CASH');
     selectDeposit(100);
 
     const btn = document.getElementById('confirm-submit-btn');
-    btn.disabled    = false;
-    btn.textContent = '✓ Confirm Payment';
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Payment'; }
 
-    document.getElementById('confirm-overlay').classList.add('open');
+    document.getElementById('confirm-overlay')?.classList.add('open');
   }
 
   function closeConfirm() {
-    document.getElementById('confirm-overlay').classList.remove('open');
+    document.getElementById('confirm-overlay')?.classList.remove('open');
     activeJob = null;
   }
 
-  // ── Payment method selection ───────────────────────────────
+  // ── Payment method ─────────────────────────────────────────
   function selectMethod(method) {
     selectedMethod = method;
 
-    // Update button states
     ['CASH', 'MOMO', 'POS'].forEach(m => {
       const btn = document.getElementById(`pm-${m.toLowerCase()}`);
       if (btn) btn.classList.toggle('selected', m === method);
     });
 
-    // Show/hide reference fields
     const momoField = document.getElementById('momo-ref-field');
     const posField  = document.getElementById('pos-ref-field');
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
 
-    // Update amount due box color
     _updateAmountDue();
   }
 
-  // ── Deposit selection ──────────────────────────────────────
+  // ── Deposit ────────────────────────────────────────────────
   function selectDeposit(pct) {
     selectedDeposit = pct;
-    document.getElementById('opt-100').classList.toggle('selected', pct === 100);
-    document.getElementById('opt-70').classList.toggle('selected',  pct === 70);
+    document.getElementById('opt-100')?.classList.toggle('selected', pct === 100);
+    document.getElementById('opt-70')?.classList.toggle('selected',  pct === 70);
     _updateAmountDue();
   }
 
@@ -280,13 +380,10 @@ async function init() {
     const val = document.getElementById('confirm-amount-due');
     const btn = document.getElementById('confirm-submit-btn');
 
-    // Update box color class
     if (box) {
       box.classList.remove('cash', 'momo', 'pos');
       box.classList.add(selectedMethod.toLowerCase());
     }
-
-    // Update confirm button color
     if (btn) {
       btn.classList.remove('cash', 'momo', 'pos');
       btn.classList.add(selectedMethod.toLowerCase());
@@ -298,42 +395,30 @@ async function init() {
     }
 
     const due = parseFloat(activeJob.estimated_cost) * selectedDeposit / 100;
-    if (val) {
-      val.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
-    }
+    if (val) val.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
   }
 
   // ── Confirm payment ────────────────────────────────────────
   async function confirmPayment() {
     if (!activeJob) return;
 
-    // Validate references
     if (selectedMethod === 'MOMO') {
-      const ref = document.getElementById('momo-ref').value.trim();
-      if (!ref) {
-        _toast('MoMo reference number is required.', 'error');
-        document.getElementById('momo-ref').focus();
-        return;
-      }
+      const ref = document.getElementById('momo-ref')?.value.trim();
+      if (!ref) { _toast('MoMo reference number is required.', 'error'); return; }
     }
 
     if (selectedMethod === 'POS') {
-      const code = document.getElementById('pos-ref').value.trim();
-      if (!code) {
-        _toast('POS approval code is required.', 'error');
-        document.getElementById('pos-ref').focus();
-        return;
-      }
+      const code = document.getElementById('pos-ref')?.value.trim();
+      if (!code) { _toast('POS approval code is required.', 'error'); return; }
     }
 
-    const notes    = document.getElementById('confirm-notes').value.trim();
-    const phone    = document.getElementById('confirm-phone').value.trim();
-    const momoRef  = document.getElementById('momo-ref').value.trim();
-    const posCode  = document.getElementById('pos-ref').value.trim();
-    const btn      = document.getElementById('confirm-submit-btn');
+    const notes   = document.getElementById('confirm-notes')?.value.trim() || '';
+    const phone   = document.getElementById('confirm-phone')?.value.trim() || '';
+    const momoRef = document.getElementById('momo-ref')?.value.trim()      || '';
+    const posCode = document.getElementById('pos-ref')?.value.trim()       || '';
+    const btn     = document.getElementById('confirm-submit-btn');
 
-    btn.disabled    = true;
-    btn.textContent = 'Processing…';
+    if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
 
     try {
       const body = {
@@ -341,7 +426,6 @@ async function init() {
         payment_method     : selectedMethod,
         notes,
       };
-
       if (selectedMethod === 'MOMO') body.momo_reference    = momoRef;
       if (selectedMethod === 'POS')  body.pos_approval_code = posCode;
       if (phone)                     body.customer_phone    = phone;
@@ -363,11 +447,8 @@ async function init() {
       const result = await res.json();
       lastReceipt  = result;
 
-      // Update running totals
       const paid = parseFloat(result.amount_paid || 0);
-      if (totals[selectedMethod] !== undefined) {
-        totals[selectedMethod] += paid;
-      }
+      if (totals[selectedMethod] !== undefined) totals[selectedMethod] += paid;
       totals.count += 1;
       _updateSummaryStrip();
 
@@ -378,24 +459,21 @@ async function init() {
     } catch (e) {
       _toast('Network error. Please try again.', 'error');
     } finally {
-      btn.disabled    = false;
-      btn.textContent = '✓ Confirm Payment';
+      if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Payment'; }
     }
   }
 
   // ── Summary strip ──────────────────────────────────────────
   function _updateSummaryStrip() {
-    const fmt = n =>
-      `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+    const fmt = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
-    document.getElementById('sum-cash').textContent  = fmt(totals.CASH);
-    document.getElementById('sum-momo').textContent  = fmt(totals.MOMO);
-    document.getElementById('sum-pos').textContent   = fmt(totals.POS);
+    const _s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    const total = totals.CASH + totals.MOMO + totals.POS;
-    document.getElementById('sum-total').textContent = fmt(total);
-    document.getElementById('sum-total-count').textContent =
-      `${totals.count} job${totals.count !== 1 ? 's' : ''} confirmed`;
+    _s('sum-cash',  fmt(totals.CASH));
+    _s('sum-momo',  fmt(totals.MOMO));
+    _s('sum-pos',   fmt(totals.POS));
+    _s('sum-total', fmt(totals.CASH + totals.MOMO + totals.POS));
+    _s('sum-jobs-count', `${totals.count} job${totals.count !== 1 ? 's' : ''} confirmed`);
   }
 
   // ── Receipt modal ──────────────────────────────────────────
@@ -404,91 +482,69 @@ async function init() {
       ? `GHS ${parseFloat(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
       : 'GHS 0.00';
 
-    document.getElementById('receipt-job-ref').textContent =
-      result.job_number || '—';
-    document.getElementById('receipt-amount').textContent =
-      fmt(result.amount_paid);
-    document.getElementById('receipt-balance').textContent =
-      fmt(result.balance_due || 0);
-    document.getElementById('receipt-method').textContent =
-      selectedMethod;
-    document.getElementById('receipt-number').textContent =
-      result.receipt_number || '—';
+    const _s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    // Disable WhatsApp button if no phone
+    _s('receipt-job-ref',  result.job_number || '—');
+    _s('receipt-amount',   fmt(result.amount_paid));
+    _s('receipt-balance',  fmt(result.balance_due || 0));
+    _s('receipt-method',   selectedMethod);
+    _s('receipt-number',   result.receipt_number || '—');
+
     const waBtn = document.getElementById('btn-send-whatsapp');
     const phone = document.getElementById('confirm-phone')?.value?.trim() || '';
     if (waBtn) waBtn.disabled = !phone;
 
-    document.getElementById('receipt-overlay').classList.add('open');
+    document.getElementById('receipt-overlay')?.classList.add('open');
   }
 
   function closeReceipt() {
-    document.getElementById('receipt-overlay').classList.remove('open');
+    document.getElementById('receipt-overlay')?.classList.remove('open');
     lastReceipt = null;
   }
 
   async function sendWhatsApp() {
-    if (!lastReceipt || !lastReceipt.receipt_id) {
+    if (!lastReceipt?.receipt_id) {
       _toast('Receipt not available for WhatsApp delivery.', 'error');
       return;
     }
-
     const btn = document.getElementById('btn-send-whatsapp');
-    btn.disabled    = true;
-    btn.textContent = 'Sending…';
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
 
     try {
       const res = await Auth.fetch(
         `/api/v1/finance/receipts/${lastReceipt.receipt_id}/send-whatsapp/`,
         { method: 'POST' }
       );
-
       if (res.ok) {
         _toast('Receipt sent via WhatsApp.', 'success');
         closeReceipt();
       } else {
         _toast('WhatsApp delivery failed.', 'error');
-        btn.disabled    = false;
-        btn.textContent = 'Send via WhatsApp';
+        if (btn) { btn.disabled = false; btn.textContent = 'Send via WhatsApp'; }
       }
-    } catch (e) {
+    } catch {
       _toast('Network error.', 'error');
-      btn.disabled    = false;
-      btn.textContent = 'Send via WhatsApp';
+      if (btn) { btn.disabled = false; btn.textContent = 'Send via WhatsApp'; }
     }
   }
 
   async function printReceipt() {
-    if (!lastReceipt || !lastReceipt.receipt_id) {
+    if (!lastReceipt?.receipt_id) {
       _toast('Receipt not available for printing.', 'error');
       return;
     }
-
     try {
-      const res = await Auth.fetch(
-        `/api/v1/finance/receipts/${lastReceipt.receipt_id}/thermal/`
-      );
-
-      if (!res.ok) {
-        _toast('Could not load receipt for printing.', 'error');
-        return;
-      }
-
-      const data   = await res.json();
-      const win    = window.open('', '_blank', 'width=300,height=600');
+      const res  = await Auth.fetch(`/api/v1/finance/receipts/${lastReceipt.receipt_id}/thermal/`);
+      if (!res.ok) { _toast('Could not load receipt for printing.', 'error'); return; }
+      const data = await res.json();
+      const win  = window.open('', '_blank', 'width=300,height=600');
       if (win) {
-        win.document.write(
-          `<pre style="font-family:monospace;font-size:12px;padding:8px;">`
-          + data.text
-          + `</pre>`
-        );
+        win.document.write(`<pre style="font-family:monospace;font-size:12px;padding:8px;">${data.text}</pre>`);
         win.document.close();
         win.print();
       }
-
       closeReceipt();
-    } catch (e) {
+    } catch {
       _toast('Print error.', 'error');
     }
   }
@@ -497,8 +553,8 @@ async function init() {
   function _toast(msg, type = 'info') {
     const container = document.getElementById('toast-container');
     if (!container) return;
-    const el     = document.createElement('div');
-    el.className = `toast ${type}`;
+    const el = document.createElement('div');
+    el.className   = `toast ${type}`;
     el.textContent = msg;
     container.appendChild(el);
     setTimeout(() => el.remove(), 4000);
@@ -507,14 +563,15 @@ async function init() {
   // ── Helpers ────────────────────────────────────────────────
   function _esc(s) {
     return String(s ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   // ── Public API ─────────────────────────────────────────────
-return {
+  return {
     init,
     loadSummary,
+    switchPane,
     openConfirm,
     closeConfirm,
     selectMethod,
