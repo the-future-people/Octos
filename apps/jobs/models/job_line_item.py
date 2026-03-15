@@ -115,34 +115,31 @@ class JobLineItem(AuditModel):
 
     def _build_label(self) -> str:
         """
-        Auto-generates a human-readable label for the line item.
+        Builds a clean human-readable label for the line item.
         Examples:
           "A4 Colour Photocopy — 20pp × 3 sets"
-          "Spiral Binding × 3 sets"
-          "Brown Envelope × 5"
+          "Spiral Binding — 3 sets"
+          "Brown Envelope — 5 pcs"
         """
-        parts = [self.service.name]
+        service_name = self.service.name
 
-        if self.paper_size and self.paper_size not in ('', 'NA'):
-            parts[0] = f"{self.paper_size} {parts[0]}"
+        # Only prepend paper_size if service name doesn't already contain a size
+        SIZES = ('A1', 'A2', 'A3', 'A4', 'A5')
+        name_has_size = any(s in service_name.upper() for s in SIZES)
 
-        color_label = 'Colour' if self.is_color else 'B&W'
-        # Only add color label for print/copy services (not binding, envelopes etc.)
-        if self.service.category == 'INSTANT' and self.pages > 1:
-            parts.append(color_label)
+        if self.paper_size and self.paper_size not in ('', 'NA') and not name_has_size:
+            label = f"{self.paper_size} {service_name}"
+        else:
+            label = service_name
 
-        if self.sides == self.DOUBLE:
-            parts.append('2-sided')
-
-        qty_parts = []
-        if self.pages > 1:
-            qty_parts.append(f'{self.pages}pp')
-        if self.sets > 1:
-            qty_parts.append(f'× {self.sets} sets')
+        # Quantity suffix
+        if self.pages > 1 and self.sets > 1:
+            label += f" — {self.pages}pp × {self.sets} sets"
+        elif self.pages > 1:
+            label += f" — {self.pages}pp"
+        elif self.sets > 1:
+            label += f" — {self.sets} sets"
         elif self.quantity > 1:
-            qty_parts.append(f'× {self.quantity}')
+            label += f" — {self.quantity} pcs"
 
-        if qty_parts:
-            parts.append(' '.join(qty_parts))
-
-        return ' — '.join([parts[0], ' '.join(parts[1:])]) if len(parts) > 1 else parts[0]
+        return label
