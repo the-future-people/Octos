@@ -9,7 +9,7 @@
  *  - Deposit due preview
  *  - Job creation (title auto-set to service name)
  *
- * Depends on: Auth, State (branchId, services, customers), showToast
+ * Depends on: Auth, State (branchId, services, customers)
  */
 
 const NJ = (() => {
@@ -18,6 +18,17 @@ const NJ = (() => {
   let currentType    = 'INSTANT';
   let currentService = null;
   let priceTimer     = null;
+
+  // ── Toast — works on dashboard and jobs page ───────────────
+  function _toast(msg, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
 
   // ── Helpers ────────────────────────────────────────────────
   function _esc(s) {
@@ -54,7 +65,7 @@ const NJ = (() => {
   }
 
   // ── Set job type ───────────────────────────────────────────
-function setType(type) {
+  function setType(type) {
     currentType    = type;
     currentService = null;
 
@@ -239,15 +250,25 @@ function setType(type) {
       const total = data.total || data.estimated_price || data.price;
 
       if (total != null) {
-        const depositPct = parseInt(document.getElementById('nj-deposit').value) || 100;
+        const depositEl  = document.getElementById('nj-deposit');
+        const depositPct = depositEl ? (parseInt(depositEl.value) || 100) : 100;
         const depositAmt = (parseFloat(total) * depositPct / 100);
 
-        document.getElementById('nj-price').textContent =
-          `GHS ${parseFloat(total).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
-        document.getElementById('nj-deposit-due').textContent =
-          `GHS ${depositAmt.toLocaleString('en-GH', { minimumFractionDigits: 2 })} due`;
+        const priceEl = document.getElementById('nj-price');
+        if (priceEl) {
+          priceEl.textContent =
+            `GHS ${parseFloat(total).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+        }
 
-        document.getElementById('nj-price-box').classList.add('show');
+        const dueEl = document.getElementById('nj-deposit-due');
+        if (dueEl) {
+          dueEl.textContent =
+            `GHS ${depositAmt.toLocaleString('en-GH', { minimumFractionDigits: 2 })} due`;
+        }
+
+        const box = document.getElementById('nj-price-box');
+        if (box) box.classList.add('show');
+
       } else {
         _hidePriceBox();
       }
@@ -257,31 +278,41 @@ function setType(type) {
   }
 
   function _hidePriceBox() {
-    document.getElementById('nj-price-box').classList.remove('show');
+    const box = document.getElementById('nj-price-box');
+    if (box) box.classList.remove('show');
   }
 
   // ── Create job ─────────────────────────────────────────────
   async function createJob() {
     if (!currentService) {
-      showToast('Please select a service.', 'error');
+      _toast('Please select a service.', 'error');
       return;
     }
 
     const specs    = _collectSpecs();
-    const deadline = document.getElementById('nj-deadline').value;
-    const notes    = document.getElementById('nj-notes').value.trim();
-    const deposit  = parseInt(document.getElementById('nj-deposit').value);
-    const channel  = document.getElementById('nj-channel').value;
-    const customer = document.getElementById('nj-customer').value;
-    const priority = document.getElementById('nj-priority').value;
+    const deadlineEl = document.getElementById('nj-deadline');
+    const notesEl    = document.getElementById('nj-notes');
+    const depositEl  = document.getElementById('nj-deposit');
+    const channelEl  = document.getElementById('nj-channel');
+    const customerEl = document.getElementById('nj-customer');
+    const priorityEl = document.getElementById('nj-priority');
+
+    const deadline = deadlineEl ? deadlineEl.value       : '';
+    const notes    = notesEl    ? notesEl.value.trim()   : '';
+    const deposit  = depositEl  ? parseInt(depositEl.value) : 100;
+    const channel  = channelEl  ? channelEl.value        : 'WALK_IN';
+    const customer = customerEl ? customerEl.value       : '';
+    const priority = priorityEl ? priorityEl.value       : 'NORMAL';
 
     const quantity = parseInt(specs.quantity || specs.qty || 1);
     const pages    = parseInt(specs.pages    || 1);
     const is_color = specs.color === 'Color' || specs.is_color === true;
 
     const btn = document.getElementById('nj-submit-btn');
-    btn.disabled    = true;
-    btn.textContent = 'Creating…';
+    if (btn) {
+      btn.disabled    = true;
+      btn.textContent = 'Creating…';
+    }
 
     try {
       const body = {
@@ -307,22 +338,30 @@ function setType(type) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || Object.values(err)[0] || 'Failed to create job.', 'error');
+        _toast(err.detail || Object.values(err)[0] || 'Failed to create job.', 'error');
         return;
       }
 
       const job = await res.json();
-      showToast(`${job.job_number || 'Job'} created — sent to cashier queue.`, 'success');
+      _toast(`${job.job_number || 'Job'} created — sent to cashier queue.`, 'success');
       closeNewJobModal();
       reset();
-      State.page = 1;
-      loadJobs();
+
+      // Refresh parent page
+      if (typeof Dashboard !== 'undefined') {
+        Dashboard.onJobCreated();
+      } else if (typeof loadJobs === 'function') {
+        State.page = 1;
+        loadJobs();
+      }
 
     } catch (e) {
-      showToast('Network error. Please try again.', 'error');
+      _toast('Network error. Please try again.', 'error');
     } finally {
-      btn.disabled  = false;
-      btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Job`;
+      if (btn) {
+        btn.disabled  = false;
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Job`;
+      }
     }
   }
 
@@ -331,14 +370,24 @@ function setType(type) {
     currentService = null;
     currentType    = 'INSTANT';
 
-    document.getElementById('nj-service').value  = '';
-    document.getElementById('nj-priority').value = 'NORMAL';
-    document.getElementById('nj-channel').value  = 'WALK_IN';
-    document.getElementById('nj-customer').value = '';
-    document.getElementById('nj-deposit').value  = '100';
-    document.getElementById('nj-deadline').value = '';
-    document.getElementById('nj-notes').value    = '';
-    document.getElementById('nj-spec-fields').innerHTML = '';
+    const fields = {
+      'nj-service'  : '',
+      'nj-priority' : 'NORMAL',
+      'nj-channel'  : 'WALK_IN',
+      'nj-customer' : '',
+      'nj-deposit'  : '100',
+      'nj-deadline' : '',
+      'nj-notes'    : '',
+    };
+
+    Object.entries(fields).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    });
+
+    const specFields = document.getElementById('nj-spec-fields');
+    if (specFields) specFields.innerHTML = '';
+
     _hidePriceBox();
 
     document.querySelectorAll('.nj-toggle-btn').forEach(btn => {
@@ -349,6 +398,7 @@ function setType(type) {
   // ── Populate customers into dropdown ──────────────────────
   function populateCustomers() {
     const sel = document.getElementById('nj-customer');
+    if (!sel) return;
     sel.innerHTML = '<option value="">Walk-in / Unknown</option>' +
       State.customers.map(c =>
         `<option value="${c.id}">${_esc(c.full_name || c.name || c.email || 'Customer ' + c.id)}</option>`
@@ -356,7 +406,7 @@ function setType(type) {
   }
 
   // ── Open modal ─────────────────────────────────────────────
-function open() {
+  function open() {
     reset();
     setType('INSTANT');
     populateCustomers();

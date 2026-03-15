@@ -104,12 +104,27 @@ class SheetEngine:
         Fallback: get today's open sheet or create one on the spot.
         Called when the scheduled task may have missed.
         Never blocks an operation waiting for a sheet.
+        On Sundays, returns existing sheet if present — never creates.
         """
+        from apps.finance.models import DailySalesSheet
+        today = timezone.localdate()
+
+        # Always return existing sheet if one exists — regardless of day
+        existing = DailySalesSheet.objects.filter(
+            branch=self.branch,
+            date=today,
+        ).first()
+        if existing:
+            return existing, False
+
+        # Sunday — don't auto-create, return None
+        if today.weekday() == 6:
+            return None, False
+
         return self.open_sheet(
-            target_date=timezone.localdate(),
+            target_date=today,
             opened_by=opened_by,
         )
-
     # ── Close sequence ────────────────────────────────────────────
 
     def get_close_schedule(self) -> dict:
