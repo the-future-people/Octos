@@ -320,7 +320,9 @@
      NEW JOB MODAL
 ═══════════════════════════════════════ -->
 <div class="modal-overlay" id="new-job-modal" onclick="if(event.target===this)closeNewJobModal()">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal" style="max-width:780px;">
+
+    <!-- Header -->
     <div class="modal-head">
       <div>
         <div class="modal-title">New Job</div>
@@ -329,7 +331,8 @@
       <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
 
-    <div style="padding:20px 24px 0;">
+    <!-- Type toggle -->
+    <div style="padding:16px 24px 0;">
       <div class="nj-toggle" id="nj-type-toggle">
         <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
         <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
@@ -338,73 +341,11 @@
       </div>
     </div>
 
-    <div class="modal-body" style="padding-top:16px;">
-
-      <div class="form-row">
-        <div class="fg">
-          <label>Service</label>
-          <select id="nj-service" onchange="NJ.onServiceChange()">
-            <option value="">Select service…</option>
-          </select>
-        </div>
-        <div class="fg" id="nj-priority-row">
-          <label>Priority</label>
-          <select id="nj-priority">
-            <option value="NORMAL">Normal</option>
-            <option value="HIGH">High</option>
-            <option value="URGENT">Urgent</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="fg">
-          <label>Customer <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-          <select id="nj-customer">
-            <option value="">Walk-in / Unknown</option>
-          </select>
-        </div>
-        <div class="fg">
-          <label>Intake Channel</label>
-          <select id="nj-channel">
-            <option value="WALK_IN">Walk-in</option>
-            <option value="WHATSAPP">WhatsApp</option>
-            <option value="EMAIL">Email</option>
-            <option value="PHONE">Phone</option>
-          </select>
-        </div>
-      </div>
-
-      <div id="nj-spec-fields"></div>
-
-      <div id="nj-deposit-deadline-row">
-        <div class="form-row">
-          <div class="fg">
-            <label>Deposit</label>
-            <select id="nj-deposit">
-              <option value="100">100% — Full Payment</option>
-              <option value="70">70% — Deposit</option>
-            </select>
-          </div>
-          <div class="fg">
-            <label>Deadline <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-            <input type="datetime-local" id="nj-deadline">
-          </div>
-        </div>
-      </div>
-
-      <div class="fg" id="nj-notes-row">
-        <label>Notes <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-        <textarea id="nj-notes" rows="2" placeholder="Any special instructions…"></textarea>
-      </div>
-
-      <div class="price-box" id="nj-price-box">
-        <span class="price-label">Estimated Cost</span>
-        <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--green-text);">—</span>
-      </div>
-
+    <!-- Dynamic body — rendered by NJ controller -->
+    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;">
     </div>
 
+    <!-- Footer -->
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
       <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
@@ -412,6 +353,7 @@
         Create Job
       </button>
     </div>
+
   </div>
 </div>
 

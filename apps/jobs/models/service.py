@@ -72,6 +72,23 @@ class Service(AuditModel):
     #   style (select: Modern/Minimalist/Classic/Playful),
     #   color_preference (text), notes (text)
     #
+    # ── Smart defaults ───────────────────────────────────────────
+    # Pre-filled configuration derived from the service name.
+    # Used by the POS modal to skip manual field entry for known services.
+    #
+    # Example for "A4 B&W Photocopy 1-sided":
+    # {
+    #   "paper_size": "A4",
+    #   "is_color":   false,
+    #   "sides":      "SINGLE",
+    #   "pages":      1,
+    #   "sets":       1
+    # }
+    smart_defaults = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Pre-filled defaults for POS modal. Derived from service name.',
+    )
     spec_template = models.JSONField(
         default=list,
         blank=True,

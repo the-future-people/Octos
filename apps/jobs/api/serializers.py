@@ -9,9 +9,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'code', 'category', 'unit',
             'description', 'requires_design', 'requires_file_upload',
-            'is_active', 'spec_template',
+            'is_active', 'spec_template', 'smart_defaults',
         ]
-
 
 class PricingRuleSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source='service.name', read_only=True)
