@@ -371,19 +371,56 @@ const Dashboard = (() => {
         return;
       }
 
+const AV_COLORS = ['#22c98a','#e8294a','#4a90e8','#9b59b6','#e8c84a'];
+      const _avColor  = name => {
+        let h = 0;
+        for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+        return AV_COLORS[Math.abs(h) % AV_COLORS.length];
+      };
+
       list.innerHTML = convos.slice(0, 12).map(c => {
-        const initials  = _initials(c.customer_name || 'Unknown');
-        const time      = _timeAgo(c.updated_at || c.created_at);
-        const preview   = _esc(_truncate(c.last_message || 'No messages yet', 55));
-        const hasUnread = c.unread_count > 0;
+        const name     = c.display_name || c.customer_name || 'Unknown';
+        const ini      = _initials(name);
+        const avColor  = _avColor(name);
+        const time     = _timeAgo(c.last_message_at || c.updated_at || c.created_at);
+        const preview  = _esc(_truncate(c.last_message_preview || c.last_message || 'No messages yet', 60));
+        const hasUnread = (c.unread_count || 0) > 0;
+        const channel  = c.channel || '';
+
+        const channelBadge = channel ? `
+          <span style="
+            display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;
+            font-size:10px;font-weight:700;letter-spacing:0.3px;margin-left:6px;
+            background:var(--bg);border:1px solid var(--border);color:var(--text-3);
+          ">${channel.replace('_', ' ')}</span>` : '';
 
         return `
-          <div class="inbox-row" onclick="window.location='/portal/inbox/'">
-            <div class="inbox-av">${initials}</div>
-            <span class="inbox-name">${_esc(c.customer_name || 'Unknown')}</span>
-            <span class="inbox-preview">${preview}</span>
-            <span class="inbox-time">${time}</span>
-            ${hasUnread ? '<span class="inbox-unread"></span>' : ''}
+          <div onclick="window.location='/portal/inbox/'" style="
+            display:flex;align-items:center;gap:12px;
+            padding:12px 20px;border-bottom:1px solid var(--border);
+            cursor:pointer;transition:background 0.12s;
+          " onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+            <div style="
+              width:38px;height:38px;border-radius:50%;flex-shrink:0;
+              background:${avColor};color:${avColor === '#e8c84a' ? '#111' : '#fff'};
+              display:flex;align-items:center;justify-content:center;
+              font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
+            ">${ini}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                <div style="display:flex;align-items:center;">
+                  <span style="font-size:13.5px;font-weight:${hasUnread ? '700' : '500'};color:var(--text);">
+                    ${_esc(name)}
+                  </span>
+                  ${channelBadge}
+                </div>
+                <span style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;flex-shrink:0;">${time}</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:12.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px;">${preview}</span>
+                ${hasUnread ? `<span style="width:7px;height:7px;border-radius:50%;background:var(--red-text);flex-shrink:0;margin-left:8px;"></span>` : ''}
+              </div>
+            </div>
           </div>`;
       }).join('');
 

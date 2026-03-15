@@ -81,7 +81,7 @@ input, select, textarea { font-family: inherit; }
 .topbar {
   height: var(--topbar-h);
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid red;
   position: sticky;
   top: 0;
   z-index: 200;
