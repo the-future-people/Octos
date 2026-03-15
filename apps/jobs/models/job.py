@@ -320,3 +320,23 @@ class Job(AuditModel):
         if self.estimated_cost is None:
             return None
         return round(self.estimated_cost * 10 / 100, 2)
+    
+    @property
+    def computed_total(self):
+        """Sum of all line item totals."""
+        from django.db.models import Sum
+        return self.line_items.aggregate(
+            total=Sum('line_total')
+        )['total'] or 0
+
+    @property
+    def line_item_summary(self) -> str:
+        """Short summary of services — e.g. 'Photocopy, Binding, Envelope'"""
+        names = list(
+            self.line_items.values_list('service__name', flat=True)
+        )
+        if not names:
+            return self.title or '—'
+        overflow = len(names) - 3
+        base = ', '.join(names[:3])
+        return f"{base} +{overflow} more" if overflow > 0 else base
