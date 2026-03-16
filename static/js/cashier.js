@@ -312,35 +312,49 @@ const Cashier = (() => {
   }
 
   // ── Confirm modal ──────────────────────────────────────────
-  function openConfirm(jobId) {
+ function openConfirm(jobId) {
     activeJob = queue.find(j => j.id === jobId);
     if (!activeJob) return;
-
     selectedDeposit = 100;
     selectedMethod  = 'CASH';
 
     const _s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     const _v = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
 
-    _s('confirm-job-ref',  activeJob.job_number || '#' + activeJob.id);
-    _s('confirm-job-name', activeJob.title || '—');
+    _s('confirm-job-ref',   activeJob.job_number || '#' + activeJob.id);
+    _s('confirm-job-name',  activeJob.title || '—');
     _s('confirm-attendant', activeJob.intake_by_name || '—');
-    _s('confirm-type',     activeJob.job_type || '—');
-    _s('confirm-customer', activeJob.customer_name || 'Walk-in');
-    _s('confirm-est-cost', activeJob.estimated_cost
-      ? `GHS ${parseFloat(activeJob.estimated_cost).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
-      : '—');
+    _s('confirm-type',      activeJob.job_type || '—');
+    _s('confirm-customer',  activeJob.customer_name || 'Walk-in');
+    _s('confirm-branch-name',    activeJob.branch_name    || '—');
+    _s('confirm-branch-address', activeJob.branch_address || '—');
+    _s('confirm-branch-phone',   activeJob.branch_phone   || '—');
 
     _v('confirm-phone', activeJob.customer_phone || '');
     _v('confirm-notes', '');
     _v('momo-ref', '');
     _v('pos-ref',  '');
+    // Populate line items
+    const itemsEl = document.getElementById('confirm-line-items');
+    if (itemsEl) {
+      const items = activeJob.line_items || [];
+      if (items.length) {
+        itemsEl.innerHTML = items.map(li => `
+          <div class="cm-item">
+            <span class="cm-item-name">${li.label || li.service_name || '—'}</span>
+            <span class="cm-item-qty">${li.quantity ?? 1}</span>
+            <span class="cm-item-price">GHS ${parseFloat(li.line_total || li.unit_price || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}</span>
+          </div>`).join('');
+      } else {
+        itemsEl.innerHTML = '<div class="cm-items-empty">No line items</div>';
+      }
+    }
 
     selectMethod('CASH');
     selectDeposit(100);
 
     const btn = document.getElementById('confirm-submit-btn');
-    if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Payment'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Payment'; }
 
     document.getElementById('confirm-overlay')?.classList.add('open');
   }
@@ -349,53 +363,41 @@ const Cashier = (() => {
     document.getElementById('confirm-overlay')?.classList.remove('open');
     activeJob = null;
   }
-
   // ── Payment method ─────────────────────────────────────────
-  function selectMethod(method) {
+function selectMethod(method) {
     selectedMethod = method;
-
     ['CASH', 'MOMO', 'POS'].forEach(m => {
       const btn = document.getElementById(`pm-${m.toLowerCase()}`);
       if (btn) btn.classList.toggle('selected', m === method);
     });
-
     const momoField = document.getElementById('momo-ref-field');
     const posField  = document.getElementById('pos-ref-field');
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
-
     _updateAmountDue();
-  }
-
-  // ── Deposit ────────────────────────────────────────────────
-  function selectDeposit(pct) {
-    selectedDeposit = pct;
-    document.getElementById('opt-100')?.classList.toggle('selected', pct === 100);
-    document.getElementById('opt-70')?.classList.toggle('selected',  pct === 70);
-    _updateAmountDue();
-  }
-
-  function _updateAmountDue() {
-    const box = document.getElementById('amount-due-box');
-    const val = document.getElementById('confirm-amount-due');
     const btn = document.getElementById('confirm-submit-btn');
-
-    if (box) {
-      box.classList.remove('cash', 'momo', 'pos');
-      box.classList.add(selectedMethod.toLowerCase());
-    }
     if (btn) {
-      btn.classList.remove('cash', 'momo', 'pos');
-      btn.classList.add(selectedMethod.toLowerCase());
+      btn.className = `cm-confirm-btn ${method.toLowerCase()}`;
     }
+  }
+  // ── Deposit ────────────────────────────────────────────────
+function selectDeposit(pct) {
+    selectedDeposit = pct;
+    [100, 70].forEach(p => {
+      const el = document.getElementById(`opt-${p}`);
+      if (el) el.classList.toggle('selected', p === pct);
+    });
+    _updateAmountDue();
+  }
 
-    if (!activeJob || !activeJob.estimated_cost) {
-      if (val) val.textContent = '—';
-      return;
-    }
-
-    const due = parseFloat(activeJob.estimated_cost) * selectedDeposit / 100;
-    if (val) val.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+function _updateAmountDue() {
+    if (!activeJob) return;
+    const total = parseFloat(activeJob.estimated_cost || activeJob.computed_total || 0);
+    const due   = total * (selectedDeposit / 100);
+    const el    = document.getElementById('confirm-amount-due');
+    if (el) el.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+    const costEl = document.getElementById('confirm-est-cost');
+    if (costEl) costEl.textContent = `GHS ${total.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
   }
 
   // ── Confirm payment ────────────────────────────────────────

@@ -113,6 +113,9 @@ class JobLineItemCreateSerializer(serializers.Serializer):
 
 class JobListSerializer(serializers.ModelSerializer):
     branch_name      = serializers.CharField(source='branch.name', read_only=True)
+    branch_address   = serializers.CharField(source='branch.address', read_only=True)
+    branch_phone     = serializers.CharField(source='branch.phone', read_only=True)
+    branch_email     = serializers.EmailField(source='branch.email', read_only=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
@@ -128,7 +131,8 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
-            'line_items', 'line_item_count',
+            'line_items', 'line_item_count', 'branch_address',
+            'branch_phone', 'branch_email',
         ]
 
     def get_customer_name(self, obj):
