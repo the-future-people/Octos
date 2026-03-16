@@ -204,6 +204,21 @@ class SheetEngine:
                 f"Sheet {sheet.pk} is already {sheet.status} — cannot close again."
             )
 
+        # Manual close — enforce closing time
+        if not auto:
+            schedule = self.get_close_schedule()
+            now      = timezone.now()
+
+            if now < schedule['attendant_lock_at']:
+                # Calculate how long until closing time
+                mins_remaining = int(
+                    (schedule['attendant_lock_at'] - now).total_seconds() / 60
+                )
+                raise ValueError(
+                    f"Sheet cannot be closed until {self.branch.closing_time.strftime('%H:%M')}. "
+                    f"{mins_remaining} minute(s) remaining."
+                )
+
         # Block auto-close if non-carryover pending payments exist
         if auto and self.has_pending_payments(sheet):
             count = self.get_pending_payment_count(sheet)
@@ -399,6 +414,78 @@ class SheetEngine:
             logger.exception(
                 'SheetEngine: failed to notify BM for sheet %s', sheet.pk
             )
+    @transaction.atomic
+    def carry_forward_pending_jobs(self, sheet) -> int:
+        """
+        At hard lock (closing_time + CASHIER_LOCK_AFTER), mark all
+        remaining PENDING_PAYMENT jobs as carried forward to next sheet.
+        Returns count of jobs carried forward.
+        """
+        from apps.jobs.models import Job
+
+        pending_jobs = Job.objects.filter(
+            daily_sheet=sheet,
+            status=Job.PENDING_PAYMENT,
+        )
+
+        count = pending_jobs.count()
+        if count:
+            pending_jobs.update(carried_forward=True)
+            logger.info(
+                'SheetEngine: %d job(s) carried forward from sheet %s',
+                count,
+                sheet.pk,
+            )
+            self._notify_bm_pending_payments(sheet, count)
+
+        return count
+
+    def get_branch_lock_status(self) -> dict:
+        """
+        Returns the current lock state for the branch.
+        Used by the frontend to show/hide the New Job button.
+
+        Returns dict with:
+            can_create_jobs  : bool
+            can_close_sheet  : bool
+            lock_reason      : str or None
+            schedule         : dict of close timestamps
+            mins_to_close    : int (negative if past closing time)
+        """
+        now      = timezone.now()
+        schedule = self.get_close_schedule()
+
+        mins_to_close = int(
+            (schedule['attendant_lock_at'] - now).total_seconds() / 60
+        )
+
+        can_create = now < schedule['attendant_lock_at']
+        can_close  = now >= schedule['attendant_lock_at']
+
+        lock_reason = None
+        if not can_create:
+            if mins_to_close > 0:
+                lock_reason = f"Branch closes in {mins_to_close} minute(s)."
+            else:
+                lock_reason = (
+                    f"Branch closed at {self.branch.closing_time.strftime('%H:%M')}. "
+                    f"No new jobs can be recorded."
+                )
+
+        return {
+            'can_create_jobs' : can_create,
+            'can_close_sheet' : can_close,
+            'lock_reason'     : lock_reason,
+            'mins_to_close'   : mins_to_close,
+            'schedule'        : {
+                'warning_at'        : schedule['warning_at'].isoformat(),
+                'attendant_lock_at' : schedule['attendant_lock_at'].isoformat(),
+                'cashier_lock_at'   : schedule['cashier_lock_at'].isoformat(),
+                'bm_autoclose_at'   : schedule['bm_autoclose_at'].isoformat(),
+                'closing_time'      : self.branch.closing_time.strftime('%H:%M'),
+            },
+        }
+    
     # ── Class-level convenience ───────────────────────────────────
 
     @classmethod

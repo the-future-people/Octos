@@ -525,7 +525,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         from apps.jobs.models import Service
-        from apps.jobs.models.pricing import PricingRule
+        from apps.jobs.models import PricingRule
         from apps.organization.models import Branch
         from decimal import Decimal
 

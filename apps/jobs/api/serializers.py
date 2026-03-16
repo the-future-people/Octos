@@ -341,6 +341,14 @@ class JobCreateSerializer(serializers.ModelSerializer):
         if sheet is not None:
             validated_data['daily_sheet'] = sheet
 
+        # Enforce branch lock — no new jobs after closing time
+        from apps.finance.sheet_engine import SheetEngine
+        lock = SheetEngine(branch).get_branch_lock_status()
+        if not lock['can_create_jobs']:
+            raise serializers.ValidationError({
+                'non_field_errors': [lock['lock_reason']]
+            })
+
         validated_data['intake_by'] = self.context['request'].user
 
         # ── Create job ────────────────────────────────────────

@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    BranchLockStatusView,
     DailySalesSheetListView,
     DailySalesSheetDetailView,
     DailySalesSheetTodayView,
@@ -56,4 +57,5 @@ urlpatterns = [
     path('transfers/',                      BranchTransferCreditListView.as_view(),       name='transfer-list'),
     path('transfers/<int:pk>/reconcile/',   BranchTransferCreditReconcileView.as_view(),  name='transfer-reconcile'),
     path('sheets/<int:pk>/pdf/', DailySalesSheetPDFView.as_view(), name='sheet-pdf'),
+    path('lock-status/', BranchLockStatusView.as_view(), name='branch-lock-status'),
 ]

@@ -771,3 +771,22 @@ class DailySalesSheetPDFView(APIView):
             f'attachment; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
         )
         return response
+
+class BranchLockStatusView(APIView):
+    """
+    GET /api/v1/finance/lock-status/
+    Returns current branch lock state — can jobs be created?
+    Frontend uses this to show/hide New Job button.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not hasattr(user, 'branch') or not user.branch:
+            return Response(
+                {'detail': 'User has no branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        status_data = SheetEngine(user.branch).get_branch_lock_status()
+        return Response(status_data)

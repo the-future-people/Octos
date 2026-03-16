@@ -263,6 +263,12 @@ class Job(AuditModel):
     is_routed      = models.BooleanField(default=False)
     routing_reason = models.TextField(blank=True)
 
+    # ── Carry forward ─────────────────────────────────────────────
+    carried_forward = models.BooleanField(
+        default=False,
+        help_text='True if this job was unpaid at sheet close and carried to next day.',
+    )
+
     # ── Notes ────────────────────────────────────────────────────
     notes = models.TextField(blank=True)
 
