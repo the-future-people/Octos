@@ -42,3 +42,4 @@ staticfiles
 # Coverage
 .coverage
 htmlcov
+config/__pycache__/
