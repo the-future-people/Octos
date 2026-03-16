@@ -325,8 +325,7 @@ function _selectServiceChip(serviceId) {
     const pages    = parseInt(document.getElementById('nj-pages')?.value  || 1);
     const sets     = parseInt(document.getElementById('nj-sets')?.value   || 1);
     const is_color = document.getElementById('nj-color-mode')?.value === 'COLOR';
-    const quantity = pages * sets || 1;
-
+    const quantity   = sets;
     try {
       const params = new URLSearchParams({
         service  : currentService.id,
@@ -352,6 +351,7 @@ function _selectServiceChip(serviceId) {
   // ── Add current configuration to cart ─────────────────────
   async function _addToCart() {
     if (!currentService) { _toast('Select a service first.', 'error'); return; }
+    const service = currentService;
 
     const pages      = parseInt(document.getElementById('nj-pages')?.value      || 1);
     const sets       = parseInt(document.getElementById('nj-sets')?.value       || 1);

@@ -57,17 +57,18 @@ const Dashboard = (() => {
       _set('db-user-name',     fullName);
       _set('db-user-initials', initials);
 
-      if (user.branch && typeof user.branch === 'object') {
+   if (user.branch && typeof user.branch === 'object') {
         const b = user.branch;
         branchId = b.id;
+        State.branchId = branchId;    // ← add this
         _set('db-branch-name', b.name || '—');
         _set('db-branch-pill', b.name || '—');
         if (b.region_name)      _set('meta-region', b.region_name);
         if (b.belt_name)        _set('meta-belt',   b.belt_name);
         if (b.load_percentage != null) _set('meta-load', b.load_percentage + '%');
-      } else if (user.branch && typeof user.branch === 'number') {
+      }else if (user.branch && typeof user.branch === 'number') {
         branchId = user.branch;
-        const br = await Auth.fetch(`/api/v1/organization/branches/${user.branch}/`);
+        State.branchId = branchId;    // ← add this
         if (br.ok) {
           const b = await br.json();
           _set('db-branch-name', b.name || '—');
