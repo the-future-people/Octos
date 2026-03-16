@@ -360,7 +360,7 @@ function _selectServiceChip(serviceId) {
     const sides      = document.getElementById('nj-sides')?.value       || 'SINGLE';
     const file_src   = document.getElementById('nj-file-source')?.value || 'NA';
     const specs      = _collectSpecs();
-    const quantity   = pages * sets || 1;
+    const quantity   = sets || 1;
 
     // Get price
     let unit_price = 0;
