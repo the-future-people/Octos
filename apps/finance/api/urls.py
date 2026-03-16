@@ -8,6 +8,7 @@ from .views import (
     DailySalesSheetCloseView,
     CashierFloatSetView,
     CashierFloatCloseView,
+    EODSummaryView,
     PettyCashCreateView,
     POSTransactionListView,
     POSTransactionSettleView,
@@ -58,4 +59,5 @@ urlpatterns = [
     path('transfers/<int:pk>/reconcile/',   BranchTransferCreditReconcileView.as_view(),  name='transfer-reconcile'),
     path('sheets/<int:pk>/pdf/', DailySalesSheetPDFView.as_view(), name='sheet-pdf'),
     path('lock-status/', BranchLockStatusView.as_view(), name='branch-lock-status'),
+    path('sheets/<int:pk>/eod-summary/', EODSummaryView.as_view(), name='sheet-eod-summary'),
 ]
