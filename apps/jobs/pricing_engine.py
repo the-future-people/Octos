@@ -79,7 +79,7 @@ class PricingEngine:
         if unit == 'page':
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
         elif unit in ('piece', 'sheet'):
-            subtotal = base * multiplier * Decimal(str(quantity))
+            subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
         elif unit == 'sqm':
             subtotal = base * multiplier * Decimal(str(quantity))
         elif unit == 'set':
