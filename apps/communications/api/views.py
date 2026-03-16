@@ -2,7 +2,6 @@ from rest_framework import generics, filters, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.utils import timezone
 from apps.communications.models import Conversation, Message
 from apps.accounts.models import CustomUser
 from .serializers import (
@@ -18,13 +17,20 @@ class ConversationListView(generics.ListAPIView):
     search_fields = ['contact_phone', 'contact_email', 'contact_name']
 
     def get_queryset(self):
+        user = self.request.user
         qs = Conversation.objects.select_related(
             'branch', 'customer', 'assigned_to'
-        ).all()
-        branch_id = self.request.query_params.get('branch')
-        channel = self.request.query_params.get('channel')
+        )
+
+        # Scope to user's branch by default
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+
+        # Optional query param overrides (for managers with multi-branch access)
+        branch_id    = self.request.query_params.get('branch')
+        channel      = self.request.query_params.get('channel')
         status_param = self.request.query_params.get('status')
-        assigned_to = self.request.query_params.get('assigned_to')
+        assigned_to  = self.request.query_params.get('assigned_to')
 
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
@@ -34,19 +40,28 @@ class ConversationListView(generics.ListAPIView):
             qs = qs.filter(status=status_param)
         if assigned_to:
             qs = qs.filter(assigned_to_id=assigned_to)
+
         return qs
 
 
 class ConversationDetailView(generics.RetrieveAPIView):
-    queryset = Conversation.objects.select_related(
-        'branch', 'customer', 'assigned_to'
-    ).prefetch_related('messages', 'jobs').all()
     serializer_class = ConversationDetailSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        qs = Conversation.objects.select_related(
+            'branch', 'customer', 'assigned_to'
+        ).prefetch_related('messages', 'jobs')
+
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+
+        return qs
+
     def get_object(self):
         obj = super().get_object()
-        # Mark as read — reset unread count
+        # Reset unread count when opened
         obj.unread_count = 0
         obj.save(update_fields=['unread_count'])
         return obj
@@ -54,9 +69,9 @@ class ConversationDetailView(generics.RetrieveAPIView):
 
 class ConversationReplyView(APIView):
     """
-    Reply to a conversation.
-    POST /api/v1/communications/{id}/reply/
-    Replying to an unclaimed conversation auto-claims it.
+    POST /api/v1/communications/<id>/reply/
+    Body: { body, message_type?, is_internal_note? }
+    Replying to an unclaimed conversation auto-assigns it to the replying user.
     """
     permission_classes = [IsAuthenticated]
 
@@ -78,10 +93,14 @@ class ConversationReplyView(APIView):
             conversation.assigned_to = request.user
             conversation.save(update_fields=['assigned_to'])
 
+        # Use SYSTEM channel for internal notes, otherwise use conversation channel
+        is_note = serializer.validated_data.get('is_internal_note', False)
+        channel = Message.SYSTEM if is_note else conversation.channel
+
         message = Message.objects.create(
             conversation=conversation,
             direction=Message.OUTBOUND,
-            channel=conversation.channel,
+            channel=channel,
             sent_by=request.user,
             **serializer.validated_data
         )
@@ -91,8 +110,8 @@ class ConversationReplyView(APIView):
 
 class ConversationAssignView(APIView):
     """
-    Assign or reassign a conversation to a staff member.
-    POST /api/v1/communications/{id}/assign/
+    POST /api/v1/communications/<id>/assign/
+    Body: { user_id }
     """
     permission_classes = [IsAuthenticated]
 
@@ -112,33 +131,42 @@ class ConversationAssignView(APIView):
         try:
             user = CustomUser.objects.get(pk=serializer.validated_data['user_id'])
         except CustomUser.DoesNotExist:
-            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'detail': 'User not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
+        previous = conversation.assigned_to
         conversation.assigned_to = user
         conversation.save(update_fields=['assigned_to'])
 
-        # Log system message
+        # System note — only log if it's a reassignment
+        note = (
+            f"Reassigned from {previous.full_name} to {user.full_name}"
+            if previous
+            else f"Assigned to {user.full_name} by {request.user.full_name}"
+        )
         Message.objects.create(
             conversation=conversation,
             direction=Message.OUTBOUND,
             channel=Message.SYSTEM,
             message_type=Message.NOTE,
             is_internal_note=True,
-            body=f"Conversation assigned to {user.get_full_name()} by {request.user.get_full_name()}",
-            sent_by=request.user
+            body=note,
+            sent_by=request.user,
         )
 
         return Response({
-            'success': True,
-            'assigned_to': user.get_full_name(),
-            'assigned_to_id': user.id,
+            'success'        : True,
+            'assigned_to'    : user.full_name,
+            'assigned_to_id' : user.id,
         })
 
 
 class ConversationResolveView(APIView):
     """
-    Mark a conversation as resolved.
-    POST /api/v1/communications/{id}/resolve/
+    POST /api/v1/communications/<id>/resolve/
+    Marks conversation as RESOLVED and logs a system note.
     """
     permission_classes = [IsAuthenticated]
 
@@ -151,6 +179,12 @@ class ConversationResolveView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        if conversation.status == Conversation.RESOLVED:
+            return Response(
+                {'detail': 'Conversation is already resolved.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         conversation.status = Conversation.RESOLVED
         conversation.save(update_fields=['status'])
 
@@ -160,8 +194,8 @@ class ConversationResolveView(APIView):
             channel=Message.SYSTEM,
             message_type=Message.NOTE,
             is_internal_note=True,
-            body=f"Conversation resolved by {request.user.get_full_name()}",
-            sent_by=request.user
+            body=f"Conversation resolved by {request.user.full_name}",
+            sent_by=request.user,
         )
 
         return Response({'success': True, 'status': 'RESOLVED'})
@@ -169,8 +203,9 @@ class ConversationResolveView(APIView):
 
 class ConversationLinkJobView(APIView):
     """
-    Link a job to a conversation.
-    POST /api/v1/communications/{id}/link-job/
+    POST /api/v1/communications/<id>/link-job/
+    Body: { job_id }          — links job to conversation
+    Body: { job_id: null }    — clears all linked jobs (unlink)
     """
     permission_classes = [IsAuthenticated]
 
@@ -184,38 +219,41 @@ class ConversationLinkJobView(APIView):
             )
 
         job_id = request.data.get('job_id')
-        if not job_id:
-            return Response(
-                {'detail': 'job_id is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+
+        # Unlink — job_id explicitly null
+        if job_id is None:
+            conversation.jobs.clear()
+            return Response({'success': True, 'linked': False})
 
         from apps.jobs.models import Job
         try:
             job = Job.objects.get(pk=job_id)
         except Job.DoesNotExist:
-            return Response({'detail': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'detail': 'Job not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         conversation.jobs.add(job)
 
         return Response({
-            'success': True,
-            'job_number': job.job_number,
+            'success'               : True,
+            'linked'                : True,
+            'job_id'                : job.id,
             'linked_to_conversation': conversation.id,
         })
 
 
 class InboundWebhookView(APIView):
     """
-    Stub endpoint for inbound messages from WhatsApp/Twilio.
-    Will be wired to actual providers in the Communications phase.
     POST /api/v1/communications/webhook/inbound/
+    Stub — will be wired to WhatsApp/Twilio providers in the Communications phase.
     """
-    permission_classes = []  # Webhooks are unauthenticated — verified by signature
+    permission_classes = []  # Unauthenticated — verified by provider signature
 
     def post(self, request):
         # TODO: verify webhook signature
-        # TODO: parse provider payload
-        # TODO: find or create conversation
+        # TODO: parse provider payload (WhatsApp / Twilio)
+        # TODO: find or create Conversation
         # TODO: create inbound Message record
         return Response({'status': 'received'}, status=status.HTTP_200_OK)

@@ -1,0 +1,332 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cashier — Octos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/cashier.css' %}">
+</head>
+<body>
+
+  <!-- ── Topbar ──────────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-brand">
+        <span class="brand-logo">Octos</span>
+        <span class="brand-divider"></span>
+        <span class="brand-role">Cashier</span>
+      </div>
+      <div class="topbar-right">
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          Live
+        </div>
+        <div class="topbar-branch" id="cashier-branch-name">—</div>
+        <div class="topbar-user">
+          <div class="user-avatar" id="cashier-user-initials">—</div>
+          <span class="user-name" id="cashier-user-name">—</span>
+        </div>
+        <button class="topbar-logout" onclick="Auth.logout()" title="Sign out">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Page shell ───────────────────────────────────────────── -->
+  <div class="page-shell">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────── -->
+    <aside class="sidebar">
+
+      <div class="sidebar-section">Station</div>
+
+      <div class="sidebar-item active" data-pane="queue" onclick="Cashier.switchPane('queue')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <span class="sidebar-label">Payment Queue</span>
+        <span class="sidebar-badge" id="sidebar-queue-count" style="display:none;">0</span>
+      </div>
+
+      <div class="sidebar-item" data-pane="receipts" onclick="Cashier.switchPane('receipts')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <span class="sidebar-label">Receipts</span>
+      </div>
+
+      <div class="sidebar-item" data-pane="log" onclick="Cashier.switchPane('log')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="8" y1="6" x2="21" y2="6"/>
+          <line x1="8" y1="12" x2="21" y2="12"/>
+          <line x1="8" y1="18" x2="21" y2="18"/>
+          <line x1="3" y1="6" x2="3.01" y2="6"/>
+          <line x1="3" y1="12" x2="3.01" y2="12"/>
+          <line x1="3" y1="18" x2="3.01" y2="18"/>
+        </svg>
+        <span class="sidebar-label">Today's Log</span>
+      </div>
+
+      <div class="sidebar-section">Collections</div>
+
+      <div class="sidebar-item" data-pane="credit" onclick="Cashier.switchPane('credit')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span class="sidebar-label">Credit Accounts</span>
+      </div>
+
+    </aside>
+
+    <!-- ── Main content ─────────────────────────────────────────── -->
+    <div class="main-content" id="cashier-main-content">
+
+      <!-- Summary strip -->
+      <div class="summary-strip">
+        <div class="summary-card cash">
+          <div class="summary-label">Cash</div>
+          <div class="summary-amount" id="sum-cash">GHS 0.00</div>
+          <div class="summary-count">0 transactions</div>
+        </div>
+        <div class="summary-card momo">
+          <div class="summary-label">MoMo</div>
+          <div class="summary-amount" id="sum-momo">GHS 0.00</div>
+          <div class="summary-count">0 transactions</div>
+        </div>
+        <div class="summary-card pos">
+          <div class="summary-label">POS</div>
+          <div class="summary-amount" id="sum-pos">GHS 0.00</div>
+          <div class="summary-count">0 transactions</div>
+        </div>
+        <div class="summary-card total">
+          <div class="summary-label">Total Collected</div>
+          <div class="summary-amount" id="sum-total">GHS 0.00</div>
+          <div class="summary-count" id="sum-jobs-count">0 jobs confirmed</div>
+        </div>
+      </div>
+
+      <!-- Queue header -->
+      <div class="queue-header">
+        <div>
+          <div class="queue-title">Payment Queue</div>
+          <div class="queue-subtitle">Jobs waiting for payment confirmation — oldest first</div>
+        </div>
+        <div class="queue-meta">
+          <div class="queue-pill">
+            <span id="queue-count-num">—</span> pending
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue list -->
+      <div class="queue-list" id="queue-list">
+        <div class="skeleton-card">
+          <div class="skel" style="width:22px;height:14px;"></div>
+          <div style="flex:1;">
+            <div class="skel" style="width:55%;height:14px;margin-bottom:8px;"></div>
+            <div class="skel" style="width:38%;height:11px;"></div>
+          </div>
+          <div class="skel" style="width:90px;height:18px;"></div>
+          <div class="skel" style="width:110px;height:34px;border-radius:8px;"></div>
+        </div>
+      </div>
+
+    </div><!-- /cashier-main-content -->
+
+  </div><!-- /page-shell -->
+
+
+  <!-- ═══════════════════════════════════════
+       PAYMENT CONFIRMATION MODAL
+  ═══════════════════════════════════════ -->
+  <div class="confirm-overlay" id="confirm-overlay" onclick="if(event.target===this)Cashier.closeConfirm()">
+    <div class="confirm-modal">
+
+      <div class="confirm-modal-head">
+        <div>
+          <div class="confirm-modal-title">Collect Payment</div>
+          <div class="confirm-modal-ref" id="confirm-job-ref">—</div>
+        </div>
+        <button class="modal-close-btn" onclick="Cashier.closeConfirm()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="confirm-modal-body">
+
+        <!-- Job summary -->
+        <div class="job-summary-box">
+          <div class="job-summary-name" id="confirm-job-name">—</div>
+          <div class="job-summary-grid">
+            <div class="job-summary-field">
+              <span class="job-summary-label">Attendant</span>
+              <span class="job-summary-val" id="confirm-attendant">—</span>
+            </div>
+            <div class="job-summary-field">
+              <span class="job-summary-label">Type</span>
+              <span class="job-summary-val" id="confirm-type">—</span>
+            </div>
+            <div class="job-summary-field">
+              <span class="job-summary-label">Customer</span>
+              <span class="job-summary-val" id="confirm-customer">—</span>
+            </div>
+            <div class="job-summary-field">
+              <span class="job-summary-label">Est. Cost</span>
+              <span class="job-summary-val" id="confirm-est-cost">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payment method -->
+        <div class="pm-label">Payment Method</div>
+        <div class="pm-toggle">
+          <button class="pm-btn cash" id="pm-cash" onclick="Cashier.selectMethod('CASH')">
+            <span class="pm-icon">💵</span>
+            <span class="pm-name">Cash</span>
+          </button>
+          <button class="pm-btn momo" id="pm-momo" onclick="Cashier.selectMethod('MOMO')">
+            <span class="pm-icon">📱</span>
+            <span class="pm-name">MoMo</span>
+          </button>
+          <button class="pm-btn pos" id="pm-pos" onclick="Cashier.selectMethod('POS')">
+            <span class="pm-icon">💳</span>
+            <span class="pm-name">POS</span>
+          </button>
+        </div>
+
+        <!-- MoMo reference -->
+        <div class="ref-field" id="momo-ref-field">
+          <label>MoMo Reference Number <span style="color:#e8294a;">*</span></label>
+          <input type="text" class="ref-input momo" id="momo-ref" placeholder="e.g. GHA-123456789">
+        </div>
+
+        <!-- POS approval code -->
+        <div class="ref-field" id="pos-ref-field">
+          <label>POS Approval Code <span style="color:#e8294a;">*</span></label>
+          <input type="text" class="ref-input pos" id="pos-ref" placeholder="e.g. 123456">
+        </div>
+
+        <!-- Deposit selector -->
+        <div class="pm-label">Payment Amount</div>
+        <div class="deposit-opts">
+          <div class="deposit-opt selected" id="opt-100" onclick="Cashier.selectDeposit(100)">
+            <div class="deposit-opt-pct">100%</div>
+            <div class="deposit-opt-lbl">Full payment</div>
+          </div>
+          <div class="deposit-opt" id="opt-70" onclick="Cashier.selectDeposit(70)">
+            <div class="deposit-opt-pct">70%</div>
+            <div class="deposit-opt-lbl">Deposit only</div>
+          </div>
+        </div>
+
+        <!-- Amount due -->
+        <div class="amount-due-box" id="amount-due-box">
+          <span class="amount-due-label">Collect from customer</span>
+          <span class="amount-due-value" id="confirm-amount-due">—</span>
+        </div>
+
+        <!-- Customer phone -->
+        <div class="phone-field">
+          <label>Customer Phone <span style="color:var(--text-3);font-weight:400;">(for receipt)</span></label>
+          <input type="tel" class="phone-input" id="confirm-phone" placeholder="e.g. 0244123456">
+        </div>
+
+        <!-- Notes -->
+        <div class="notes-field">
+          <label>Notes <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+          <textarea class="notes-input" id="confirm-notes" rows="2" placeholder="Any additional context…"></textarea>
+        </div>
+
+      </div>
+
+      <div class="confirm-modal-foot">
+        <button class="btn-cancel" onclick="Cashier.closeConfirm()">Cancel</button>
+        <button class="btn-confirm" id="confirm-submit-btn" onclick="Cashier.confirmPayment()">
+          ✓ Confirm Payment
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════
+       RECEIPT MODAL
+  ═══════════════════════════════════════ -->
+  <div class="receipt-overlay" id="receipt-overlay">
+    <div class="receipt-modal">
+
+      <div class="receipt-success-banner">
+        <div class="receipt-success-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <div class="receipt-success-title">Payment Confirmed</div>
+        <div class="receipt-success-sub" id="receipt-job-ref">—</div>
+      </div>
+
+      <div class="receipt-detail">
+        <div class="receipt-row">
+          <span class="receipt-row-label">Amount Paid</span>
+          <span class="receipt-row-val" id="receipt-amount">—</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-row-label">Balance Due</span>
+          <span class="receipt-row-val" id="receipt-balance">—</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-row-label">Payment Method</span>
+          <span class="receipt-row-val" id="receipt-method">—</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-row-label">Receipt No.</span>
+          <span class="receipt-row-val" id="receipt-number">—</span>
+        </div>
+      </div>
+
+      <div class="receipt-actions">
+        <button class="receipt-action-btn btn-whatsapp" id="btn-send-whatsapp" onclick="Cashier.sendWhatsApp()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          Send via WhatsApp
+        </button>
+        <button class="receipt-action-btn btn-print" onclick="Cashier.printReceipt()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect x="6" y="14" width="12" height="8"/>
+          </svg>
+          Print Receipt
+        </button>
+        <button class="receipt-action-btn btn-skip" onclick="Cashier.closeReceipt()">
+          Skip for now
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+
+  <div id="toast-container"></div>
+
+  <script src="{% static 'js/auth.js' %}"></script>
+  <script src="{% static 'js/cashier.js' %}"></script>
+
+</body>
+</html>

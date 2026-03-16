@@ -1,0 +1,218 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inbox — Octos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+  <link rel="stylesheet" href="{% static 'css/inbox.css' %}">
+</head>
+<body>
+
+  <!-- ── Topbar ──────────────────────────────────────────── -->
+  <header class="inbox-topbar">
+    <div class="inbox-topbar-inner">
+
+      <div class="inbox-topbar-left">
+        <span class="inbox-brand">Octos</span>
+        <span class="inbox-brand-divider"></span>
+        <nav class="inbox-breadcrumb">
+          <a href="/portal/dashboard/" class="inbox-breadcrumb-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:3px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Dashboard
+          </a>
+          <span class="inbox-breadcrumb-sep">›</span>
+          <span class="inbox-breadcrumb-current">Inbox</span>
+        </nav>
+      </div>
+
+      <div class="topbar-right">
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          Active
+        </div>
+        <div class="user-chip">
+          <div class="user-avatar" id="ib-initials">—</div>
+          <span class="user-name" id="ib-name">—</span>
+        </div>
+        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ── Page body ───────────────────────────────────────── -->
+  <div class="inbox-shell">
+
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside class="inbox-sidebar">
+
+      <div class="sidebar-head">
+        <div class="sidebar-title">
+          Conversations
+          <span class="convo-count" id="convo-count">—</span>
+        </div>
+        <div class="channel-tabs">
+          <button class="channel-tab active" data-channel="all">All</button>
+          <button class="channel-tab" data-channel="WHATSAPP">
+            <span class="ch-dot"></span> WhatsApp
+          </button>
+          <button class="channel-tab" data-channel="EMAIL">
+            <span class="ch-dot"></span> Email
+          </button>
+          <button class="channel-tab" data-channel="PHONE">
+            <span class="ch-dot"></span> Phone
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-search">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="inbox-search" type="text" placeholder="Search conversations…">
+      </div>
+
+      <div class="convo-list" id="convo-list">
+        <div class="loading-row"><span class="spin"></span> Loading…</div>
+      </div>
+
+    </aside>
+
+    <!-- ── Conversation pane ───────────────────────────────── -->
+    <section class="convo-pane">
+
+      <!-- Empty state -->
+      <div class="pane-empty" id="pane-empty">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <p>Select a conversation<br>to start reading</p>
+      </div>
+
+      <!-- Active conversation -->
+      <div id="active-convo" style="display:none;flex-direction:column;height:100%;">
+
+        <!-- Pane header -->
+        <div class="pane-header">
+          <div class="pane-header-left">
+            <div class="pane-av av-yellow" id="pane-av">—</div>
+            <div>
+              <div class="pane-name" id="pane-name">—</div>
+              <div class="pane-meta" id="pane-meta">—</div>
+            </div>
+            <span class="ch-badge" id="pane-channel-badge">—</span>
+          </div>
+          <div class="pane-actions">
+            <button class="btn-action" id="btn-link-job">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Link Job
+            </button>
+            <button class="btn-action" id="btn-assign">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              Assign
+            </button>
+            <button class="btn-action resolve" id="btn-resolve">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Resolve
+            </button>
+          </div>
+        </div>
+
+        <!-- Linked job bar -->
+        <div class="linked-job-bar" id="linked-job-bar">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="linked-job-text">—</span>
+          <button class="btn-unlink" id="btn-unlink-job">Remove</button>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages-area" id="messages-area"></div>
+
+        <!-- Reply bar -->
+        <div class="reply-bar">
+          <textarea
+            id="reply-input"
+            class="reply-input"
+            placeholder="Type a reply… (Enter to send, Shift+Enter for new line)"
+            rows="1"
+          ></textarea>
+          <button class="btn-send" id="btn-send">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Send
+          </button>
+        </div>
+
+      </div><!-- /active-convo -->
+
+    </section>
+
+  </div><!-- /inbox-shell -->
+
+
+  <!-- ═══════════════════════════════════════
+       LINK JOB MODAL
+  ═══════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-link-job">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title">Link to Job</span>
+        <button class="modal-x" onclick="Inbox.closeModal('modal-link-job')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="fg">
+          <label>Search Job</label>
+          <input type="text" id="job-search-input" placeholder="Reference or customer name…">
+        </div>
+        <div id="job-search-results"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" onclick="Inbox.closeModal('modal-link-job')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════
+       ASSIGN MODAL
+  ═══════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-assign">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title">Assign Conversation</span>
+        <button class="modal-x" onclick="Inbox.closeModal('modal-assign')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="fg">
+          <label>Assign To</label>
+          <select id="assign-select">
+            <option value="">Loading agents…</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" onclick="Inbox.closeModal('modal-assign')">Cancel</button>
+        <button class="btn-dark" id="btn-confirm-assign">Assign</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="toast-container"></div>
+
+  <script src="{% static 'js/auth.js' %}"></script>
+  <script src="{% static 'js/branch_manager/inbox.js' %}"></script>
+
+</body>
+</html>
