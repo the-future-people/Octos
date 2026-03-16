@@ -57,8 +57,8 @@ const Dashboard = (() => {
       _set('db-user-name',     fullName);
       _set('db-user-initials', initials);
 
-   if (user.branch && typeof user.branch === 'object') {
-        const b = user.branch;
+   if (user.branch_detail) {
+        const b = user.branch_detail;
         branchId = b.id;
         State.branchId = branchId;    // ← add this
         _set('db-branch-name', b.name || '—');

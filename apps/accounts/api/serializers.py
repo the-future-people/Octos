@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from apps.accounts.models import CustomUser, Role, Permission
+from apps.organization.models import Branch
 
 
 class PermissionSerializer(serializers.ModelSerializer):
@@ -23,17 +24,25 @@ class RoleListSerializer(serializers.ModelSerializer):
         model = Role
         fields = ['id', 'name', 'codename']
 
+class BranchMinimalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Branch
+        fields = ['id', 'name', 'code', 'region_name', 'belt_name']
+    region_name = serializers.CharField(source='region.name', read_only=True)
+    belt_name   = serializers.CharField(source='region.belt.name', read_only=True)
+
 
 class UserSerializer(serializers.ModelSerializer):
-    role_detail = RoleListSerializer(source='role', read_only=True)
-    full_name = serializers.SerializerMethodField()
+    role_detail   = RoleListSerializer(source='role', read_only=True)
+    branch_detail = BranchMinimalSerializer(source='branch', read_only=True)
+    full_name     = serializers.SerializerMethodField()
 
     class Meta:
-        model = CustomUser
+        model  = CustomUser
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'role_detail', 'branch', 'phone', 'employee_id',
-            'is_active', 'created_at'
+            'role', 'role_detail', 'branch', 'branch_detail',
+            'phone', 'employee_id', 'is_active', 'created_at',
         ]
 
     def get_full_name(self, obj):
