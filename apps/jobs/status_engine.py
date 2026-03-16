@@ -125,7 +125,7 @@ class JobStatusEngine:
             ValueError  : Illegal transition or insufficient role
             PermissionError : Actor lacks required role
         """
-        from apps.jobs.models.job_status_log import JobStatusLog
+        from apps.jobs.models import JobStatusLog
 
         # Guard: cancellation blocked after PAID
         if to_status == 'CANCELLED' and self.job.status in NO_CANCEL_AFTER:

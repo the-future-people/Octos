@@ -1,5 +1,5 @@
 from decimal import Decimal
-from apps.jobs.models.pricing import PricingRule
+from apps.jobs.models import PricingRule
 
 
 class PricingEngine:
