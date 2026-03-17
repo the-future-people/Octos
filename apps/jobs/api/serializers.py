@@ -290,16 +290,13 @@ class JobCreateSerializer(serializers.ModelSerializer):
 
                 # Effective quantity for pricing = pages × sets (for print/copy)
                 # or just quantity for simple items (binding, envelopes)
-                effective_qty = pg * sets if pg > 1 or sets > 1 else qty
-
                 pricing = PricingEngine.get_price(
                     service  = svc,
                     branch   = branch,
-                    quantity = effective_qty,
+                    quantity = sets,
                     is_color = color,
                     pages    = pg,
                 )
-
                 unit_price = float(pricing['base_price']) if pricing['success'] else 0
                 line_total = float(pricing['total'])      if pricing['success'] else 0
                 total     += line_total

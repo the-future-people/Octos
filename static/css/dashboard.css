@@ -1205,6 +1205,9 @@ input, select, textarea { font-family: inherit; }
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .nj-service-chip {

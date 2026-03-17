@@ -375,7 +375,7 @@ class JobRouteConfirmView(APIView):
 class ServiceListView(generics.ListAPIView):
     serializer_class   = ServiceSerializer
     permission_classes = [IsAuthenticated]
-
+    pagination_class   = None
     def get_queryset(self):
         qs       = Service.objects.filter(is_active=True)
         category = self.request.query_params.get('category')
