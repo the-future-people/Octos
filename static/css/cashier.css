@@ -670,8 +670,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .cm-total-val { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 700; color: var(--text); }
 
 /* Section label */
-.cm-section-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: -6px; }
-
+.cm-section-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: 6px; }
 /* Payment method buttons */
 .cm-pm-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .cm-pm {
@@ -839,6 +838,34 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .cm-change-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--amber-text); }
 .cm-change-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--amber-text); }
 
+.cm-meta { flex-wrap: wrap; row-gap: 4px; }
+.cm-section-label { position: relative; z-index: 1; }
+.cm-meta-chip:last-child .cm-meta-v {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+/* ── Two-panel modal layout ── */
+.cm-info-panel {
+  padding: 20px 22px;
+  border-bottom: 2px solid var(--border);
+  position: relative;
+}
+.cm-payment-panel {
+  padding: 20px 22px 24px;
+  background: var(--bg);
+}
+.cm-close {
+  position: absolute; top: 16px; right: 16px;
+}
+.cm-payment-hint {
+  font-size: 11.5px; font-weight: 600;
+  color: var(--text-3); text-align: center;
+  padding: 6px 0 2px;
+  display: none;
+}
+
+.cm-payment-hint.visible { display: block; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(14px); }
@@ -887,7 +914,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
     min-width: unset;
   }
 }
-
 @media (max-width: 480px) {
   .page-shell {
     padding: 16px 12px 32px;

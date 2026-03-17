@@ -322,3 +322,57 @@ class BranchTransferCreditSerializer(serializers.ModelSerializer):
         if obj.reconciled_by:
             return obj.reconciled_by.full_name
         return ''
+    
+# ─────────────────────────────────────────────────────────────────────────────
+# Cashier Sign-Off
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CashierSignOffSerializer(serializers.Serializer):
+    """Cashier submits full sign-off at end of shift."""
+    closing_cash      = serializers.DecimalField(max_digits=10, decimal_places=2)
+    variance_notes    = serializers.CharField(allow_blank=True, default='')
+    shift_notes       = serializers.CharField(allow_blank=True, default='')
+
+    # Overtime
+    is_overtime       = serializers.BooleanField(default=False)
+    overtime_reason   = serializers.CharField(allow_blank=True, default='')
+    overtime_until    = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cover
+    is_cover          = serializers.BooleanField(default=False)
+    covering_for_id   = serializers.IntegerField(required=False, allow_null=True)
+    cover_until       = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate(self, data):
+        if data.get('is_overtime') and not data.get('overtime_reason'):
+            raise serializers.ValidationError(
+                {'overtime_reason': 'Reason is required for overtime.'}
+            )
+        if data.get('is_overtime') and not data.get('overtime_until'):
+            raise serializers.ValidationError(
+                {'overtime_until': 'End time is required for overtime.'}
+            )
+        if data.get('is_cover') and not data.get('covering_for_id'):
+            raise serializers.ValidationError(
+                {'covering_for_id': 'Must specify who you are covering.'}
+            )
+        if data.get('is_cover') and not data.get('cover_until'):
+            raise serializers.ValidationError(
+                {'cover_until': 'End time is required for cover shift.'}
+            )
+        return data
+
+
+class ShiftStatusSerializer(serializers.Serializer):
+    """Read-only — returned by GET /api/v1/finance/cashier/shift-status/"""
+    has_shift         = serializers.BooleanField()
+    shift_end         = serializers.TimeField(allow_null=True)
+    minutes_remaining = serializers.IntegerField(allow_null=True)
+    should_prompt     = serializers.BooleanField()   # ≤60 min remaining
+    should_lock       = serializers.BooleanField()   # shift end passed
+    is_signed_off     = serializers.BooleanField()
+    float_id          = serializers.IntegerField(allow_null=True)
+    is_overtime       = serializers.BooleanField()
+    overtime_until    = serializers.DateTimeField(allow_null=True)
+    is_cover          = serializers.BooleanField()
+    cover_until       = serializers.DateTimeField(allow_null=True)

@@ -125,9 +125,9 @@ const Dashboard = (() => {
       _set('stat-unread', unread);
 
       const inboxBadge = document.getElementById('sidebar-badge-inbox');
-      if (inboxBadge && unread > 0) {
-        inboxBadge.textContent = unread;
-        inboxBadge.style.display = 'flex';
+      if (inboxBadge) {
+        inboxBadge.textContent   = unread;
+        inboxBadge.style.display = unread > 0 ? 'flex' : 'none';
       }
     } catch { /* silent */ }
   }
@@ -254,6 +254,7 @@ const Dashboard = (() => {
     if (paneId === 'inbox'   && !inboxLoaded) loadInboxTab();
     if (paneId === 'services'&& !svcLoaded)   loadServicesTab();
     if (paneId === 'finance')                 _loadFinancePane();
+    if (paneId === 'reports')                 _loadReportsPane();
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
@@ -328,14 +329,13 @@ const Dashboard = (() => {
         ${sheet.status === 'OPEN' ? `
           <button class="btn-dark" onclick="Dashboard.closeSheet(${sheet.id})">Close Day Sheet</button>
         ` : `
-          <a href="/api/v1/finance/sheets/${sheet.id}/pdf/" 
-             target="_blank"
+          <button onclick="Dashboard.downloadSheetPDF(${sheet.id}, '${sheet.date}')"
              style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;
                     background:var(--text);color:#fff;border-radius:var(--radius-sm);
-                    font-size:13px;font-weight:700;text-decoration:none;">
+                    font-size:13px;font-weight:700;border:none;cursor:pointer;">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download Sheet PDF
-          </a>
+          </button>
         `}
       </div>
         ${sheet.notes ? `<div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">${_esc(sheet.notes)}</div>` : ''}
@@ -662,82 +662,239 @@ const Dashboard = (() => {
   }
 
   // ── Inbox pane ─────────────────────────────────────────────
-  async function loadInboxTab() {
-    if (inboxLoaded) return;
-    inboxLoaded = true;
+// ── Inbox pane ─────────────────────────────────────────────
+  let _inboxChannel  = 'WHATSAPP';
+  let _inboxConvos   = [];
+  let _activeConvoId = null;
 
-    const list = document.getElementById('inbox-tab-list');
-    if (!list) return;
+  async function loadInboxTab() {
+    inboxLoaded = true;
+    const pane = document.getElementById('pane-inbox');
+    if (!pane) return;
+
+    // Render shell
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Inbox</span>
+      </div>
+      <div class="reports-tabs" id="inbox-channel-tabs">
+        <button class="reports-tab active" data-channel="WHATSAPP" onclick="Dashboard.switchInboxChannel('WHATSAPP')">
+          WhatsApp <span class="inbox-badge" id="inbox-badge-WHATSAPP" style="display:none;"></span>
+        </button>
+        <button class="reports-tab" data-channel="EMAIL" onclick="Dashboard.switchInboxChannel('EMAIL')">
+          Email <span class="inbox-badge" id="inbox-badge-EMAIL" style="display:none;"></span>
+        </button>
+        <button class="reports-tab" data-channel="PHONE" onclick="Dashboard.switchInboxChannel('PHONE')">
+          Phone <span class="inbox-badge" id="inbox-badge-PHONE" style="display:none;"></span>
+        </button>
+      </div>
+      <div id="inbox-body" style="display:flex;gap:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:480px;">
+        <div id="inbox-list" style="width:320px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;"></div>
+        <div id="inbox-thread" style="flex:1;display:flex;flex-direction:column;">
+          <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px;">
+            Select a conversation
+          </div>
+        </div>
+      </div>`;
+
+    await _fetchAndRenderInbox();
+  }
+
+  async function _fetchAndRenderInbox() {
+    const listEl = document.getElementById('inbox-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;"><span class="spin"></span></div>';
 
     try {
-      const res  = await Auth.fetch('/api/v1/communications/');
+      const res = await Auth.fetch('/api/v1/communications/');
       if (!res.ok) throw new Error();
-      const data   = await res.json();
-      const convos = Array.isArray(data) ? data : (data.results || []);
+      const data = await res.json();
+      _inboxConvos = Array.isArray(data) ? data : (data.results || []);
 
-      if (!convos.length) {
-        list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No conversations yet.</div>`;
-        return;
-      }
+      // Update badges
+      ['WHATSAPP', 'EMAIL', 'PHONE'].forEach(ch => {
+        const unread = _inboxConvos
+          .filter(c => (c.channel || '').toUpperCase() === ch)
+          .reduce((sum, c) => sum + (c.unread_count || 0), 0);
+        const badge = document.getElementById(`inbox-badge-${ch}`);
+        if (badge) {
+          badge.textContent   = unread;
+          badge.style.display = unread > 0 ? 'inline-flex' : 'none';
+        }
+      });
 
-const AV_COLORS = ['#22c98a','#e8294a','#4a90e8','#9b59b6','#e8c84a'];
-      const _avColor  = name => {
-        let h = 0;
-        for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-        return AV_COLORS[Math.abs(h) % AV_COLORS.length];
-      };
-
-      list.innerHTML = convos.slice(0, 12).map(c => {
-        const name     = c.display_name || c.customer_name || 'Unknown';
-        const ini      = _initials(name);
-        const avColor  = _avColor(name);
-        const time     = _timeAgo(c.last_message_at || c.updated_at || c.created_at);
-        const preview  = _esc(_truncate(c.last_message_preview || c.last_message || 'No messages yet', 60));
-        const hasUnread = (c.unread_count || 0) > 0;
-        const channel  = c.channel || '';
-
-        const channelBadge = channel ? `
-          <span style="
-            display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;
-            font-size:10px;font-weight:700;letter-spacing:0.3px;margin-left:6px;
-            background:var(--bg);border:1px solid var(--border);color:var(--text-3);
-          ">${channel.replace('_', ' ')}</span>` : '';
-
-        return `
-          <div onclick="window.location='/portal/inbox/'" style="
-            display:flex;align-items:center;gap:12px;
-            padding:12px 20px;border-bottom:1px solid var(--border);
-            cursor:pointer;transition:background 0.12s;
-          " onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-            <div style="
-              width:38px;height:38px;border-radius:50%;flex-shrink:0;
-              background:${avColor};color:${avColor === '#e8c84a' ? '#111' : '#fff'};
-              display:flex;align-items:center;justify-content:center;
-              font-family:'Syne',sans-serif;font-size:13px;font-weight:700;
-            ">${ini}</div>
-            <div style="flex:1;min-width:0;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-                <div style="display:flex;align-items:center;">
-                  <span style="font-size:13.5px;font-weight:${hasUnread ? '700' : '500'};color:var(--text);">
-                    ${_esc(name)}
-                  </span>
-                  ${channelBadge}
-                </div>
-                <span style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;flex-shrink:0;">${time}</span>
-              </div>
-              <div style="display:flex;align-items:center;justify-content:space-between;">
-                <span style="font-size:12.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px;">${preview}</span>
-                ${hasUnread ? `<span style="width:7px;height:7px;border-radius:50%;background:var(--red-text);flex-shrink:0;margin-left:8px;"></span>` : ''}
-              </div>
-            </div>
-          </div>`;
-      }).join('');
-
+      _renderInboxList();
     } catch {
-      list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-3);">Could not load inbox.</div>`;
+      listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-3);">Could not load inbox.</div>';
     }
   }
 
+  function _renderInboxList() {
+    const listEl = document.getElementById('inbox-list');
+    if (!listEl) return;
+
+    const filtered = _inboxConvos.filter(
+      c => (c.channel || '').toUpperCase() === _inboxChannel
+    );
+
+    if (!filtered.length) {
+      listEl.innerHTML = `<div style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px;">No ${_inboxChannel.toLowerCase()} conversations.</div>`;
+      return;
+    }
+
+    const AV_COLORS = ['#22c98a','#e8294a','#4a90e8','#9b59b6','#e8c84a'];
+    const _avColor  = name => {
+      let h = 0;
+      for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+      return AV_COLORS[Math.abs(h) % AV_COLORS.length];
+    };
+
+    listEl.innerHTML = filtered.map(c => {
+      const name      = c.display_name || c.customer_name || 'Unknown';
+      const ini       = _initials(name);
+      const avColor   = _avColor(name);
+      const time      = _timeAgo(c.last_message_at || c.updated_at || c.created_at);
+      const preview   = _esc(_truncate(c.last_message_preview || c.last_message || 'No messages yet', 55));
+      const hasUnread = (c.unread_count || 0) > 0;
+      const isActive  = c.id === _activeConvoId;
+
+      return `
+        <div onclick="Dashboard.openConvo(${c.id})"
+          style="
+            display:flex;align-items:center;gap:10px;padding:12px 14px;
+            border-bottom:1px solid var(--border);cursor:pointer;
+            background:${isActive ? 'var(--bg)' : 'var(--panel)'};
+            transition:background 0.12s;
+          "
+          onmouseover="this.style.background='var(--bg)'"
+          onmouseout="this.style.background='${isActive ? 'var(--bg)' : 'var(--panel)'}'">
+          <div style="
+            width:36px;height:36px;border-radius:50%;flex-shrink:0;
+            background:${avColor};color:${avColor === '#e8c84a' ? '#111' : '#fff'};
+            display:flex;align-items:center;justify-content:center;
+            font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+          ">${ini}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+              <span style="font-size:13px;font-weight:${hasUnread ? '700' : '500'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">
+                ${_esc(name)}
+              </span>
+              <span style="font-size:10.5px;color:var(--text-3);font-family:'JetBrains Mono',monospace;flex-shrink:0;margin-left:6px;">${time}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">${preview}</span>
+              ${hasUnread ? `<span style="width:6px;height:6px;border-radius:50%;background:var(--red-text);flex-shrink:0;margin-left:6px;"></span>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function switchInboxChannel(channel) {
+    _inboxChannel  = channel;
+    _activeConvoId = null;
+
+    document.querySelectorAll('#inbox-channel-tabs .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.channel === channel);
+    });
+
+    _renderInboxList();
+
+    // Reset thread
+    const thread = document.getElementById('inbox-thread');
+    if (thread) thread.innerHTML = `
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px;">
+        Select a conversation
+      </div>`;
+  }
+
+  async function openConvo(convoId) {
+    _activeConvoId = convoId;
+    _renderInboxList(); // re-render to highlight active
+
+    const thread = document.getElementById('inbox-thread');
+    if (!thread) return;
+    thread.innerHTML = '<div style="flex:1;display:flex;align-items:center;justify-content:center;"><span class="spin"></span></div>';
+
+    try {
+      const res = await Auth.fetch(`/api/v1/communications/${convoId}/`);
+      if (!res.ok) throw new Error();
+      const convo = await res.json();
+      const msgs  = convo.messages || [];
+      const name  = convo.display_name || convo.customer_name || 'Unknown';
+
+      thread.innerHTML = `
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${_esc(name)}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:1px;">${_esc(convo.channel || '')} · ${convo.contact_value || ''}</div>
+          </div>
+        </div>
+        <div id="inbox-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
+          ${msgs.length ? msgs.map(m => _renderMessage(m)).join('') : '<div style="text-align:center;color:var(--text-3);font-size:13px;padding:32px 0;">No messages yet.</div>'}
+        </div>
+        <div style="padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:8px;">
+          <input id="inbox-reply-input" type="text" placeholder="Type a reply…"
+            style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;outline:none;"
+            onkeydown="if(event.key==='Enter') Dashboard.sendReply(${convoId})"/>
+          <button onclick="Dashboard.sendReply(${convoId})"
+            style="padding:8px 16px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">
+            Send
+          </button>
+        </div>`;
+
+      // Scroll to bottom
+      const msgsEl = document.getElementById('inbox-messages');
+      if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+    } catch {
+      thread.innerHTML = '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px;">Could not load conversation.</div>';
+    }
+  }
+
+  function _renderMessage(m) {
+    const isOutbound = m.direction === 'OUTBOUND' || m.is_outbound;
+    const time = m.created_at
+      ? new Date(m.created_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    return `
+      <div style="display:flex;flex-direction:column;align-items:${isOutbound ? 'flex-end' : 'flex-start'};">
+        <div style="
+          max-width:70%;padding:9px 13px;border-radius:${isOutbound ? '14px 14px 4px 14px' : '14px 14px 14px 4px'};
+          background:${isOutbound ? 'var(--text)' : 'var(--bg)'};
+          color:${isOutbound ? '#fff' : 'var(--text)'};
+          border:${isOutbound ? 'none' : '1px solid var(--border)'};
+          font-size:13px;line-height:1.5;
+        ">${_esc(m.body || m.content || '')}</div>
+        <span style="font-size:10px;color:var(--text-3);margin-top:3px;">${time}</span>
+      </div>`;
+  }
+
+  async function sendReply(convoId) {
+    const input = document.getElementById('inbox-reply-input');
+    const body  = input?.value.trim();
+    if (!body) return;
+
+    input.value    = '';
+    input.disabled = true;
+
+    try {
+      const res = await Auth.fetch(`/api/v1/communications/${convoId}/reply/`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ body }),
+      });
+      if (res.ok) {
+        await openConvo(convoId); // refresh thread
+      } else {
+        _toast('Could not send reply.', 'error');
+        input.disabled = false;
+      }
+    } catch {
+      _toast('Network error.', 'error');
+      input.disabled = false;
+    }
+  }
   // ── Services pane ──────────────────────────────────────────
   async function _loadServicesAndCustomers() {
     try {
@@ -943,21 +1100,289 @@ const AV_COLORS = ['#22c98a','#e8294a','#4a90e8','#9b59b6','#e8c84a'];
     container.appendChild(el);
     setTimeout(() => el.remove(), 3500);
   }
+// ── Reports pane ─────────────────────────────────────────────
+  let _reportsPeriod = 'month';
 
+  async function _loadReportsPane() {
+    const pane = document.getElementById('pane-reports');
+    if (!pane) return;
+
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Reports</span>
+        <div class="period-tabs">
+          <button class="period-tab" data-period="day"   onclick="Dashboard.setReportsPeriod('day')">Day</button>
+          <button class="period-tab" data-period="week"  onclick="Dashboard.setReportsPeriod('week')">Week</button>
+          <button class="period-tab active" data-period="month" onclick="Dashboard.setReportsPeriod('month')">Month</button>
+          <button class="period-tab" data-period="year"  onclick="Dashboard.setReportsPeriod('year')">Year</button>
+        </div>
+      </div>
+
+      <div class="reports-tabs">
+        <button class="reports-tab active" data-tab="sheets" onclick="Dashboard.switchReportsTab('sheets')">Daily Sheets</button>
+        <button class="reports-tab" data-tab="jobs"   onclick="Dashboard.switchReportsTab('jobs')">Jobs History</button>
+        <button class="reports-tab" data-tab="services" onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
+      </div>
+
+      <div id="reports-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _loadReportsTab('sheets');
+  }
+
+  async function setReportsPeriod(period) {
+    _reportsPeriod = period;
+    document.querySelectorAll('.period-tab[data-period]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'sheets';
+    await _loadReportsTab(activeTab);
+  }
+
+  async function switchReportsTab(tab) {
+    document.querySelectorAll('.reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    await _loadReportsTab(tab);
+  }
+
+  async function _loadReportsTab(tab) {
+    const content = document.getElementById('reports-content');
+    if (!content) return;
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
+    if (tab === 'sheets')   await _renderSheetsReport(content);
+    if (tab === 'jobs')     await _renderJobsReport(content);
+    if (tab === 'services') await _renderServicesReport(content);
+  }
+
+  // ── Sheets Archive ────────────────────────────────────────────
+  async function _renderSheetsReport(container) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/sheets/?period=${_reportsPeriod}`);
+      if (!res.ok) throw new Error();
+      const data  = await res.json();
+      const sheets = data.results || data;
+
+      if (!sheets.length) {
+        container.innerHTML = '<div class="loading-cell">No sheets found for this period.</div>';
+        return;
+      }
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Jobs</th>
+                <th>Cash</th>
+                <th>MoMo</th>
+                <th>POS</th>
+                <th>Total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sheets.map(s => `
+                <tr>
+                  <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">${s.date}</td>
+                  <td><span class="badge badge-${s.status === 'OPEN' ? 'progress' : 'done'}">${s.status}</span></td>
+                  <td>${s.total_jobs_created || 0}</td>
+                  <td>${fmt(s.total_cash)}</td>
+                  <td>${fmt(s.total_momo)}</td>
+                  <td>${fmt(s.total_pos)}</td>
+                  <td style="font-weight:700;">${fmt((parseFloat(s.total_cash||0)+parseFloat(s.total_momo||0)+parseFloat(s.total_pos||0)))}</td>
+                  <td>
+                    ${s.status !== 'OPEN' ? `
+                        <button onclick="Dashboard.downloadSheetPDF(${s.id}, '${s.date}')"
+                        style="font-size:12px;color:var(--text-2);background:none;border:none;cursor:pointer;font-weight:600;padding:0;">
+                        PDF ↓
+                      </button>` : '—'}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load sheets.</div>';
+    }
+  }
+
+  // ── Jobs History ──────────────────────────────────────────────
+  async function _renderJobsReport(container) {
+    try {
+      const res = await Auth.fetch(`/api/v1/jobs/?period=${_reportsPeriod}&page_size=50`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const jobs = data.results || data;
+
+      const total     = jobs.length;
+      const completed = jobs.filter(j => j.status === 'COMPLETE').length;
+      const cancelled = jobs.filter(j => j.status === 'CANCELLED').length;
+      const drafts    = jobs.filter(j => j.status === 'DRAFT').length;
+      const pct       = total ? Math.round(completed / total * 100) : 0;
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      container.innerHTML = `
+        <div class="stat-grid" style="margin-bottom:20px;">
+          <div class="stat-card blue"><div class="stat-num">${total}</div><div class="stat-lbl">Total Jobs</div></div>
+          <div class="stat-card green"><div class="stat-num">${completed}</div><div class="stat-lbl">Completed</div></div>
+          <div class="stat-card red"><div class="stat-num">${cancelled}</div><div class="stat-lbl">Cancelled</div></div>
+          <div class="stat-card amber"><div class="stat-num">${pct}%</div><div class="stat-lbl">Completion Rate</div></div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Ref</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Attendant</th>
+                <th>Amount</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${jobs.map(j => `
+                <tr>
+                  <td style="font-family:'JetBrains Mono',monospace;font-size:11px;">${j.job_number||'—'}</td>
+                  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${j.title||'—'}</td>
+                  <td><span class="type-pill ${j.job_type||''}">${j.job_type||'—'}</span></td>
+                  <td><span class="badge badge-${_jobStatusBadge(j.status)}">${j.status}</span></td>
+                  <td>${j.intake_by_name||'—'}</td>
+                  <td>${fmt(j.estimated_cost)}</td>
+                  <td style="font-size:11px;color:var(--text-3);">${j.created_at ? new Date(j.created_at).toLocaleDateString('en-GH') : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load jobs.</div>';
+    }
+  }
+
+  function _jobStatusBadge(status) {
+    const map = {
+      COMPLETE: 'done', PENDING_PAYMENT: 'pending', IN_PROGRESS: 'progress',
+      CANCELLED: 'cancelled', DRAFT: 'draft', PAID: 'progress',
+    };
+    return map[status] || 'pending';
+  }
+
+  // ── Service Performance ───────────────────────────────────────
+  async function _renderServicesReport(container) {
+    try {
+      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=${_reportsPeriod}`);
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const services = data.services || [];
+
+      if (!services.length) {
+        container.innerHTML = '<div class="loading-cell">No service data for this period.</div>';
+        return;
+      }
+
+      const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+      const maxRev  = Math.max(...services.map(s => parseFloat(s.revenue||0)));
+
+      container.innerHTML = `
+        <!-- Bar chart -->
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">Revenue by Service</div>
+          ${services.slice(0,10).map(s => {
+            const pct = maxRev ? (parseFloat(s.revenue||0) / maxRev * 100) : 0;
+            return `
+              <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                  <span style="font-size:12px;font-weight:500;color:var(--text);">${s.service}</span>
+                  <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text-2);">${fmt(s.revenue)}</span>
+                </div>
+                <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+                  <div style="height:100%;width:${pct}%;background:var(--text);border-radius:3px;transition:width 0.4s ease;"></div>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+
+        <!-- Table -->
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Jobs</th>
+                <th>Revenue</th>
+                <th>% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${services.map(s => `
+                <tr>
+                  <td>${s.service}</td>
+                  <td>${s.job_count}</td>
+                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">${fmt(s.revenue)}</td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <div style="width:60px;height:4px;background:var(--border);border-radius:2px;">
+                        <div style="height:100%;width:${s.percentage}%;background:var(--green-text);border-radius:2px;"></div>
+                      </div>
+                      <span style="font-size:12px;color:var(--text-2);">${s.percentage}%</span>
+                    </div>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
+    }
+  }
+  async function downloadSheetPDF(sheetId, sheetDate) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/pdf/`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not download PDF.', 'error');
+        return;
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `sheet_NTB_${sheetDate}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      _toast('Network error downloading PDF.', 'error');
+    }
+  }
   // ── Public API ─────────────────────────────────────────────
-  return {
+return {
     init,
     switchPane,
     setPeriod,
+    setReportsPeriod,
+    switchReportsTab,
     loadInboxTab,
     loadServicesTab,
     openOutsourceModal,
     confirmOutsource,
     closeSheet,
+    downloadSheetPDF,
     onJobCreated,
     closeEOD,
     toggleEODConfirm,
     confirmCloseSheet,
+    switchInboxChannel,
+    openConvo,
+    sendReply,
   };
 
 })();

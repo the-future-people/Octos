@@ -50,6 +50,20 @@ class JobListView(generics.ListAPIView):
         if is_routed is not None:
             qs = qs.filter(is_routed=is_routed.lower() == 'true')
 
+        period = self.request.query_params.get('period')
+        if period:
+            from django.utils import timezone
+            from datetime import timedelta
+            now = timezone.now()
+            since = {
+                'day':   now.replace(hour=0, minute=0, second=0, microsecond=0),
+                'week':  (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0),
+                'month': now.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+                'year':  now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0),
+            }.get(period)
+            if since:
+                qs = qs.filter(created_at__gte=since)
+
         return qs
 
 
@@ -221,10 +235,13 @@ class CashierConfirmPaymentView(APIView):
             job.payment_method     = serializer.validated_data.get('payment_method', 'CASH')
             job.momo_reference     = serializer.validated_data.get('momo_reference', '')
             job.pos_approval_code  = serializer.validated_data.get('pos_approval_code', '')
+            job.cash_tendered      = serializer.validated_data.get('cash_tendered')
+            job.change_given       = serializer.validated_data.get('change_given')
             job.save(update_fields=[
                 'deposit_percentage', 'amount_paid',
                 'payment_method', 'momo_reference',
-                'pos_approval_code', 'updated_at',
+                'pos_approval_code', 'cash_tendered',
+                'change_given', 'updated_at',
             ])
 
             # Advance FSM to COMPLETE — for INSTANT jobs, payment = job done
@@ -665,3 +682,59 @@ class DiscardDraftView(APIView):
         job.save(update_fields=['status', 'abandoned_at'])
 
         return Response({'detail': 'Draft discarded.'})
+
+class ServicePerformanceView(APIView):
+    """
+    GET /api/v1/jobs/reports/services/?period=day|week|month|year
+    Returns service performance stats for the branch.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum, Count
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.jobs.models import JobLineItem
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+
+        period = request.query_params.get('period', 'month')
+        now    = timezone.now()
+
+        if period == 'day':
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'week':
+            since = now - timedelta(days=now.weekday())
+            since = since.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'year':
+            since = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:  # month
+            since = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        qs = JobLineItem.objects.filter(
+            job__branch=branch,
+            job__status='COMPLETE',
+            job__created_at__gte=since,
+        ).values(
+            'service__name'
+        ).annotate(
+            job_count  = Count('job', distinct=True),
+            revenue    = Sum('line_total'),
+        ).order_by('-revenue')
+
+        total_revenue = sum(float(r['revenue'] or 0) for r in qs)
+
+        data = [
+            {
+                'service'   : r['service__name'],
+                'job_count' : r['job_count'],
+                'revenue'   : str(r['revenue'] or 0),
+                'percentage': round(float(r['revenue'] or 0) / total_revenue * 100, 1)
+                              if total_revenue else 0,
+            }
+            for r in qs
+        ]
+
+        return Response({'period': period, 'since': since.isoformat(), 'services': data})

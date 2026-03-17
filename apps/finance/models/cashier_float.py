@@ -72,6 +72,27 @@ class CashierFloat(AuditModel):
     )
     signed_off_at   = models.DateTimeField(null=True, blank=True)
     is_signed_off   = models.BooleanField(default=False)
+    shift_notes     = models.TextField(
+        blank=True,
+        help_text='Cashier notes on incidents or observations during shift',
+    )
+
+    # ── Overtime ──────────────────────────────────────────────
+    is_overtime       = models.BooleanField(default=False)
+    overtime_reason   = models.TextField(blank=True)
+    overtime_until    = models.DateTimeField(null=True, blank=True)
+
+    # ── Cover shift ───────────────────────────────────────────
+    is_cover          = models.BooleanField(default=False)
+    covering_for      = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='floats_covered_by',
+        help_text='The cashier whose shift this person is covering',
+    )
+    cover_until       = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering        = ['-created_at']

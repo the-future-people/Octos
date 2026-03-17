@@ -1743,6 +1743,21 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .eod-confirm-btn:hover:not(:disabled) { opacity: 0.88; }
 .eod-confirm-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+.reports-tabs {
+  display: flex; gap: 4px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--border); padding-bottom: 0;
+}
+.reports-tab {
+  padding: 8px 16px; font-size: 13px; font-weight: 600;
+  color: var(--text-3); background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; margin-bottom: -1px;
+  transition: all var(--transition);
+}
+.reports-tab:hover { color: var(--text); }
+.reports-tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+
 /* Responsive */
 @media (max-width: 600px) {
   .eod-revenue-grid { grid-template-columns: 1fr 1fr; }

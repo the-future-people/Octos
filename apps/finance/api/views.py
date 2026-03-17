@@ -35,6 +35,7 @@ from .serializers import (
     CreditPaymentSerializer,
     CreditSettlementSerializer,
     BranchTransferCreditSerializer,
+    CashierSignOffSerializer,
 )
 
 
@@ -63,6 +64,20 @@ class DailySalesSheetListView(generics.ListAPIView):
         date_param = self.request.query_params.get('date')
         if date_param:
             qs = qs.filter(date=date_param)
+
+        period = self.request.query_params.get('period')
+        if period:
+            from django.utils import timezone
+            from datetime import timedelta
+            now = timezone.localdate()
+            since = {
+                'day':   now,
+                'week':  now - timedelta(days=now.weekday()),
+                'month': now.replace(day=1),
+                'year':  now.replace(month=1, day=1),
+            }.get(period)
+            if since:
+                qs = qs.filter(date__gte=since)
 
         return qs
 
@@ -298,7 +313,221 @@ class CashierFloatCloseView(APIView):
 
         return Response(CashierFloatSerializer(float_record).data)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cashier Sign-Off
+# ─────────────────────────────────────────────────────────────────────────────
 
+class CashierSignOffView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/sign-off/
+    Cashier submits closing cash, variance notes, shift notes.
+    Marks float as signed off and locks the queue for this cashier.
+    If overtime or cover: extends queue access until specified time.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            float_record = CashierFloat.objects.select_related(
+                'cashier', 'daily_sheet'
+            ).get(pk=pk, cashier=request.user)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if float_record.is_signed_off:
+            return Response(
+                {'detail': 'Already signed off.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = CashierSignOffSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d = serializer.validated_data
+        from django.utils import timezone
+
+        # Overtime or cover — not signing off yet, just extending
+        if d.get('is_overtime') or d.get('is_cover'):
+            float_record.is_overtime     = d.get('is_overtime', False)
+            float_record.overtime_reason = d.get('overtime_reason', '')
+            float_record.overtime_until  = d.get('overtime_until')
+            float_record.is_cover        = d.get('is_cover', False)
+            float_record.cover_until     = d.get('cover_until')
+
+            if d.get('covering_for_id'):
+                from apps.accounts.models import CustomUser
+                try:
+                    float_record.covering_for = CustomUser.objects.get(
+                        pk=d['covering_for_id']
+                    )
+                except CustomUser.DoesNotExist:
+                    return Response(
+                        {'detail': 'User to cover not found.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            float_record.save(update_fields=[
+                'is_overtime', 'overtime_reason', 'overtime_until',
+                'is_cover', 'covering_for', 'cover_until', 'updated_at',
+            ])
+            return Response({
+                'detail'         : 'Shift extended.',
+                'is_overtime'    : float_record.is_overtime,
+                'overtime_until' : float_record.overtime_until,
+                'is_cover'       : float_record.is_cover,
+                'cover_until'    : float_record.cover_until,
+            })
+
+        # Full sign-off
+        float_record.closing_cash   = d['closing_cash']
+        float_record.variance_notes = d['variance_notes']
+        float_record.shift_notes    = d['shift_notes']
+        float_record.signed_off_by  = request.user
+        float_record.signed_off_at  = timezone.now()
+        float_record.is_signed_off  = True
+        float_record.compute_variance()
+        float_record.save(update_fields=[
+            'closing_cash', 'variance_notes', 'shift_notes',
+            'signed_off_by', 'signed_off_at', 'is_signed_off',
+            'variance', 'updated_at',
+        ])
+
+        return Response(CashierFloatSerializer(float_record).data)
+
+
+class CashierShiftStatusView(APIView):
+    """
+    GET /api/v1/finance/cashier/shift-status/
+    Returns current shift state for the logged-in cashier.
+    Polled every 60s by the cashier portal.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.utils import timezone
+        from datetime import datetime, timedelta
+        from apps.hr.models import EmployeeShift, ShiftOverride
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get today's float
+        today = timezone.localdate()
+        try:
+            float_record = CashierFloat.objects.get(
+                cashier     = user,
+                daily_sheet__date   = today,
+                daily_sheet__branch = branch,
+            )
+        except CashierFloat.DoesNotExist:
+            float_record = None
+
+        # If already signed off and not overtime/cover
+        if float_record and float_record.is_signed_off:
+            return Response({
+                'has_shift'        : True,
+                'shift_end'        : None,
+                'minutes_remaining': 0,
+                'should_prompt'    : False,
+                'should_lock'      : True,
+                'is_signed_off'    : True,
+                'float_id'         : float_record.id,
+                'is_overtime'      : False,
+                'overtime_until'   : None,
+                'is_cover'         : False,
+                'cover_until'      : None,
+            })
+
+        # Resolve shift end time
+        # 1. Check ShiftOverride for today
+        shift_end = None
+        try:
+            employee = user.employee_profile
+            override = ShiftOverride.objects.filter(
+                employee = employee,
+                date     = today,
+            ).exclude(
+                override_type = ShiftOverride.ABSENCE,
+            ).order_by('-created_at').first()
+
+            if override and override.override_end:
+                shift_end = override.override_end
+            else:
+                # 2. Fall back to base EmployeeShift
+                base = EmployeeShift.objects.filter(
+                    employee    = employee,
+                    day_of_week = today.weekday(),
+                    is_active   = True,
+                ).first()
+                if base:
+                    shift_end = base.end_time
+        except Exception:
+            shift_end = None
+
+        # If overtime active — use overtime_until instead
+        if float_record and float_record.is_overtime and float_record.overtime_until:
+            now            = timezone.now()
+            delta          = float_record.overtime_until - now
+            mins_remaining = max(0, int(delta.total_seconds() / 60))
+            return Response({
+                'has_shift'        : True,
+                'shift_end'        : float_record.overtime_until.time(),
+                'minutes_remaining': mins_remaining,
+                'should_prompt'    : mins_remaining <= 60,
+                'should_lock'      : mins_remaining <= 0,
+                'is_signed_off'    : False,
+                'float_id'         : float_record.id if float_record else None,
+                'is_overtime'      : True,
+                'overtime_until'   : float_record.overtime_until,
+                'is_cover'         : float_record.is_cover,
+                'cover_until'      : float_record.cover_until,
+            })
+
+        if not shift_end:
+            return Response({
+                'has_shift'        : False,
+                'shift_end'        : None,
+                'minutes_remaining': None,
+                'should_prompt'    : False,
+                'should_lock'      : False,
+                'is_signed_off'    : False,
+                'float_id'         : float_record.id if float_record else None,
+                'is_overtime'      : False,
+                'overtime_until'   : None,
+                'is_cover'         : False,
+                'cover_until'      : None,
+            })
+
+        # Compute minutes remaining
+        now            = timezone.now()
+        shift_end_dt   = datetime.combine(today, shift_end)
+        shift_end_dt   = timezone.make_aware(shift_end_dt)
+        delta          = shift_end_dt - now
+        mins_remaining = max(0, int(delta.total_seconds() / 60))
+
+        return Response({
+            'has_shift'        : True,
+            'shift_end'        : shift_end,
+            'minutes_remaining': mins_remaining,
+            'should_prompt'    : mins_remaining <= 60,
+            'should_lock'      : mins_remaining <= 0,
+            'is_signed_off'    : float_record.is_signed_off if float_record else False,
+            'float_id'         : float_record.id if float_record else None,
+            'is_overtime'      : float_record.is_overtime if float_record else False,
+            'overtime_until'   : float_record.overtime_until if float_record else None,
+            'is_cover'         : float_record.is_cover if float_record else False,
+            'cover_until'      : float_record.cover_until if float_record else None,
+        })
 # ─────────────────────────────────────────────────────────────────────────────
 # Petty Cash
 # ─────────────────────────────────────────────────────────────────────────────
