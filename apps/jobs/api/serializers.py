@@ -129,7 +129,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'id', 'job_number', 'title', 'job_type', 'status',
             'priority', 'branch', 'branch_name', 'assigned_to',
             'assigned_to_name', 'customer_name', 'intake_by_name',
-            'is_routed', 'estimated_cost', 'deposit_percentage',
+            'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
@@ -297,7 +297,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
                     is_color = color,
                     pages    = pg,
                 )
-                unit_price = float(pricing['base_price']) if pricing['success'] else 0
+                unit_price = float(pricing.get('base_price', pricing.get('total', 0))) if pricing['success'] else 0
                 line_total = float(pricing['total'])      if pricing['success'] else 0
                 total     += line_total
 

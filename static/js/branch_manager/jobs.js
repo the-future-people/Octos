@@ -622,5 +622,8 @@ function _toast(msg, type = 'info') {
 }
 
 // Global aliases expected by NJ controller and HTML onclick handlers
-function closeNewJobModal()     { document.getElementById('new-job-modal').classList.remove('open'); }
+function closeNewJobModal() {
+  NJ.tryAutoSaveDraft();
+  document.getElementById('new-job-modal').classList.remove('open');
+}
 function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }

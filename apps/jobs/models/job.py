@@ -270,6 +270,17 @@ class Job(AuditModel):
     )
 
     # ── Notes ────────────────────────────────────────────────────
+    # ── Draft ────────────────────────────────────────────────────────────────
+    draft_expires_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Auto-set to created_at + 3 days for DRAFT jobs. Null for all other statuses.',
+    )
+    abandoned_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set when a draft expires or is manually discarded.',
+    )
+
+    # ── Notes ──
     notes = models.TextField(blank=True)
 
     class Meta:

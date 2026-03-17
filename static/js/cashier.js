@@ -24,7 +24,7 @@ const Cashier = (() => {
 
   const totals = { CASH: 0, MOMO: 0, POS: 0, count: 0 };
 
-  const POLL_INTERVAL   = 8000;
+  const POLL_INTERVAL   = 4000;
   const WAIT_AMBER_MINS = 10;
   const WAIT_RED_MINS   = 20;
 
@@ -259,6 +259,7 @@ const Cashier = (() => {
               <span class="type-pill ${job.job_type || ''}">${job.job_type || ''}</span>
               ${priorityTag}
               <span class="queue-card-attendant">by ${attendant}</span>
+              <span class="queue-card-channel">${_esc(job.intake_channel || 'WALK_IN')}</span>
               <span class="wait-tag ${waitClass}">${waitLabel}</span>
             </div>
           </div>
@@ -379,6 +380,15 @@ function selectMethod(method) {
     if (btn) {
       btn.className = `cm-confirm-btn ${method.toLowerCase()}`;
     }
+    // Cash tendered field
+    const cashTendered = document.getElementById('cash-tendered-field');
+    if (cashTendered) cashTendered.classList.toggle('visible', method === 'CASH');
+    if (method !== 'CASH') {
+      const changeRow = document.getElementById('cm-change-row');
+      if (changeRow) changeRow.style.display = 'none';
+      const input = document.getElementById('cash-tendered');
+      if (input) input.value = '';
+    }
   }
   // ── Deposit ────────────────────────────────────────────────
 function selectDeposit(pct) {
@@ -398,6 +408,26 @@ function _updateAmountDue() {
     if (el) el.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
     const costEl = document.getElementById('confirm-est-cost');
     if (costEl) costEl.textContent = `GHS ${total.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+  }
+  function calcChange() {
+    if (selectedMethod !== 'CASH' || !activeJob) return;
+    const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
+    const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
+    const change   = tendered - due;
+    const row      = document.getElementById('cm-change-row');
+    const val      = document.getElementById('cm-change-val');
+    if (!row || !val) return;
+    if (tendered > 0) {
+      row.style.display = 'flex';
+      val.textContent   = `GHS ${Math.abs(change).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+      row.style.background  = change >= 0 ? 'var(--green-bg)'  : 'var(--red-bg)';
+      row.style.borderColor = change >= 0 ? 'var(--green-border)' : 'var(--red-border)';
+      val.style.color       = change >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+      const label = document.querySelector('.cm-change-label');
+      if (label) label.style.color = change >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+    } else {
+      row.style.display = 'none';
+    }
   }
 
   // ── Confirm payment ────────────────────────────────────────

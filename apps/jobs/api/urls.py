@@ -26,4 +26,8 @@ urlpatterns = [
     # Pricing
     path('pricing/',          views.PricingRuleListView.as_view(), name='pricing-list'),
     path('price/calculate/',  views.PriceCalculateView.as_view(),  name='price-calculate'),
+    # Drafts
+    path('drafts/',              views.DraftListView.as_view(),   name='draft-list'),
+    path('drafts/save/',         views.SaveDraftView.as_view(),   name='draft-save'),
+    path('drafts/<int:pk>/discard/', views.DiscardDraftView.as_view(), name='draft-discard'),
 ]
