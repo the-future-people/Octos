@@ -128,6 +128,23 @@ async function loadJobs() {
   if (State.searchQuery)                      params.set('search',   State.searchQuery);
 
   try {
+    // Scope to today's open sheet
+    const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+
+    if (!sheetRes.ok) {
+      _setSheetClosed('No open sheet today.');
+      return;
+    }
+
+    const sheet = await sheetRes.json();
+
+    if (sheet.status !== 'OPEN') {
+      _setSheetClosed('Today\'s sheet is closed — view history in Reports.');
+      return;
+    }
+
+    params.set('daily_sheet', sheet.id);
+
     const res  = await Auth.fetch(`/api/v1/jobs/?${params}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -232,6 +249,30 @@ function _setTableError() {
   const el = document.getElementById('jobs-tbody');
   if (el) el.innerHTML =
     `<tr><td colspan="6" class="loading-cell" style="color:var(--red-text);">Failed to load jobs. Try refreshing.</td></tr>`;
+}
+function _setSheetClosed(message) {
+  _set('stat-total',       '—');
+  _set('stat-in-progress', '—');
+  _set('stat-complete',    '—');
+  _set('stat-revenue',     '—');
+
+  const pag = document.getElementById('pagination');
+  if (pag) pag.style.display = 'none';
+
+  const tbody = document.getElementById('jobs-tbody');
+  if (tbody) tbody.innerHTML = `
+    <tr>
+      <td colspan="6" class="empty-cell">
+        <div class="empty-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div class="empty-text">${message}</div>
+      </td>
+    </tr>`;
 }
 
 // ─────────────────────────────────────────────────────────────

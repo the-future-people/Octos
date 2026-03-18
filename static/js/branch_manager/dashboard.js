@@ -82,43 +82,53 @@ const Dashboard = (() => {
   }
 
   // ── Stats ──────────────────────────────────────────────────
-  async function loadStats() {
+ async function loadStats() {
     try {
-      const res  = await Auth.fetch('/api/v1/jobs/?page_size=200');
+      // Scope everything to today's open sheet
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      if (!sheetRes.ok) {
+        _setStats(0, 0, 0, 0, 0);
+        return;
+      }
+      const sheet = await sheetRes.json();
+
+      if (sheet.status !== 'OPEN') {
+        _setStats(0, 0, 0, 0, 0);
+        _set('meta-load', '0%');
+        return;
+      }
+
+      const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheet.id}&page_size=200`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       const jobs = Array.isArray(data) ? data : (data.results || []);
 
-      const total      = data.count || jobs.length;
+      const total      = jobs.length;
       const inProgress = jobs.filter(j => j.status === 'IN_PROGRESS').length;
       const complete   = jobs.filter(j => j.status === 'COMPLETE').length;
       const pending    = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
       const routed     = jobs.filter(j => j.is_routed).length;
 
-      _set('stat-total-jobs',      total);
-      _set('stat-in-progress',     inProgress);
-      _set('stat-complete',        complete);
-      _set('stat-pending-payment', pending);
-      _set('stat-routed',          routed);
+      _setStats(total, inProgress, complete, pending, routed);
 
-      // Sidebar badge
+      // Sidebar badge — today's total only
       const jobsBadge = document.getElementById('sidebar-badge-jobs');
-      if (jobsBadge && total > 0) {
-        jobsBadge.textContent = total;
-        jobsBadge.style.display = 'flex';
+      if (jobsBadge) {
+        jobsBadge.textContent   = total;
+        jobsBadge.style.display = total > 0 ? 'flex' : 'none';
       }
 
-      // Branch load
+      // Branch load — in progress vs total today
       const load = total > 0 ? Math.round((inProgress / total) * 100) + '%' : '0%';
       _set('meta-load', load);
 
     } catch { /* silent */ }
 
-    // Unread messages
+    // Unread messages — not sheet-scoped, always live
     try {
-      const res  = await Auth.fetch('/api/v1/communications/');
+      const res    = await Auth.fetch('/api/v1/communications/');
       if (!res.ok) throw new Error();
-      const data = await res.json();
+      const data   = await res.json();
       const convos = Array.isArray(data) ? data : (data.results || []);
       const unread = convos.reduce((sum, c) => sum + (c.unread_count || 0), 0);
 
@@ -132,19 +142,41 @@ const Dashboard = (() => {
     } catch { /* silent */ }
   }
 
+  function _setStats(total, inProgress, complete, pending, routed) {
+    _set('stat-total-jobs',      total);
+    _set('stat-in-progress',     inProgress);
+    _set('stat-complete',        complete);
+    _set('stat-pending-payment', pending);
+    _set('stat-routed',          routed);
+  }
+
   // ── Recent jobs ────────────────────────────────────────────
-  async function loadRecentJobs() {
+async function loadRecentJobs() {
     const tbody = document.getElementById('recent-jobs-tbody');
     if (!tbody) return;
 
     try {
-      const res  = await Auth.fetch('/api/v1/jobs/?page_size=10');
+      // First get today's open sheet
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      if (!sheetRes.ok) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No open sheet today.</td></tr>`;
+        return;
+      }
+      const sheet = await sheetRes.json();
+
+      if (sheet.status !== 'OPEN') {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">Today's sheet is closed — jobs archived in the day sheet PDF.</td></tr>`;
+        return;
+      }
+
+      // Fetch jobs scoped to this sheet
+      const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheet.id}&page_size=10`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       const jobs = Array.isArray(data) ? data : (data.results || []);
 
       if (!jobs.length) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No jobs yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px;">No jobs recorded yet today.</td></tr>`;
         return;
       }
 

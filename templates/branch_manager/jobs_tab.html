@@ -181,7 +181,21 @@ const JT = (function() {
     tbody.innerHTML = `<tr><td colspan="5" class="jt-loading"><span class="jt-spin"></span> Loading…</td></tr>`;
 
     try {
-      const params = new URLSearchParams({ page, page_size: PAGE_SIZE });
+      // Scope to today's open sheet only
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      if (!sheetRes.ok) {
+        tbody.innerHTML = `<tr><td colspan="5" class="jt-loading">No open sheet today.</td></tr>`;
+        document.getElementById('jt-pagination').style.display = 'none';
+        return;
+      }
+      const sheet = await sheetRes.json();
+      if (sheet.status !== 'OPEN') {
+        tbody.innerHTML = `<tr><td colspan="5" class="jt-loading">Today's sheet is closed — jobs archived in the day sheet PDF.</td></tr>`;
+        document.getElementById('jt-pagination').style.display = 'none';
+        return;
+      }
+
+      const params = new URLSearchParams({ page, page_size: PAGE_SIZE, daily_sheet: sheet.id });
       const res    = await Auth.fetch(`/api/v1/jobs/?${params}`);
       if (!res.ok) throw new Error();
       const data = await res.json();

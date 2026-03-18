@@ -47,8 +47,9 @@ class JobListView(generics.ListAPIView):
             qs = qs.filter(job_type=job_type)
         if status_param:
             qs = qs.filter(status=status_param)
-        if is_routed is not None:
-            qs = qs.filter(is_routed=is_routed.lower() == 'true')
+        daily_sheet = self.request.query_params.get('daily_sheet')
+        if daily_sheet:
+            qs = qs.filter(daily_sheet_id=daily_sheet)
 
         period = self.request.query_params.get('period')
         if period:
