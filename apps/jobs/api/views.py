@@ -4,11 +4,13 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 
+from apps.communications import models
 from apps.jobs.models import Job, JobFile, Service, PricingRule
 from apps.jobs.status_engine import JobStatusEngine
 from apps.jobs.routing_engine import RoutingEngine
 from apps.jobs.pricing_engine import PricingEngine
 from apps.organization.models import Branch
+from django.db import models
 
 from .serializers import (
     JobListSerializer, JobDetailSerializer, JobCreateSerializer,
@@ -739,3 +741,42 @@ class ServicePerformanceView(APIView):
         ]
 
         return Response({'period': period, 'since': since.isoformat(), 'services': data})
+
+class JobStatsView(APIView):
+    """
+    GET /api/v1/jobs/stats/?daily_sheet=<id>
+    Returns aggregated stats for the sheet — never paginated.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum, Count
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+
+        qs = Job.objects.filter(branch=branch)
+
+        sheet_id = request.query_params.get('daily_sheet')
+        if sheet_id:
+            qs = qs.filter(daily_sheet_id=sheet_id)
+
+        totals = qs.aggregate(
+            total        = Count('id'),
+            complete     = Count('id', filter=models.Q(status='COMPLETE')),
+            in_progress  = Count('id', filter=models.Q(status='IN_PROGRESS')),
+            pending      = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
+            routed       = Count('id', filter=models.Q(is_routed=True)),
+            revenue      = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
+        )
+
+        return Response({
+            'total'       : totals['total']       or 0,
+            'complete'    : totals['complete']     or 0,
+            'in_progress' : totals['in_progress']  or 0,
+            'pending'     : totals['pending']      or 0,
+            'routed'      : totals['routed']       or 0,
+            'revenue'     : str(totals['revenue']  or 0),
+        })

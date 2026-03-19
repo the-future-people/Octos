@@ -203,24 +203,16 @@ function _renderTable() {
 }
 
 async function _renderStats(sheetId) {
-  // Fetch all jobs for today's sheet (no pagination) for accurate stats
   try {
-    const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheetId}&page_size=500`);
+    const res  = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheetId}`);
     if (!res.ok) return;
     const data = await res.json();
-    const all  = Array.isArray(data) ? data : (data.results || []);
 
-    const inProgress = all.filter(j => j.status === 'IN_PROGRESS').length;
-    const complete   = all.filter(j => j.status === 'COMPLETE').length;
-    const revenue    = all
-      .filter(j => ['PAID', 'COMPLETE'].includes(j.status))
-      .reduce((sum, j) => sum + parseFloat(j.final_cost || j.estimated_cost || 0), 0);
-
-    _set('stat-total',       data.count || all.length);
-    _set('stat-in-progress', inProgress);
-    _set('stat-complete',    complete);
-    _set('stat-revenue',     revenue > 0
-      ? revenue.toLocaleString('en-GH', { minimumFractionDigits: 2 })
+    _set('stat-total',       data.total);
+    _set('stat-in-progress', data.in_progress);
+    _set('stat-complete',    data.complete);
+    _set('stat-revenue',     parseFloat(data.revenue) > 0
+      ? parseFloat(data.revenue).toLocaleString('en-GH', { minimumFractionDigits: 2 })
       : '0');
   } catch { /* silent */ }
 }

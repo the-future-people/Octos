@@ -100,28 +100,23 @@ const Dashboard = (() => {
         return;
       }
 
-      const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheet.id}&page_size=200`);
+      const res  = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const jobs = Array.isArray(data) ? data : (data.results || []);
 
-      const total      = jobs.length;
-      const inProgress = jobs.filter(j => j.status === 'IN_PROGRESS').length;
-      const complete   = jobs.filter(j => j.status === 'COMPLETE').length;
-      const pending    = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
-      const routed     = jobs.filter(j => j.is_routed).length;
-
-      _setStats(total, inProgress, complete, pending, routed);
+      _setStats(data.total, data.in_progress, data.complete, data.pending, data.routed);
 
       // Sidebar badge — today's total only
       const jobsBadge = document.getElementById('sidebar-badge-jobs');
       if (jobsBadge) {
-        jobsBadge.textContent   = total;
-        jobsBadge.style.display = total > 0 ? 'flex' : 'none';
+        jobsBadge.textContent   = data.total;
+        jobsBadge.style.display = data.total > 0 ? 'flex' : 'none';
       }
 
-      // Branch load — in progress vs total today
-      const load = total > 0 ? Math.round((inProgress / total) * 100) + '%' : '0%';
+      // Branch load
+      const load = data.total > 0
+        ? Math.round((data.in_progress / data.total) * 100) + '%'
+        : '0%';
       _set('meta-load', load);
 
     } catch { /* silent */ }
