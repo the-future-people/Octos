@@ -25,6 +25,13 @@ from .views import (
     DailySalesSheetPDFView,
     CashierSignOffView,
     CashierShiftStatusView,
+    CashierSignOffView,
+    CashierShiftStatusView,
+    InvoiceListView,
+    InvoiceDetailView,
+    InvoiceCreateView,
+    InvoiceSendView,
+    InvoicePDFView,
 )
 
 urlpatterns = [
@@ -63,5 +70,11 @@ urlpatterns = [
     path('lock-status/',                    BranchLockStatusView.as_view(),       name='branch-lock-status'),
     path('floats/<int:pk>/sign-off/',       CashierSignOffView.as_view(),         name='float-sign-off'),
     path('cashier/shift-status/',           CashierShiftStatusView.as_view(),     name='cashier-shift-status'),
+    # ── Invoices ──────────────────────────────────────────────
+    path('invoices/',                       InvoiceListView.as_view(),            name='invoice-list'),
+    path('invoices/create/',                InvoiceCreateView.as_view(),          name='invoice-create'),
+    path('invoices/<int:pk>/',              InvoiceDetailView.as_view(),          name='invoice-detail'),
+    path('invoices/<int:pk>/send/',         InvoiceSendView.as_view(),            name='invoice-send'),
+    path('invoices/<int:pk>/pdf/',          InvoicePDFView.as_view(),             name='invoice-pdf'),
     path('sheets/<int:pk>/eod-summary/', EODSummaryView.as_view(), name='sheet-eod-summary'),
 ]

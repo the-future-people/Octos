@@ -30,7 +30,7 @@ const Cashier = (() => {
 
   // ── Bootstrap ──────────────────────────────────────────────
 async function init() {
-    Auth.guard();
+    await Auth.guard(['CASHIER']);
     await loadContext();
     await loadSummary();
     await loadQueue();

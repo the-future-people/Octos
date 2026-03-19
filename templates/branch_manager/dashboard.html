@@ -312,7 +312,7 @@
      NEW JOB MODAL
 ═══════════════════════════════════════ -->
 <div class="modal-overlay" id="new-job-modal">
-  <div class="modal" style="max-width:780px;">
+  <div class="modal" style="max-width:780px;max-height:92vh;height:92vh;">
 
     <!-- Header -->
     <div class="modal-head">
@@ -390,12 +390,54 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════
+     INVOICE MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="invoice-modal">
+  <div class="modal" style="max-width:620px;">
+
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="invoice-modal-title">Invoice</div>
+        <div class="modal-subtitle">Generate and send a professional invoice</div>
+      </div>
+      <button class="modal-x" onclick="Invoice.close()">×</button>
+    </div>
+
+    <!-- Step dots -->
+    <div style="padding:12px 24px 0;display:flex;gap:6px;flex-shrink:0;">
+      ${[1,2,3,4].map(n => `
+        <div id="inv-dot-${n}" style="flex:1;height:3px;border-radius:2px;
+          background:${n === 1 ? 'var(--text)' : 'var(--border)'};
+          transition:background 0.2s;"></div>`).join('')}
+    </div>
+
+    <div class="modal-body" id="invoice-modal-body" style="padding-top:16px;">
+    </div>
+
+    <div class="modal-foot">
+      <button id="invoice-back-btn" onclick="Invoice.back()"
+        style="display:none;padding:8px 18px;background:none;
+               border:1px solid var(--border);border-radius:var(--radius-sm);
+               font-size:13px;cursor:pointer;color:var(--text-2);font-family:inherit;">
+        ← Back
+      </button>
+      <div style="flex:1;"></div>
+      <button class="btn-ghost" onclick="Invoice.close()">Cancel</button>
+      <button class="btn-dark" id="invoice-next-btn" onclick="Invoice.next()">
+        Continue →
+      </button>
+    </div>
+
+  </div>
+</div>
 
 <div id="toast-container"></div>
 {% include "branch_manager/eod_modal.html" %}
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/dashboard.js' %}"></script>
 <script src="{% static 'js/nj_controller.js' %}"></script>
+<script src="{% static 'js/invoice_controller.js' %}"></script>
 
 <script>
   document.getElementById('sidebar-toggle').addEventListener('click', () => {

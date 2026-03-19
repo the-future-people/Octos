@@ -420,7 +420,21 @@
   <script src="/static/js/auth.js"></script>
   <script>
     if (Auth.isAuthenticated()) {
-      window.location.href = '/portal/dashboard/';
+      Auth.redirectToPortal();
+    }
+
+    // Show session expiry message if redirected here with reason
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('reason');
+    if (reason === 'expired') {
+      const el = document.getElementById('error-msg');
+      if (el) {
+        el.textContent = 'Your session has expired. Please sign in again.';
+        el.style.background = '#FFF7ED';
+        el.style.borderColor = '#FED7AA';
+        el.style.color = '#C2410C';
+        el.classList.add('show');
+      }
     }
 
     document.getElementById('password').addEventListener('keydown', e => {
@@ -467,7 +481,7 @@
         const user = await userRes.json();
         Auth.setUser(user);
 
-        window.location.href = '/portal/dashboard/';
+        Auth.redirectToPortal();
 
       } catch (err) {
         showError('Connection error. Please try again.');

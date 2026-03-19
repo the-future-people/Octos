@@ -133,14 +133,40 @@ const NJ = (() => {
             </div>
           </div>
 
-          <!-- Service grid -->
+<!-- Service grid -->
           <div class="form-group" style="margin-bottom:12px;">
             <label class="form-label">Select Service</label>
+            <div style="position:relative;margin-bottom:8px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2"
+                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none;">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="nj-service-search"
+                placeholder="Search services…"
+                oninput="NJ._filterServiceChips(this.value)"
+                onkeydown="NJ._serviceSearchKeydown(event)"
+                autocomplete="off"
+                style="width:100%;padding:8px 12px 8px 32px;
+                       border:1.5px solid var(--border);border-radius:var(--radius-sm);
+                       background:var(--bg);color:var(--text);font-size:13px;
+                       font-family:inherit;outline:none;box-sizing:border-box;
+                       transition:border-color var(--transition);"
+                onfocus="this.style.borderColor='var(--border-dark)'"
+                onblur="this.style.borderColor='var(--border)'">
+            </div>
             <div class="nj-service-grid" id="nj-service-grid">
               ${services.map(s => `
-                <button class="nj-service-chip" data-id="${s.id}" onclick="NJ._selectServiceChip(${s.id})">
+                <button class="nj-service-chip"
+                  data-id="${s.id}"
+                  data-name="${_esc(s.name.toLowerCase())}"
+                  onclick="NJ._selectServiceChip(${s.id})">
                   ${_esc(s.name)}
                 </button>`).join('')}
+            </div>
+            <div id="nj-service-no-results" style="display:none;padding:12px;
+              text-align:center;font-size:12.5px;color:var(--text-3);">
+              No services match
             </div>
           </div>
 
@@ -403,9 +429,11 @@ const NJ = (() => {
   }
 
   // ── Reset configurator after adding ───────────────────────
-  function _resetConfigurator() {
+function _resetConfigurator() {
     currentService = null;
     document.querySelectorAll('.nj-service-chip').forEach(b => b.classList.remove('active'));
+    const search = document.getElementById('nj-service-search');
+    if (search) { search.value = ''; _filterServiceChips(''); }
     const cfg = document.getElementById('nj-configurator');
     if (cfg) cfg.style.display = 'none';
     const box = document.getElementById('nj-line-price-box');
@@ -858,7 +886,10 @@ const NJ = (() => {
     _applyTheme('INSTANT');
     _positionPill();
     _showInstantUI();
-    requestAnimationFrame(_positionPill);
+    requestAnimationFrame(() => {
+      _positionPill();
+      document.getElementById('nj-service-search')?.focus();
+    });
   }
 
   function _toggleAdvanced() {
@@ -906,6 +937,41 @@ const NJ = (() => {
     // Reset cart after saving
     cart = [];
   }
+
+  // ── Service chip search ────────────────────────────────────
+  function _filterServiceChips(query) {
+    const q       = query.trim().toLowerCase();
+    const chips   = document.querySelectorAll('.nj-service-chip');
+    const noMatch = document.getElementById('nj-service-no-results');
+    let   visible = 0;
+
+    chips.forEach(chip => {
+      const name    = chip.dataset.name || '';
+      const matches = !q || name.includes(q);
+      chip.style.display = matches ? '' : 'none';
+      if (matches) visible++;
+    });
+
+    if (noMatch) noMatch.style.display = visible === 0 ? 'block' : 'none';
+  }
+
+  function _serviceSearchKeydown(e) {
+    if (e.key === 'Escape') {
+      const input = document.getElementById('nj-service-search');
+      if (input) { input.value = ''; _filterServiceChips(''); }
+      return;
+    }
+    if (e.key === 'Enter') {
+      // Auto-select if exactly one chip is visible
+      const visible = [...document.querySelectorAll('.nj-service-chip')]
+        .filter(c => c.style.display !== 'none');
+      if (visible.length === 1) {
+        visible[0].click();
+        const input = document.getElementById('nj-service-search');
+        if (input) { input.value = ''; _filterServiceChips(''); }
+      }
+    }
+  }
 return {
     setType,
     onServiceChange,
@@ -920,6 +986,8 @@ return {
     _removeFromCart,
     _toggleAdvanced,
     tryAutoSaveDraft,
+    _filterServiceChips,
+    _serviceSearchKeydown,
   };
 
 })();

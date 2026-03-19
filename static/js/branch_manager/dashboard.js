@@ -30,8 +30,10 @@ const Dashboard = (() => {
   let currentPeriod = 'day';
 
   // ── Boot ───────────────────────────────────────────────────
-  async function init() {
-    Auth.guard();
+ async function init() {
+    await Auth.guard(['BRANCH_MANAGER', 'BELT_MANAGER', 'REGIONAL_MANAGER', 'HQ_FACTORY_MANAGER', 'HQ_HR_MANAGER', 'REGIONAL_HR_COORDINATOR', 'SUPER_ADMIN']);
+    console.log('Cached user object:', JSON.stringify(Auth.getUser()));
+    console.log('Detected role:', Auth.getRole());
     _setDate();
     await Promise.all([
       loadContext(),

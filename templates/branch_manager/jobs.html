@@ -478,14 +478,24 @@
         <div class="jobs-page-title">Jobs</div>
         <div class="jobs-page-sub" id="meta-date">—</div>
       </div>
-      <button class="hero-btn hero-btn-primary" style="padding:10px 20px;" onclick="NJ.open()">
-        <div class="hero-btn-icon" style="width:26px;height:26px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </div>
-        <div class="hero-btn-label">
-          <span class="hero-btn-title" style="font-size:13px;">New Job</span>
-        </div>
-      </button>
+<div style="display:flex;gap:8px;">
+        <button class="hero-btn hero-btn-secondary" style="padding:10px 20px;" onclick="Invoice.open()">
+          <div class="hero-btn-icon" style="width:26px;height:26px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          <div class="hero-btn-label">
+            <span class="hero-btn-title" style="font-size:13px;">Invoice</span>
+          </div>
+        </button>
+        <button class="hero-btn hero-btn-primary" style="padding:10px 20px;" onclick="NJ.open()">
+          <div class="hero-btn-icon" style="width:26px;height:26px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+          <div class="hero-btn-label">
+            <span class="hero-btn-title" style="font-size:13px;">New Job</span>
+          </div>
+        </button>
+      </div>
     </div>
 
     <!-- Stat strip -->
@@ -565,10 +575,11 @@
 
 
 <!-- ═══════════════════════════════════════
-     NEW JOB MODAL
+     NEW JOB MODAL — rendered by nj_controller.js
 ═══════════════════════════════════════ -->
-<div class="modal-overlay" id="new-job-modal" onclick="if(event.target===this)closeNewJobModal()">
-  <div class="modal" style="max-width:520px;">
+<div class="modal-overlay" id="new-job-modal">
+  <div class="modal" style="max-width:780px;">
+
     <div class="modal-head">
       <div>
         <div class="modal-title">New Job</div>
@@ -577,7 +588,7 @@
       <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
 
-    <div style="padding:20px 24px 0;">
+    <div style="padding:16px 24px 0;flex-shrink:0;">
       <div class="nj-toggle" id="nj-type-toggle">
         <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
         <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
@@ -586,89 +597,19 @@
       </div>
     </div>
 
-    <div class="modal-body" style="padding-top:16px;">
-
-      <div class="form-row-2">
-        <div class="form-group">
-          <label class="form-label">Service</label>
-          <select id="nj-service" class="form-input" onchange="NJ.onServiceChange()">
-            <option value="">Select service…</option>
-          </select>
-        </div>
-        <div class="form-group" id="nj-priority-row">
-          <label class="form-label">Priority</label>
-          <select id="nj-priority" class="form-input">
-            <option value="NORMAL">Normal</option>
-            <option value="HIGH">High</option>
-            <option value="URGENT">Urgent</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="form-row-2">
-        <div class="form-group">
-          <label class="form-label">Customer <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-          <select id="nj-customer" class="form-input">
-            <option value="">Walk-in / Unknown</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Intake Channel</label>
-          <select id="nj-channel" class="form-input">
-            <option value="WALK_IN">Walk-in</option>
-            <option value="WHATSAPP">WhatsApp</option>
-            <option value="EMAIL">Email</option>
-            <option value="PHONE">Phone</option>
-          </select>
-        </div>
-      </div>
-
-      <div id="nj-spec-fields"></div>
-
-      <div id="nj-deposit-deadline-row">
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Deposit</label>
-            <select id="nj-deposit" class="form-input">
-              <option value="100">100% — Full Payment</option>
-              <option value="70">70% — Deposit</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Deadline <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-            <input type="datetime-local" id="nj-deadline" class="form-input">
-          </div>
-        </div>
-      </div>
-
-      <div class="form-group" id="nj-notes-row">
-        <label class="form-label">Notes <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-        <textarea id="nj-notes" class="form-input" rows="2" placeholder="Any special instructions…"></textarea>
-      </div>
-
-      <div class="nj-price-box" id="nj-price-box">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:12px;color:var(--green-text);font-weight:600;letter-spacing:0.5px;">ESTIMATED COST</span>
-          <span id="nj-price" style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--green-text);">—</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-          <span style="font-size:11.5px;color:var(--green-text);opacity:0.7;">Amount due at payment</span>
-          <span id="nj-deposit-due" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--green-text);">—</span>
-        </div>
-      </div>
-
+    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;">
     </div>
 
     <div class="modal-foot">
-      <button class="btn-ghost-light" onclick="closeNewJobModal()">Cancel</button>
-      <button class="btn-primary" id="nj-submit-btn" onclick="NJ.createJob()">
+      <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
+      <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Create Job
       </button>
     </div>
+
   </div>
 </div>
-
 
 <!-- ═══════════════════════════════════════
      JOB DETAIL MODAL
@@ -724,15 +665,59 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════
+     INVOICE MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="invoice-modal">
+  <div class="modal" style="max-width:620px;">
 
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="invoice-modal-title">Invoice</div>
+        <div class="modal-subtitle">Generate and send a professional invoice</div>
+      </div>
+      <button class="modal-x" onclick="Invoice.close()">×</button>
+    </div>
+
+<!-- Step dots -->
+    <div style="padding:12px 24px 0;display:flex;gap:6px;flex-shrink:0;">
+      <div id="inv-dot-1" style="flex:1;height:3px;border-radius:2px;background:var(--text);transition:background 0.2s;"></div>
+      <div id="inv-dot-2" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-3" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-4" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+    </div>
+
+    <div class="modal-body" id="invoice-modal-body" style="padding-top:16px;">
+    </div>
+
+    <div class="modal-foot">
+      <button id="invoice-back-btn" onclick="Invoice.back()"
+        style="display:none;padding:8px 18px;background:none;
+               border:1px solid var(--border);border-radius:var(--radius-sm);
+               font-size:13px;cursor:pointer;color:var(--text-2);font-family:inherit;">
+        ← Back
+      </button>
+      <div style="flex:1;"></div>
+      <button class="btn-ghost" onclick="Invoice.close()">Cancel</button>
+      <button class="btn-dark" id="invoice-next-btn" onclick="Invoice.next()">
+        Continue →
+      </button>
+    </div>
+
+  </div>
+</div>
 <div id="toast-container"></div>
 
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/jobs.js' %}"></script>
 <script src="{% static 'js/nj_controller.js' %}"></script>
+<script src="{% static 'js/invoice_controller.js' %}"></script>
 
 <script>
-  function closeNewJobModal()     { document.getElementById('new-job-modal').classList.remove('open'); }
+function closeNewJobModal() {
+  NJ.tryAutoSaveDraft();
+  document.getElementById('new-job-modal').classList.remove('open');
+}
   function closeDetailModal()     { document.getElementById('job-detail-modal').classList.remove('open'); }
   function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }
 

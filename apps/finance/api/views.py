@@ -12,7 +12,10 @@ from apps.finance.models import (
     CreditAccount,
     CreditPayment,
     BranchTransferCredit,
+    Invoice,
+    InvoiceLineItem,
 )
+from apps.finance.models.invoice import Invoice
 from apps.finance.sheet_engine import SheetEngine
 from apps.finance.receipt_engine import ReceiptEngine
 from apps.finance.credit_engine import CreditEngine
@@ -36,6 +39,8 @@ from .serializers import (
     CreditSettlementSerializer,
     BranchTransferCreditSerializer,
     CashierSignOffSerializer,
+    InvoiceSerializer,
+    InvoiceCreateSerializer,
 )
 
 
@@ -176,8 +181,9 @@ class DailySalesSheetNotesView(APIView):
         serializer = DailySalesSheetNotesSerializer(
             sheet, data=request.data, partial=True
         )
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Invoice create data: {serializer.validated_data}")
 
         serializer.save()
         return Response(serializer.data)
@@ -245,6 +251,9 @@ class CashierFloatSetView(APIView):
         serializer = CashierFloatSetSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Invoice create data: {serializer.validated_data}")
 
         from apps.accounts.models import CustomUser
         from django.utils import timezone
@@ -1228,3 +1237,569 @@ class EODSummaryView(APIView):
             'petty_cash'      : petty_cash_list,
             'credit_sales'    : credit_list,
         })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoices
+# ─────────────────────────────────────────────────────────────────────────────
+
+class InvoiceListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/invoices/
+    Returns all invoices for the requesting user's branch.
+    """
+    serializer_class   = InvoiceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs   = Invoice.objects.select_related(
+            'branch', 'job', 'generated_by'
+        ).prefetch_related('line_items__service')
+
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+
+        invoice_type = self.request.query_params.get('type')
+        status_param = self.request.query_params.get('status')
+        if invoice_type:
+            qs = qs.filter(invoice_type=invoice_type)
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        return qs
+
+
+class InvoiceDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/finance/invoices/<id>/
+    """
+    serializer_class   = InvoiceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Invoice.objects.select_related(
+            'branch', 'job', 'generated_by'
+        ).prefetch_related('line_items__service')
+
+
+class InvoiceCreateView(APIView):
+    """
+    POST /api/v1/finance/invoices/
+    Create a job-linked or standalone invoice.
+    Generates PDF and delivers via selected channel.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from decimal import Decimal
+        from django.utils import timezone
+        from apps.jobs.models import Job, JobLineItem, Service
+        from apps.jobs.pricing_engine import PricingEngine
+
+        serializer = InvoiceCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d      = serializer.validated_data
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Resolve job if linked ─────────────────────────────
+        job = None
+        if d.get('job_id'):
+            try:
+                job = Job.objects.get(pk=d['job_id'], branch=branch)
+            except Job.DoesNotExist:
+                return Response(
+                    {'detail': 'Job not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # ── Create invoice ────────────────────────────────────
+        invoice = Invoice.objects.create(
+            branch           = branch,
+            job              = job,
+            generated_by     = user,
+            invoice_type     = d['invoice_type'],
+            due_date         = d.get('due_date'),
+            bm_note          = d.get('bm_note', ''),
+            bill_to_name     = d['bill_to_name'],
+            bill_to_phone    = d.get('bill_to_phone', ''),
+            bill_to_email    = d.get('bill_to_email', ''),
+            bill_to_company  = d.get('bill_to_company', ''),
+            delivery_channel = d['delivery_channel'],
+            vat_rate         = d.get('vat_rate', 0),
+            status           = Invoice.DRAFT,
+        )
+
+        # ── Build line items ──────────────────────────────────
+        if job:
+            # Pull from job's line items
+            job_items = JobLineItem.objects.filter(
+                job=job
+            ).select_related('service').order_by('position')
+
+            for i, li in enumerate(job_items):
+                InvoiceLineItem.objects.create(
+                    invoice    = invoice,
+                    service    = li.service,
+                    label      = li.label or li.service.name,
+                    quantity   = li.quantity,
+                    pages      = li.pages,
+                    sets       = li.sets,
+                    is_color   = li.is_color,
+                    paper_size = li.paper_size,
+                    sides      = li.sides,
+                    unit_price = li.unit_price,
+                    line_total = li.line_total,
+                    position   = i,
+                )
+        else:
+            # Standalone — build from submitted line items
+            for i, item in enumerate(d.get('line_items', [])):
+                try:
+                    svc = Service.objects.get(pk=item['service'])
+                except Service.DoesNotExist:
+                    continue
+
+                pg       = int(item.get('pages', 1))
+                sets     = int(item.get('sets', 1))
+                is_color = bool(item.get('is_color', False))
+
+                pricing = PricingEngine.get_price(
+                    service  = svc,
+                    branch   = branch,
+                    quantity = sets,
+                    is_color = is_color,
+                    pages    = pg,
+                )
+                line_total  = Decimal(str(pricing.get('total', 0)))
+                unit_price  = line_total / (pg * sets) if (pg * sets) > 0 else Decimal('0')
+
+                InvoiceLineItem.objects.create(
+                    invoice    = invoice,
+                    service    = svc,
+                    label      = svc.name,
+                    quantity   = sets,
+                    pages      = pg,
+                    sets       = sets,
+                    is_color   = is_color,
+                    paper_size = item.get('paper_size', 'A4'),
+                    sides      = item.get('sides', 'SINGLE'),
+                    unit_price = unit_price,
+                    line_total = line_total,
+                    position   = i,
+                )
+
+        # ── Compute totals ────────────────────────────────────
+        invoice.compute_totals()
+        invoice.save(update_fields=[
+            'subtotal', 'vat_amount', 'total', 'updated_at'
+        ])
+
+        # ── Generate PDF ──────────────────────────────────────
+        try:
+            _generate_invoice_pdf(invoice)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"PDF generation failed: {e}", exc_info=True)
+
+        # ── Deliver ───────────────────────────────────────────
+        _deliver_invoice(invoice)
+
+        return Response(
+            InvoiceSerializer(invoice).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class InvoiceSendView(APIView):
+    """
+    POST /api/v1/finance/invoices/<id>/send/
+    Re-send an existing invoice via its delivery channel.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            invoice = Invoice.objects.get(pk=pk)
+        except Invoice.DoesNotExist:
+            return Response(
+                {'detail': 'Invoice not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        _deliver_invoice(invoice)
+        return Response({'detail': 'Invoice sent.'})
+
+
+class InvoicePDFView(APIView):
+    """
+    GET /api/v1/finance/invoices/<id>/pdf/
+    Download the invoice PDF.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            invoice = Invoice.objects.get(pk=pk)
+        except Invoice.DoesNotExist:
+            return Response({'detail': 'Invoice not found.'}, status=404)
+
+        # Regenerate if missing
+        if not invoice.pdf_path:
+            try:
+                _generate_invoice_pdf(invoice)
+            except Exception as e:
+                return Response(
+                    {'detail': f'PDF generation failed: {e}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        import os
+        if not os.path.exists(invoice.pdf_path):
+            try:
+                _generate_invoice_pdf(invoice)
+            except Exception as e:
+                return Response(
+                    {'detail': f'PDF generation failed: {e}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        from django.http import FileResponse
+        response = FileResponse(
+            open(invoice.pdf_path, 'rb'),
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="{invoice.invoice_number}.pdf"'
+        )
+        return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _generate_invoice_pdf(invoice):
+    """Generate a PDF for the invoice and save path to invoice.pdf_path."""
+    import os
+    from django.conf import settings
+    from django.utils import timezone
+
+    media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
+    invoices_dir = os.path.join(media_root, 'invoices')
+    os.makedirs(invoices_dir, exist_ok=True)
+
+    output_path = os.path.join(
+        invoices_dir, f"{invoice.invoice_number}.pdf"
+    )
+
+    # Build PDF using reportlab
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle,
+        Paragraph, Spacer, HRFlowable,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+
+    doc    = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        rightMargin=20*mm, leftMargin=20*mm,
+        topMargin=20*mm,   bottomMargin=20*mm,
+    )
+    styles = getSampleStyleSheet()
+    W      = A4[0] - 40*mm
+
+    # ── Custom styles ─────────────────────────────────────────
+    h1 = ParagraphStyle('h1', fontSize=20, fontName='Helvetica-Bold',
+                         textColor=colors.HexColor('#111111'))
+    h2 = ParagraphStyle('h2', fontSize=11, fontName='Helvetica-Bold',
+                         textColor=colors.HexColor('#111111'))
+    sm = ParagraphStyle('sm', fontSize=9,  fontName='Helvetica',
+                         textColor=colors.HexColor('#666666'))
+    sm_bold = ParagraphStyle('smb', fontSize=9, fontName='Helvetica-Bold',
+                              textColor=colors.HexColor('#111111'))
+    right = ParagraphStyle('right', fontSize=9, fontName='Helvetica',
+                            alignment=TA_RIGHT,
+                            textColor=colors.HexColor('#666666'))
+    right_bold = ParagraphStyle('rightb', fontSize=11, fontName='Helvetica-Bold',
+                                 alignment=TA_RIGHT,
+                                 textColor=colors.HexColor('#111111'))
+
+    def fmt(n):
+        return f"GHS {float(n or 0):,.2f}"
+
+    story = []
+
+    # ── Header ────────────────────────────────────────────────
+    header_data = [[
+        Paragraph('Farhat Printing Press', h1),
+        Paragraph(
+            f"<b>{invoice.invoice_type} INVOICE</b>",
+            ParagraphStyle('inv', fontSize=14, fontName='Helvetica-Bold',
+                           alignment=TA_RIGHT,
+                           textColor=colors.HexColor(
+                               '#1a4fd6' if invoice.invoice_type == 'PROFORMA'
+                               else '#1a7a4a'
+                           ))
+        ),
+    ]]
+    header_table = Table(header_data, colWidths=[W*0.6, W*0.4])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(header_table)
+
+    # Branch info
+    branch = invoice.branch
+    story.append(Paragraph(
+        f"{branch.name} &nbsp;·&nbsp; {branch.code}",
+        sm
+    ))
+    story.append(Spacer(1, 6*mm))
+    story.append(HRFlowable(width=W, thickness=1,
+                             color=colors.HexColor('#eeeeee')))
+    story.append(Spacer(1, 6*mm))
+
+    # ── Invoice meta + Bill To ────────────────────────────────
+    issued  = invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '—'
+    due     = invoice.due_date.strftime('%d %b %Y')   if invoice.due_date   else '—'
+
+    bill_lines = [invoice.bill_to_name]
+    if invoice.bill_to_company: bill_lines.append(invoice.bill_to_company)
+    if invoice.bill_to_phone:   bill_lines.append(invoice.bill_to_phone)
+    if invoice.bill_to_email:   bill_lines.append(invoice.bill_to_email)
+
+    meta_data = [[
+        [
+            Paragraph('BILL TO', ParagraphStyle('lbl', fontSize=8,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor('#aaaaaa'),
+                spaceAfter=3)),
+            *[Paragraph(line, sm_bold if i == 0 else sm)
+              for i, line in enumerate(bill_lines)],
+        ],
+        [
+            Paragraph('INVOICE NO', ParagraphStyle('lbl', fontSize=8,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor('#aaaaaa'),
+                alignment=TA_RIGHT, spaceAfter=3)),
+            Paragraph(invoice.invoice_number, right_bold),
+            Spacer(1, 4),
+            Paragraph('DATE ISSUED', ParagraphStyle('lbl2', fontSize=8,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor('#aaaaaa'),
+                alignment=TA_RIGHT, spaceAfter=3)),
+            Paragraph(issued, right),
+            Spacer(1, 4),
+            Paragraph('DUE DATE', ParagraphStyle('lbl3', fontSize=8,
+                fontName='Helvetica-Bold',
+                textColor=colors.HexColor('#aaaaaa'),
+                alignment=TA_RIGHT, spaceAfter=3)),
+            Paragraph(due, right),
+        ],
+    ]]
+
+    meta_table = Table(meta_data, colWidths=[W*0.5, W*0.5])
+    meta_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 8*mm))
+
+    # Job ref if linked
+    if invoice.job:
+        story.append(Paragraph(
+            f"Job Reference: <b>{invoice.job.job_number}</b>",
+            sm
+        ))
+        story.append(Spacer(1, 4*mm))
+
+    # ── Line items table ──────────────────────────────────────
+    table_data = [[
+        Paragraph('SERVICE', ParagraphStyle('th', fontSize=8,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#aaaaaa'))),
+        Paragraph('QTY', ParagraphStyle('th2', fontSize=8,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#aaaaaa'),
+            alignment=TA_CENTER)),
+        Paragraph('UNIT PRICE', ParagraphStyle('th3', fontSize=8,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#aaaaaa'),
+            alignment=TA_RIGHT)),
+        Paragraph('TOTAL', ParagraphStyle('th4', fontSize=8,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#aaaaaa'),
+            alignment=TA_RIGHT)),
+    ]]
+
+    for li in invoice.line_items.all():
+        detail = f"{li.paper_size} · {'Colour' if li.is_color else 'B&W'}"
+        if li.pages > 1:
+            detail += f" · {li.pages}pp × {li.sets} sets"
+        table_data.append([
+            [
+                Paragraph(li.label, sm_bold),
+                Paragraph(detail, sm),
+            ],
+            Paragraph(str(li.quantity), ParagraphStyle('c', fontSize=9,
+                fontName='Helvetica', alignment=TA_CENTER,
+                textColor=colors.HexColor('#444444'))),
+            Paragraph(fmt(li.unit_price), ParagraphStyle('r', fontSize=9,
+                fontName='Helvetica', alignment=TA_RIGHT,
+                textColor=colors.HexColor('#444444'))),
+            Paragraph(fmt(li.line_total), ParagraphStyle('rb', fontSize=9,
+                fontName='Helvetica-Bold', alignment=TA_RIGHT,
+                textColor=colors.HexColor('#111111'))),
+        ])
+
+    col_w = [W*0.5, W*0.1, W*0.2, W*0.2]
+    items_table = Table(table_data, colWidths=col_w, repeatRows=1)
+    items_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f7f7f7')),
+        ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+        ('GRID',          (0,0), (-1,-1), 0.5, colors.HexColor('#eeeeee')),
+        ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING',    (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING',   (0,0), (-1,-1), 8),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
+    ]))
+    story.append(items_table)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Totals ────────────────────────────────────────────────
+    totals_data = []
+    totals_data.append([
+        Paragraph('Subtotal', sm),
+        Paragraph(fmt(invoice.subtotal), right),
+    ])
+    if invoice.vat_rate:
+        totals_data.append([
+            Paragraph(f'VAT ({invoice.vat_rate}%)', sm),
+            Paragraph(fmt(invoice.vat_amount), right),
+        ])
+    totals_data.append([
+        Paragraph('<b>Total</b>', ParagraphStyle('tb', fontSize=11,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#111111'))),
+        Paragraph(f'<b>{fmt(invoice.total)}</b>',
+            ParagraphStyle('trb', fontSize=11,
+            fontName='Helvetica-Bold', alignment=TA_RIGHT,
+            textColor=colors.HexColor('#111111'))),
+    ])
+
+    totals_table = Table(totals_data, colWidths=[W*0.75, W*0.25])
+    totals_table.setStyle(TableStyle([
+        ('ALIGN',         (1,0), (1,-1), 'RIGHT'),
+        ('LINEABOVE',     (0,-1), (-1,-1), 1, colors.HexColor('#eeeeee')),
+        ('TOPPADDING',    (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(totals_table)
+
+    # ── Status badge ──────────────────────────────────────────
+    story.append(Spacer(1, 6*mm))
+    status_color = {
+        'DRAFT': '#888888', 'SENT': '#3355cc',
+        'VIEWED': '#cc8800', 'PAID': '#1a7a4a',
+    }.get(invoice.status, '#888888')
+
+    story.append(Paragraph(
+        f'<font color="{status_color}"><b>STATUS: {invoice.status}</b></font>',
+        ParagraphStyle('st', fontSize=10, fontName='Helvetica-Bold')
+    ))
+
+    # ── BM note ───────────────────────────────────────────────
+    if invoice.bm_note:
+        story.append(Spacer(1, 6*mm))
+        story.append(HRFlowable(width=W, thickness=0.5,
+                                 color=colors.HexColor('#eeeeee')))
+        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph(invoice.bm_note, sm))
+
+    # ── Footer ────────────────────────────────────────────────
+    story.append(Spacer(1, 10*mm))
+    story.append(HRFlowable(width=W, thickness=0.5,
+                             color=colors.HexColor('#eeeeee')))
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph(
+        'Thank you for your business — Farhat Printing Press',
+        ParagraphStyle('ft', fontSize=8, fontName='Helvetica',
+                       textColor=colors.HexColor('#aaaaaa'),
+                       alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+
+    # Save path
+    invoice.pdf_path = output_path
+    invoice.save(update_fields=['pdf_path', 'updated_at'])
+
+
+def _deliver_invoice(invoice):
+    """Send invoice via its delivery channel. Marks status as SENT."""
+    from django.utils import timezone
+
+    # Mark as SENT — PDF is available for download via the PDF endpoint
+    # WhatsApp/Email delivery stubs until integrations are wired
+    invoice.status  = Invoice.SENT
+    invoice.sent_at = timezone.now()
+    invoice.save(update_fields=['status', 'sent_at', 'updated_at'])
+
+
+def _send_invoice_whatsapp(invoice):
+    """Stub — wire to WhatsApp Business API when ready."""
+    # TODO: integrate with WhatsApp Business API
+    # For now just log and return True for testing
+    print(f"[WhatsApp] Sending invoice {invoice.invoice_number} to {invoice.bill_to_phone}")
+    return True
+
+
+def _send_invoice_email(invoice):
+    """Send invoice PDF via Django email."""
+    if not invoice.bill_to_email:
+        return False
+
+    try:
+        from django.core.mail import EmailMessage
+        import os
+
+        subject = f"Invoice {invoice.invoice_number} — Farhat Printing Press"
+        body    = invoice.bm_note or (
+            f"Dear {invoice.bill_to_name},\n\n"
+            f"Please find attached your {invoice.get_invoice_type_display()} "
+            f"from Farhat Printing Press.\n\n"
+            f"Invoice No: {invoice.invoice_number}\n"
+            f"Amount: GHS {invoice.total}\n\n"
+            f"Thank you for your business."
+        )
+
+        email = EmailMessage(
+            subject = subject,
+            body    = body,
+            to      = [invoice.bill_to_email],
+        )
+
+        if invoice.pdf_path and os.path.exists(invoice.pdf_path):
+            email.attach_file(invoice.pdf_path)
+
+        email.send()
+        return True
+
+    except Exception as e:
+        print(f"[Email] Failed to send invoice {invoice.invoice_number}: {e}")
+        return False

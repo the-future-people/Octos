@@ -153,7 +153,7 @@ async function loadJobs() {
     State.totalCount = data.count   || State.jobs.length;
 
     _renderTable();
-    _renderStats();
+    _renderStats(sheet.id);
     _renderPagination();
   } catch (err) {
     console.error('loadJobs failed:', err);
@@ -202,20 +202,27 @@ function _renderTable() {
   }).join('');
 }
 
-function _renderStats() {
-  const total      = State.totalCount;
-  const inProgress = State.jobs.filter(j => j.status === 'IN_PROGRESS').length;
-  const complete   = State.jobs.filter(j => j.status === 'COMPLETE').length;
-  const revenue    = State.jobs
-    .filter(j => ['PAID', 'COMPLETE'].includes(j.status))
-    .reduce((sum, j) => sum + parseFloat(j.final_cost || j.estimated_cost || 0), 0);
+async function _renderStats(sheetId) {
+  // Fetch all jobs for today's sheet (no pagination) for accurate stats
+  try {
+    const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheetId}&page_size=500`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const all  = Array.isArray(data) ? data : (data.results || []);
 
-  _set('stat-total',       total);
-  _set('stat-in-progress', inProgress);
-  _set('stat-complete',    complete);
-  _set('stat-revenue',     revenue > 0
-    ? revenue.toLocaleString('en-GH', { minimumFractionDigits: 2 })
-    : '0');
+    const inProgress = all.filter(j => j.status === 'IN_PROGRESS').length;
+    const complete   = all.filter(j => j.status === 'COMPLETE').length;
+    const revenue    = all
+      .filter(j => ['PAID', 'COMPLETE'].includes(j.status))
+      .reduce((sum, j) => sum + parseFloat(j.final_cost || j.estimated_cost || 0), 0);
+
+    _set('stat-total',       data.count || all.length);
+    _set('stat-in-progress', inProgress);
+    _set('stat-complete',    complete);
+    _set('stat-revenue',     revenue > 0
+      ? revenue.toLocaleString('en-GH', { minimumFractionDigits: 2 })
+      : '0');
+  } catch { /* silent */ }
 }
 
 function _renderPagination() {

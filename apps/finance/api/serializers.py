@@ -8,8 +8,9 @@ from apps.finance.models import (
     CreditAccount,
     CreditPayment,
     BranchTransferCredit,
+    Invoice,
+    InvoiceLineItem,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily Sales Sheet
@@ -376,3 +377,98 @@ class ShiftStatusSerializer(serializers.Serializer):
     overtime_until    = serializers.DateTimeField(allow_null=True)
     is_cover          = serializers.BooleanField()
     cover_until       = serializers.DateTimeField(allow_null=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice
+# ─────────────────────────────────────────────────────────────────────────────
+
+class InvoiceLineItemSerializer(serializers.ModelSerializer):
+    service_name = serializers.CharField(source='service.name', read_only=True)
+
+    class Meta:
+        model  = InvoiceLineItem
+        fields = [
+            'id', 'service', 'service_name', 'label',
+            'quantity', 'pages', 'sets', 'is_color',
+            'paper_size', 'sides',
+            'unit_price', 'line_total', 'position',
+        ]
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    line_items       = InvoiceLineItemSerializer(many=True, read_only=True)
+    generated_by_name = serializers.CharField(
+        source='generated_by.full_name', read_only=True
+    )
+    branch_name      = serializers.CharField(source='branch.name',     read_only=True)
+    job_number       = serializers.CharField(source='job.job_number',  read_only=True)
+
+    class Meta:
+        model  = Invoice
+        fields = [
+            'id', 'invoice_number', 'invoice_type', 'status',
+            'branch', 'branch_name',
+            'job', 'job_number',
+            'issue_date', 'due_date', 'bm_note',
+            'bill_to_name', 'bill_to_phone',
+            'bill_to_email', 'bill_to_company',
+            'delivery_channel',
+            'subtotal', 'vat_rate', 'vat_amount', 'total',
+            'sent_at', 'pdf_path',
+            'generated_by_name',
+            'line_items',
+            'created_at',
+        ]
+
+
+class InvoiceCreateSerializer(serializers.Serializer):
+    """Create an invoice — job-linked or standalone."""
+
+    # Optional job link
+    job_id           = serializers.IntegerField(required=False, allow_null=True)
+
+    # Invoice meta
+    invoice_type     = serializers.ChoiceField(
+        choices=Invoice.TYPE_CHOICES, default=Invoice.PROFORMA
+    )
+    due_date         = serializers.DateField(required=False, allow_null=True)
+    bm_note          = serializers.CharField(required=False, allow_blank=True, default='')
+
+    # Bill To
+    bill_to_name     = serializers.CharField()
+    bill_to_phone    = serializers.CharField(required=False, allow_blank=True, default='')
+    bill_to_email    = serializers.EmailField(required=False, allow_blank=True, default='')
+    bill_to_company  = serializers.CharField(required=False, allow_blank=True, default='')
+
+    # Delivery
+    delivery_channel = serializers.ChoiceField(choices=Invoice.DELIVERY_CHOICES)
+
+    # VAT
+    vat_rate         = serializers.DecimalField(
+        max_digits=5, decimal_places=2, default=0
+    )
+
+    # Line items (for standalone — ignored if job_id provided)
+    line_items       = serializers.ListField(
+        child=serializers.DictField(), required=False, default=list
+    )
+
+    def validate(self, data):
+        # Must have either a job or line items
+        if not data.get('job_id') and not data.get('line_items'):
+            raise serializers.ValidationError(
+                'Provide either a job_id or at least one line item.'
+            )
+        # WhatsApp needs phone
+        channel = data.get('delivery_channel')
+        if channel in ['WHATSAPP', 'BOTH'] and not data.get('bill_to_phone'):
+            raise serializers.ValidationError(
+                {'bill_to_phone': 'Phone number required for WhatsApp delivery.'}
+            )
+        # Email needs email
+        if channel in ['EMAIL', 'BOTH'] and not data.get('bill_to_email'):
+            raise serializers.ValidationError(
+                {'bill_to_email': 'Email address required for email delivery.'}
+            )
+        return data
