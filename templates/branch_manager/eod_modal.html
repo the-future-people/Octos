@@ -1,0 +1,148 @@
+{% load static %}
+<div class="eod-overlay" id="eod-overlay">
+  <div class="eod-modal">
+
+    <!-- ── Header ── -->
+    <div class="eod-header">
+      <div class="eod-header-left">
+        <div class="eod-title">End of Day Report</div>
+        <div class="eod-subtitle" id="eod-subtitle">Loading…</div>
+      </div>
+      <button class="eod-close-btn" onclick="Dashboard.closeEOD()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- ── Loading state ── -->
+    <div class="eod-loading" id="eod-loading">
+      <div class="eod-spinner"></div>
+      <span>Compiling day summary…</span>
+    </div>
+
+    <!-- ── Content (hidden until loaded) ── -->
+    <div class="eod-content" id="eod-content" style="display:none;">
+
+      <!-- 1. Revenue Summary -->
+      <div class="eod-section">
+        <div class="eod-section-title">Revenue Summary</div>
+        <div class="eod-revenue-grid">
+          <div class="eod-rev-card cash">
+            <div class="eod-rev-label">Cash</div>
+            <div class="eod-rev-val" id="eod-cash">—</div>
+          </div>
+          <div class="eod-rev-card momo">
+            <div class="eod-rev-label">MoMo</div>
+            <div class="eod-rev-val" id="eod-momo">—</div>
+          </div>
+          <div class="eod-rev-card pos">
+            <div class="eod-rev-label">POS</div>
+            <div class="eod-rev-val" id="eod-pos">—</div>
+          </div>
+          <div class="eod-rev-card total">
+            <div class="eod-rev-label">Total Collected</div>
+            <div class="eod-rev-val" id="eod-total">—</div>
+          </div>
+        </div>
+        <div class="eod-rev-extras">
+          <div class="eod-rev-extra-row">
+            <span>Credit Issued</span>
+            <span id="eod-credit-issued">—</span>
+          </div>
+          <div class="eod-rev-extra-row">
+            <span>Petty Cash Out</span>
+            <span id="eod-petty-cash-out">—</span>
+          </div>
+          <div class="eod-rev-extra-row eod-net">
+            <span>Net Cash in Till</span>
+            <span id="eod-net-cash">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Jobs Summary -->
+      <div class="eod-section">
+        <div class="eod-section-title">Jobs Summary</div>
+        <div class="eod-checklist" id="eod-jobs-checklist">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- 3. Pending Payments -->
+      <div class="eod-section" id="eod-pending-section">
+        <div class="eod-section-title">Pending Payments
+          <span class="eod-badge amber" id="eod-pending-badge"></span>
+        </div>
+        <div class="eod-info-note amber" id="eod-pending-note" style="display:none;">
+          These jobs will be <strong>carried forward</strong> to tomorrow's sheet.
+        </div>
+        <div id="eod-pending-list"></div>
+
+        <div class="eod-section-subtitle" id="eod-untouched-subtitle" style="display:none;">
+          Never touched by cashier
+        </div>
+        <div class="eod-info-note red" id="eod-untouched-note" style="display:none;">
+          These jobs were created by attendants but never entered the cashier queue.
+        </div>
+        <div id="eod-untouched-list"></div>
+      </div>
+
+      <!-- 4. Cashier Activity -->
+      <div class="eod-section">
+        <div class="eod-section-title">Cashier Activity</div>
+        <div id="eod-cashier-activity">
+          <!-- populated by JS -->
+        </div>
+        <div class="eod-info-note amber" id="eod-float-warning" style="display:none;">
+          No cashier float was opened today.
+        </div>
+      </div>
+
+      <!-- 5. Petty Cash -->
+      <div class="eod-section" id="eod-petty-section">
+        <div class="eod-section-title">Petty Cash Disbursements</div>
+        <div id="eod-petty-list">
+          <div class="eod-empty-note">No petty cash disbursements today.</div>
+        </div>
+      </div>
+
+      <!-- 6. Credit Sales -->
+      <div class="eod-section" id="eod-credit-section">
+        <div class="eod-section-title">Credit Sales</div>
+        <div id="eod-credit-list">
+          <div class="eod-empty-note">No credit sales today.</div>
+        </div>
+      </div>
+
+      <!-- 7. BM Notes -->
+      <div class="eod-section">
+        <div class="eod-section-title">Branch Manager Notes</div>
+        <div class="eod-field">
+          <label class="eod-field-label">Remarks / Notes for today</label>
+          <textarea class="eod-textarea" id="eod-notes" rows="3"
+            placeholder="Add any remarks, observations or notes about today's operations…"></textarea>
+        </div>
+      </div>
+
+      <!-- 8. Acknowledgement -->
+      <div class="eod-section eod-ack-section">
+        <label class="eod-ack-label">
+          <input type="checkbox" id="eod-ack-checkbox" onchange="Dashboard.toggleEODConfirm()">
+          <span>I have reviewed this end-of-day report and confirm that the information above accurately reflects today's operations at <strong id="eod-ack-branch">this branch</strong>.</span>
+        </label>
+      </div>
+
+    </div>
+
+    <!-- ── Footer ── -->
+    <div class="eod-footer" id="eod-footer" style="display:none;">
+      <button class="eod-cancel-btn" onclick="Dashboard.closeEOD()">Cancel</button>
+      <button class="eod-confirm-btn" id="eod-confirm-btn" disabled onclick="Dashboard.confirmCloseSheet()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Confirm &amp; Close Sheet
+      </button>
+    </div>
+
+  </div>
+</div>

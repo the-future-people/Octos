@@ -375,7 +375,7 @@ class JobRouteConfirmView(APIView):
 class ServiceListView(generics.ListAPIView):
     serializer_class   = ServiceSerializer
     permission_classes = [IsAuthenticated]
-
+    pagination_class   = None
     def get_queryset(self):
         qs       = Service.objects.filter(is_active=True)
         category = self.request.query_params.get('category')
@@ -442,3 +442,226 @@ class PriceCalculateView(APIView):
             pages    = pages,
         )
         return Response(result)
+
+class SaveDraftView(APIView):
+    """
+    POST /api/v1/jobs/drafts/save/
+    Auto-saves an in-progress job as a DRAFT.
+    Called when attendant closes the NJ modal with items in cart.
+    Creates a new DRAFT job with line items.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.jobs.models import Job, JobLineItem, Service
+        from apps.jobs.pricing_engine import PricingEngine
+        from apps.finance.sheet_engine import SheetEngine
+        from django.utils import timezone
+        from datetime import timedelta
+        from decimal import Decimal
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'User has no branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        line_items_data = request.data.get('line_items', [])
+        customer_id     = request.data.get('customer')
+        channel         = request.data.get('channel', 'WALK_IN')
+
+        if not line_items_data:
+            return Response(
+                {'detail': 'No line items to save.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Build title from services
+        names = []
+        total = Decimal('0.00')
+        priced_items = []
+
+        for item in line_items_data:
+            try:
+                svc = Service.objects.get(pk=item['service'])
+            except Service.DoesNotExist:
+                continue
+            pg       = int(item.get('pages', 1))
+            sets     = int(item.get('sets', 1))
+            is_color = bool(item.get('is_color', False))
+            pricing  = PricingEngine.get_price(
+                service  = svc,
+                branch   = branch,
+                quantity = sets,
+                is_color = is_color,
+                pages    = pg,
+            )
+            line_total = Decimal(str(pricing.get('total', 0)))
+            unit_price = Decimal(str(pricing.get('base_price', 0)))
+            total     += line_total
+            names.append(svc.name)
+            priced_items.append({
+                'service'   : svc,
+                'pages'     : pg,
+                'sets'      : sets,
+                'quantity'  : sets,
+                'is_color'  : is_color,
+                'paper_size': item.get('paper_size', 'A4'),
+                'sides'     : item.get('sides', 'SINGLE'),
+                'unit_price': unit_price,
+                'line_total': line_total,
+                'label'     : svc.name,
+            })
+
+        if not priced_items:
+            return Response(
+                {'detail': 'No valid line items.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(names) == 1:
+            title = names[0]
+        elif len(names) <= 3:
+            title = ', '.join(names)
+        else:
+            title = ', '.join(names[:3]) + f' +{len(names)-3} more'
+
+        # Get or open today's sheet
+        sheet, _ = SheetEngine(branch).get_or_open_today()
+
+        now     = timezone.now()
+        expires = now + timedelta(days=3)
+
+        # Customer
+        from apps.customers.models import CustomerProfile
+        customer = None
+        if customer_id:
+            try:
+                customer = CustomerProfile.objects.get(pk=customer_id)
+            except CustomerProfile.DoesNotExist:
+                pass
+
+        job = Job.objects.create(
+            branch           = branch,
+            intake_by        = user,
+            customer         = customer,
+            title            = title,
+            job_type         = 'INSTANT',
+            status           = Job.DRAFT,
+            estimated_cost   = total,
+            daily_sheet      = sheet,
+            draft_expires_at = expires,
+        )
+
+        # Create line items
+        for i, item in enumerate(priced_items):
+            JobLineItem.objects.create(
+                job        = job,
+                service    = item['service'],
+                quantity   = item['quantity'],
+                pages      = item['pages'],
+                sets       = item['sets'],
+                is_color   = item['is_color'],
+                paper_size = item['paper_size'],
+                sides      = item['sides'],
+                unit_price = item['unit_price'],
+                line_total = item['line_total'],
+                label      = item['label'],
+                position   = i,
+            )
+
+        return Response({
+            'id'         : job.id,
+            'job_number' : job.job_number,
+            'title'      : job.title,
+            'total'      : str(total),
+            'expires_at' : expires.isoformat(),
+        }, status=status.HTTP_201_CREATED)
+
+
+class DraftListView(generics.ListAPIView):
+    """
+    GET /api/v1/jobs/drafts/
+    Returns all active DRAFT jobs for the user's branch.
+    Ordered oldest first so attendants work the queue.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.jobs.models import Job
+        from django.utils import timezone
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response([])
+
+        drafts = Job.objects.filter(
+            branch           = branch,
+            status           = Job.DRAFT,
+            draft_expires_at__gt = timezone.now(),
+        ).prefetch_related('line_items__service').order_by('created_at')
+
+        data = []
+        for j in drafts:
+            items = j.line_items.all()
+            data.append({
+                'id'            : j.id,
+                'job_number'    : j.job_number,
+                'title'         : j.title,
+                'estimated_cost': str(j.estimated_cost or 0),
+                'created_at'    : j.created_at.isoformat(),
+                'expires_at'    : j.draft_expires_at.isoformat(),
+                'intake_by'     : j.intake_by.full_name if j.intake_by else '—',
+                'line_items'    : [
+                    {
+                        'service'   : item.service_id,
+                        'service_name': item.service.name,
+                        'pages'     : item.pages,
+                        'sets'      : item.sets,
+                        'quantity'  : item.quantity,
+                        'is_color'  : item.is_color,
+                        'paper_size': item.paper_size,
+                        'sides'     : item.sides,
+                        'unit_price': str(item.unit_price),
+                        'line_total': str(item.line_total),
+                        'label'     : item.label,
+                    }
+                    for item in items
+                ],
+            })
+
+        return Response(data)
+
+
+class DiscardDraftView(APIView):
+    """
+    POST /api/v1/jobs/drafts/<pk>/discard/
+    Marks a draft as ABANDONED — kept for analytics, not resumable.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.jobs.models import Job
+        from django.utils import timezone
+
+        try:
+            job = Job.objects.get(pk=pk, status=Job.DRAFT)
+        except Job.DoesNotExist:
+            return Response(
+                {'detail': 'Draft not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if job.branch != getattr(request.user, 'branch', None):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        job.status       = Job.CANCELLED
+        job.abandoned_at = timezone.now()
+        job.save(update_fields=['status', 'abandoned_at'])
+
+        return Response({'detail': 'Draft discarded.'})

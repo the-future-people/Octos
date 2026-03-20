@@ -113,6 +113,9 @@ class JobLineItemCreateSerializer(serializers.Serializer):
 
 class JobListSerializer(serializers.ModelSerializer):
     branch_name      = serializers.CharField(source='branch.name', read_only=True)
+    branch_address   = serializers.CharField(source='branch.address', read_only=True)
+    branch_phone     = serializers.CharField(source='branch.phone', read_only=True)
+    branch_email     = serializers.EmailField(source='branch.email', read_only=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
@@ -126,9 +129,10 @@ class JobListSerializer(serializers.ModelSerializer):
             'id', 'job_number', 'title', 'job_type', 'status',
             'priority', 'branch', 'branch_name', 'assigned_to',
             'assigned_to_name', 'customer_name', 'intake_by_name',
-            'is_routed', 'estimated_cost', 'deposit_percentage',
+            'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
-            'line_items', 'line_item_count',
+            'line_items', 'line_item_count', 'branch_address',
+            'branch_phone', 'branch_email',
         ]
 
     def get_customer_name(self, obj):
@@ -286,17 +290,14 @@ class JobCreateSerializer(serializers.ModelSerializer):
 
                 # Effective quantity for pricing = pages × sets (for print/copy)
                 # or just quantity for simple items (binding, envelopes)
-                effective_qty = pg * sets if pg > 1 or sets > 1 else qty
-
                 pricing = PricingEngine.get_price(
                     service  = svc,
                     branch   = branch,
-                    quantity = effective_qty,
+                    quantity = sets,
                     is_color = color,
                     pages    = pg,
                 )
-
-                unit_price = float(pricing['base_price']) if pricing['success'] else 0
+                unit_price = float(pricing.get('base_price', pricing.get('total', 0))) if pricing['success'] else 0
                 line_total = float(pricing['total'])      if pricing['success'] else 0
                 total     += line_total
 

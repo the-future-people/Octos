@@ -57,17 +57,18 @@ const Dashboard = (() => {
       _set('db-user-name',     fullName);
       _set('db-user-initials', initials);
 
-      if (user.branch && typeof user.branch === 'object') {
-        const b = user.branch;
+   if (user.branch_detail) {
+        const b = user.branch_detail;
         branchId = b.id;
+        State.branchId = branchId;    // ← add this
         _set('db-branch-name', b.name || '—');
         _set('db-branch-pill', b.name || '—');
         if (b.region_name)      _set('meta-region', b.region_name);
         if (b.belt_name)        _set('meta-belt',   b.belt_name);
         if (b.load_percentage != null) _set('meta-load', b.load_percentage + '%');
-      } else if (user.branch && typeof user.branch === 'number') {
+      }else if (user.branch && typeof user.branch === 'number') {
         branchId = user.branch;
-        const br = await Auth.fetch(`/api/v1/organization/branches/${user.branch}/`);
+        State.branchId = branchId;    // ← add this
         if (br.ok) {
           const b = await br.json();
           _set('db-branch-name', b.name || '—');
@@ -344,21 +345,319 @@ const Dashboard = (() => {
     }
   }
 
+// ── EOD / Close Sheet ─────────────────────────────────────────
+  let _eodSheetId = null;
+  let _eodData    = null;
+
   async function closeSheet(sheetId) {
+    _eodSheetId = sheetId;
+    _eodData    = null;
+
+    // Reset modal state
+    document.getElementById('eod-loading').style.display  = 'flex';
+    document.getElementById('eod-content').style.display  = 'none';
+    document.getElementById('eod-footer').style.display   = 'none';
+    document.getElementById('eod-ack-checkbox').checked   = false;
+    document.getElementById('eod-confirm-btn').disabled   = true;
+    document.getElementById('eod-notes').value            = '';
+
+    document.getElementById('eod-overlay').classList.add('open');
+
     try {
-      const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/close/`, {
-        method: 'POST',
-      });
+      const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/eod-summary/`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not load EOD summary.', 'error');
+        closeEOD();
+        return;
+      }
+      _eodData = await res.json();
+      _renderEOD(_eodData);
+    } catch {
+      _toast('Network error loading EOD summary.', 'error');
+      closeEOD();
+    }
+  }
+
+  function closeEOD() {
+    document.getElementById('eod-overlay').classList.remove('open');
+    _eodSheetId = null;
+    _eodData    = null;
+  }
+
+  function toggleEODConfirm() {
+    const checked = document.getElementById('eod-ack-checkbox').checked;
+    document.getElementById('eod-confirm-btn').disabled = !checked;
+  }
+
+  function _fmt(n) {
+    return `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+  }
+
+  function _renderEOD(d) {
+    const meta = d.meta;
+    const rev  = d.revenue;
+    const jobs = d.jobs;
+
+    // Subtitle
+    const dateStr = new Date(meta.date).toLocaleDateString('en-GH', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    document.getElementById('eod-subtitle').textContent =
+      `${dateStr} · ${meta.branch}`;
+    document.getElementById('eod-ack-branch').textContent = meta.branch;
+
+    // ── Revenue ──────────────────────────────────────────────────
+    document.getElementById('eod-cash').textContent        = _fmt(rev.cash);
+    document.getElementById('eod-momo').textContent        = _fmt(rev.momo);
+    document.getElementById('eod-pos').textContent         = _fmt(rev.pos);
+    document.getElementById('eod-total').textContent       = _fmt(rev.total);
+    document.getElementById('eod-credit-issued').textContent  = _fmt(rev.credit_issued);
+    document.getElementById('eod-petty-cash-out').textContent = _fmt(rev.petty_cash_out);
+    document.getElementById('eod-net-cash').textContent    = _fmt(rev.net_cash_in_till);
+
+    // ── Jobs checklist ───────────────────────────────────────────
+    const cl = document.getElementById('eod-jobs-checklist');
+    cl.innerHTML = [
+      _checkItem('ok',
+        `${jobs.total} jobs created · ${jobs.completed} completed`,
+        jobs.cancelled ? `${jobs.cancelled} cancelled` : null),
+      _checkItem('ok',
+        `${jobs.local} local jobs · ${jobs.routed_out} routed out`,
+        jobs.routed_in ? `${jobs.routed_in} routed in from other branches` : null),
+      jobs.pending_payment > 0
+        ? _checkItem('warn',
+            `${jobs.pending_payment} pending payment — will carry forward`,
+            `${jobs.pending_untouched} never touched by cashier`)
+        : _checkItem('ok', 'All jobs paid — no carry-forwards', null),
+      d.float_opened
+        ? _checkItem('ok', 'Cashier float opened today', null)
+        : _checkItem('warn', 'No cashier float was opened today', null),
+    ].join('');
+
+    // ── Pending payments list ─────────────────────────────────────
+    const pendingBadge = document.getElementById('eod-pending-badge');
+    pendingBadge.textContent = jobs.pending_payment;
+    pendingBadge.style.display = jobs.pending_payment ? 'inline-flex' : 'none';
+
+    const pendingNote = document.getElementById('eod-pending-note');
+    pendingNote.style.display = jobs.pending_list.length ? 'block' : 'none';
+
+    document.getElementById('eod-pending-list').innerHTML =
+      jobs.pending_list.length
+        ? _jobMiniTable(jobs.pending_list)
+        : '<div class="eod-empty-note">No pending payments.</div>';
+
+    const untouchedSubtitle = document.getElementById('eod-untouched-subtitle');
+    const untouchedNote     = document.getElementById('eod-untouched-note');
+    untouchedSubtitle.style.display = jobs.untouched_list.length ? 'block' : 'none';
+    untouchedNote.style.display     = jobs.untouched_list.length ? 'block' : 'none';
+    document.getElementById('eod-untouched-list').innerHTML =
+      jobs.untouched_list.length ? _jobMiniTable(jobs.untouched_list) : '';
+
+    // ── Cashier activity ─────────────────────────────────────────
+    const cashierEl = document.getElementById('eod-cashier-activity');
+    const floatWarn = document.getElementById('eod-float-warning');
+    floatWarn.style.display = d.float_opened ? 'none' : 'block';
+
+    if (d.cashier_activity.length) {
+      cashierEl.innerHTML = d.cashier_activity.map(c => {
+        const methods = ['CASH', 'MOMO', 'POS'].map(m => {
+          const info = c.method_breakdown[m];
+          if (!info) return '';
+          return `
+            <div class="eod-method-pill ${m.toLowerCase()}">
+              <span class="eod-method-pill-label">${m}</span>
+              <span class="eod-method-pill-val">${_fmt(info.total)}</span>
+            </div>`;
+        }).join('');
+
+        const activeFrom = c.active_from
+          ? new Date(c.active_from).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
+          : '—';
+        const activeTo = c.active_to
+          ? new Date(c.active_to).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
+          : '—';
+
+        const variance    = parseFloat(c.variance || 0);
+        const varClass    = variance === 0 ? 'variance-ok' : 'variance-warn';
+        const varDisplay  = variance >= 0 ? `+${_fmt(variance)}` : _fmt(variance);
+        const signoffHtml = c.is_signed_off
+          ? `<span class="eod-signoff-badge ok">✓ Signed off</span>`
+          : `<span class="eod-signoff-badge pending">⚠ Not signed off</span>`;
+
+        return `
+          <div class="eod-cashier-card">
+            <div class="eod-cashier-head">
+              <div>
+                <div class="eod-cashier-name">${c.cashier_name}</div>
+                <div class="eod-cashier-meta">Active ${activeFrom} → ${activeTo} · ${c.transaction_count} transactions</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                ${signoffHtml}
+                <div class="eod-cashier-total">${_fmt(c.total_collected)}</div>
+              </div>
+            </div>
+            <div class="eod-cashier-body">
+              <div class="eod-cashier-methods">${methods}</div>
+              <div class="eod-cashier-float-row">
+                <div class="eod-float-item">
+                  <span class="eod-float-label">Opening Float</span>
+                  <span class="eod-float-val">${_fmt(c.opening_float)}</span>
+                </div>
+                <div class="eod-float-item">
+                  <span class="eod-float-label">Expected Cash</span>
+                  <span class="eod-float-val">${_fmt(c.expected_cash)}</span>
+                </div>
+                <div class="eod-float-item">
+                  <span class="eod-float-label">Closing Cash</span>
+                  <span class="eod-float-val">${_fmt(c.closing_cash)}</span>
+                </div>
+                <div class="eod-float-item">
+                  <span class="eod-float-label">Variance</span>
+                  <span class="eod-float-val ${varClass}">${varDisplay}</span>
+                </div>
+                ${c.variance_notes ? `
+                <div class="eod-float-item" style="flex:1;">
+                  <span class="eod-float-label">Variance Notes</span>
+                  <span class="eod-float-val" style="font-family:inherit;font-size:12px;">${c.variance_notes}</span>
+                </div>` : ''}
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    } else {
+      cashierEl.innerHTML = '<div class="eod-empty-note">No cashier activity recorded today.</div>';
+    }
+
+    // ── Petty cash ────────────────────────────────────────────────
+    const pettyEl = document.getElementById('eod-petty-list');
+    if (d.petty_cash.length) {
+      pettyEl.innerHTML = `
+        <table class="eod-table">
+          <thead>
+            <tr>
+              <th>Reason</th>
+              <th>Recorded By</th>
+              <th>Time</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${d.petty_cash.map(p => `
+              <tr>
+                <td>${p.reason || '—'}</td>
+                <td>${p.recorded_by_name}</td>
+                <td>${p.created_at ? new Date(p.created_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                <td class="mono" style="text-align:right;">${_fmt(p.amount)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    } else {
+      pettyEl.innerHTML = '<div class="eod-empty-note">No petty cash disbursements today.</div>';
+    }
+
+    // ── Credit sales ──────────────────────────────────────────────
+    const creditEl = document.getElementById('eod-credit-list');
+    if (d.credit_sales.length) {
+      creditEl.innerHTML = `
+        <table class="eod-table">
+          <thead>
+            <tr>
+              <th>Job Ref</th>
+              <th>Title</th>
+              <th>Customer</th>
+              <th style="text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${d.credit_sales.map(c => `
+              <tr>
+                <td class="mono">${c.job_number}</td>
+                <td>${c.title || '—'}</td>
+                <td>${c.customer_name}</td>
+                <td class="mono" style="text-align:right;">${_fmt(c.estimated_cost)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    } else {
+      creditEl.innerHTML = '<div class="eod-empty-note">No credit sales today.</div>';
+    }
+
+    // ── Show content ──────────────────────────────────────────────
+    document.getElementById('eod-loading').style.display = 'none';
+    document.getElementById('eod-content').style.display = 'block';
+    document.getElementById('eod-footer').style.display  = 'flex';
+  }
+
+  function _checkItem(type, text, sub) {
+    const icons = { ok: '✓', warn: '⚠', alert: '✕' };
+    return `
+      <div class="eod-check-item ${type}">
+        <span class="eod-check-icon">${icons[type]}</span>
+        <div>
+          <div class="eod-check-text">${text}</div>
+          ${sub ? `<div class="eod-check-sub">${sub}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function _jobMiniTable(list) {
+    return `
+      <table class="eod-table">
+        <thead>
+          <tr>
+            <th>Job Ref</th>
+            <th>Title</th>
+            <th>Attendant</th>
+            <th>Created</th>
+            <th style="text-align:right;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map(j => `
+            <tr>
+              <td class="mono">${j.job_number}</td>
+              <td>${j.title || '—'}</td>
+              <td>${j.intake_by_name}</td>
+              <td>${j.created_at ? new Date(j.created_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+              <td class="mono" style="text-align:right;">${_fmt(j.estimated_cost)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  async function confirmCloseSheet() {
+    if (!_eodSheetId) return;
+
+    const notes  = document.getElementById('eod-notes')?.value.trim() || '';
+    const btn    = document.getElementById('eod-confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span style="opacity:0.6">Closing…</span>';
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/sheets/${_eodSheetId}/close/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        }
+      );
       if (res.ok) {
-        _toast('Sheet closed successfully.', 'success');
+        _toast('Day sheet closed successfully.', 'success');
+        closeEOD();
         document.getElementById('pane-finance').dataset.loaded = '';
         _loadFinancePane();
       } else {
         const err = await res.json().catch(() => ({}));
         _toast(err.detail || 'Could not close sheet.', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Confirm &amp; Close Sheet';
       }
     } catch {
       _toast('Network error.', 'error');
+      btn.disabled = false;
     }
   }
 
@@ -656,6 +955,9 @@ const AV_COLORS = ['#22c98a','#e8294a','#4a90e8','#9b59b6','#e8c84a'];
     confirmOutsource,
     closeSheet,
     onJobCreated,
+    closeEOD,
+    toggleEODConfirm,
+    confirmCloseSheet,
   };
 
 })();

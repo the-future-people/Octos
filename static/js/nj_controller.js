@@ -15,6 +15,7 @@ const NJ = (() => {
   let currentType    = 'INSTANT';
   let currentService = null;
   let priceTimer     = null;
+  let _jobSubmitted = false;
 
   // POS cart — only used for INSTANT
   // Each entry: { service, serviceId, serviceName, quantity, pages, sets,
@@ -258,7 +259,7 @@ const NJ = (() => {
   }
 
   // ── Service chip selection ─────────────────────────────────
-function _selectServiceChip(serviceId) {
+  function _selectServiceChip(serviceId) {
     currentService = State.services.find(s => s.id === serviceId) || null;
     if (!currentService) return;
 
@@ -325,8 +326,7 @@ function _selectServiceChip(serviceId) {
     const pages    = parseInt(document.getElementById('nj-pages')?.value  || 1);
     const sets     = parseInt(document.getElementById('nj-sets')?.value   || 1);
     const is_color = document.getElementById('nj-color-mode')?.value === 'COLOR';
-    const quantity = pages * sets || 1;
-
+    const quantity   = sets;
     try {
       const params = new URLSearchParams({
         service  : currentService.id,
@@ -352,6 +352,7 @@ function _selectServiceChip(serviceId) {
   // ── Add current configuration to cart ─────────────────────
   async function _addToCart() {
     if (!currentService) { _toast('Select a service first.', 'error'); return; }
+    const service = currentService;
 
     const pages      = parseInt(document.getElementById('nj-pages')?.value      || 1);
     const sets       = parseInt(document.getElementById('nj-sets')?.value       || 1);
@@ -360,7 +361,7 @@ function _selectServiceChip(serviceId) {
     const sides      = document.getElementById('nj-sides')?.value       || 'SINGLE';
     const file_src   = document.getElementById('nj-file-source')?.value || 'NA';
     const specs      = _collectSpecs();
-    const quantity   = pages * sets || 1;
+    const quantity   = sets || 1;
 
     // Get price
     let unit_price = 0;
@@ -751,6 +752,7 @@ function _selectServiceChip(serviceId) {
         const job = await res.json();
         const total = _fmt(cart.reduce((s, i) => s + i.line_total, 0));
         _toast(`${job.job_number} created — ${cart.length} service${cart.length > 1 ? 's' : ''}, ${total}`, 'success');
+        _jobSubmitted = true;
         closeNewJobModal();
         reset();
         _onJobCreated();
@@ -809,6 +811,7 @@ function _selectServiceChip(serviceId) {
 
       const job = await res.json();
       _toast(`${job.job_number || 'Job'} created — sent to cashier queue.`, 'success');
+      _jobSubmitted = true;
       closeNewJobModal();
       reset();
       _onJobCreated();
@@ -858,7 +861,7 @@ function _selectServiceChip(serviceId) {
     requestAnimationFrame(_positionPill);
   }
 
-function _toggleAdvanced() {
+  function _toggleAdvanced() {
     const adv = document.getElementById('nj-advanced-fields');
     const arr = document.getElementById('nj-advanced-arrow');
     if (!adv) return;
@@ -866,8 +869,44 @@ function _toggleAdvanced() {
     adv.style.display = open ? 'block' : 'none';
     if (arr) arr.textContent = open ? '▼' : '▶';
   }
+  // ── Auto-save draft ───────────────────────────────────────────
+ async function tryAutoSaveDraft() {
+    if (_jobSubmitted) { _jobSubmitted = false; return; }
+    if (currentType !== 'INSTANT') return;
+    if (!cart.length) return;
 
-  return {
+    const lineItems = cart.map(item => ({
+      service   : item.serviceId,
+      pages     : item.pages,
+      sets      : item.sets,
+      quantity  : item.sets,
+      is_color  : item.is_color,
+      paper_size: item.paper_size,
+      sides     : item.sides,
+    }));
+
+    const customer = document.getElementById('nj-customer')?.value || null;
+    const channel  = document.getElementById('nj-channel')?.value  || 'WALK_IN';
+
+    try {
+      const res = await Auth.fetch('/api/v1/jobs/drafts/save/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          line_items: lineItems,
+          customer  : customer || null,
+          channel,
+        }),
+      });
+      if (res.ok) {
+        _toast('Draft saved.', 'info');
+      }
+    } catch { /* silent */ }
+
+    // Reset cart after saving
+    cart = [];
+  }
+return {
     setType,
     onServiceChange,
     createJob,
@@ -880,6 +919,7 @@ function _toggleAdvanced() {
     _addToCart,
     _removeFromCart,
     _toggleAdvanced,
+    tryAutoSaveDraft,
   };
 
 })();

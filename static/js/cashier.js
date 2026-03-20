@@ -24,7 +24,7 @@ const Cashier = (() => {
 
   const totals = { CASH: 0, MOMO: 0, POS: 0, count: 0 };
 
-  const POLL_INTERVAL   = 8000;
+  const POLL_INTERVAL   = 4000;
   const WAIT_AMBER_MINS = 10;
   const WAIT_RED_MINS   = 20;
 
@@ -259,6 +259,7 @@ const Cashier = (() => {
               <span class="type-pill ${job.job_type || ''}">${job.job_type || ''}</span>
               ${priorityTag}
               <span class="queue-card-attendant">by ${attendant}</span>
+              <span class="queue-card-channel">${_esc(job.intake_channel || 'WALK_IN')}</span>
               <span class="wait-tag ${waitClass}">${waitLabel}</span>
             </div>
           </div>
@@ -312,35 +313,49 @@ const Cashier = (() => {
   }
 
   // ── Confirm modal ──────────────────────────────────────────
-  function openConfirm(jobId) {
+ function openConfirm(jobId) {
     activeJob = queue.find(j => j.id === jobId);
     if (!activeJob) return;
-
     selectedDeposit = 100;
     selectedMethod  = 'CASH';
 
     const _s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     const _v = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
 
-    _s('confirm-job-ref',  activeJob.job_number || '#' + activeJob.id);
-    _s('confirm-job-name', activeJob.title || '—');
+    _s('confirm-job-ref',   activeJob.job_number || '#' + activeJob.id);
+    _s('confirm-job-name',  activeJob.title || '—');
     _s('confirm-attendant', activeJob.intake_by_name || '—');
-    _s('confirm-type',     activeJob.job_type || '—');
-    _s('confirm-customer', activeJob.customer_name || 'Walk-in');
-    _s('confirm-est-cost', activeJob.estimated_cost
-      ? `GHS ${parseFloat(activeJob.estimated_cost).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
-      : '—');
+    _s('confirm-type',      activeJob.job_type || '—');
+    _s('confirm-customer',  activeJob.customer_name || 'Walk-in');
+    _s('confirm-branch-name',    activeJob.branch_name    || '—');
+    _s('confirm-branch-address', activeJob.branch_address || '—');
+    _s('confirm-branch-phone',   activeJob.branch_phone   || '—');
 
     _v('confirm-phone', activeJob.customer_phone || '');
     _v('confirm-notes', '');
     _v('momo-ref', '');
     _v('pos-ref',  '');
+    // Populate line items
+    const itemsEl = document.getElementById('confirm-line-items');
+    if (itemsEl) {
+      const items = activeJob.line_items || [];
+      if (items.length) {
+        itemsEl.innerHTML = items.map(li => `
+          <div class="cm-item">
+            <span class="cm-item-name">${li.label || li.service_name || '—'}</span>
+            <span class="cm-item-qty">${li.quantity ?? 1}</span>
+            <span class="cm-item-price">GHS ${parseFloat(li.line_total || li.unit_price || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}</span>
+          </div>`).join('');
+      } else {
+        itemsEl.innerHTML = '<div class="cm-items-empty">No line items</div>';
+      }
+    }
 
     selectMethod('CASH');
     selectDeposit(100);
 
     const btn = document.getElementById('confirm-submit-btn');
-    if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Payment'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Payment'; }
 
     document.getElementById('confirm-overlay')?.classList.add('open');
   }
@@ -349,53 +364,70 @@ const Cashier = (() => {
     document.getElementById('confirm-overlay')?.classList.remove('open');
     activeJob = null;
   }
-
   // ── Payment method ─────────────────────────────────────────
-  function selectMethod(method) {
+function selectMethod(method) {
     selectedMethod = method;
-
     ['CASH', 'MOMO', 'POS'].forEach(m => {
       const btn = document.getElementById(`pm-${m.toLowerCase()}`);
       if (btn) btn.classList.toggle('selected', m === method);
     });
-
     const momoField = document.getElementById('momo-ref-field');
     const posField  = document.getElementById('pos-ref-field');
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
-
     _updateAmountDue();
-  }
-
-  // ── Deposit ────────────────────────────────────────────────
-  function selectDeposit(pct) {
-    selectedDeposit = pct;
-    document.getElementById('opt-100')?.classList.toggle('selected', pct === 100);
-    document.getElementById('opt-70')?.classList.toggle('selected',  pct === 70);
-    _updateAmountDue();
-  }
-
-  function _updateAmountDue() {
-    const box = document.getElementById('amount-due-box');
-    const val = document.getElementById('confirm-amount-due');
     const btn = document.getElementById('confirm-submit-btn');
-
-    if (box) {
-      box.classList.remove('cash', 'momo', 'pos');
-      box.classList.add(selectedMethod.toLowerCase());
-    }
     if (btn) {
-      btn.classList.remove('cash', 'momo', 'pos');
-      btn.classList.add(selectedMethod.toLowerCase());
+      btn.className = `cm-confirm-btn ${method.toLowerCase()}`;
     }
-
-    if (!activeJob || !activeJob.estimated_cost) {
-      if (val) val.textContent = '—';
-      return;
+    // Cash tendered field
+    const cashTendered = document.getElementById('cash-tendered-field');
+    if (cashTendered) cashTendered.classList.toggle('visible', method === 'CASH');
+    if (method !== 'CASH') {
+      const changeRow = document.getElementById('cm-change-row');
+      if (changeRow) changeRow.style.display = 'none';
+      const input = document.getElementById('cash-tendered');
+      if (input) input.value = '';
     }
+  }
+  // ── Deposit ────────────────────────────────────────────────
+function selectDeposit(pct) {
+    selectedDeposit = pct;
+    [100, 70].forEach(p => {
+      const el = document.getElementById(`opt-${p}`);
+      if (el) el.classList.toggle('selected', p === pct);
+    });
+    _updateAmountDue();
+  }
 
-    const due = parseFloat(activeJob.estimated_cost) * selectedDeposit / 100;
-    if (val) val.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+function _updateAmountDue() {
+    if (!activeJob) return;
+    const total = parseFloat(activeJob.estimated_cost || activeJob.computed_total || 0);
+    const due   = total * (selectedDeposit / 100);
+    const el    = document.getElementById('confirm-amount-due');
+    if (el) el.textContent = `GHS ${due.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+    const costEl = document.getElementById('confirm-est-cost');
+    if (costEl) costEl.textContent = `GHS ${total.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+  }
+  function calcChange() {
+    if (selectedMethod !== 'CASH' || !activeJob) return;
+    const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
+    const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
+    const change   = tendered - due;
+    const row      = document.getElementById('cm-change-row');
+    const val      = document.getElementById('cm-change-val');
+    if (!row || !val) return;
+    if (tendered > 0) {
+      row.style.display = 'flex';
+      val.textContent   = `GHS ${Math.abs(change).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+      row.style.background  = change >= 0 ? 'var(--green-bg)'  : 'var(--red-bg)';
+      row.style.borderColor = change >= 0 ? 'var(--green-border)' : 'var(--red-border)';
+      val.style.color       = change >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+      const label = document.querySelector('.cm-change-label');
+      if (label) label.style.color = change >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+    } else {
+      row.style.display = 'none';
+    }
   }
 
   // ── Confirm payment ────────────────────────────────────────

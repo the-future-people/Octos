@@ -184,14 +184,17 @@ class DailySalesSheetCloseView(APIView):
                 {'detail': 'Sheet not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
         try:
+            notes = request.data.get('notes', '').strip()
             engine = SheetEngine(sheet.branch)
             closed = engine.close_sheet(
                 sheet,
                 closed_by=request.user,
                 auto=False,
             )
+            if notes:
+                closed.notes = notes
+                closed.save(update_fields=['notes'])
             return Response(
                 DailySalesSheetDetailSerializer(
                     closed, context={'request': request}
@@ -790,3 +793,209 @@ class BranchLockStatusView(APIView):
 
         status_data = SheetEngine(user.branch).get_branch_lock_status()
         return Response(status_data)
+
+class EODSummaryView(APIView):
+    """
+    GET /api/v1/finance/sheets/<pk>/eod-summary/
+    Returns a comprehensive end-of-day summary for the pre-close checklist.
+    Only accessible by the branch manager of the sheet's branch.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from django.db.models import Sum, Count, Q
+        from apps.jobs.models import Job
+        from apps.finance.models import (
+            CashierFloat, PettyCash, POSTransaction, CreditAccount
+        )
+
+        # ── Fetch sheet ───────────────────────────────────────────
+        try:
+            sheet = DailySalesSheet.objects.select_related(
+                'branch', 'opened_by', 'closed_by'
+            ).get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if sheet.branch != getattr(request.user, 'branch', None):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        branch = sheet.branch
+        jobs   = Job.objects.filter(daily_sheet=sheet).select_related(
+            'intake_by', 'customer', 'assigned_to'
+        )
+
+        # ── Revenue summary ───────────────────────────────────────
+        revenue = {
+            'cash' : str(sheet.total_cash),
+            'momo' : str(sheet.total_momo),
+            'pos'  : str(sheet.total_pos),
+            'total': str(sheet.total_cash + sheet.total_momo + sheet.total_pos),
+            'credit_issued'  : str(sheet.total_credit_issued),
+            'petty_cash_out' : str(sheet.total_petty_cash_out),
+            'net_cash_in_till': str(sheet.net_cash_in_till),
+        }
+
+        # ── Jobs summary ──────────────────────────────────────────
+        total_jobs     = jobs.count()
+        completed_jobs = jobs.filter(status='COMPLETE').count()
+        cancelled_jobs = jobs.filter(status='CANCELLED').count()
+        local_jobs     = jobs.filter(is_routed=False).count()
+        routed_out     = jobs.filter(is_routed=True).count()
+
+        # Routed-in: jobs assigned to this branch from another branch
+        routed_in = Job.objects.filter(
+            assigned_to=branch,
+            is_routed=True,
+        ).exclude(branch=branch).count()
+
+        # Pending payment — cashier accepted (in queue)
+        pending_cashier = jobs.filter(status='PENDING_PAYMENT')
+        pending_cashier_list = list(pending_cashier.values(
+            'id', 'job_number', 'title', 'estimated_cost',
+            'intake_by__first_name', 'intake_by__last_name',
+            'created_at',
+        ))
+        for j in pending_cashier_list:
+            fn = j.pop('intake_by__first_name', '') or ''
+            ln = j.pop('intake_by__last_name', '') or ''
+            j['intake_by_name'] = f"{fn} {ln}".strip() or '—'
+            j['estimated_cost'] = str(j['estimated_cost'] or 0)
+            j['created_at']     = j['created_at'].isoformat() if j['created_at'] else None
+
+        # Pending payment — never touched by cashier (no POSTransaction)
+        pending_untouched = pending_cashier.filter(
+            pos_transactions__isnull=True
+        )
+        pending_untouched_list = list(pending_untouched.values(
+            'id', 'job_number', 'title', 'estimated_cost',
+            'intake_by__first_name', 'intake_by__last_name',
+            'created_at',
+        ))
+        for j in pending_untouched_list:
+            fn = j.pop('intake_by__first_name', '') or ''
+            ln = j.pop('intake_by__last_name', '') or ''
+            j['intake_by_name'] = f"{fn} {ln}".strip() or '—'
+            j['estimated_cost'] = str(j['estimated_cost'] or 0)
+            j['created_at']     = j['created_at'].isoformat() if j['created_at'] else None
+
+        jobs_summary = {
+            'total'            : total_jobs,
+            'completed'        : completed_jobs,
+            'cancelled'        : cancelled_jobs,
+            'local'            : local_jobs,
+            'routed_out'       : routed_out,
+            'routed_in'        : routed_in,
+            'pending_payment'  : pending_cashier.count(),
+            'pending_untouched': pending_untouched.count(),
+            'pending_list'     : pending_cashier_list,
+            'untouched_list'   : pending_untouched_list,
+        }
+
+        # ── Cashier activity ──────────────────────────────────────
+        floats = CashierFloat.objects.filter(
+            daily_sheet=sheet
+        ).select_related('cashier', 'float_set_by', 'signed_off_by')
+
+        cashier_activity = []
+        for f in floats:
+            from apps.finance.models import Receipt
+            txns = Receipt.objects.filter(
+                daily_sheet=sheet,
+                cashier=f.cashier,
+            ).order_by('created_at')
+
+            by_method = txns.values('payment_method').annotate(
+                total=Sum('amount_paid'),
+                count=Count('id'),
+            )
+            method_breakdown = {
+                row['payment_method']: {
+                    'total': str(row['total'] or 0),
+                    'count': row['count'],
+                }
+                for row in by_method
+            }
+
+            first_txn = txns.first()
+            last_txn  = txns.last()
+
+            cashier_activity.append({
+                'cashier_name'     : f.cashier.full_name,
+                'cashier_id'       : f.cashier.id,
+                'opening_float'    : str(f.opening_float),
+                'closing_cash'     : str(f.closing_cash),
+                'expected_cash'    : str(f.expected_cash),
+                'variance'         : str(f.variance),
+                'variance_notes'   : f.variance_notes,
+                'is_signed_off'    : f.is_signed_off,
+                'signed_off_at'    : f.signed_off_at.isoformat() if f.signed_off_at else None,
+                'float_set_at'     : f.float_set_at.isoformat() if f.float_set_at else None,
+                'active_from'      : first_txn.created_at.isoformat() if first_txn else None,
+                'active_to'        : last_txn.created_at.isoformat() if last_txn else None,
+                'total_collected'  : str(txns.aggregate(t=Sum('amount_paid'))['t'] or 0),
+                'transaction_count': txns.count(),
+                'method_breakdown' : method_breakdown,
+            })
+        float_opened = floats.exists()
+
+        # ── Petty cash ────────────────────────────────────────────
+        petty_cash_records = PettyCash.objects.filter(
+            daily_sheet=sheet
+        ).select_related('recorded_by').order_by('created_at')
+
+        petty_cash_list = list(petty_cash_records.values(
+            'id', 'amount', 'purpose', 'created_at',
+            'recorded_by__first_name', 'recorded_by__last_name',
+        ))
+        for p in petty_cash_list:
+            fn = p.pop('recorded_by__first_name', '') or ''
+            ln = p.pop('recorded_by__last_name', '') or ''
+            p['recorded_by_name'] = f"{fn} {ln}".strip() or '—'
+            p['reason']           = p.pop('purpose', '—')
+            p['amount']           = str(p['amount'])
+            p['created_at']       = p['created_at'].isoformat() if p['created_at'] else None
+
+        # ── Credit sales ──────────────────────────────────────────
+        credit_jobs = jobs.filter(
+            customer__credit_account__isnull=False,
+            status__in=['COMPLETE', 'PENDING_PAYMENT'],
+        ).select_related('customer__credit_account')
+
+        credit_list = []
+        for j in credit_jobs:
+            credit_list.append({
+                'job_number'    : j.job_number,
+                'title'         : j.title,
+                'estimated_cost': str(j.estimated_cost or 0),
+                'customer_name' : j.customer.full_name if j.customer else '—',
+            })
+
+        # ── Sheet meta ────────────────────────────────────────────
+        meta = {
+            'sheet_id'  : sheet.pk,
+            'date'      : sheet.date.isoformat(),
+            'status'    : sheet.status,
+            'branch'    : branch.name,
+            'branch_code': branch.code,
+            'opened_at' : sheet.opened_at.isoformat() if sheet.opened_at else None,
+            'opened_by' : sheet.opened_by.full_name if sheet.opened_by else 'System',
+            'is_public_holiday'  : sheet.is_public_holiday,
+            'public_holiday_name': sheet.public_holiday_name,
+        }
+
+        return Response({
+            'meta'            : meta,
+            'revenue'         : revenue,
+            'jobs'            : jobs_summary,
+            'cashier_activity': cashier_activity,
+            'float_opened'    : float_opened,
+            'petty_cash'      : petty_cash_list,
+            'credit_sales'    : credit_list,
+        })
