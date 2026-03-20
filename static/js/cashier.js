@@ -1260,35 +1260,34 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     }, 1000);
   }
   // ── Cashier History & Receipts Pane ──────────────────────
+// ── Cashier History & Receipts Pane ──────────────────────
   function _renderReceiptsPane(container) {
     container.innerHTML = `
-      <div style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
         <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-          color:var(--text);letter-spacing:-0.3px;margin-bottom:16px;">
-          My Activity
-        </div>
-        <div style="display:flex;gap:4px;background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:4px;width:fit-content;">
+          color:var(--text);letter-spacing:-0.3px;">My Activity</div>
+        <div style="display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);
+          border-radius:10px;padding:3px;">
           <button id="tab-history"
             onclick="Cashier._switchReceiptsTab('history')"
-            style="padding:6px 16px;border-radius:10px;border:none;
+            style="padding:5px 14px;border-radius:8px;border:none;
                    background:var(--text);color:#fff;
-                   font-size:12.5px;font-weight:600;cursor:pointer;
+                   font-size:12px;font-weight:600;cursor:pointer;
                    font-family:'DM Sans',sans-serif;transition:all 0.15s;">
             History
           </button>
           <button id="tab-receipts"
             onclick="Cashier._switchReceiptsTab('receipts')"
-            style="padding:6px 16px;border-radius:10px;border:none;
+            style="padding:5px 14px;border-radius:8px;border:none;
                    background:none;color:var(--text-3);
-                   font-size:12.5px;font-weight:500;cursor:pointer;
+                   font-size:12px;font-weight:500;cursor:pointer;
                    font-family:'DM Sans',sans-serif;transition:all 0.15s;">
             Receipts
           </button>
         </div>
       </div>
       <div id="receipts-tab-content"></div>`;
-    _loadHistoryLevel('year');
+    _loadAllHistoryPeriods();
   }
 
   function _switchReceiptsTab(tab) {
@@ -1307,18 +1306,241 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     const content = document.getElementById('receipts-tab-content');
     if (!content) return;
     if (tab === 'history') {
-      _loadHistoryLevel('year');
+      _loadAllHistoryPeriods();
     } else {
+      _loadReceiptsList();
+    }
+  }
+
+  async function _loadAllHistoryPeriods() {
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+
+    content.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div id="hist-today"  class="hist-section"></div>
+        <div id="hist-week"   class="hist-section"></div>
+        <div id="hist-month"  class="hist-section"></div>
+        <div id="hist-year"   class="hist-section"></div>
+      </div>`;
+
+    const now   = new Date();
+    const year  = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    // ISO week number
+    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+
+    const sections = [
+      { id: 'hist-today', label: 'Today',      params: { level: 'day',   year, month, week } },
+      { id: 'hist-week',  label: 'This Week',  params: { level: 'week',  year, month } },
+      { id: 'hist-month', label: 'This Month', params: { level: 'month', year } },
+      { id: 'hist-year',  label: 'This Year',  params: { level: 'year' } },
+    ];
+
+    // Load all four in parallel
+    await Promise.all(sections.map(s => _loadHistorySection(s.id, s.label, s.params)));
+  }
+
+  async function _loadHistorySection(elId, label, params) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+
+    el.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+        letter-spacing:0.8px;margin-bottom:10px;">${label}</div>
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+        padding:16px 20px;display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:13px;">
+        <span class="spin"></span> Loading…
+      </div>`;
+
+    try {
+      const qp = new URLSearchParams(params);
+      const res  = await Auth.fetch(`/api/v1/finance/cashier/history/?${qp}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      // For day/week/month/year — sum all results into one total
+      const results = data.results || [];
+      const fmt = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+      if (!results.length) {
+        el.innerHTML = `
+          <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+            letter-spacing:0.8px;margin-bottom:10px;">${label}</div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+            padding:16px 20px;font-size:13px;color:var(--text-3);">
+            No activity yet.
+          </div>`;
+        return;
+      }
+
+      const cash  = results.reduce((a, r) => a + r.cash,  0);
+      const momo  = results.reduce((a, r) => a + r.momo,  0);
+      const pos   = results.reduce((a, r) => a + r.pos,   0);
+      const total = cash + momo + pos;
+      const count = results.reduce((a, r) => a + r.count, 0);
+
+      const cashPct = total > 0 ? (cash / total * 100).toFixed(0) : 0;
+      const momoPct = total > 0 ? (momo / total * 100).toFixed(0) : 0;
+      const posPct  = total > 0 ? (pos  / total * 100).toFixed(0) : 0;
+
+      el.innerHTML = `
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.8px;margin-bottom:10px;">${label}</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+          padding:18px 20px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <div style="font-size:12px;color:var(--text-3);">
+              ${count} receipt${count !== 1 ? 's' : ''}
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:18px;
+              font-weight:700;color:var(--text);">${fmt(total)}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div style="padding:10px 12px;background:var(--cash-bg);
+              border:1px solid var(--cash-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--cash-text);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Cash</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:var(--cash-strong);">${fmt(cash)}</div>
+              <div style="font-size:10px;color:var(--cash-text);margin-top:2px;">${cashPct}%</div>
+            </div>
+            <div style="padding:10px 12px;background:var(--momo-bg);
+              border:1px solid var(--momo-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--momo-text);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">MoMo</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:var(--momo-strong);">${fmt(momo)}</div>
+              <div style="font-size:10px;color:var(--momo-text);margin-top:2px;">${momoPct}%</div>
+            </div>
+            <div style="padding:10px 12px;background:var(--pos-bg);
+              border:1px solid var(--pos-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--pos-text);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">POS</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:var(--pos-strong);">${fmt(pos)}</div>
+              <div style="font-size:10px;color:var(--pos-text);margin-top:2px;">${posPct}%</div>
+            </div>
+          </div>
+        </div>`;
+    } catch {
+      el.innerHTML = `
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.8px;margin-bottom:10px;">${label}</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+          padding:16px 20px;font-size:13px;color:var(--text-3);">
+          Could not load.
+        </div>`;
+    }
+  }
+
+ async function _loadReceiptsList() {
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        padding:60px;color:var(--text-3);gap:10px;font-size:13px;">
+        <span class="spin"></span> Loading…
+      </div>`;
+
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/cashier/receipts/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = data.results || data;
+      const fmt   = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+      if (!items.length) {
+        content.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+            No receipts yet.
+          </div>`;
+        return;
+      }
+
+      const rows = items.map(r => {
+        const method = r.payment_method || '—';
+        const methodColor = { CASH: 'var(--cash-text)', MOMO: 'var(--momo-text)', POS: 'var(--pos-text)' }[method] || 'var(--text-3)';
+        const methodBg    = { CASH: 'var(--cash-bg)',   MOMO: 'var(--momo-bg)',   POS: 'var(--pos-bg)'   }[method] || 'var(--bg)';
+        const date = r.created_at
+          ? new Date(r.created_at).toLocaleString('en-GB', {
+              day: 'numeric', month: 'short', year: 'numeric',
+              hour: '2-digit', minute: '2-digit',
+            })
+          : '—';
+        return `
+          <tr>
+            <td style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                font-weight:600;color:var(--text);">${_esc(r.receipt_number || '—')}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">${date}</div>
+            </td>
+            <td style="padding:12px 16px;border-bottom:1px solid var(--border);
+              font-size:13px;color:var(--text-2);">
+              ${_esc(r.job_number || '—')}
+            </td>
+            <td style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <span style="padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;
+                background:${methodBg};color:${methodColor};">${method}</span>
+            </td>
+            <td style="padding:12px 16px;border-bottom:1px solid var(--border);
+              text-align:right;font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--text);">${fmt(r.amount_paid)}</td>
+          </tr>`;
+      }).join('');
+
       content.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;
-          justify-content:center;height:280px;gap:10px;color:var(--text-3);">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          <div style="font-size:14px;font-weight:600;color:var(--text);">Receipts</div>
-          <div style="font-size:13px;">Coming soon.</div>
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);">
+                <th style="text-align:left;padding:10px 16px;font-size:10.5px;font-weight:700;
+                  letter-spacing:0.8px;text-transform:uppercase;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Receipt</th>
+                <th style="text-align:left;padding:10px 16px;font-size:10.5px;font-weight:700;
+                  letter-spacing:0.8px;text-transform:uppercase;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Job</th>
+                <th style="text-align:left;padding:10px 16px;font-size:10.5px;font-weight:700;
+                  letter-spacing:0.8px;text-transform:uppercase;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Method</th>
+                <th style="text-align:right;padding:10px 16px;font-size:10.5px;font-weight:700;
+                  letter-spacing:0.8px;text-transform:uppercase;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Amount</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    } catch {
+      content.innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+          Could not load receipts.
+        </div>`;
+    }
+  }
+
+  async function _loadHistoryLevel(level, params = {}) {
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+    const qp = new URLSearchParams({ level });
+    if (params.year)  qp.set('year',  params.year);
+    if (params.month) qp.set('month', params.month);
+    if (params.week)  qp.set('week',  params.week);
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/cashier/history/?${qp}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      _renderHistoryLevel(data, params);
+    } catch {
+      content.innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+          Could not load history.
         </div>`;
     }
   }
@@ -1482,6 +1704,9 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     _wizardNext,
     _updateVariancePreview,
     _toggleOvertimeFields,
+    _switchReceiptsTab,
+    _historyDrillDown,
+    _historyDrillUp,
   };
 })();
 

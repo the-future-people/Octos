@@ -31,6 +31,7 @@ from .views import (
     InvoiceCreateView,
     InvoiceSendView,
     InvoicePDFView,
+    CashierReceiptListView,
 )
 
 urlpatterns = [
@@ -82,4 +83,5 @@ urlpatterns = [
     path('invoices/<int:pk>/',                   InvoiceDetailView.as_view(),                 name='invoice-detail'),
     path('invoices/<int:pk>/send/',              InvoiceSendView.as_view(),                   name='invoice-send'),
     path('invoices/<int:pk>/pdf/',               InvoicePDFView.as_view(),                    name='invoice-pdf'),
+    path('cashier/receipts/',                CashierReceiptListView.as_view(),            name='cashier-receipts'),
 ]

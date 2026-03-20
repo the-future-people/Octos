@@ -270,7 +270,9 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   flex-direction: column;
   gap: 20px;
   min-width: 0;
+  min-height: 100vh;
 }
+html { overflow-y: scroll; }
 
 /* ── Summary strip ─────────────────────────────────────── */
 .summary-strip {

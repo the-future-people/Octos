@@ -875,7 +875,27 @@ class ReceiptThermalView(APIView):
 
         return Response({'text': text})
 
+class CashierReceiptListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/cashier/receipts/
+    Returns receipts issued by the logged-in cashier.
+    Ordered newest first. Optional ?date=YYYY-MM-DD filter.
+    """
+    serializer_class   = ReceiptSerializer
+    permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        qs   = Receipt.objects.filter(
+            cashier=user,
+            is_void=False,
+        ).select_related('job', 'daily_sheet').order_by('-created_at')
+
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            qs = qs.filter(created_at__date=date_param)
+
+        return qs
 # ─────────────────────────────────────────────────────────────────────────────
 # Credit Accounts
 # ─────────────────────────────────────────────────────────────────────────────
