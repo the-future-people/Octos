@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+from django.contrib.auth.hashers import make_password, check_password
 from apps.core.models import AuditModel
 
 
@@ -26,39 +27,41 @@ class CustomUser(AbstractBaseUser, AuditModel):
     No personal contact details are ever used for business.
     """
     employee_id = models.CharField(max_length=20, unique=True, blank=True)
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=20, blank=True)
-    photo = models.ImageField(upload_to='employees/', null=True, blank=True)
+    first_name  = models.CharField(max_length=100)
+    last_name   = models.CharField(max_length=100)
+    email       = models.EmailField(unique=True)
+    phone       = models.CharField(max_length=20, blank=True)
+    photo       = models.ImageField(upload_to='employees/', null=True, blank=True)
 
     branch = models.ForeignKey(
         'organization.Branch',
         on_delete=models.PROTECT,
         related_name='user_accounts',
-        null=True,
-        blank=True
+        null=True, blank=True,
     )
     role = models.ForeignKey(
         'accounts.Role',
         on_delete=models.PROTECT,
         related_name='users',
-        null=True,
-        blank=True
+        null=True, blank=True,
     )
 
-    is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)
-    is_superuser = models.BooleanField(default=False)
-    is_clocked_in = models.BooleanField(default=False)
-    last_clock_in = models.DateTimeField(null=True, blank=True)
-    approved_at = models.DateTimeField(null=True, blank=True)
+    is_active      = models.BooleanField(default=True)
+    is_staff       = models.BooleanField(default=False)
+    is_superuser   = models.BooleanField(default=False)
+    is_clocked_in  = models.BooleanField(default=False)
+    last_clock_in  = models.DateTimeField(null=True, blank=True)
+    approved_at    = models.DateTimeField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
-    must_change_password = models.BooleanField(default=False)
+
+    # ── Download PIN ─────────────────────────────────────────
+    # Stored as a hashed 4-digit PIN — never plain text
+    download_pin     = models.CharField(max_length=128, blank=True, null=True)
+    download_pin_set = models.BooleanField(default=False)
 
     objects = CustomUserManager()
 
-    USERNAME_FIELD = 'email'
+    USERNAME_FIELD  = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
 
     class Meta:
@@ -74,6 +77,18 @@ class CustomUser(AbstractBaseUser, AuditModel):
     @property
     def is_approved(self):
         return self.approved_at is not None
+
+    def set_download_pin(self, raw_pin):
+        """Hash and store the 4-digit PIN."""
+        self.download_pin     = make_password(str(raw_pin))
+        self.download_pin_set = True
+        self.save(update_fields=['download_pin', 'download_pin_set'])
+
+    def verify_download_pin(self, raw_pin):
+        """Check a raw PIN against the stored hash."""
+        if not self.download_pin:
+            return False
+        return check_password(str(raw_pin), self.download_pin)
 
     def has_perm(self, perm, obj=None):
         return self.is_superuser

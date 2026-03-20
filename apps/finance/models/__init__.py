@@ -7,6 +7,7 @@ from .credit_account import CreditAccount
 from .credit_payment import CreditPayment
 from .branch_transfer_credit import BranchTransferCredit
 from .invoice import Invoice, InvoiceLineItem
+from .sheet_download_log import SheetDownloadLog
 
 __all__ = [
     'DailySalesSheet',
@@ -19,4 +20,5 @@ __all__ = [
     'BranchTransferCredit',
     'Invoice',
     'InvoiceLineItem',
+    'SheetDownloadLog',
 ]

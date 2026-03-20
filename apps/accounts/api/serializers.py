@@ -44,6 +44,7 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'role_name', 'role_detail', 'branch', 'branch_detail',
             'phone', 'employee_id', 'is_active', 'created_at',
+            'download_pin_set',
         ]
 
    

@@ -1,8 +1,6 @@
 from django.shortcuts import render
 
 
-def jobs_tab_view(request):
-    return render(request, 'branch_manager/jobs_tab.html')
 
 def login_view(request):
     return render(request, 'branch_manager/login.html')

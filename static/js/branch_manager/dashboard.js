@@ -32,8 +32,6 @@ const Dashboard = (() => {
   // ── Boot ───────────────────────────────────────────────────
  async function init() {
     await Auth.guard(['BRANCH_MANAGER', 'BELT_MANAGER', 'REGIONAL_MANAGER', 'HQ_FACTORY_MANAGER', 'HQ_HR_MANAGER', 'REGIONAL_HR_COORDINATOR', 'SUPER_ADMIN']);
-    console.log('Cached user object:', JSON.stringify(Auth.getUser()));
-    console.log('Detected role:', Auth.getRole());
     _setDate();
     await Promise.all([
       loadContext(),
@@ -178,7 +176,7 @@ async function loadRecentJobs() {
       }
 
       tbody.innerHTML = jobs.map(j => `
-        <tr onclick="window.location='/portal/jobs/'">
+        <tr onclick="Dashboard.switchPane('jobs','Jobs')">
           <td>
             <div class="td-job-title">${_esc(j.title || '—')}</div>
             <div class="td-job-ref">${_esc(j.job_number || '#' + j.id)}</div>
@@ -291,27 +289,11 @@ async function loadRecentJobs() {
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
-  async function _loadJobsPane() {
-    jobsLoaded = true;
-    const pane = document.getElementById('pane-jobs');
-    if (!pane) return;
+      function _loadJobsPane() {
+        jobsLoaded = true;
+        Jobs.init({ embedded: true });
+      }
 
-    pane.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading jobs…</div>';
-
-    try {
-      const res = await fetch('/portal/jobs-tab/');
-      if (!res.ok) throw new Error();
-      const html = await res.text();
-      pane.innerHTML = html;
-      pane.querySelectorAll('script').forEach(old => {
-        const s = document.createElement('script');
-        s.textContent = old.textContent;
-        old.replaceWith(s);
-      });
-    } catch {
-      pane.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load jobs.</div>';
-    }
-  }
 
   // ── Finance pane ───────────────────────────────────────────
  async function _loadFinancePane() {
@@ -467,7 +449,7 @@ async function loadRecentJobs() {
       container.innerHTML = `
         <div style="background:var(--panel);border:1px solid var(--border);
           border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
+          <table class="p-table" id="sheets-archive-table">
             <thead>
               <tr>
                 <th>Date</th>
@@ -480,13 +462,16 @@ async function loadRecentJobs() {
                 <th></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="sheets-archive-tbody">
               ${sheets.map(s => {
                 const total = parseFloat(s.total_cash||0)
                   + parseFloat(s.total_momo||0)
                   + parseFloat(s.total_pos||0);
                 return `
-                  <tr>
+                  <tr id="sheet-row-${s.id}" onclick="Dashboard.toggleSheetRow(${s.id}, '${s.date}')"
+                    style="cursor:pointer;transition:background 0.12s;"
+                    onmouseover="this.style.background='var(--bg)'"
+                    onmouseout="this.style.background=''">
                     <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">
                       ${s.date}
                     </td>
@@ -501,12 +486,19 @@ async function loadRecentJobs() {
                     <td>${_fmt(s.total_pos)}</td>
                     <td style="font-weight:700;">${_fmt(total)}</td>
                     <td>
-                      ${s.status !== 'OPEN' ? `
-                        <button onclick="Dashboard.downloadSheetPDF(${s.id},'${s.date}')"
-                          style="font-size:12px;color:var(--text-2);background:none;
-                                 border:none;cursor:pointer;font-weight:600;padding:0;">
-                          PDF ↓
-                        </button>` : '—'}
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        id="sheet-chevron-${s.id}" style="color:var(--text-3);transition:transform 0.2s;">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </td>
+                  </tr>
+                  <tr id="sheet-detail-${s.id}" style="display:none;">
+                    <td colspan="8" class="sheet-detail-td" style="background:var(--bg);border-bottom:1px solid var(--border);">
+                      <div id="sheet-detail-content-${s.id}"
+                        style="padding:16px 0;border-top:1px solid var(--border);margin-left:-1px;">
+                        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+                      </div>
                     </td>
                   </tr>`;
               }).join('')}
@@ -515,6 +507,170 @@ async function loadRecentJobs() {
         </div>`;
     } catch {
       container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load archive.</div>';
+    }
+  }
+
+  let _openSheetRow = null;
+
+  async function toggleSheetRow(sheetId, sheetDate) {
+    const detailRow     = document.getElementById(`sheet-detail-${sheetId}`);
+    const chevron       = document.getElementById(`sheet-chevron-${sheetId}`);
+    const contentEl     = document.getElementById(`sheet-detail-content-${sheetId}`);
+    const isOpen        = detailRow.style.display !== 'none';
+
+    // Close any open row
+    if (_openSheetRow && _openSheetRow !== sheetId) {
+      const prevDetail  = document.getElementById(`sheet-detail-${_openSheetRow}`);
+      const prevChevron = document.getElementById(`sheet-chevron-${_openSheetRow}`);
+      if (prevDetail)  prevDetail.style.display  = 'none';
+      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
+    }
+
+    if (isOpen) {
+      detailRow.style.display   = 'none';
+      chevron.style.transform   = 'rotate(0deg)';
+      _openSheetRow             = null;
+    } else {
+      detailRow.style.display   = 'table-row';
+      chevron.style.transform   = 'rotate(180deg)';
+      _openSheetRow             = sheetId;
+      await _loadSheetDetail(sheetId, sheetDate, contentEl);
+    }
+  }
+
+  async function _loadSheetDetail(sheetId, sheetDate, container) {
+    container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheetId}&page_size=200`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const jobs = Array.isArray(data) ? data : (data.results || []);
+
+      // Get sheet totals
+      const sheetRes = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/`);
+      const sheet    = sheetRes.ok ? await sheetRes.json() : null;
+
+      if (!jobs.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:24px;color:var(--text-3);font-size:13px;">
+            No jobs recorded for this day.
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <!-- Jobs table -->
+        <div style="overflow-x:auto;padding:0 20px;margin-bottom:16px;margin-left:-18px;margin-right:-14px;">
+          <table style="min-width:900px;width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border);">
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Time</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Job Ref</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Status</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Channel</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Attendant</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Cashier</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Due</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Given</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Change</th>
+                <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${jobs.map(j => {
+                const time = j.created_at
+                  ? new Date(j.created_at).toLocaleTimeString('en-GH', {
+                      hour:'2-digit', minute:'2-digit'
+                    })
+                  : '—';
+                return `
+                  <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3);">${time}</td>
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;">${_esc(j.job_number || '#' + j.id)}</td>
+                    <td style="padding:8px 12px;">${_statusBadge(j.status)}</td>
+                    <td style="padding:8px 12px;font-size:12px;">
+                      ${j.payment_method
+                        ? `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 7px;border-radius:4px;background:var(--border);color:var(--text-2);font-weight:700;">${j.payment_method}</span>`
+                        : '<span style="color:var(--text-3);">—</span>'}
+                    </td>
+                    <td style="padding:8px 12px;font-size:12px;color:var(--text-2);">${_esc(j.intake_by_name || '—')}</td>
+                    <td style="padding:8px 12px;font-size:12px;color:var(--text-2);">${_esc(j.confirmed_by_name || '—')}</td>
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;">${j.estimated_cost != null ? _fmt(j.estimated_cost) : '—'}</td>
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;">${j.cash_tendered != null ? _fmt(j.cash_tendered) : '—'}</td>
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;">${j.change_given != null ? _fmt(j.change_given) : '—'}</td>
+                    <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;">${j.amount_paid != null ? _fmt(j.amount_paid) : '—'}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Day summary strip -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 20px;margin:0 20px;
+          display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+            <div>
+              <span style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;">Cash</span>
+              <div style="font-size:14px;font-weight:700;color:var(--text);
+                font-family:'JetBrains Mono',monospace;">
+                ${sheet ? _fmt(sheet.total_cash) : '—'}
+              </div>
+            </div>
+            <div>
+              <span style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;">MoMo</span>
+              <div style="font-size:14px;font-weight:700;color:var(--text);
+                font-family:'JetBrains Mono',monospace;">
+                ${sheet ? _fmt(sheet.total_momo) : '—'}
+              </div>
+            </div>
+            <div>
+              <span style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;">POS</span>
+              <div style="font-size:14px;font-weight:700;color:var(--text);
+                font-family:'JetBrains Mono',monospace;">
+                ${sheet ? _fmt(sheet.total_pos) : '—'}
+              </div>
+            </div>
+            <div style="padding-left:16px;border-left:1px solid var(--border);">
+              <span style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;">Total</span>
+              <div style="font-size:16px;font-weight:800;color:var(--text);
+                font-family:'Outfit',sans-serif;">
+                ${sheet
+                  ? _fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))
+                  : '—'}
+              </div>
+            </div>
+          </div>
+
+          <!-- Download PDF button -->
+          ${sheet && sheet.status !== 'OPEN' ? `
+            <button onclick="Dashboard.initiateSheetDownload(${sheetId}, '${sheetDate}')"
+              style="display:inline-flex;align-items:center;gap:7px;padding:8px 16px;
+                     background:var(--ink, #0f0f0f);color:#fff;border:none;
+                     border-radius:var(--radius-sm);font-size:12px;font-weight:700;
+                     cursor:pointer;font-family:'Outfit',sans-serif;
+                     transition:opacity 0.15s;"
+              onmouseover="this.style.opacity='0.85'"
+              onmouseout="this.style.opacity='1'">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Download PDF
+            </button>` : ''}
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load sheet details.
+        </div>`;
     }
   }
 
@@ -1274,43 +1430,32 @@ async function loadRecentJobs() {
     setTimeout(() => el.remove(), 3500);
   }
 // ── Reports pane ─────────────────────────────────────────────
-  let _reportsPeriod = 'month';
-
-  async function _loadReportsPane() {
+async function _loadReportsPane() {
     const pane = document.getElementById('pane-reports');
     if (!pane) return;
 
     pane.innerHTML = `
       <div class="section-head">
-        <span class="section-title">Reports</span>
-        <div class="period-tabs">
-          <button class="period-tab" data-period="day"   onclick="Dashboard.setReportsPeriod('day')">Day</button>
-          <button class="period-tab" data-period="week"  onclick="Dashboard.setReportsPeriod('week')">Week</button>
-          <button class="period-tab active" data-period="month" onclick="Dashboard.setReportsPeriod('month')">Month</button>
-          <button class="period-tab" data-period="year"  onclick="Dashboard.setReportsPeriod('year')">Year</button>
-        </div>
+        <span class="section-title">Reports & Filing</span>
       </div>
 
       <div class="reports-tabs">
-        <button class="reports-tab active" data-tab="sheets"  onclick="Dashboard.switchReportsTab('sheets')">Daily Sheets</button>
-        <button class="reports-tab" data-tab="jobs"           onclick="Dashboard.switchReportsTab('jobs')">Jobs History</button>
-        <button class="reports-tab" data-tab="history"        onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
-        <button class="reports-tab" data-tab="services"       onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
+        <button class="reports-tab active" data-tab="history"
+          onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
+        <button class="reports-tab" data-tab="filing"
+          onclick="Dashboard.switchReportsTab('filing')">Weekly Filing</button>
+        <button class="reports-tab" data-tab="services"
+          onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
       </div>
 
       <div id="reports-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
 
-    await _loadReportsTab('sheets');
+    await _loadReportsTab('history');
   }
-
   async function setReportsPeriod(period) {
-    _reportsPeriod = period;
-    document.querySelectorAll('.period-tab[data-period]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.period === period);
-    });
-    const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'sheets';
+    const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'history';
     await _loadReportsTab(activeTab);
   }
 
@@ -1326,9 +1471,8 @@ async function loadRecentJobs() {
     if (!content) return;
     content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
-    if (tab === 'sheets')   await _renderSheetsReport(content);
-    if (tab === 'jobs')     await _renderJobsReport(content);
     if (tab === 'history')  await _renderHistoryReport(content);
+    if (tab === 'filing')   await _renderWeeklyFiling(content);
     if (tab === 'services') await _renderServicesReport(content);
   }
 
@@ -1454,7 +1598,7 @@ async function loadRecentJobs() {
   // ── Service Performance ───────────────────────────────────────
   async function _renderServicesReport(container) {
     try {
-      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=${_reportsPeriod}`);
+      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=month`);
       if (!res.ok) throw new Error();
       const data     = await res.json();
       const services = data.services || [];
@@ -1518,6 +1662,27 @@ async function loadRecentJobs() {
     } catch {
       container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
     }
+  }
+
+  async function _renderWeeklyFiling(container) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:64px 24px;color:var(--text-3);">
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="1.5"
+          style="margin-bottom:16px;opacity:0.3;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:700;
+          color:var(--text-2);margin-bottom:8px;">Weekly Filing</div>
+        <div style="font-size:13px;max-width:340px;margin:0 auto;line-height:1.6;">
+          File and ascent weekly reports (Mon–Sat). This feature is coming soon as part of
+          the consumables and weekly operations pipeline.
+        </div>
+      </div>`;
   }
   // ── Jobs Archive (drill-down history) ─────────────────────
   let _historyLevel  = 'year';
@@ -1976,6 +2141,217 @@ const kpiCards = [
       _toast('Network error downloading PDF.', 'error');
     }
   }
+  // ── PIN Modal ──────────────────────────────────────────────
+  let _pinSheetId   = null;
+  let _pinSheetDate = null;
+  let _pinAttempts  = 0;
+  const MAX_ATTEMPTS = 3;
+
+  async function initiateSheetDownload(sheetId, sheetDate) {
+    _pinSheetId   = sheetId;
+    _pinSheetDate = sheetDate;
+    _pinAttempts  = 0;
+
+    // Check if PIN is set
+    const user = Auth.getUser();
+    const hasPinSet = user?.download_pin_set;
+
+    _set('pin-modal-subtitle', `Sheet · ${sheetDate}`);
+
+    if (!hasPinSet) {
+      // Need to re-fetch to get latest pin status
+      const res = await Auth.fetch('/api/v1/accounts/me/');
+      if (res?.ok) {
+        const fresh = await res.json();
+        Auth.setUser(fresh);
+        if (!fresh.download_pin_set) {
+          _showPinState('set');
+          document.getElementById('pin-modal-title').textContent = 'Set Download PIN';
+          document.getElementById('pin-modal').classList.add('open');
+          setTimeout(() => document.getElementById('pin-set-input')?.focus(), 100);
+          return;
+        }
+      }
+    }
+
+    _showPinState('verify');
+    document.getElementById('pin-modal-title').textContent = 'Enter PIN';
+    document.getElementById('pin-modal').classList.add('open');
+    setTimeout(() => document.getElementById('pin-verify-input')?.focus(), 100);
+  }
+
+  function _showPinState(state) {
+    document.getElementById('pin-set-state').style.display    = state === 'set'    ? 'block' : 'none';
+    document.getElementById('pin-verify-state').style.display = state === 'verify' ? 'block' : 'none';
+  }
+
+  function _onPinInput(type) {
+    if (type === 'verify') {
+      const val = document.getElementById('pin-verify-input').value;
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById(`pin-dot-${i}`);
+        if (dot) dot.style.background = i < val.length ? 'var(--text)' : 'var(--border)';
+      }
+    } else if (type === 'set') {
+      const val = document.getElementById('pin-set-input').value;
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById(`pin-set-dot-${i}`);
+        if (dot) dot.style.background = i < val.length ? 'var(--text)' : 'var(--border)';
+      }
+    }
+  }
+
+  async function _submitPin() {
+    const btn = document.getElementById('pin-submit-btn');
+    const isSetState = document.getElementById('pin-set-state').style.display !== 'none';
+
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+
+    if (isSetState) {
+      await _handleSetPin(btn);
+    } else {
+      await _handleVerifyPin(btn);
+    }
+  }
+
+  async function _handleSetPin(btn) {
+    const pin        = document.getElementById('pin-set-input')?.value.trim();
+    const confirmPin = document.getElementById('pin-confirm-input')?.value.trim();
+    const errorEl    = document.getElementById('pin-set-error');
+
+    errorEl.style.display = 'none';
+
+    if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+      errorEl.textContent    = 'PIN must be exactly 4 digits.';
+      errorEl.style.display  = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Confirm';
+      return;
+    }
+
+    if (pin !== confirmPin) {
+      errorEl.textContent    = 'PINs do not match.';
+      errorEl.style.display  = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Confirm';
+      return;
+    }
+
+    try {
+      const res = await Auth.fetch('/api/v1/accounts/pin/set/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ pin, confirm_pin: confirmPin }),
+      });
+
+      if (res.ok) {
+        // Update cached user
+        const userRes = await Auth.fetch('/api/v1/accounts/me/');
+        if (userRes?.ok) Auth.setUser(await userRes.json());
+
+        _toast('Download PIN set successfully.', 'success');
+        closePinModal();
+
+        // Now proceed to verify
+        setTimeout(() => initiateSheetDownload(_pinSheetId, _pinSheetDate), 300);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        errorEl.textContent   = err.detail || 'Could not set PIN.';
+        errorEl.style.display = 'block';
+        btn.disabled    = false;
+        btn.textContent = 'Confirm';
+      }
+    } catch {
+      const errorEl = document.getElementById('pin-set-error');
+      errorEl.textContent   = 'Network error. Please try again.';
+      errorEl.style.display = 'block';
+      btn.disabled    = false;
+      btn.textContent = 'Confirm';
+    }
+  }
+
+  async function _handleVerifyPin(btn) {
+    const pin     = document.getElementById('pin-verify-input')?.value.trim();
+    const errorEl = document.getElementById('pin-verify-error');
+    const attemptsEl = document.getElementById('pin-attempts');
+
+    errorEl.style.display = 'none';
+
+    if (!pin || pin.length !== 4) {
+      errorEl.textContent   = 'Please enter your 4-digit PIN.';
+      errorEl.style.display = 'block';
+      btn.disabled    = false;
+      btn.textContent = 'Confirm';
+      return;
+    }
+
+    try {
+      const res = await Auth.fetch('/api/v1/accounts/pin/verify/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ pin, sheet_id: _pinSheetId }),
+      });
+
+      if (res.ok) {
+        closePinModal();
+        _toast('PIN verified. Downloading…', 'success');
+        await downloadSheetPDF(_pinSheetId, _pinSheetDate);
+      } else {
+        _pinAttempts++;
+        const remaining = MAX_ATTEMPTS - _pinAttempts;
+
+        // Shake animation
+        const input = document.getElementById('pin-verify-input');
+        if (input) {
+          input.style.borderColor = 'var(--red-text)';
+          input.value = '';
+          for (let i = 0; i < 4; i++) {
+            const dot = document.getElementById(`pin-dot-${i}`);
+            if (dot) dot.style.background = 'var(--border)';
+          }
+          setTimeout(() => { input.style.borderColor = 'var(--border)'; }, 600);
+          setTimeout(() => input.focus(), 100);
+        }
+
+        if (_pinAttempts >= MAX_ATTEMPTS) {
+          errorEl.textContent   = 'Too many incorrect attempts. Please try again later.';
+          errorEl.style.display = 'block';
+          attemptsEl.textContent = '';
+          btn.disabled = true;
+          btn.textContent = 'Locked';
+        } else {
+          errorEl.textContent   = 'Incorrect PIN.';
+          errorEl.style.display = 'block';
+          attemptsEl.textContent = `${remaining} attempt${remaining !== 1 ? 's' : ''} remaining`;
+          btn.disabled    = false;
+          btn.textContent = 'Confirm';
+        }
+      }
+    } catch {
+      errorEl.textContent   = 'Network error. Please try again.';
+      errorEl.style.display = 'block';
+      btn.disabled    = false;
+      btn.textContent = 'Confirm';
+    }
+  }
+
+  function closePinModal() {
+    document.getElementById('pin-modal').classList.remove('open');
+    const pinVerifyInput = document.getElementById('pin-verify-input');
+    const pinSetInput    = document.getElementById('pin-set-input');
+    const pinConfirmInput = document.getElementById('pin-confirm-input');
+    if (pinVerifyInput)  pinVerifyInput.value  = '';
+    if (pinSetInput)     pinSetInput.value     = '';
+    if (pinConfirmInput) pinConfirmInput.value = '';
+    for (let i = 0; i < 4; i++) {
+      const dot    = document.getElementById(`pin-dot-${i}`);
+      const setDot = document.getElementById(`pin-set-dot-${i}`);
+      if (dot)    dot.style.background    = 'var(--border)';
+      if (setDot) setDot.style.background = 'var(--border)';
+    }
+    _pinAttempts = 0;
+  }
   // ── Public API ─────────────────────────────────────────────
 return {
     init,
@@ -1999,6 +2375,11 @@ return {
     _historyDrill,
     _historyNav,
     switchDaySheetTab,
+    initiateSheetDownload,
+    closePinModal,
+    _onPinInput,
+    _submitPin,
+    toggleSheetRow,
   };
 
 })();
@@ -2113,3 +2494,4 @@ const Notifications = (() => {
   return { toggle, close, markRead, markAllRead, loadCount, startPolling };
 
 })();
+

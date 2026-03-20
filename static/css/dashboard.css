@@ -1819,3 +1819,7 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   .hero-btn { width: 100%; }
   .branch-pill { display: none; }
 }
+/* ── Sheet detail expanded row ────────────────────────────── */
+.sheet-detail-td {
+  padding: 0 !important;
+}

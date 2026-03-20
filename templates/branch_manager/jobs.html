@@ -414,7 +414,7 @@
 </head>
 <body>
 
-<div class="jobs-shell">
+<div class="jobs-shell" id="jobs-standalone-root">
 
   <!-- ── Topbar ──────────────────────────────────────────── -->
   <header class="jobs-topbar">
@@ -501,26 +501,26 @@
     <!-- Stat strip -->
     <div class="jobs-stat-strip">
       <div class="stat-card blue">
-        <div class="stat-num" id="stat-total">0</div>
+        <div class="stat-num" id="jobs-stat-total">0</div>
         <div class="stat-lbl">Total Jobs</div>
       </div>
       <div class="stat-card amber">
-        <div class="stat-num" id="stat-in-progress">0</div>
+        <div class="stat-num" id="jobs-stat-in-progress">0</div>
         <div class="stat-lbl">In Progress</div>
       </div>
       <div class="stat-card green">
-        <div class="stat-num" id="stat-complete">0</div>
+        <div class="stat-num" id="jobs-stat-complete">0</div>
         <div class="stat-lbl">Complete</div>
       </div>
       <div class="stat-card purple">
-        <div class="stat-num" id="stat-revenue">0</div>
+        <div class="stat-num" id="jobs-stat-revenue">0</div>
         <div class="stat-lbl">Revenue (GHS)</div>
       </div>
     </div>
 
     <!-- Toolbar -->
     <div class="jobs-toolbar">
-      <div class="filter-tabs" id="filter-tabs">
+      <div class="filter-tabs" id="jobs-filter-tabs">
         <button class="filter-tab active" data-status="all">All Today</button>
         <button class="filter-tab" data-status="DRAFT">Draft</button>
         <button class="filter-tab" data-status="PENDING_PAYMENT">Pending Payment</button>
@@ -560,11 +560,11 @@
       </table>
 
       <!-- Pagination inside container -->
-      <div class="jobs-pagination" id="pagination" style="display:none;">
-        <span class="page-info" id="page-info"></span>
+      <div class="jobs-pagination" id="jobs-pagination" style="display:none;">
+        <span class="page-info" id="jobs-page-info"></span>
         <div class="page-btns">
-          <button class="page-btn" id="btn-prev" onclick="Jobs.prevPage()">← Prev</button>
-          <button class="page-btn" id="btn-next" onclick="Jobs.nextPage()">Next →</button>
+          <button class="page-btn" id="jobs-btn-prev" onclick="Jobs.prevPage()">← Prev</button>
+          <button class="page-btn" id="jobs-btn-next" onclick="Jobs.nextPage()">Next →</button>
         </div>
       </div>
     </div>
