@@ -282,7 +282,11 @@ async function loadRecentJobs() {
     if (paneId === 'jobs'    && !jobsLoaded)  _loadJobsPane();
     if (paneId === 'inbox'   && !inboxLoaded) loadInboxTab();
     if (paneId === 'services'&& !svcLoaded)   loadServicesTab();
-    if (paneId === 'finance')                 _loadFinancePane();
+    if (paneId === 'finance') {
+      const pane = document.getElementById('pane-finance');
+      if (pane) pane.dataset.loaded = '';
+      _loadFinancePane();
+    }
     if (paneId === 'reports')                 _loadReportsPane();
   }
 
@@ -310,24 +314,81 @@ async function loadRecentJobs() {
   }
 
   // ── Finance pane ───────────────────────────────────────────
-  async function _loadFinancePane() {
+ async function _loadFinancePane() {
     const pane = document.getElementById('pane-finance');
     if (!pane || pane.dataset.loaded) return;
     pane.dataset.loaded = '1';
 
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Day Sheet</span>
+      </div>
+      <div class="reports-tabs" id="daysheet-tabs">
+        <button class="reports-tab active" data-tab="today"
+          onclick="Dashboard.switchDaySheetTab('today')">Today's Sheet</button>
+        <button class="reports-tab" data-tab="archive"
+          onclick="Dashboard.switchDaySheetTab('archive')">Archive</button>
+      </div>
+      <div id="daysheet-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _loadDaySheetTab('today');
+  }
+
+  async function switchDaySheetTab(tab) {
+    document.querySelectorAll('#daysheet-tabs .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    await _loadDaySheetTab(tab);
+  }
+
+  async function _loadDaySheetTab(tab) {
+    const content = document.getElementById('daysheet-content');
+    if (!content) return;
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+    if (tab === 'today')   await _renderTodaySheet(content);
+    if (tab === 'archive') await _renderSheetsArchive(content);
+  }
+
+  async function _renderTodaySheet(container) {
     try {
       const res = await Auth.fetch('/api/v1/finance/sheets/today/');
       if (!res.ok) throw new Error();
       const sheet = await res.json();
 
-      pane.innerHTML = `
-        <div class="section-head">
-          <span class="section-title">Today's Sales Sheet</span>
-          <span class="section-link" style="color:${sheet.status === 'OPEN' ? 'var(--green-text)' : 'var(--text-3)'};">
-            ${sheet.status}
-          </span>
+      container.innerHTML = `
+        <!-- Status strip -->
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:13px;font-weight:600;color:var(--text-2);">
+              ${sheet.date}
+            </span>
+            <span class="badge badge-${sheet.status === 'OPEN' ? 'progress' : 'done'}">
+              ${sheet.status}
+            </span>
+          </div>
+          ${sheet.status === 'OPEN' ? `
+            <button class="btn-dark" onclick="Dashboard.closeSheet(${sheet.id})">
+              Close Day Sheet
+            </button>` : `
+            <button onclick="Dashboard.downloadSheetPDF(${sheet.id}, '${sheet.date}')"
+              style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;
+                     background:var(--text);color:#fff;border-radius:var(--radius-sm);
+                     font-size:13px;font-weight:700;border:none;cursor:pointer;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Download PDF
+            </button>`}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+
+        <!-- Revenue cards -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
           <div class="stat-card green">
             <div class="stat-num">${_fmt(sheet.total_cash)}</div>
             <div class="stat-lbl">Cash</div>
@@ -345,32 +406,115 @@ async function loadRecentJobs() {
             <div class="stat-lbl">Net Cash In Till</div>
           </div>
         </div>
-        <div class="section-head">
-          <span class="section-title">Sheet Details</span>
+
+        <!-- Sheet details -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:16px 20px;
+          display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total Jobs</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);">
+              ${sheet.total_jobs_created}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Refunds</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);">
+              ${_fmt(sheet.total_refunds)}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Petty Cash Out</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);">
+              ${_fmt(sheet.total_petty_cash_out)}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Credit Issued</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);">
+              ${_fmt(sheet.total_credit_issued)}
+            </div>
+          </div>
         </div>
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Total Jobs</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${sheet.total_jobs_created}</div></div>
-          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Refunds</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_refunds)}</div></div>
-          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Petty Cash Out</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_petty_cash_out)}</div></div>
-          <div><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Credit Issued</span><div style="font-size:20px;font-weight:700;margin-top:4px;">${_fmt(sheet.total_credit_issued)}</div></div>
-        </div>
-        <div style="margin-top:20px;display:flex;gap:10px;">
-        ${sheet.status === 'OPEN' ? `
-          <button class="btn-dark" onclick="Dashboard.closeSheet(${sheet.id})">Close Day Sheet</button>
-        ` : `
-          <button onclick="Dashboard.downloadSheetPDF(${sheet.id}, '${sheet.date}')"
-             style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;
-                    background:var(--text);color:#fff;border-radius:var(--radius-sm);
-                    font-size:13px;font-weight:700;border:none;cursor:pointer;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download Sheet PDF
-          </button>
-        `}
-      </div>
-        ${sheet.notes ? `<div style="margin-top:16px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">${_esc(sheet.notes)}</div>` : ''}
-      `;
+
+        ${sheet.notes ? `
+          <div style="padding:12px 16px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">
+            ${_esc(sheet.notes)}
+          </div>` : ''}`;
+
     } catch {
-      pane.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
+      container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
+    }
+  }
+
+  async function _renderSheetsArchive(container) {
+    try {
+      const res    = await Auth.fetch('/api/v1/finance/sheets/?page_size=50');
+      if (!res.ok) throw new Error();
+      const data   = await res.json();
+      const sheets = Array.isArray(data) ? data : (data.results || []);
+
+      if (!sheets.length) {
+        container.innerHTML = '<div class="loading-cell">No sheets found.</div>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Jobs</th>
+                <th>Cash</th>
+                <th>MoMo</th>
+                <th>POS</th>
+                <th>Total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sheets.map(s => {
+                const total = parseFloat(s.total_cash||0)
+                  + parseFloat(s.total_momo||0)
+                  + parseFloat(s.total_pos||0);
+                return `
+                  <tr>
+                    <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">
+                      ${s.date}
+                    </td>
+                    <td>
+                      <span class="badge badge-${s.status==='OPEN'?'progress':'done'}">
+                        ${s.status}
+                      </span>
+                    </td>
+                    <td>${s.total_jobs_created || 0}</td>
+                    <td>${_fmt(s.total_cash)}</td>
+                    <td>${_fmt(s.total_momo)}</td>
+                    <td>${_fmt(s.total_pos)}</td>
+                    <td style="font-weight:700;">${_fmt(total)}</td>
+                    <td>
+                      ${s.status !== 'OPEN' ? `
+                        <button onclick="Dashboard.downloadSheetPDF(${s.id},'${s.date}')"
+                          style="font-size:12px;color:var(--text-2);background:none;
+                                 border:none;cursor:pointer;font-weight:600;padding:0;">
+                          PDF ↓
+                        </button>` : '—'}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load archive.</div>';
     }
   }
 
@@ -1854,6 +1998,7 @@ return {
     sendReply,
     _historyDrill,
     _historyNav,
+    switchDaySheetTab,
   };
 
 })();
