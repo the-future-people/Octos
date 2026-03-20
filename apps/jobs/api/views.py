@@ -27,7 +27,7 @@ class JobListView(generics.ListAPIView):
     serializer_class   = JobListSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [filters.SearchFilter]
-    search_fields      = ['job_number', 'title']
+    search_fields = ['job_number', 'title', 'customer__contact_name', 'customer__contact_phone']
 
     def get_queryset(self):
         user = self.request.user
@@ -41,7 +41,6 @@ class JobListView(generics.ListAPIView):
         branch_id    = self.request.query_params.get('branch')
         job_type     = self.request.query_params.get('job_type')
         status_param = self.request.query_params.get('status')
-        is_routed    = self.request.query_params.get('is_routed')
 
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
@@ -49,9 +48,16 @@ class JobListView(generics.ListAPIView):
             qs = qs.filter(job_type=job_type)
         if status_param:
             qs = qs.filter(status=status_param)
+
         daily_sheet = self.request.query_params.get('daily_sheet')
         if daily_sheet:
             qs = qs.filter(daily_sheet_id=daily_sheet)
+
+        intake_by = self.request.query_params.get('intake_by')
+        if intake_by == 'me':
+            qs = qs.filter(intake_by=user)
+        elif intake_by:
+            qs = qs.filter(intake_by_id=intake_by)
 
         period = self.request.query_params.get('period')
         if period:

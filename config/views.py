@@ -21,3 +21,6 @@ def jobs_view(request):
 
 def cashier_view(request):
     return render(request, 'portals/cashier.html')
+
+def attendant_view(request):
+    return render(request, 'portals/attendant.html')

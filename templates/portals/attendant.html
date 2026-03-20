@@ -1,0 +1,378 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendant — Octos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+</head>
+<body>
+
+<div class="app-shell" id="app-shell">
+
+  <!-- ── Topbar ──────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-toggle">
+        <span class="brand-logo">Octos</span>
+        <span class="brand-divider"></span>
+        <span class="brand-role">Attendant</span>
+        <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="topbar-center">
+        <nav class="breadcrumb" id="breadcrumb">
+          <div class="breadcrumb-item">
+            <span class="breadcrumb-current" id="at-branch-name">Loading…</span>
+          </div>
+          <span class="breadcrumb-sep">›</span>
+          <div class="breadcrumb-item">
+            <span class="breadcrumb-current" id="breadcrumb-current">Overview</span>
+          </div>
+        </nav>
+      </div>
+
+      <div class="topbar-right">
+        <div class="live-indicator">
+          <div class="live-dot"></div>
+          Active
+        </div>
+        <div class="branch-pill" id="at-branch-pill">—</div>
+        <div class="user-chip">
+          <div class="user-avatar" id="at-user-initials">—</div>
+          <span class="user-name" id="at-user-name">—</span>
+        </div>
+        <div style="position:relative;">
+          <button class="icon-btn" id="at-notif-btn" title="Notifications" onclick="AtNotifications.toggle()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="notif-badge" id="at-notif-badge">0</span>
+          </button>
+          <div class="notif-dropdown" id="notif-dropdown">
+            <div class="notif-dropdown-head">
+              <span class="notif-dropdown-title">Notifications</span>
+              <button class="notif-read-all" onclick="AtNotifications.markAllRead()">Mark all read</button>
+            </div>
+            <div class="notif-list" id="notif-list">
+              <div class="notif-empty">Loading…</div>
+            </div>
+            <div class="notif-footer" onclick="AtNotifications.close()">Close</div>
+          </div>
+        </div>
+        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Body ────────────────────────────────────────────── -->
+  <div class="body-layout">
+
+    <!-- Sidebar -->
+<aside class="sidebar">
+      <div class="sidebar-inner">
+
+        <div class="sidebar-section">Workspace</div>
+
+        <div class="sidebar-item active" data-pane="overview" data-label="Overview"
+          onclick="Attendant.switchPane('overview', 'Overview')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span class="sidebar-label">Overview</span>
+        </div>
+
+        <!-- My Jobs — expandable -->
+        <div class="sidebar-item" data-pane="my-jobs" data-label="My Jobs"
+          onclick="Attendant.toggleMyJobs()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="sidebar-label">My Jobs</span>
+          <span class="sidebar-badge" id="sidebar-badge-myjobs" style="display:none;">0</span>
+        </div>
+
+        <!-- Sub items -->
+        <div id="myjobs-subnav" style="display:none;padding-left:20px;position:relative;margin-bottom:4px;">
+          <div style="position:absolute;left:27px;top:0;bottom:0;width:1px;background:var(--border);z-index:0;"></div>
+
+          <div class="sidebar-item" data-pane="my-jobs-today" data-label="Today's Jobs"
+            style="padding-left:20px;position:relative;"
+            onclick="Attendant.switchPane('my-jobs-today', 'Today\'s Jobs')">
+            <div style="position:absolute;left:-13px;top:50%;width:13px;height:1px;background:var(--border-dark);z-index:1;"></div>
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span class="sidebar-label">Today's Jobs</span>
+          </div>
+
+          <div class="sidebar-item" data-pane="search" data-label="Search"
+            style="padding-left:20px;position:relative;"
+            onclick="Attendant.switchPane('search', 'Search')">
+            <div style="position:absolute;left:-13px;top:50%;width:13px;height:1px;background:var(--border-dark);z-index:1;"></div>
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="sidebar-label">Search</span>
+          </div>
+        </div>
+
+        <div class="sidebar-item" data-pane="branch-jobs" data-label="Branch Jobs"
+          onclick="Attendant.switchPane('branch-jobs', 'Branch Jobs')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span class="sidebar-label">Branch Jobs</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="drafts" data-label="Drafts"
+          onclick="Attendant.switchPane('drafts', 'Drafts')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span class="sidebar-label">Drafts</span>
+          <span class="sidebar-badge" id="sidebar-badge-drafts" style="display:none;">0</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="inbox" data-label="Inbox"
+          onclick="Attendant.switchPane('inbox', 'Inbox')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="sidebar-label">Inbox</span>
+          <span class="sidebar-badge" id="sidebar-badge-inbox" style="display:none;">0</span>
+        </div>
+
+        <div class="sidebar-section">Branch</div>
+
+        <div class="sidebar-item" data-pane="services" data-label="Services"
+          onclick="Attendant.switchPane('services', 'Services')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+          <span class="sidebar-label">Services</span>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-content">
+
+      <!-- Info strip -->
+      <div class="info-strip">
+        <div class="info-item">
+          <span class="info-key">Branch</span>
+          <span class="info-val" id="meta-branch">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Date</span>
+          <span class="info-val" id="meta-date">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">My Jobs Today</span>
+          <span class="info-val" id="meta-my-jobs">0</span>
+        </div>
+        <div class="info-item">
+          <span class="info-key">Active Services</span>
+          <span class="info-val" id="meta-services">—</span>
+        </div>
+      </div>
+
+      <!-- Pane area -->
+      <div class="pane-area">
+
+        <!-- ── OVERVIEW ──────────────────────────────────── -->
+        <div class="pane active" id="pane-overview">
+
+          <div class="hero-actions">
+            <button class="hero-btn hero-btn-primary" onclick="NJ.open()">
+              <div class="hero-btn-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </div>
+              <div class="hero-btn-label">
+                <span class="hero-btn-title">New Job</span>
+                <span class="hero-btn-sub">Create an instant, production or design job</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat-card blue">
+              <div class="stat-num" id="stat-my-total">0</div>
+              <div class="stat-lbl">My Jobs Today</div>
+            </div>
+            <div class="stat-card amber">
+              <div class="stat-num" id="stat-my-pending">0</div>
+              <div class="stat-lbl">Pending Payment</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-num" id="stat-my-complete">0</div>
+              <div class="stat-lbl">Complete</div>
+            </div>
+            <div class="stat-card purple">
+              <div class="stat-num" id="stat-my-drafts">0</div>
+              <div class="stat-lbl">Drafts</div>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <span class="section-title">My Recent Jobs</span>
+            <span class="section-link" style="cursor:pointer;"
+              onclick="Attendant.toggleMyJobs()">View all →</span>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+            <table class="p-table">
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="recent-jobs-tbody">
+                <tr><td colspan="4" class="loading-cell"><span class="spin"></span> Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+
+        <!-- ── MY JOBS TODAY ────────────────────────────── -->
+        <div class="pane" id="pane-my-jobs-today">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>
+
+        <!-- ── BRANCH JOBS ───────────────────────────────── -->
+        <div class="pane" id="pane-branch-jobs">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>
+
+        <!-- ── DRAFTS ────────────────────────────────────── -->
+        <div class="pane" id="pane-drafts">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>
+
+        <!-- ── INBOX ─────────────────────────────────────── -->
+        <div class="pane" id="pane-inbox">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>
+        <!-- ── SEARCH ─────────────────────────────────────── -->
+        <div class="pane" id="pane-search">
+          <div class="section-head">
+            <span class="section-title">Job Search</span>
+            <span style="font-size:12px;color:var(--text-3);">Last 7 days · Branch-wide</span>
+          </div>
+
+          <!-- Search input -->
+          <div style="position:relative;margin-bottom:20px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2"
+              style="position:absolute;left:14px;top:50%;transform:translateY(-50%);
+                     color:var(--text-3);pointer-events:none;">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" id="search-input"
+              placeholder="Search by job number, title or customer…"
+              oninput="Attendant.onSearchInput(this.value)"
+              style="width:100%;padding:12px 16px 12px 44px;
+                     border:1.5px solid var(--border);border-radius:var(--radius);
+                     background:var(--panel);color:var(--text);font-size:14px;
+                     font-family:inherit;outline:none;box-sizing:border-box;
+                     transition:border-color 0.15s;"
+              onfocus="this.style.borderColor='var(--border-dark)'"
+              onblur="this.style.borderColor='var(--border)'">
+          </div>
+
+          <!-- Results -->
+          <div id="search-results">
+            <div style="text-align:center;padding:48px;color:var(--text-3);">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="1.5"
+                style="margin-bottom:12px;opacity:0.3;">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <div style="font-size:13px;">Type to search jobs from the last 7 days</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── SERVICES ──────────────────────────────────── -->
+        <div class="pane" id="pane-services">
+          <div class="section-head">
+            <span class="section-title">Active Services</span>
+            <span id="meta-services-count" class="section-link"></span>
+          </div>
+          <div id="services-grid" class="services-grid">
+            <div class="loading-cell" style="grid-column:1/-1;"><span class="spin"></span> Loading…</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     NEW JOB MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="new-job-modal">
+  <div class="modal" style="max-width:780px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">New Job</div>
+        <div class="modal-subtitle">Record a new job for this branch</div>
+      </div>
+      <button class="modal-x" onclick="closeNewJobModal()">×</button>
+    </div>
+    <div style="padding:16px 24px 0;flex-shrink:0;">
+      <div class="nj-toggle" id="nj-type-toggle">
+        <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
+        <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
+        <button class="nj-toggle-btn"        data-type="DESIGN"     onclick="NJ.setType('DESIGN')">Design</button>
+        <div class="nj-toggle-pill" id="nj-toggle-pill"></div>
+      </div>
+    </div>
+    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
+      <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create Job
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     JOB DETAIL MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="job-detail-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="detail-title">Job Detail</div>
+        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:var(--text-3);"></div>
+      </div>
+      <button class="modal-x" onclick="document.getElementById('job-detail-modal').classList.remove('open')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="detail-body">
+      <div style="text-align:center;padding:40px;color:var(--text-3);"><span class="spin"></span> Loading…</div>
+    </div>
+  </div>
+</div>
+<div id="toast-container"></div>
+<script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/attendant.js' %}"></script>
+<script src="{% static 'js/nj_controller.js' %}"></script>
+<script>
+  document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    document.getElementById('app-shell').classList.toggle('collapsed');
+  });
+
+  function closeNewJobModal() {
+    NJ.tryAutoSaveDraft();
+    document.getElementById('new-job-modal').classList.remove('open');
+  }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#at-notif-btn') && !e.target.closest('#notif-dropdown')) {
+      AtNotifications.close();
+    }
+  });
+</script>
+</body>
+</html>

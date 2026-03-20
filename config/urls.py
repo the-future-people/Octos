@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
 from config.views import login_view, dashboard_view, inbox_view, jobs_view, cashier_view
-from config.views import jobs_tab_view
+from config.views import jobs_tab_view, attendant_view
 urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
@@ -30,5 +30,6 @@ urlpatterns = [
     path('api/v1/analytics/',     include('apps.analytics.urls')),
     path('portal/jobs-tab/', jobs_tab_view, name='jobs-tab'),
     path('portal/cashier/', cashier_view, name='cashier'),
+    path('portal/attendant/', attendant_view, name='attendant'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
