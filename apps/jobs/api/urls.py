@@ -32,4 +32,5 @@ urlpatterns = [
     path('drafts/<int:pk>/discard/', views.DiscardDraftView.as_view(), name='draft-discard'),
     path('reports/services/', views.ServicePerformanceView.as_view(), name='service-performance'),
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
+    path('history/', views.JobHistoryView.as_view(), name='job-history'),
 ]

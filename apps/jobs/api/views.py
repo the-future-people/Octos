@@ -3,14 +3,13 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.db import models
 
-from apps.communications import models
 from apps.jobs.models import Job, JobFile, Service, PricingRule
 from apps.jobs.status_engine import JobStatusEngine
 from apps.jobs.routing_engine import RoutingEngine
 from apps.jobs.pricing_engine import PricingEngine
 from apps.organization.models import Branch
-from django.db import models
 
 from .serializers import (
     JobListSerializer, JobDetailSerializer, JobCreateSerializer,
@@ -785,4 +784,460 @@ class JobStatsView(APIView):
             'pending'     : totals['pending']      or 0,
             'routed'      : totals['routed']       or 0,
             'revenue'     : str(totals['revenue']  or 0),
+        })
+
+class JobHistoryView(APIView):
+    """
+    GET /api/v1/jobs/history/
+    
+    Aggregated job history at any drill-down level.
+    
+    Params:
+      level = year | month | week | day
+      year  = 2026
+      month = 3  (1-12)
+      week  = 1  (week number within month, 1-5)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum, Count, Q
+        from django.utils import timezone
+        from datetime import date, timedelta
+        import calendar
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+
+        level = request.query_params.get('level', 'year')
+        year  = request.query_params.get('year')
+        month = request.query_params.get('month')
+        week  = request.query_params.get('week')
+
+        # Convert to int
+        year  = int(year)  if year  else None
+        month = int(month) if month else None
+        week  = int(week)  if week  else None
+
+        base_qs = Job.objects.filter(branch=branch)
+
+        if level == 'year':
+            return self._year_level(request, base_qs, branch)
+        elif level == 'month' and year:
+            return self._month_level(request, base_qs, branch, year)
+        elif level == 'week' and year and month:
+            return self._week_level(request, base_qs, branch, year, month)
+        elif level == 'day' and year and month and week is not None:
+            return self._day_level(request, base_qs, branch, year, month, week)
+        else:
+            return Response({'detail': 'Invalid parameters.'}, status=400)
+
+    # ── Helpers ───────────────────────────────────────────────
+
+    def _agg(self, qs):
+        """Aggregate a queryset into KPI numbers."""
+        from django.db.models import Sum, Count
+        result = qs.aggregate(
+            total    = Count('id'),
+            complete = Count('id', filter=models.Q(status='COMPLETE')),
+            pending  = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
+            revenue  = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
+        )
+        total    = result['total']    or 0
+        complete = result['complete'] or 0
+        pending  = result['pending']  or 0
+        revenue  = float(result['revenue'] or 0)
+        rate     = round(complete / total * 100, 1) if total else 0
+        return {
+            'total'    : total,
+            'complete' : complete,
+            'pending'  : pending,
+            'revenue'  : revenue,
+            'rate'     : rate,
+        }
+
+    def _pct_change(self, current, previous):
+        """Compute % change between two values."""
+        if not previous:
+            return None
+        change = round((current - previous) / previous * 100, 1)
+        return f"+{change}%" if change >= 0 else f"{change}%"
+
+    def _week_ranges(self, year, month):
+        """Return list of (week_num, start_date, end_date) for Mon-Sat weeks in a month."""
+        import calendar
+        from datetime import date, timedelta
+        
+        first_day = date(year, month, 1)
+        last_day  = date(year, month, calendar.monthrange(year, month)[1])
+        
+        weeks = []
+        current = first_day
+        # Move to Monday
+        while current.weekday() != 0:
+            current -= timedelta(days=1)
+        
+        week_num = 1
+        while current <= last_day:
+            week_start = current
+            week_end   = min(current + timedelta(days=5), last_day)  # Mon-Sat
+            if week_end >= first_day:  # Only include if overlaps with month
+                weeks.append((week_num, week_start, week_end))
+                week_num += 1
+            current += timedelta(days=7)
+        
+        return weeks
+
+    # ── Year level ────────────────────────────────────────────
+
+    def _year_level(self, request, base_qs, branch):
+        from django.db.models.functions import TruncYear, TruncMonth
+        from django.db.models import Sum, Count
+        from datetime import date
+
+        # Get all years with data
+        years_qs = base_qs.dates('created_at', 'year')
+        current_year = date.today().year
+
+        # Also always include current year
+        year_set = set(d.year for d in years_qs) | {current_year}
+        years    = sorted(year_set, reverse=True)
+
+        # Current year KPIs
+        cur_qs  = base_qs.filter(created_at__year=current_year)
+        prev_qs = base_qs.filter(created_at__year=current_year - 1)
+        cur     = self._agg(cur_qs)
+        prev    = self._agg(prev_qs)
+
+        kpis = {
+            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
+            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
+            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
+            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
+        }
+
+        # Trend — jobs per month for current year
+        trend_labels  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        trend_jobs    = []
+        trend_revenue = []
+        for m in range(1, 13):
+            mqs = cur_qs.filter(created_at__month=m)
+            agg = self._agg(mqs)
+            trend_jobs.append(agg['total'])
+            trend_revenue.append(agg['revenue'])
+
+        # Bar — jobs per year
+        bar_labels = [str(y) for y in sorted(years)]
+        bar_data   = []
+        for y in sorted(years):
+            bar_data.append(self._agg(base_qs.filter(created_at__year=y))['total'])
+
+        # Heatmap — jobs per week of current year (52 weeks)
+        from datetime import date, timedelta
+        heatmap = []
+        start = date(current_year, 1, 1)
+        for w in range(52):
+            week_start = start + timedelta(weeks=w)
+            week_end   = week_start + timedelta(days=6)
+            count = cur_qs.filter(
+                created_at__date__gte=week_start,
+                created_at__date__lte=week_end,
+            ).count()
+            heatmap.append({'week': w + 1, 'count': count})
+
+        # Drill-down items
+        items = []
+        for y in years:
+            agg = self._agg(base_qs.filter(created_at__year=y))
+            items.append({
+                'label'   : str(y),
+                'year'    : y,
+                'total'   : agg['total'],
+                'revenue' : agg['revenue'],
+                'rate'    : agg['rate'],
+            })
+
+        return Response({
+            'level'  : 'year',
+            'kpis'   : kpis,
+            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
+            'bar'    : { 'labels': bar_labels,   'data': bar_data },
+            'heatmap': heatmap,
+            'items'  : items,
+        })
+
+    # ── Month level ───────────────────────────────────────────
+
+    def _month_level(self, request, base_qs, branch, year):
+        import calendar
+        from datetime import date
+
+        month_names = ['Jan','Feb','Mar','Apr','May','Jun',
+                       'Jul','Aug','Sep','Oct','Nov','Dec']
+
+        cur_qs  = base_qs.filter(created_at__year=year)
+        prev_qs = base_qs.filter(created_at__year=year - 1)
+        cur     = self._agg(cur_qs)
+        prev    = self._agg(prev_qs)
+
+        kpis = {
+            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
+            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
+            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
+            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
+        }
+
+        # Trend — jobs per month
+        trend_labels  = month_names
+        trend_jobs    = []
+        trend_revenue = []
+        for m in range(1, 13):
+            mqs = cur_qs.filter(created_at__month=m)
+            agg = self._agg(mqs)
+            trend_jobs.append(agg['total'])
+            trend_revenue.append(agg['revenue'])
+
+        # Bar — same as trend
+        bar_labels = month_names
+        bar_data   = trend_jobs[:]
+
+        # Heatmap — jobs per day of year
+        from datetime import date, timedelta
+        heatmap = []
+        start = date(year, 1, 1)
+        for w in range(52):
+            week_start = start + timedelta(weeks=w)
+            week_end   = week_start + timedelta(days=6)
+            count = cur_qs.filter(
+                created_at__date__gte=week_start,
+                created_at__date__lte=week_end,
+            ).count()
+            heatmap.append({'week': w + 1, 'count': count})
+
+        # Drill-down items — months
+        items = []
+        for m in range(1, 13):
+            mqs = cur_qs.filter(created_at__month=m)
+            agg = self._agg(mqs)
+            if agg['total'] > 0 or m <= date.today().month:
+                items.append({
+                    'label'  : month_names[m - 1],
+                    'year'   : year,
+                    'month'  : m,
+                    'total'  : agg['total'],
+                    'revenue': agg['revenue'],
+                    'rate'   : agg['rate'],
+                })
+
+        return Response({
+            'level'  : 'month',
+            'year'   : year,
+            'kpis'   : kpis,
+            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
+            'bar'    : { 'labels': bar_labels,   'data': bar_data },
+            'heatmap': heatmap,
+            'items'  : items,
+        })
+
+    # ── Week level ────────────────────────────────────────────
+
+    def _week_level(self, request, base_qs, branch, year, month):
+        import calendar
+        from datetime import date
+
+        month_names = ['January','February','March','April','May','June',
+                       'July','August','September','October','November','December']
+
+        cur_qs  = base_qs.filter(created_at__year=year, created_at__month=month)
+        prev_month = month - 1 if month > 1 else 12
+        prev_year  = year if month > 1 else year - 1
+        prev_qs = base_qs.filter(created_at__year=prev_year, created_at__month=prev_month)
+        cur  = self._agg(cur_qs)
+        prev = self._agg(prev_qs)
+
+        kpis = {
+            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
+            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
+            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
+            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
+        }
+
+        # Get week ranges
+        weeks = self._week_ranges(year, month)
+
+        # Trend — jobs per day of month
+        days_in_month = calendar.monthrange(year, month)[1]
+        trend_labels  = [str(d) for d in range(1, days_in_month + 1)]
+        trend_jobs    = []
+        trend_revenue = []
+        for d in range(1, days_in_month + 1):
+            dqs = cur_qs.filter(created_at__day=d)
+            agg = self._agg(dqs)
+            trend_jobs.append(agg['total'])
+            trend_revenue.append(agg['revenue'])
+
+        # Bar — jobs per week
+        bar_labels = [f"Week {w[0]}" for w in weeks]
+        bar_data   = []
+        for _, ws, we in weeks:
+            bar_data.append(
+                cur_qs.filter(created_at__date__gte=ws, created_at__date__lte=we).count()
+            )
+
+        # Heatmap — jobs per day (Mon-Sat grid)
+        heatmap = []
+        for _, ws, we in weeks:
+            week_row = []
+            from datetime import timedelta
+            current = ws
+            while current <= we:
+                count = cur_qs.filter(created_at__date=current).count()
+                week_row.append({'date': current.isoformat(), 'count': count})
+                current += timedelta(days=1)
+            heatmap.append(week_row)
+
+        # Drill-down items — weeks
+        items = []
+        for wnum, ws, we in weeks:
+            wqs = cur_qs.filter(created_at__date__gte=ws, created_at__date__lte=we)
+            agg = self._agg(wqs)
+            items.append({
+                'label'     : f"Week {wnum}",
+                'week'      : wnum,
+                'year'      : year,
+                'month'     : month,
+                'start'     : ws.isoformat(),
+                'end'       : we.isoformat(),
+                'total'     : agg['total'],
+                'revenue'   : agg['revenue'],
+                'rate'      : agg['rate'],
+            })
+
+        return Response({
+            'level'  : 'week',
+            'year'   : year,
+            'month'  : month,
+            'month_name': month_names[month - 1],
+            'kpis'   : kpis,
+            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
+            'bar'    : { 'labels': bar_labels,   'data': bar_data },
+            'heatmap': heatmap,
+            'items'  : items,
+        })
+
+    # ── Day level ─────────────────────────────────────────────
+
+    def _day_level(self, request, base_qs, branch, year, month, week):
+        from datetime import date, timedelta
+        from apps.finance.models import DailySalesSheet
+
+        weeks  = self._week_ranges(year, month)
+        # Find the matching week
+        target = next((w for w in weeks if w[0] == week), None)
+        if not target:
+            return Response({'detail': 'Week not found.'}, status=400)
+
+        _, week_start, week_end = target
+
+        cur_qs  = base_qs.filter(
+            created_at__date__gte=week_start,
+            created_at__date__lte=week_end,
+        )
+        # Previous week
+        prev_start = week_start - timedelta(days=7)
+        prev_end   = week_end   - timedelta(days=7)
+        prev_qs    = base_qs.filter(
+            created_at__date__gte=prev_start,
+            created_at__date__lte=prev_end,
+        )
+        cur  = self._agg(cur_qs)
+        prev = self._agg(prev_qs)
+
+        kpis = {
+            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
+            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
+            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
+            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
+        }
+
+        # Trend — jobs per hour of day (aggregated across week)
+        trend_labels  = [f"{h:02d}:00" for h in range(8, 20)]
+        trend_jobs    = [
+            cur_qs.filter(created_at__hour=h).count()
+            for h in range(8, 20)
+        ]
+        trend_revenue = [
+            float(cur_qs.filter(
+                created_at__hour=h, status='COMPLETE'
+            ).aggregate(r=models.Sum('amount_paid'))['r'] or 0)
+            for h in range(8, 20)
+        ]
+
+        # Bar — jobs per day of week
+        day_names  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        bar_labels = []
+        bar_data   = []
+        current    = week_start
+        while current <= week_end:
+            bar_labels.append(current.strftime('%a %d'))
+            bar_data.append(cur_qs.filter(created_at__date=current).count())
+            current += timedelta(days=1)
+
+        # Heatmap — jobs per hour per day
+        heatmap = []
+        current = week_start
+        while current <= week_end:
+            day_row = []
+            for h in range(8, 20):
+                count = cur_qs.filter(
+                    created_at__date=current,
+                    created_at__hour=h,
+                ).count()
+                day_row.append({'hour': h, 'count': count})
+            heatmap.append({'date': current.isoformat(), 'hours': day_row})
+            current += timedelta(days=1)
+
+        # Drill-down items — days with sheet info
+        items = []
+        current = week_start
+        while current <= week_end:
+            dqs = cur_qs.filter(created_at__date=current)
+            agg = self._agg(dqs)
+
+            # Get daily sheet for PDF link
+            try:
+                sheet = DailySalesSheet.objects.get(branch=branch, date=current)
+                sheet_id     = sheet.id
+                sheet_status = sheet.status
+            except DailySalesSheet.DoesNotExist:
+                sheet_id     = None
+                sheet_status = None
+
+            items.append({
+                'date'        : current.isoformat(),
+                'label'       : current.strftime('%a %d %b'),
+                'total'       : agg['total'],
+                'revenue'     : agg['revenue'],
+                'complete'    : agg['complete'],
+                'pending'     : agg['pending'],
+                'rate'        : agg['rate'],
+                'sheet_id'    : sheet_id,
+                'sheet_status': sheet_status,
+            })
+            current += timedelta(days=1)
+
+        return Response({
+            'level'     : 'day',
+            'year'      : year,
+            'month'     : month,
+            'week'      : week,
+            'week_start': week_start.isoformat(),
+            'week_end'  : week_end.isoformat(),
+            'kpis'      : kpis,
+            'trend'     : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
+            'bar'       : { 'labels': bar_labels,   'data': bar_data },
+            'heatmap'   : heatmap,
+            'items'     : items,
         })

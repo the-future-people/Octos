@@ -1148,9 +1148,10 @@ async function loadRecentJobs() {
       </div>
 
       <div class="reports-tabs">
-        <button class="reports-tab active" data-tab="sheets" onclick="Dashboard.switchReportsTab('sheets')">Daily Sheets</button>
-        <button class="reports-tab" data-tab="jobs"   onclick="Dashboard.switchReportsTab('jobs')">Jobs History</button>
-        <button class="reports-tab" data-tab="services" onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
+        <button class="reports-tab active" data-tab="sheets"  onclick="Dashboard.switchReportsTab('sheets')">Daily Sheets</button>
+        <button class="reports-tab" data-tab="jobs"           onclick="Dashboard.switchReportsTab('jobs')">Jobs History</button>
+        <button class="reports-tab" data-tab="history"        onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
+        <button class="reports-tab" data-tab="services"       onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
       </div>
 
       <div id="reports-content">
@@ -1183,6 +1184,7 @@ async function loadRecentJobs() {
 
     if (tab === 'sheets')   await _renderSheetsReport(content);
     if (tab === 'jobs')     await _renderJobsReport(content);
+    if (tab === 'history')  await _renderHistoryReport(content);
     if (tab === 'services') await _renderServicesReport(content);
   }
 
@@ -1373,6 +1375,444 @@ async function loadRecentJobs() {
       container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
     }
   }
+  // ── Jobs Archive (drill-down history) ─────────────────────
+  let _historyLevel  = 'year';
+  let _historyYear   = null;
+  let _historyMonth  = null;
+  let _historyWeek   = null;
+  let _historyCharts = {};
+
+  async function _renderHistoryReport(container) {
+    _historyLevel = 'year';
+    _historyYear  = null;
+    _historyMonth = null;
+    _historyWeek  = null;
+    await _fetchAndRenderHistory(container);
+  }
+
+  async function _fetchAndRenderHistory(container) {
+    if (!container) container = document.getElementById('reports-content');
+    container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
+    // Destroy existing charts
+    Object.values(_historyCharts).forEach(c => { try { c.destroy(); } catch {} });
+    _historyCharts = {};
+
+    // Build query params
+    const params = new URLSearchParams({ level: _historyLevel });
+    if (_historyYear)  params.set('year',  _historyYear);
+    if (_historyMonth) params.set('month', _historyMonth);
+    if (_historyWeek !== null) params.set('week', _historyWeek);
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/jobs/history/?${params}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      _renderHistoryData(container, data);
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load history.</div>';
+    }
+  }
+
+ function _renderHistoryData(container, data) {
+    const fmt  = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const kpis = data.kpis || {};
+
+    // ── Breadcrumb ────────────────────────────────────────────
+    const crumbs = [{ label: 'All Years', level: 'year', year: null, month: null, week: null }];
+    if (_historyYear)  crumbs.push({ label: String(_historyYear), level: 'month', year: _historyYear, month: null, week: null });
+    if (_historyMonth) {
+      const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_historyMonth-1];
+      crumbs.push({ label: mn, level: 'week', year: _historyYear, month: _historyMonth, week: null });
+    }
+    if (_historyWeek !== null) crumbs.push({ label: `Week ${_historyWeek}`, level: 'day', year: _historyYear, month: _historyMonth, week: _historyWeek });
+
+    const breadcrumbHtml = crumbs.map((c, i) => {
+      const isLast = i === crumbs.length - 1;
+      return isLast
+        ? `<span style="font-size:13px;font-weight:700;color:var(--text);">${c.label}</span>`
+        : `<span onclick="Dashboard._historyNav('${c.level}',${c.year},${c.month},${c.week})"
+             style="font-size:13px;color:var(--text-3);cursor:pointer;transition:color 0.15s;"
+             onmouseover="this.style.color='var(--text)'"
+             onmouseout="this.style.color='var(--text-3)'">${c.label}</span>
+           <span style="color:var(--border-dark);margin:0 6px;">›</span>`;
+    }).join('');
+
+    // ── Drill-down items ──────────────────────────────────────
+    let itemsHtml = '';
+
+    if (data.level === 'year' || data.level === 'month') {
+      const heading = data.level === 'year' ? 'Years' : 'Months';
+      itemsHtml = `
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:12px;">${heading}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:24px;">
+          ${(data.items||[]).map((item, i) => {
+            const colors = ['#1a1a2e','#6b47d9','#1a3a2e','#2e1a1a','#1a2e3a','#3a2e1a'];
+            const bg = colors[i % colors.length];
+            return `
+            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+              style="border:1px solid var(--border);border-radius:8px;overflow:hidden;
+                     cursor:pointer;transition:all 0.15s;display:flex;height:64px;
+                     box-shadow:0 1px 4px rgba(0,0,0,0.05);"
+              onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'"
+              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 4px rgba(0,0,0,0.05)'">
+
+              <!-- Left — year -->
+              <div style="
+                background:${bg};
+                background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 1px,transparent 1px,transparent 7px);
+                width:80px;flex-shrink:0;
+                display:flex;align-items:center;justify-content:center;">
+                <div style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:800;
+                  color:#fff;letter-spacing:-0.01em;">
+                  ${item.label}
+                </div>
+              </div>
+
+              <!-- Right — stats -->
+              <div style="background:var(--panel);flex:1;padding:0 14px;
+                display:flex;align-items:center;gap:20px;">
+                <div>
+                  <div style="font-size:13px;font-weight:700;color:var(--text);">${item.total} jobs</div>
+                  <div style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">${fmt(item.revenue)}</div>
+                </div>
+                <div style="flex:1;">
+                  <div style="height:3px;background:var(--border);border-radius:2px;">
+                    <div style="height:100%;width:${item.rate}%;background:var(--green-text);border-radius:2px;"></div>
+                  </div>
+                  <div style="font-size:10px;color:var(--text-3);margin-top:3px;font-family:'JetBrains Mono',monospace;">${item.rate}% complete</div>
+                </div>
+              </div>
+
+            </div>`;
+          }).join('')}
+        </div>`;
+
+    } else if (data.level === 'week') {
+      itemsHtml = `
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:12px;">Weeks</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+          overflow:hidden;margin-bottom:24px;">
+          ${(data.items||[]).map(item => `
+            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+              style="display:flex;align-items:center;justify-content:space-between;
+                     padding:14px 20px;border-bottom:1px solid var(--border);cursor:pointer;
+                     transition:background 0.12s;"
+              onmouseover="this.style.background='var(--bg)'"
+              onmouseout="this.style.background=''">
+              <div>
+                <div style="font-size:14px;font-weight:700;color:var(--text);">${item.label}</div>
+                <div style="font-size:11px;color:var(--text-3);margin-top:2px;font-family:'JetBrains Mono',monospace;">
+                  ${item.start} → ${item.end}
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:24px;">
+                <div style="text-align:right;">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);">${item.total} jobs</div>
+                  <div style="font-size:12px;color:var(--text-3);">${fmt(item.revenue)}</div>
+                </div>
+                <div style="font-size:12px;color:var(--green-text);font-weight:600;min-width:40px;text-align:right;">
+                  ${item.rate}%
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3);">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </div>
+            </div>`).join('')}
+        </div>`;
+
+    } else if (data.level === 'day') {
+      itemsHtml = `
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:12px;">Days</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+          overflow:hidden;margin-bottom:24px;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Jobs</th>
+                <th>Complete</th>
+                <th>Pending</th>
+                <th>Revenue</th>
+                <th>Sheet</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(data.items||[]).map(item => `
+                <tr>
+                  <td style="font-weight:600;color:var(--text);">${item.label}</td>
+                  <td>${item.total}</td>
+                  <td style="color:var(--green-text);font-weight:600;">${item.complete}</td>
+                  <td style="color:var(--amber-text);">${item.pending}</td>
+                  <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">${fmt(item.revenue)}</td>
+                  <td>
+                    ${item.sheet_status
+                      ? `<span class="badge badge-${item.sheet_status==='OPEN'?'progress':'done'}">${item.sheet_status}</span>`
+                      : '<span style="color:var(--text-3);font-size:12px;">No sheet</span>'}
+                  </td>
+                  <td>
+                    ${item.sheet_id && item.sheet_status !== 'OPEN'
+                      ? `<button onclick="Dashboard.downloadSheetPDF(${item.sheet_id},'${item.date}')"
+                           style="font-size:12px;color:var(--text-2);background:none;border:none;
+                                  cursor:pointer;font-weight:600;padding:0;">PDF ↓</button>`
+                      : '—'}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    // ── KPI cards (compact with % change) ─────────────────────
+const kpiCards = [
+      { key:'total',   label:'Total Jobs', value: kpis.total?.value   || 0, fmt: v => v,       border:'#3355cc', text:'#3355cc' },
+      { key:'revenue', label:'Revenue',    value: kpis.revenue?.value || 0, fmt: v => fmt(v),  border:'#22c98a', text:'#22c98a' },
+      { key:'pending', label:'Pending',    value: kpis.pending?.value || 0, fmt: v => v,       border:'#e8a820', text:'#e8a820' },
+      { key:'rate',    label:'Completion', value: kpis.rate?.value    || 0, fmt: v => v + '%', border:'#9b59b6', text:'#9b59b6' },
+    ];
+
+    const kpiHtml = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;">
+        ${kpiCards.map(k => {
+          const change = kpis[k.key]?.change;
+          const isPos  = change?.startsWith('+');
+          const isNeg  = change?.startsWith('-');
+          return `
+            <div style="background:var(--panel);border:1px solid var(--border);
+              border-top:3px solid ${k.border};
+              border-radius:8px;padding:10px 12px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+                ${k.label}
+              </div>
+              <div style="font-size:17px;font-weight:800;color:${k.text};
+                font-family:'Outfit',sans-serif;letter-spacing:-0.01em;margin-bottom:3px;">
+                ${k.fmt(k.value)}
+              </div>
+              ${change ? `
+                <div style="font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;
+                  color:${isPos ? '#22c98a' : isNeg ? '#e8294a' : 'var(--text-3)'};">
+                  ${isPos ? '↑' : isNeg ? '↓' : ''} ${change} vs prev
+                </div>` : `
+                <div style="font-size:9px;color:var(--text-3);">no prev data</div>`}
+            </div>`;
+        }).join('')}
+      </div>`;
+
+    // ── Charts ────────────────────────────────────────────────
+    const chartsHtml = `
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+        padding:20px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:16px;">📈 Trend</div>
+        <canvas id="history-trend-chart" height="70"></canvas>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+            letter-spacing:0.5px;margin-bottom:16px;">📊 Distribution</div>
+          <canvas id="history-bar-chart" height="140"></canvas>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+            letter-spacing:0.5px;margin-bottom:16px;">🔥 Activity Heatmap</div>
+          <div id="history-heatmap"></div>
+        </div>
+      </div>`;
+
+    // ── Assemble in new order ─────────────────────────────────
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:20px;flex-wrap:wrap;">
+        ${breadcrumbHtml}
+      </div>
+      ${itemsHtml}
+      ${kpiHtml}
+      ${chartsHtml}`;
+
+    _drawHistoryCharts(data);
+  }
+
+  function _drawHistoryCharts(data) {
+    // Load Chart.js if not already loaded
+    if (typeof Chart === 'undefined') {
+      const script   = document.createElement('script');
+      script.src     = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      script.onload  = () => _drawHistoryCharts(data);
+      document.head.appendChild(script);
+      return;
+    }
+
+    const textColor   = getComputedStyle(document.documentElement)
+      .getPropertyValue('--text-3').trim() || '#999';
+    const borderColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--border').trim() || '#eee';
+
+    // Trend chart
+    const trendCtx = document.getElementById('history-trend-chart');
+    if (trendCtx && data.trend) {
+      _historyCharts.trend = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+          labels  : data.trend.labels,
+          datasets: [
+            {
+              label          : 'Jobs',
+              data           : data.trend.jobs,
+              borderColor    : '#3355cc',
+              backgroundColor: 'rgba(51,85,204,0.08)',
+              tension        : 0.4,
+              fill           : true,
+              yAxisID        : 'y',
+            },
+            {
+              label          : 'Revenue (GHS)',
+              data           : data.trend.revenue,
+              borderColor    : '#22c98a',
+              backgroundColor: 'rgba(34,201,138,0.08)',
+              tension        : 0.4,
+              fill           : true,
+              yAxisID        : 'y1',
+            },
+          ],
+        },
+        options: {
+          responsive : true,
+          interaction: { mode: 'index', intersect: false },
+          plugins    : { legend: { labels: { color: textColor, font: { size: 11 } } } },
+          scales     : {
+            x : { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor } },
+            y : { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor }, position: 'left' },
+            y1: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false }, position: 'right' },
+          },
+        },
+      });
+    }
+
+    // Bar chart
+    const barCtx = document.getElementById('history-bar-chart');
+    if (barCtx && data.bar) {
+      _historyCharts.bar = new Chart(barCtx, {
+        type: 'bar',
+        data: {
+          labels  : data.bar.labels,
+          datasets: [{
+            label          : 'Jobs',
+            data           : data.bar.data,
+            backgroundColor: 'rgba(51,85,204,0.7)',
+            borderRadius   : 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins   : { legend: { display: false } },
+          scales    : {
+            x: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor } },
+          },
+        },
+      });
+    }
+
+    // Heatmap
+    _drawHeatmap(data);
+  }
+
+  function _drawHeatmap(data) {
+    const el = document.getElementById('history-heatmap');
+    if (!el || !data.heatmap) return;
+
+    // Flatten heatmap to get max value for color scaling
+    let items = [];
+    if (data.level === 'day') {
+      // Array of {date, hours:[{hour,count}]}
+      data.heatmap.forEach(day => {
+        day.hours.forEach(h => items.push(h.count));
+      });
+    } else {
+      // Array of {week, count}
+      items = data.heatmap.map(w => (typeof w === 'object' && w.count !== undefined) ? w.count : 0);
+    }
+    const max = Math.max(...items, 1);
+
+    const cellSize = 14;
+    const gap      = 2;
+
+    if (data.level === 'day') {
+      // Hour × Day grid
+      const days  = data.heatmap;
+      const hours = Array.from({length:12}, (_,i) => i + 8);
+      let html = `
+        <div style="overflow-x:auto;">
+          <table style="border-collapse:separate;border-spacing:${gap}px;font-size:9px;color:var(--text-3);">
+            <thead>
+              <tr>
+                <td></td>
+                ${days.map(d => `<td style="text-align:center;padding-bottom:4px;">
+                  ${new Date(d.date).toLocaleDateString('en-GB',{weekday:'short'})}</td>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${hours.map(h => `
+                <tr>
+                  <td style="padding-right:6px;text-align:right;">${h}h</td>
+                  ${days.map(d => {
+                    const hdata = d.hours.find(x => x.hour === h);
+                    const count = hdata?.count || 0;
+                    const alpha = count ? 0.15 + (count / max) * 0.85 : 0.05;
+                    return `<td title="${count} jobs" style="width:${cellSize}px;height:${cellSize}px;
+                      border-radius:2px;background:rgba(51,85,204,${alpha.toFixed(2)});cursor:default;"></td>`;
+                  }).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      el.innerHTML = html;
+    } else {
+      // Week grid — 52 weeks × 1 row or monthly grid
+      const weeks = data.heatmap;
+      let html = '<div style="display:flex;flex-wrap:wrap;gap:2px;">';
+      weeks.forEach(w => {
+        const count = Array.isArray(w) ? w.reduce((s,d) => s + d.count, 0) : (w.count || 0);
+        const alpha = count ? 0.15 + (count / max) * 0.85 : 0.05;
+        html += `<div title="${count} jobs" style="width:${cellSize}px;height:${cellSize}px;
+          border-radius:2px;background:rgba(51,85,204,${alpha.toFixed(2)});"></div>`;
+      });
+      html += '</div>';
+      el.innerHTML = html;
+    }
+  }
+
+  function _historyDrill(item) {
+    if (typeof item === 'string') {
+      try { item = JSON.parse(item.replace(/&quot;/g, '"')); } catch { return; }
+    }
+    _historyYear  = item.year  || _historyYear;
+    _historyMonth = item.month || null;
+    _historyWeek  = item.week  !== undefined ? item.week : null;
+
+    if (_historyMonth && _historyWeek !== null) {
+      _historyLevel = 'day';
+    } else if (_historyMonth) {
+      _historyLevel = 'week';
+    } else if (_historyYear) {
+      _historyLevel = 'month';
+    }
+
+    _fetchAndRenderHistory(document.getElementById('reports-content'));
+  }
+
+  function _historyNav(level, year, month, week) {
+    _historyLevel = level;
+    _historyYear  = year;
+    _historyMonth = month;
+    _historyWeek  = week;
+    _fetchAndRenderHistory(document.getElementById('reports-content'));
+  }
   async function downloadSheetPDF(sheetId, sheetDate) {
     try {
       const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/pdf/`);
@@ -1412,6 +1852,8 @@ return {
     switchInboxChannel,
     openConvo,
     sendReply,
+    _historyDrill,
+    _historyNav,
   };
 
 })();
