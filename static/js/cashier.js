@@ -29,7 +29,7 @@ const Cashier = (() => {
   const WAIT_RED_MINS   = 20;
 
   // ── Bootstrap ──────────────────────────────────────────────
-async function init() {
+  async function init() {
     await Auth.guard(['CASHIER']);
     await loadContext();
     await loadSummary();
@@ -106,8 +106,10 @@ async function init() {
       _renderQueuePane(main);
       loadQueue();
       _updateSummaryStrip();
+    } else if (paneId === 'receipts') {
+      _renderReceiptsPane(main);
     } else {
-      const labels = { receipts: 'Receipts', log: "Today's Log", credit: 'Credit Accounts' };
+      const labels = { log: "Today's Log", credit: 'Credit Accounts' };
       main.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;
           justify-content:center;height:320px;gap:12px;color:var(--text-3);">
@@ -318,7 +320,6 @@ async function init() {
     _v('pos-ref',  '');
     _v('cash-tendered', '');
 
-    // Populate line items
     const itemsEl = document.getElementById('confirm-line-items');
     if (itemsEl) {
       const items = activeJob.line_items || [];
@@ -335,11 +336,9 @@ async function init() {
       }
     }
 
-    // Reset change row
     const changeRow = document.getElementById('cm-change-row');
     if (changeRow) changeRow.style.display = 'none';
 
-    // Reset hint
     const hint = document.getElementById('cm-payment-hint');
     if (hint) { hint.textContent = 'Select a payment method to continue'; hint.classList.add('visible'); }
 
@@ -366,15 +365,13 @@ async function init() {
       if (btn) btn.classList.toggle('selected', m === method);
     });
 
-    // Show/hide ref fields
-    const momoField   = document.getElementById('momo-ref-field');
-    const posField    = document.getElementById('pos-ref-field');
-    const cashField   = document.getElementById('cash-tendered-field');
+    const momoField = document.getElementById('momo-ref-field');
+    const posField  = document.getElementById('pos-ref-field');
+    const cashField = document.getElementById('cash-tendered-field');
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
     if (cashField) cashField.classList.toggle('visible', method === 'CASH');
 
-    // Clear irrelevant fields
     if (method !== 'CASH') {
       const changeRow = document.getElementById('cm-change-row');
       const input     = document.getElementById('cash-tendered');
@@ -382,11 +379,9 @@ async function init() {
       if (input)     input.value = '';
     }
 
-    // Update confirm button class
     const btn = document.getElementById('confirm-submit-btn');
     if (btn) btn.className = `cm-confirm-btn ${method.toLowerCase()}`;
 
-    // Update hint
     const hint = document.getElementById('cm-payment-hint');
     if (hint) {
       hint.classList.add('visible');
@@ -432,9 +427,9 @@ async function init() {
 
     if (tendered > 0) {
       row.style.display     = 'flex';
-      row.style.background  = change >= 0 ? 'var(--green-bg)'     : 'var(--red-bg)';
-      row.style.borderColor = change >= 0 ? 'var(--green-border)'  : 'var(--red-border)';
-      val.style.color       = change >= 0 ? 'var(--green-text)'    : 'var(--red-text)';
+      row.style.background  = change >= 0 ? 'var(--green-bg)'    : 'var(--red-bg)';
+      row.style.borderColor = change >= 0 ? 'var(--green-border)' : 'var(--red-border)';
+      val.style.color       = change >= 0 ? 'var(--green-text)'   : 'var(--red-text)';
       val.textContent       = `GHS ${Math.abs(change).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
       const label = document.querySelector('.cm-change-label');
       if (label) label.style.color = change >= 0 ? 'var(--green-text)' : 'var(--red-text)';
@@ -465,7 +460,6 @@ async function init() {
     btn.disabled      = !ready;
     btn.style.opacity = ready ? '1' : '0.4';
 
-    // Hide hint when ready
     if (ready) {
       const hint = document.getElementById('cm-payment-hint');
       if (hint) hint.classList.remove('visible');
@@ -476,7 +470,6 @@ async function init() {
   async function confirmPayment() {
     if (!activeJob) return;
 
-    // Final validation
     if (selectedMethod === 'CASH') {
       const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
       const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -580,7 +573,6 @@ async function init() {
     _s('receipt-method',  selectedMethod);
     _s('receipt-number',  result.receipt_number || '—');
 
-    // Cash tendered + change
     const cashRow   = document.getElementById('receipt-cash-row');
     const changeRow = document.getElementById('receipt-change-row');
     if (selectedMethod === 'CASH') {
@@ -671,12 +663,28 @@ async function init() {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  function _fmtTime(isoOrTime) {
+    if (!isoOrTime) return '—';
+    try {
+      // Handle both "19:30:00" and full ISO datetime
+      const str = String(isoOrTime);
+      if (str.includes('T')) {
+        return new Date(str).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' });
+      }
+      const [h, m] = str.split(':');
+      const d = new Date();
+      d.setHours(parseInt(h), parseInt(m));
+      return d.toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' });
+    } catch { return isoOrTime; }
+  }
+
   // ── Shift sign-off ─────────────────────────────────────────
-  let _shiftPollTimer  = null;
-  let _shiftStatus     = null;
-  let _signOffStep     = 1;
-  let _signOffFloatId  = null;
-  const SHIFT_POLL_MS  = 60000;
+  let _shiftPollTimer = null;
+  let _shiftStatus    = null;
+  let _signOffStep    = 1;
+  let _signOffFloatId = null;
+  const SHIFT_POLL_MS = 60000;
 
   function _startShiftPolling() {
     _pollShiftStatus();
@@ -702,68 +710,90 @@ async function init() {
       return;
     }
     if (s.should_lock) {
-      // Fire wizard immediately — non-dismissible
       _lockQueue('Your shift has ended. Please complete sign-off.');
       openSignOffWizard(false);
       return;
     }
     if (s.should_prompt) {
-      _showSignOffBanner(s.minutes_remaining);
+      _showSignOffBanner(s.minutes_remaining, s.shift_end);
     }
   }
 
-  function _showSignOffBanner(minsRemaining) {
-    if (document.getElementById('signoff-banner')) return; // already showing
-    const banner = document.createElement('div');
-    banner.id    = 'signoff-banner';
-    banner.style.cssText = `
-      position:fixed;top:56px;left:0;right:0;z-index:900;
-      background:var(--amber-bg);border-bottom:1px solid var(--amber-border);
-      padding:10px 24px;display:flex;align-items:center;justify-content:space-between;
-      font-size:13px;color:var(--amber-text);`;
-    banner.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        <span><strong>Your shift ends in ${minsRemaining} minute${minsRemaining !== 1 ? 's' : ''}.</strong>
-        Please prepare to sign off.</span>
+function _showSignOffBanner(minsRemaining, shiftEnd) {
+  if (document.getElementById('signoff-banner')) return;
+
+  const endTime  = _fmtTime(shiftEnd);
+  const isUrgent = minsRemaining <= 15;
+
+  const banner = document.createElement('div');
+  banner.id    = 'signoff-banner';
+  banner.style.cssText = `
+    position:sticky;top:56px;left:0;right:0;z-index:900;
+    background:${isUrgent ? '#1a1a1a' : '#fff8e6'};
+    border-bottom:2px solid ${isUrgent ? '#e8294a' : '#f0d878'};
+    padding:0 28px;
+    display:flex;align-items:center;justify-content:space-between;
+    gap:16px;height:52px;`;
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;">
+      <div style="
+        width:8px;height:8px;border-radius:50%;flex-shrink:0;
+        background:${isUrgent ? '#e8294a' : '#e8c84a'};
+        box-shadow:0 0 0 3px ${isUrgent ? 'rgba(232,41,74,0.25)' : 'rgba(232,200,74,0.3)'};
+        animation:pulse 1.5s ease-in-out infinite;">
       </div>
-      <div style="display:flex;gap:10px;">
-        <button onclick="Cashier.openSignOffWizard(true)"
-          style="padding:6px 14px;background:var(--amber-text);color:#fff;border:none;
-                 border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">
-          Sign Off Now
-        </button>
-        <button onclick="document.getElementById('signoff-banner').remove()"
-          style="padding:6px 10px;background:none;border:1px solid var(--amber-border);
-                 border-radius:var(--radius-sm);font-size:12px;cursor:pointer;color:var(--amber-text);">
-          Dismiss
-        </button>
-      </div>`;
-    document.body.prepend(banner);
-  }
+      <div>
+        <span style="
+          font-family:'Syne',sans-serif;
+          font-size:13px;font-weight:700;
+          color:${isUrgent ? '#ffffff' : '#1a1a1a'};">
+          Shift ends at ${endTime}
+        </span>
+        <span style="
+          font-size:12.5px;font-weight:400;margin-left:8px;
+          color:${isUrgent ? 'rgba(255,255,255,0.6)' : '#7a5c00'};">
+          ${minsRemaining} minute${minsRemaining !== 1 ? 's' : ''} remaining
+        </span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button onclick="Cashier.openSignOffWizard(true)"
+        style="
+          padding:7px 16px;
+          background:${isUrgent ? '#e8294a' : '#1a1a1a'};
+          color:#fff;border:none;border-radius:8px;
+          font-size:12px;font-weight:700;cursor:pointer;
+          font-family:'DM Sans',sans-serif;white-space:nowrap;">
+        Sign Off Now
+      </button>
+      <button onclick="document.getElementById('signoff-banner').remove()"
+        style="
+          padding:7px 10px;background:none;
+          border:1px solid ${isUrgent ? 'rgba(255,255,255,0.2)' : '#d0cdc6'};
+          border-radius:8px;font-size:12px;cursor:pointer;
+          color:${isUrgent ? 'rgba(255,255,255,0.5)' : '#9a9690'};
+          font-family:'DM Sans',sans-serif;">
+        Dismiss
+      </button>
+    </div>`;
+  document.body.insertBefore(banner, document.body.children[1]);
+}
 
   function _lockQueue(message) {
-    // Stop payment polling — no new jobs should come in
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
     const list = document.getElementById('queue-list');
     if (!list) return;
 
-    // Disable all collect buttons
     list.querySelectorAll('.collect-btn').forEach(btn => {
-      btn.disabled = true;
+      btn.disabled    = true;
       btn.textContent = 'Queue Locked';
       btn.style.opacity = '0.4';
     });
 
-    // Show locked banner inside queue
     const existing = document.getElementById('queue-lock-banner');
     if (existing) return;
+
     const lockBanner = document.createElement('div');
     lockBanner.id    = 'queue-lock-banner';
     lockBanner.style.cssText = `
@@ -788,10 +818,9 @@ async function init() {
     list.prepend(lockBanner);
   }
 
+  // ── Sign-off wizard ────────────────────────────────────────
   function openSignOffWizard(dismissible = true) {
     _signOffStep = 1;
-
-    // Remove existing wizard if any
     document.getElementById('signoff-wizard')?.remove();
 
     const overlay = document.createElement('div');
@@ -814,7 +843,6 @@ async function init() {
         border-radius:var(--radius);width:100%;max-width:540px;
         max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
 
-        <!-- Header -->
         <div style="padding:20px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;">
           <div>
             <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--text);">
@@ -830,7 +858,6 @@ async function init() {
           ` : ''}
         </div>
 
-        <!-- Step indicator -->
         <div style="padding:16px 24px 0;display:flex;gap:6px;">
           ${[1,2,3,4,5].map(n => `
             <div id="wizard-step-dot-${n}" style="
@@ -840,12 +867,8 @@ async function init() {
             </div>`).join('')}
         </div>
 
-        <!-- Body -->
-        <div id="wizard-body" style="padding:24px;">
-          <!-- Rendered per step -->
-        </div>
+        <div id="wizard-body" style="padding:24px;"></div>
 
-        <!-- Footer -->
         <div style="padding:16px 24px 20px;border-top:1px solid var(--border);
           display:flex;justify-content:space-between;align-items:center;">
           <button id="wizard-back-btn" onclick="Cashier._wizardBack()"
@@ -875,26 +898,23 @@ async function init() {
     const nextBtn = document.getElementById('wizard-next-btn');
     if (!body) return;
 
-    // Update step dots
     [1,2,3,4,5].forEach(n => {
       const dot = document.getElementById(`wizard-step-dot-${n}`);
       if (dot) dot.style.background = n <= step ? 'var(--text)' : 'var(--border)';
     });
 
-    if (label) label.textContent = `Step ${step} of 5`;
-    if (backBtn) backBtn.style.display = step > 1 ? 'block' : 'none';
-    if (nextBtn) nextBtn.textContent   = step === 5 ? 'Sign Off Shift' : 'Continue →';
+    if (label)   label.textContent        = `Step ${step} of 5`;
+    if (backBtn) backBtn.style.display     = step > 1 ? 'block' : 'none';
+    if (nextBtn) nextBtn.textContent       = step === 5 ? 'Sign Off Shift' : 'Continue →';
+    if (nextBtn) nextBtn.style.background  = step === 5 ? 'var(--red-text)' : 'var(--text)';
 
-    const s = _shiftStatus || {};
-    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
     const steps = {
 
       // ── Step 1: Queue check ─────────────────────────────────
       1: () => `
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">
-          Queue Status
-        </div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Queue Status</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Confirm the state of the payment queue before signing off.
         </div>
@@ -912,9 +932,7 @@ async function init() {
 
       // ── Step 2: Collection summary ──────────────────────────
       2: () => `
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">
-          Collection Summary
-        </div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Collection Summary</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Verify your total collections for today's shift.
         </div>
@@ -933,7 +951,7 @@ async function init() {
           </div>
           <div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
             <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Total</div>
-            <div style="font-size:18px;font-weight:700;color:var(--text);margin-top:4px;">${fmt(totals.CASH+totals.MOMO+totals.POS)}</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);margin-top:4px;">${fmt(totals.CASH + totals.MOMO + totals.POS)}</div>
           </div>
         </div>
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text-2);">
@@ -943,43 +961,37 @@ async function init() {
 
       // ── Step 3: Closing cash count ──────────────────────────
       3: () => `
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">
-          Closing Cash Count
-        </div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Closing Cash Count</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Count the physical cash in your till and enter the total below.
         </div>
-        <div class="fg" style="margin-bottom:16px;">
+        <div style="margin-bottom:16px;">
           <label style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;
             letter-spacing:0.5px;display:block;margin-bottom:6px;">Closing Cash Amount (GHS)</label>
           <input type="number" id="wizard-closing-cash" min="0" step="0.01" placeholder="0.00"
             oninput="Cashier._updateVariancePreview()"
             style="width:100%;padding:10px 14px;border:1px solid var(--border);
-                   border-radius:var(--radius-sm);background:var(--bg);
-                   color:var(--text);font-size:15px;font-family:'JetBrains Mono',monospace;
-                   box-sizing:border-box;">
+                   border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                   font-size:15px;font-family:'JetBrains Mono',monospace;box-sizing:border-box;">
         </div>
         <div id="variance-preview" style="display:none;padding:12px 14px;border-radius:var(--radius-sm);
-          font-size:13px;margin-bottom:16px;"></div>
-        <div class="fg">
+          border:1px solid;font-size:13px;margin-bottom:16px;"></div>
+        <div>
           <label style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-            letter-spacing:0.5px;display:block;margin-bottom:6px;">Variance Notes <span style="color:var(--red-text);">*</span></label>
+            letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Variance Notes <span style="color:var(--red-text);">*</span>
+          </label>
           <textarea id="wizard-variance-notes" rows="3"
-            placeholder="Explain any difference between expected and actual cash…"
+            placeholder="Explain any difference between expected and actual cash, or confirm cash matches…"
             style="width:100%;padding:10px 14px;border:1px solid var(--border);
-                   border-radius:var(--radius-sm);background:var(--bg);
-                   color:var(--text);font-size:13px;resize:vertical;box-sizing:border-box;">
-          </textarea>
-          <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-            Required — explain any discrepancy or confirm cash matches.
-          </div>
+                   border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                   font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+          <div style="font-size:11px;color:var(--text-3);margin-top:4px;">Required — confirm cash matches or explain any discrepancy.</div>
         </div>`,
 
       // ── Step 4: Float handover ──────────────────────────────
       4: () => `
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">
-          Float Handover
-        </div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Float Handover</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Physically hand over your cash float to the Branch Manager before confirming.
         </div>
@@ -989,43 +1001,36 @@ async function init() {
           <div style="font-size:24px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text);">
             ${fmt(totals.CASH)}
           </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">
-            Total cash collected today
-          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Total cash collected today</div>
         </div>
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text-2);">
           <input type="checkbox" id="wizard-float-ack" style="margin-top:2px;accent-color:var(--text);">
           <span>I confirm I have physically handed over the cash float to the Branch Manager.</span>
         </label>`,
 
-      // ── Step 5: Shift notes + overtime/cover ────────────────
+      // ── Step 5: Shift notes + overtime ─────────────────────
       5: () => `
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">
-          Shift Notes & Extensions
-        </div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Shift Notes</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-          Add any observations, incidents, or extend your shift if needed.
+          Add any observations or incidents from your shift, then confirm sign-off.
         </div>
-        <div class="fg" style="margin-bottom:20px;">
+        <div style="margin-bottom:20px;">
           <label style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;
             letter-spacing:0.5px;display:block;margin-bottom:6px;">Shift Notes</label>
           <textarea id="wizard-shift-notes" rows="3"
             placeholder="Any incidents, issues, or observations during your shift…"
             style="width:100%;padding:10px 14px;border:1px solid var(--border);
-                   border-radius:var(--radius-sm);background:var(--bg);
-                   color:var(--text);font-size:13px;resize:vertical;box-sizing:border-box;">
-          </textarea>
+                   border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                   font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
-        <div style="padding:14px;background:var(--bg);border:1px solid var(--border);
-          border-radius:var(--radius);margin-bottom:12px;">
+        <div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);">
             <input type="checkbox" id="wizard-is-overtime" onchange="Cashier._toggleOvertimeFields()"
               style="accent-color:var(--text);">
-            I am doing overtime
+            I need to stay for overtime
           </label>
-          <div id="overtime-fields" style="display:none;margin-top:12px;padding-top:12px;
-            border-top:1px solid var(--border);">
-            <div class="fg" style="margin-bottom:10px;">
+          <div id="overtime-fields" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div style="margin-bottom:10px;">
               <label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
                 letter-spacing:0.5px;display:block;margin-bottom:6px;">Overtime Until</label>
               <input type="datetime-local" id="wizard-overtime-until"
@@ -1033,28 +1038,10 @@ async function init() {
                        border-radius:var(--radius-sm);background:var(--bg);
                        color:var(--text);font-size:13px;box-sizing:border-box;">
             </div>
-            <div class="fg">
+            <div>
               <label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
                 letter-spacing:0.5px;display:block;margin-bottom:6px;">Reason</label>
               <input type="text" id="wizard-overtime-reason" placeholder="Brief reason for overtime…"
-                style="width:100%;padding:8px 12px;border:1px solid var(--border);
-                       border-radius:var(--radius-sm);background:var(--bg);
-                       color:var(--text);font-size:13px;box-sizing:border-box;">
-            </div>
-          </div>
-        </div>
-        <div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);">
-            <input type="checkbox" id="wizard-is-cover" onchange="Cashier._toggleCoverFields()"
-              style="accent-color:var(--text);">
-            I am covering someone else's shift
-          </label>
-          <div id="cover-fields" style="display:none;margin-top:12px;padding-top:12px;
-            border-top:1px solid var(--border);">
-            <div class="fg" style="margin-bottom:10px;">
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-                letter-spacing:0.5px;display:block;margin-bottom:6px;">Covering Until</label>
-              <input type="datetime-local" id="wizard-cover-until"
                 style="width:100%;padding:8px 12px;border:1px solid var(--border);
                        border-radius:var(--radius-sm);background:var(--bg);
                        color:var(--text);font-size:13px;box-sizing:border-box;">
@@ -1065,7 +1052,7 @@ async function init() {
 
     body.innerHTML = steps[step]?.() || '';
 
-    // Step 1: load queue count async
+    // Step 1: async queue check
     if (step === 1) {
       Auth.fetch('/api/v1/jobs/cashier/queue/').then(async res => {
         if (!res.ok) return;
@@ -1075,15 +1062,15 @@ async function init() {
         const el    = document.getElementById('wizard-queue-check');
         if (!el) return;
         if (count === 0) {
-          el.style.background   = 'var(--green-bg)';
-          el.style.borderColor  = 'var(--green-border)';
-          el.style.color        = 'var(--green-text)';
-          el.innerHTML = `<strong>✓ Queue is clear</strong> — no jobs pending payment.`;
+          el.style.background  = 'var(--green-bg)';
+          el.style.borderColor = 'var(--green-border)';
+          el.style.color       = 'var(--green-text)';
+          el.innerHTML         = `<strong>✓ Queue is clear</strong> — no jobs pending payment.`;
         } else {
-          el.style.background   = 'var(--amber-bg)';
-          el.style.borderColor  = 'var(--amber-border)';
-          el.style.color        = 'var(--amber-text)';
-          el.innerHTML = `<strong>⚠ ${count} job${count !== 1 ? 's' : ''} pending payment</strong> — these will carry forward to tomorrow.`;
+          el.style.background  = 'var(--amber-bg)';
+          el.style.borderColor = 'var(--amber-border)';
+          el.style.color       = 'var(--amber-text)';
+          el.innerHTML         = `<strong>⚠ ${count} job${count !== 1 ? 's' : ''} pending payment</strong> — these will carry forward to tomorrow.`;
         }
       }).catch(() => {});
     }
@@ -1091,18 +1078,18 @@ async function init() {
 
   function _updateVariancePreview() {
     const closing  = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
-    const expected = totals.CASH; // opening float + cash collected
+    const expected = totals.CASH;
     const variance = closing - expected;
     const el       = document.getElementById('variance-preview');
-    if (!el || !closing) { if (el) el.style.display = 'none'; return; }
+    if (!el) return;
+    if (!closing && closing !== 0) { el.style.display = 'none'; return; }
 
     el.style.display     = 'block';
-    el.style.background  = variance === 0 ? 'var(--green-bg)'  : 'var(--amber-bg)';
-    el.style.borderColor = variance === 0 ? 'var(--green-border)' : 'var(--amber-border)';
-    el.style.color       = variance === 0 ? 'var(--green-text)'   : 'var(--amber-text)';
-    el.style.border      = '1px solid';
+    el.style.background  = variance === 0 ? 'var(--green-bg)'     : 'var(--amber-bg)';
+    el.style.borderColor = variance === 0 ? 'var(--green-border)'  : 'var(--amber-border)';
+    el.style.color       = variance === 0 ? 'var(--green-text)'    : 'var(--amber-text)';
 
-    const fmt = n => `GHS ${Math.abs(n).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const fmt = n => `GHS ${Math.abs(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
     el.innerHTML = variance === 0
       ? `<strong>✓ No variance</strong> — cash matches expected amount.`
       : `<strong>${variance > 0 ? 'Surplus' : 'Shortage'}: ${fmt(variance)}</strong>
@@ -1115,18 +1102,11 @@ async function init() {
     if (fields) fields.style.display = checked ? 'block' : 'none';
   }
 
-  function _toggleCoverFields() {
-    const checked = document.getElementById('wizard-is-cover')?.checked;
-    const fields  = document.getElementById('cover-fields');
-    if (fields) fields.style.display = checked ? 'block' : 'none';
-  }
-
   function _wizardBack() {
     if (_signOffStep > 1) _renderWizardStep(_signOffStep - 1);
   }
 
   function _wizardNext() {
-    // Validate current step before advancing
     if (_signOffStep === 1) {
       if (!document.getElementById('wizard-queue-ack')?.checked) {
         _toast('Please acknowledge the queue status.', 'error'); return;
@@ -1140,7 +1120,7 @@ async function init() {
     if (_signOffStep === 3) {
       const cash  = document.getElementById('wizard-closing-cash')?.value;
       const notes = document.getElementById('wizard-variance-notes')?.value.trim();
-      if (!cash || parseFloat(cash) < 0) {
+      if (cash === '' || cash === null || cash === undefined) {
         _toast('Please enter your closing cash count.', 'error'); return;
       }
       if (!notes) {
@@ -1166,22 +1146,18 @@ async function init() {
     }
 
     const isOvertime = document.getElementById('wizard-is-overtime')?.checked || false;
-    const isCover    = document.getElementById('wizard-is-cover')?.checked    || false;
 
     const body = {
       closing_cash   : parseFloat(document.getElementById('wizard-closing-cash')?.value || 0),
       variance_notes : document.getElementById('wizard-variance-notes')?.value.trim() || '',
       shift_notes    : document.getElementById('wizard-shift-notes')?.value.trim()    || '',
       is_overtime    : isOvertime,
-      is_cover       : isCover,
+      is_cover       : false,
     };
 
     if (isOvertime) {
       body.overtime_reason = document.getElementById('wizard-overtime-reason')?.value.trim() || '';
       body.overtime_until  = document.getElementById('wizard-overtime-until')?.value || null;
-    }
-    if (isCover) {
-      body.cover_until = document.getElementById('wizard-cover-until')?.value || null;
     }
 
     const btn = document.getElementById('wizard-next-btn');
@@ -1205,22 +1181,36 @@ async function init() {
 
       const result = await res.json();
 
-      // Overtime/cover — queue stays open
-      if (result.is_overtime || result.is_cover) {
+      // Overtime — extend queue access, don't sign off
+      if (result.is_overtime) {
         document.getElementById('signoff-wizard')?.remove();
         document.getElementById('signoff-banner')?.remove();
-        _toast(
-          result.is_overtime
-            ? `Overtime recorded until ${new Date(result.overtime_until).toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'})}.`
-            : 'Cover shift recorded.',
-          'success'
-        );
-        _startPolling(); // resume queue polling
+        const untilStr = result.overtime_until
+          ? _fmtTime(result.overtime_until)
+          : 'later';
+        _toast(`Overtime recorded — queue open until ${untilStr}.`, 'success');
+        _startPolling();
         return;
       }
 
       // Full sign-off complete
       document.getElementById('signoff-wizard')?.remove();
+      document.getElementById('signoff-banner')?.remove();
+
+      // Clear queue visually
+      const list = document.getElementById('queue-list');
+      if (list) list.innerHTML = `
+        <div class="queue-empty">
+          <div class="queue-empty-icon" style="background:var(--green-bg);border-color:var(--green-border);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
+              fill="none" stroke="var(--green-text)" stroke-width="1.5">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <div class="queue-empty-title" style="color:var(--green-text);">Shift signed off</div>
+          <div class="queue-empty-sub">Your collections have been recorded. Have a great rest of your day!</div>
+        </div>`;
+
       _showSignOffComplete();
 
     } catch {
@@ -1253,7 +1243,7 @@ async function init() {
         You have successfully signed off. Have a great rest of your day!
       </div>
       <div style="font-size:13px;color:var(--text-3);">
-        This window will close in <span id="signoff-countdown">5</span> seconds…
+        Redirecting in <span id="signoff-countdown">5</span> seconds…
       </div>`;
 
     document.body.appendChild(overlay);
@@ -1269,9 +1259,211 @@ async function init() {
       }
     }, 1000);
   }
+  // ── Cashier History & Receipts Pane ──────────────────────
+  function _renderReceiptsPane(container) {
+    container.innerHTML = `
+      <div style="margin-bottom:20px;">
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+          color:var(--text);letter-spacing:-0.3px;margin-bottom:16px;">
+          My Activity
+        </div>
+        <div style="display:flex;gap:4px;background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:4px;width:fit-content;">
+          <button id="tab-history"
+            onclick="Cashier._switchReceiptsTab('history')"
+            style="padding:6px 16px;border-radius:10px;border:none;
+                   background:var(--text);color:#fff;
+                   font-size:12.5px;font-weight:600;cursor:pointer;
+                   font-family:'DM Sans',sans-serif;transition:all 0.15s;">
+            History
+          </button>
+          <button id="tab-receipts"
+            onclick="Cashier._switchReceiptsTab('receipts')"
+            style="padding:6px 16px;border-radius:10px;border:none;
+                   background:none;color:var(--text-3);
+                   font-size:12.5px;font-weight:500;cursor:pointer;
+                   font-family:'DM Sans',sans-serif;transition:all 0.15s;">
+            Receipts
+          </button>
+        </div>
+      </div>
+      <div id="receipts-tab-content"></div>`;
+    _loadHistoryLevel('year');
+  }
+
+  function _switchReceiptsTab(tab) {
+    const histBtn = document.getElementById('tab-history');
+    const rcptBtn = document.getElementById('tab-receipts');
+    if (histBtn) {
+      histBtn.style.background = tab === 'history' ? 'var(--text)' : 'none';
+      histBtn.style.color      = tab === 'history' ? '#fff' : 'var(--text-3)';
+      histBtn.style.fontWeight = tab === 'history' ? '600' : '500';
+    }
+    if (rcptBtn) {
+      rcptBtn.style.background = tab === 'receipts' ? 'var(--text)' : 'none';
+      rcptBtn.style.color      = tab === 'receipts' ? '#fff' : 'var(--text-3)';
+      rcptBtn.style.fontWeight = tab === 'receipts' ? '600' : '500';
+    }
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+    if (tab === 'history') {
+      _loadHistoryLevel('year');
+    } else {
+      content.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;
+          justify-content:center;height:280px;gap:10px;color:var(--text-3);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <div style="font-size:14px;font-weight:600;color:var(--text);">Receipts</div>
+          <div style="font-size:13px;">Coming soon.</div>
+        </div>`;
+    }
+  }
+
+  async function _loadHistoryLevel(level, params = {}) {
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        padding:60px;color:var(--text-3);gap:10px;font-size:13px;">
+        <span class="spin"></span> Loading…
+      </div>`;
+    const qp = new URLSearchParams({ level });
+    if (params.year)  qp.set('year',  params.year);
+    if (params.month) qp.set('month', params.month);
+    if (params.week)  qp.set('week',  params.week);
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/cashier/history/?${qp}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      _renderHistoryLevel(data, params);
+    } catch {
+      content.innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+          Could not load history.
+        </div>`;
+    }
+  }
+
+  function _renderHistoryLevel(data, params) {
+    const content = document.getElementById('receipts-tab-content');
+    if (!content) return;
+    const results = data.results || [];
+    const level   = data.level;
+    const fmt     = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const crumbs = [];
+    crumbs.push(`<span style="color:var(--text-3);cursor:pointer;font-size:12.5px;"
+      onclick="Cashier._historyDrillUp('year')">All Years</span>`);
+    if (params.year) {
+      crumbs.push(`<span style="color:var(--text-3);">›</span>`);
+      if (level === 'month') {
+        crumbs.push(`<span style="color:var(--text);font-size:12.5px;font-weight:600;">${params.year}</span>`);
+      } else {
+        crumbs.push(`<span style="color:var(--text-3);cursor:pointer;font-size:12.5px;"
+          onclick="Cashier._historyDrillUp('month',${params.year})">${params.year}</span>`);
+      }
+    }
+    if (params.month && params.year) {
+      const mn = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      crumbs.push(`<span style="color:var(--text-3);">›</span>`);
+      if (level === 'week') {
+        crumbs.push(`<span style="color:var(--text);font-size:12.5px;font-weight:600;">${mn[params.month]}</span>`);
+      } else {
+        crumbs.push(`<span style="color:var(--text-3);cursor:pointer;font-size:12.5px;"
+          onclick="Cashier._historyDrillUp('week',${params.year},${params.month})">${mn[params.month]}</span>`);
+      }
+    }
+    if (params.week) {
+      crumbs.push(`<span style="color:var(--text-3);">›</span>`);
+      crumbs.push(`<span style="color:var(--text);font-size:12.5px;font-weight:600;">Week ${params.week}</span>`);
+    }
+
+    const breadcrumb = crumbs.length > 1
+      ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;">${crumbs.join('')}</div>`
+      : '';
+
+    if (!results.length) {
+      content.innerHTML = breadcrumb + `
+        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+          No activity found for this period.
+        </div>`;
+      return;
+    }
+
+    const isDrillable = level !== 'day';
+    const cards = results.map(row => {
+      const total   = row.total || 0;
+      const cashPct = total > 0 ? (row.cash / total * 100).toFixed(0) : 0;
+      const momoPct = total > 0 ? (row.momo / total * 100).toFixed(0) : 0;
+      const posPct  = total > 0 ? (row.pos  / total * 100).toFixed(0) : 0;
+      const drill   = isDrillable
+        ? `onclick="Cashier._historyDrillDown(${JSON.stringify(row).replace(/"/g, '&quot;')})"
+           style="cursor:pointer;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;transition:border-color 0.15s;"`
+        : `style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;"`;
+      return `
+        <div ${drill}>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;">
+            <div>
+              <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:var(--text);">
+                ${_esc(row.label)}
+              </div>
+              <div style="font-size:12px;color:var(--text-3);margin-top:2px;">
+                ${row.count} receipt${row.count !== 1 ? 's' : ''}
+                ${isDrillable ? ' · <span style="color:var(--text-3);">drill down →</span>' : ''}
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--text);">
+                ${fmt(total)}
+              </div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">total collected</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div style="padding:10px 12px;background:var(--cash-bg);border:1px solid var(--cash-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--cash-text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Cash</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--cash-strong);">${fmt(row.cash)}</div>
+              <div style="font-size:11px;color:var(--cash-text);margin-top:2px;">${cashPct}%</div>
+            </div>
+            <div style="padding:10px 12px;background:var(--momo-bg);border:1px solid var(--momo-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--momo-text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">MoMo</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--momo-strong);">${fmt(row.momo)}</div>
+              <div style="font-size:11px;color:var(--momo-text);margin-top:2px;">${momoPct}%</div>
+            </div>
+            <div style="padding:10px 12px;background:var(--pos-bg);border:1px solid var(--pos-border);border-radius:var(--radius-sm);">
+              <div style="font-size:10px;font-weight:700;color:var(--pos-text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">POS</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--pos-strong);">${fmt(row.pos)}</div>
+              <div style="font-size:11px;color:var(--pos-text);margin-top:2px;">${posPct}%</div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    content.innerHTML = breadcrumb + `<div style="display:flex;flex-direction:column;gap:10px;">${cards}</div>`;
+  }
+
+  function _historyDrillDown(row) {
+    if (row.year !== undefined && row.month === undefined) {
+      _loadHistoryLevel('month', { year: row.year });
+    } else if (row.month !== undefined && row.week === undefined) {
+      _loadHistoryLevel('week', { year: row.year, month: row.month });
+    } else if (row.week !== undefined) {
+      _loadHistoryLevel('day', { year: row.year, month: row.month, week: row.week });
+    }
+  }
+
+  function _historyDrillUp(level, year, month) {
+    if (level === 'year')       _loadHistoryLevel('year');
+    else if (level === 'month') _loadHistoryLevel('month', { year });
+    else if (level === 'week')  _loadHistoryLevel('week',  { year, month });
+  }
 
   // ── Public API ─────────────────────────────────────────────
-return {
+  return {
     init,
     loadSummary,
     switchPane,
@@ -1290,7 +1482,6 @@ return {
     _wizardNext,
     _updateVariancePreview,
     _toggleOvertimeFields,
-    _toggleCoverFields,
   };
 })();
 

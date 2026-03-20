@@ -267,10 +267,44 @@ class CashierConfirmPaymentView(APIView):
             result['amount_paid']        = str(amount_paid) if amount_paid else None
             result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
             result['payment_method']     = serializer.validated_data.get('payment_method', 'CASH')
-            result['receipt_number']     = None  # populated after ReceiptEngine is wired in
+
+                # ── Issue receipt ─────────────────────────────────────────
+            receipt_number = None
+            try:
+                    from apps.finance.receipt_engine import ReceiptEngine
+                    from apps.finance.models import DailySalesSheet
+
+                    daily_sheet = DailySalesSheet.objects.filter(
+                        branch = job.branch,
+                        status = DailySalesSheet.Status.OPEN,
+                    ).order_by('-date').first()
+
+                    if daily_sheet:
+                        engine  = ReceiptEngine(job.branch)
+                        receipt = engine.issue(
+                            job               = job,
+                            cashier           = request.user,
+                            daily_sheet       = daily_sheet,
+                            payment_method    = serializer.validated_data.get('payment_method', 'CASH'),
+                            amount_paid       = amount_paid,
+                            balance_due       = job.balance_due or 0,
+                            momo_reference    = serializer.validated_data.get('momo_reference', ''),
+                            pos_approval_code = serializer.validated_data.get('pos_approval_code', ''),
+                            customer_phone    = serializer.validated_data.get('customer_phone', ''),
+                        )
+                        receipt_number          = receipt.receipt_number
+                        result['receipt_id']    = receipt.id
+                        result['receipt_number'] = receipt_number
+                    else:
+                        result['receipt_number'] = None
+                        result['receipt_id']     = None
+            except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"ReceiptEngine failed: {e}", exc_info=True)
+                    result['receipt_number'] = None
+                    result['receipt_id']     = None
 
             return Response(result)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Files

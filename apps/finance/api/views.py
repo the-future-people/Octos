@@ -418,7 +418,7 @@ class CashierShiftStatusView(APIView):
 
     def get(self, request):
         from django.utils import timezone
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, time as dt_time
         from apps.hr.models import EmployeeShift, ShiftOverride
 
         user   = request.user
@@ -434,14 +434,14 @@ class CashierShiftStatusView(APIView):
         today = timezone.localdate()
         try:
             float_record = CashierFloat.objects.get(
-                cashier     = user,
+                cashier             = user,
                 daily_sheet__date   = today,
                 daily_sheet__branch = branch,
             )
         except CashierFloat.DoesNotExist:
             float_record = None
 
-        # If already signed off and not overtime/cover
+        # If already signed off
         if float_record and float_record.is_signed_off:
             return Response({
                 'has_shift'        : True,
@@ -457,33 +457,7 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : None,
             })
 
-        # Resolve shift end time
-        # 1. Check ShiftOverride for today
-        shift_end = None
-        try:
-            employee = user.employee_profile
-            override = ShiftOverride.objects.filter(
-                employee = employee,
-                date     = today,
-            ).exclude(
-                override_type = ShiftOverride.ABSENCE,
-            ).order_by('-created_at').first()
-
-            if override and override.override_end:
-                shift_end = override.override_end
-            else:
-                # 2. Fall back to base EmployeeShift
-                base = EmployeeShift.objects.filter(
-                    employee    = employee,
-                    day_of_week = today.weekday(),
-                    is_active   = True,
-                ).first()
-                if base:
-                    shift_end = base.end_time
-        except Exception:
-            shift_end = None
-
-        # If overtime active — use overtime_until instead
+        # If overtime active — use overtime_until instead of shift end
         if float_record and float_record.is_overtime and float_record.overtime_until:
             now            = timezone.now()
             delta          = float_record.overtime_until - now
@@ -495,27 +469,40 @@ class CashierShiftStatusView(APIView):
                 'should_prompt'    : mins_remaining <= 60,
                 'should_lock'      : mins_remaining <= 0,
                 'is_signed_off'    : False,
-                'float_id'         : float_record.id if float_record else None,
+                'float_id'         : float_record.id,
                 'is_overtime'      : True,
                 'overtime_until'   : float_record.overtime_until,
                 'is_cover'         : float_record.is_cover,
                 'cover_until'      : float_record.cover_until,
             })
 
+        # Resolve shift end from HR records
+        shift_end = None
+        try:
+            employee = user.employee_profile
+            override = ShiftOverride.objects.filter(
+                employee      = employee,
+                date          = today,
+            ).exclude(
+                override_type = ShiftOverride.ABSENCE,
+            ).order_by('-created_at').first()
+
+            if override and override.override_end:
+                shift_end = override.override_end
+            else:
+                base = EmployeeShift.objects.filter(
+                    employee    = employee,
+                    day_of_week = today.weekday(),
+                    is_active   = True,
+                ).first()
+                if base:
+                    shift_end = base.end_time
+        except Exception:
+            shift_end = None
+
+        # No HR shift record — fall back to 19:30 branch closing time
         if not shift_end:
-            return Response({
-                'has_shift'        : False,
-                'shift_end'        : None,
-                'minutes_remaining': None,
-                'should_prompt'    : False,
-                'should_lock'      : False,
-                'is_signed_off'    : False,
-                'float_id'         : float_record.id if float_record else None,
-                'is_overtime'      : False,
-                'overtime_until'   : None,
-                'is_cover'         : False,
-                'cover_until'      : None,
-            })
+            shift_end = dt_time(19, 30)
 
         # Compute minutes remaining
         now            = timezone.now()
@@ -540,6 +527,168 @@ class CashierShiftStatusView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 # Petty Cash
 # ─────────────────────────────────────────────────────────────────────────────
+class CashierHistoryView(APIView):
+    """
+    GET /api/v1/finance/cashier/history/
+    Returns the logged-in cashier's personal collection history.
+
+    Query params:
+      ?level=year                     — yearly totals
+      ?level=month&year=2026          — monthly breakdown for a year
+      ?level=week&year=2026&month=3   — weekly breakdown for a month
+      ?level=day&year=2026&month=3&week=12 — daily breakdown for a week (ISO week)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum, Count, Q
+        from django.db.models.functions import (
+            TruncYear, TruncMonth, TruncWeek, TruncDay,
+            ExtractYear, ExtractMonth, ExtractWeek,
+        )
+        from django.utils import timezone
+
+        user  = request.user
+        level = request.query_params.get('level', 'year')
+
+        qs = Receipt.objects.filter(
+            cashier  = user,
+            is_void  = False,
+        ).select_related('daily_sheet')
+
+        # ── Apply drill-down filters ──────────────────────────
+        year_param  = request.query_params.get('year')
+        month_param = request.query_params.get('month')
+        week_param  = request.query_params.get('week')
+
+        if year_param:
+            qs = qs.filter(created_at__year=int(year_param))
+        if month_param:
+            qs = qs.filter(created_at__month=int(month_param))
+        if week_param:
+            qs = qs.filter(created_at__week=int(week_param))
+
+        # ── Aggregate per method ──────────────────────────────
+        def _totals(queryset):
+            return {
+                'cash' : float(queryset.filter(payment_method='CASH').aggregate(
+                    t=Sum('amount_paid'))['t'] or 0),
+                'momo' : float(queryset.filter(payment_method='MOMO').aggregate(
+                    t=Sum('amount_paid'))['t'] or 0),
+                'pos'  : float(queryset.filter(payment_method='POS').aggregate(
+                    t=Sum('amount_paid'))['t'] or 0),
+                'count': queryset.count(),
+            }
+
+        # ── Year level ────────────────────────────────────────
+        if level == 'year':
+            years = (
+                qs.annotate(yr=ExtractYear('created_at'))
+                  .values('yr')
+                  .distinct()
+                  .order_by('-yr')
+            )
+            result = []
+            for row in years:
+                y   = row['yr']
+                sub = qs.filter(created_at__year=y)
+                t   = _totals(sub)
+                result.append({
+                    'label'    : str(y),
+                    'year'     : y,
+                    'cash'     : t['cash'],
+                    'momo'     : t['momo'],
+                    'pos'      : t['pos'],
+                    'total'    : t['cash'] + t['momo'] + t['pos'],
+                    'count'    : t['count'],
+                })
+            return Response({'level': 'year', 'results': result})
+
+        # ── Month level ───────────────────────────────────────
+        if level == 'month':
+            import calendar
+            months = (
+                qs.annotate(mo=ExtractMonth('created_at'))
+                  .values('mo')
+                  .distinct()
+                  .order_by('-mo')
+            )
+            result = []
+            for row in months:
+                m   = row['mo']
+                sub = qs.filter(created_at__month=m)
+                t   = _totals(sub)
+                result.append({
+                    'label'    : calendar.month_name[m],
+                    'month'    : m,
+                    'year'     : int(year_param) if year_param else None,
+                    'cash'     : t['cash'],
+                    'momo'     : t['momo'],
+                    'pos'      : t['pos'],
+                    'total'    : t['cash'] + t['momo'] + t['pos'],
+                    'count'    : t['count'],
+                })
+            return Response({'level': 'month', 'results': result})
+
+        # ── Week level ────────────────────────────────────────
+        if level == 'week':
+            weeks = (
+                qs.annotate(wk=ExtractWeek('created_at'))
+                  .values('wk')
+                  .distinct()
+                  .order_by('-wk')
+            )
+            result = []
+            for row in weeks:
+                w   = row['wk']
+                sub = qs.filter(created_at__week=w)
+                t   = _totals(sub)
+                result.append({
+                    'label' : f'Week {w}',
+                    'week'  : w,
+                    'month' : int(month_param) if month_param else None,
+                    'year'  : int(year_param)  if year_param  else None,
+                    'cash'  : t['cash'],
+                    'momo'  : t['momo'],
+                    'pos'   : t['pos'],
+                    'total' : t['cash'] + t['momo'] + t['pos'],
+                    'count' : t['count'],
+                })
+            return Response({'level': 'week', 'results': result})
+
+        # ── Day level ─────────────────────────────────────────
+        if level == 'day':
+            from django.db.models.functions import ExtractDay
+            days = (
+                qs.annotate(
+                    dy=TruncDay('created_at')
+                )
+                .values('dy')
+                .distinct()
+                .order_by('-dy')
+            )
+            result = []
+            for row in days:
+                d   = row['dy']
+                sub = qs.filter(
+                    created_at__date=d.date()
+                )
+                t   = _totals(sub)
+                result.append({
+                    'label'    : d.strftime('%a, %d %b %Y'),
+                    'date'     : d.date().isoformat(),
+                    'cash'     : t['cash'],
+                    'momo'     : t['momo'],
+                    'pos'      : t['pos'],
+                    'total'    : t['cash'] + t['momo'] + t['pos'],
+                    'count'    : t['count'],
+                })
+            return Response({'level': 'day', 'results': result})
+
+        return Response(
+            {'detail': 'Invalid level. Use year, month, week, or day.'},
+            status=400,
+        )
 
 class PettyCashCreateView(APIView):
     """

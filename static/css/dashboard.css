@@ -1823,3 +1823,7 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .sheet-detail-td {
   padding: 0 !important;
 }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
