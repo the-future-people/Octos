@@ -1596,42 +1596,78 @@ async function _loadReportsPane() {
   }
 
   // ── Service Performance ───────────────────────────────────────
+ // ── Service Performance ──────────────────────────────────────────────────
+  let _servicesPeriod = 'month';
+
   async function _renderServicesReport(container) {
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.8px;">Service Performance</div>
+        <div style="display:flex;gap:4px;">
+          ${['day','week','month','year'].map(p => `
+            <button onclick="Dashboard.setServicesPeriod('${p}')"
+              class="reports-tab ${_servicesPeriod === p ? 'active' : ''}"
+              data-period="${p}"
+              style="padding:5px 12px;font-size:12px;">
+              ${p.charAt(0).toUpperCase() + p.slice(1)}
+            </button>`).join('')}
+        </div>
+      </div>
+      <div id="services-report-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _fetchServicesReport();
+  }
+
+  async function _fetchServicesReport() {
+    const content = document.getElementById('services-report-content');
+    if (!content) return;
+
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
     try {
-      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=month`);
+      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=${_servicesPeriod}`);
       if (!res.ok) throw new Error();
       const data     = await res.json();
       const services = data.services || [];
 
       if (!services.length) {
-        container.innerHTML = '<div class="loading-cell">No service data for this period.</div>';
+        content.innerHTML = '<div class="loading-cell">No service data for this period.</div>';
         return;
       }
 
-      const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-      const maxRev  = Math.max(...services.map(s => parseFloat(s.revenue||0)));
+      const fmt    = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+      const maxRev = Math.max(...services.map(s => parseFloat(s.revenue||0)));
 
-      container.innerHTML = `
-        <!-- Bar chart -->
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">Revenue by Service</div>
+      content.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:20px;margin-bottom:16px;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">
+            Revenue by Service
+          </div>
           ${services.slice(0,10).map(s => {
             const pct = maxRev ? (parseFloat(s.revenue||0) / maxRev * 100) : 0;
             return `
               <div style="margin-bottom:10px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <div style="display:flex;justify-content:space-between;
+                  align-items:center;margin-bottom:4px;">
                   <span style="font-size:12px;font-weight:500;color:var(--text);">${s.service}</span>
-                  <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text-2);">${fmt(s.revenue)}</span>
+                  <span style="font-size:12px;font-family:'JetBrains Mono',monospace;
+                    color:var(--text-2);">${fmt(s.revenue)}</span>
                 </div>
                 <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-                  <div style="height:100%;width:${pct}%;background:var(--text);border-radius:3px;transition:width 0.4s ease;"></div>
+                  <div style="height:100%;width:${pct}%;background:var(--text);
+                    border-radius:3px;transition:width 0.4s ease;"></div>
                 </div>
               </div>`;
           }).join('')}
         </div>
 
-        <!-- Table -->
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
           <table class="p-table">
             <thead>
               <tr>
@@ -1646,11 +1682,13 @@ async function _loadReportsPane() {
                 <tr>
                   <td>${s.service}</td>
                   <td>${s.job_count}</td>
-                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">${fmt(s.revenue)}</td>
+                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">
+                    ${fmt(s.revenue)}</td>
                   <td>
                     <div style="display:flex;align-items:center;gap:8px;">
                       <div style="width:60px;height:4px;background:var(--border);border-radius:2px;">
-                        <div style="height:100%;width:${s.percentage}%;background:var(--green-text);border-radius:2px;"></div>
+                        <div style="height:100%;width:${s.percentage}%;
+                          background:var(--green-text);border-radius:2px;"></div>
                       </div>
                       <span style="font-size:12px;color:var(--text-2);">${s.percentage}%</span>
                     </div>
@@ -1660,30 +1698,409 @@ async function _loadReportsPane() {
           </table>
         </div>`;
     } catch {
-      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
+      content.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
     }
   }
 
-  async function _renderWeeklyFiling(container) {
+  async function setServicesPeriod(period) {
+    _servicesPeriod = period;
+    document.querySelectorAll('#pane-reports .reports-tab[data-period]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    await _fetchServicesReport();
+  }
+
+ async function _renderWeeklyFiling(container) {
+    if (!container) return;
+
     container.innerHTML = `
-      <div style="text-align:center;padding:64px 24px;color:var(--text-3);">
-        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" stroke-width="1.5"
-          style="margin-bottom:16px;opacity:0.3;">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
-          <polyline points="10 9 9 9 8 9"/>
-        </svg>
-        <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:700;
-          color:var(--text-2);margin-bottom:8px;">Weekly Filing</div>
-        <div style="font-size:13px;max-width:340px;margin:0 auto;line-height:1.6;">
-          File and ascent weekly reports (Mon–Sat). This feature is coming soon as part of
-          the consumables and weekly operations pipeline.
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">Weekly Filing</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            Monday – Saturday consolidated operations report
+          </div>
         </div>
+        <button id="weekly-prepare-btn" onclick="Dashboard.weeklyPrepare()"
+          style="padding:8px 18px;background:var(--text);color:#fff;border:none;
+                 border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                 cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Prepare This Week
+        </button>
+      </div>
+      <div id="weekly-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _loadWeeklyReport();
+  }
+
+  async function _loadWeeklyReport() {
+    const content = document.getElementById('weekly-content');
+    if (!content) return;
+
+    try {
+      // Check if a report exists for current week
+      const res  = await Auth.fetch('/api/v1/finance/weekly/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const reports = data.results || data;
+
+      // Get current ISO week
+      const now    = new Date();
+      const jan4   = new Date(now.getFullYear(), 0, 4);
+      const weekN  = Math.ceil(((now - jan4) / 86400000 + jan4.getDay() + 1) / 7);
+
+      const current = reports.find(r =>
+        r.week_number === weekN && r.year === now.getFullYear()
+      );
+
+      if (current) {
+        _renderWeeklyReportDetail(content, current);
+      } else {
+        _renderWeeklyEmpty(content);
+      }
+
+    } catch {
+      content.innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
+          Could not load weekly filing.
+        </div>`;
+    }
+  }
+
+  function _renderWeeklyEmpty(container) {
+    const now      = new Date();
+    const monday   = new Date(now);
+    monday.setDate(now.getDate() - now.getDay() + 1);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const fmt = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    container.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:32px;text-align:center;">
+        <div style="width:48px;height:48px;border-radius:12px;background:var(--bg);
+          border:1px solid var(--border);display:flex;align-items:center;
+          justify-content:center;margin:0 auto 16px;color:var(--text-3);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;
+          color:var(--text);margin-bottom:6px;">No filing for this week</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+          ${fmt(monday)} – ${fmt(saturday)}
+        </div>
+        <button onclick="Dashboard.weeklyPrepare()"
+          style="padding:8px 20px;background:var(--text);color:#fff;border:none;
+                 border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                 cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Prepare Filing
+        </button>
       </div>`;
   }
+
+  function _renderWeeklyReportDetail(container, report) {
+    const fmt     = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+    const isLocked = report.status === 'LOCKED';
+    const isDraft  = report.status === 'DRAFT';
+
+    const statusColor = {
+      DRAFT     : 'var(--amber-text)',
+      SUBMITTED : 'var(--green-text)',
+      LOCKED    : 'var(--green-text)',
+    }[report.status] || 'var(--text-3)';
+
+    const statusBg = {
+      DRAFT     : 'var(--amber-bg)',
+      SUBMITTED : 'var(--green-bg)',
+      LOCKED    : 'var(--green-bg)',
+    }[report.status] || 'var(--bg)';
+
+    // ── Sheet status grid ─────────────────────────────────────────────────
+    const days    = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const sheets  = report.daily_sheets || [];
+
+    const sheetGrid = days.map((day, i) => {
+      const sheet = sheets.find(s => new Date(s.date).getDay() === (i + 1));
+      if (!sheet) {
+        return `
+          <div style="flex:1;padding:10px 8px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;margin-bottom:4px;">${day}</div>
+            <div style="font-size:10px;color:var(--text-3);">No sheet</div>
+          </div>`;
+      }
+      const isClosed = sheet.status !== 'OPEN';
+      const dotColor = isClosed ? 'var(--green-text)' : 'var(--amber-text)';
+      const dotBg    = isClosed ? 'var(--green-bg)'   : 'var(--amber-bg)';
+      return `
+        <div style="flex:1;padding:10px 8px;background:${dotBg};
+          border:1px solid ${isClosed ? 'var(--green-border)' : 'var(--amber-border)'};
+          border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:10px;font-weight:700;color:${dotColor};
+            text-transform:uppercase;margin-bottom:4px;">${day}</div>
+          <div style="font-size:10px;color:${dotColor};font-weight:600;">
+            ${isClosed ? '✓ Closed' : '● Open'}
+          </div>
+          <div style="font-size:9px;color:${dotColor};margin-top:2px;
+            font-family:'JetBrains Mono',monospace;">
+            ${fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}
+          </div>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <!-- Status header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+        padding:16px 20px;margin-bottom:16px;">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text);">
+            Week ${report.week_number}, ${report.year}
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px;">
+            ${new Date(report.date_from).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            –
+            ${new Date(report.date_to).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;
+            background:${statusBg};color:${statusColor};">${report.status}</span>
+          ${isDraft ? `
+            <button onclick="Dashboard.weeklyPrepare()"
+              style="padding:6px 14px;background:none;border:1.5px solid var(--border);
+                     border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                     cursor:pointer;color:var(--text-2);font-family:'DM Sans',sans-serif;">
+              Refresh
+            </button>` : ''}
+          ${isLocked && report.pdf_path ? `
+            <button onclick="Dashboard.weeklyDownloadPDF(${report.id})"
+              style="padding:6px 14px;background:var(--text);color:#fff;border:none;
+                     border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                     cursor:pointer;font-family:'DM Sans',sans-serif;">
+              Download PDF
+            </button>` : ''}
+        </div>
+      </div>
+
+      <!-- Sheet status grid -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">Daily Sheets</div>
+        <div style="display:flex;gap:8px;">${sheetGrid}</div>
+      </div>
+
+      <!-- Revenue summary -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Total Collected</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
+            font-weight:700;color:var(--text);">${fmt(parseFloat(report.total_cash||0) + parseFloat(report.total_momo||0) + parseFloat(report.total_pos||0))}</div>
+        </div>
+        <div style="background:var(--cash-bg);border:1px solid var(--cash-border);
+          border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--cash-text);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Cash</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
+            font-weight:700;color:var(--cash-strong);">${fmt(parseFloat(report.total_cash||0))}</div>
+        </div>
+        <div style="background:var(--momo-bg);border:1px solid var(--momo-border);
+          border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--momo-text);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">MoMo</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
+            font-weight:700;color:var(--momo-strong);">${fmt(parseFloat(report.total_momo||0))}</div>
+        </div>
+        <div style="background:var(--pos-bg);border:1px solid var(--pos-border);
+          border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--pos-text);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">POS</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
+            font-weight:700;color:var(--pos-strong);">${fmt(parseFloat(report.total_pos||0))}</div>
+        </div>
+      </div>
+
+      <!-- Jobs summary -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 16px;text-align:center;">
+          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
+            color:var(--text);">${fmt(parseFloat(report.total_jobs_created||0))}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Jobs Created</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 16px;text-align:center;">
+          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
+            color:var(--green-text);">${report.total_jobs_complete}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Completed</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 16px;text-align:center;">
+          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
+            color:var(--red-text);">${report.total_jobs_cancelled}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Cancelled</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 16px;text-align:center;">
+          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
+            color:var(--amber-text);">${report.carry_forward_count}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Carry Forward</div>
+        </div>
+      </div>
+
+      <!-- Inventory placeholder -->
+      <div style="background:#fffbec;border:1px solid var(--momo-border);
+        border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;
+        display:flex;align-items:center;gap:10px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="var(--momo-text)" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span style="font-size:12.5px;color:var(--momo-text);">
+          Inventory section will appear here once the inventory module is active.
+        </span>
+      </div>
+
+      <!-- BM Notes -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">Branch Manager Notes</div>
+        ${isLocked
+          ? `<div style="background:var(--panel);border:1px solid var(--border);
+               border-radius:var(--radius);padding:14px 16px;font-size:13px;
+               color:var(--text-2);min-height:60px;">${report.bm_notes || '—'}</div>`
+          : `<textarea id="weekly-notes" rows="3"
+               placeholder="Add weekly observations, incidents, or notes…"
+               style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+                      border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                      font-size:13px;resize:vertical;box-sizing:border-box;
+                      font-family:'DM Sans',sans-serif;">${report.bm_notes || ''}</textarea>`
+        }
+      </div>
+
+      <!-- Submit button -->
+      ${isDraft ? `
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button onclick="Dashboard.weeklySubmit(${report.id})"
+            id="weekly-submit-btn"
+            style="padding:10px 24px;background:var(--text);color:#fff;border:none;
+                   border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                   cursor:pointer;font-family:'DM Sans',sans-serif;
+                   ${!report.all_sheets_closed ? 'opacity:0.4;cursor:not-allowed;' : ''}">
+            ${report.all_sheets_closed ? 'Submit & Lock Filing' : 'Close all sheets to submit'}
+          </button>
+        </div>
+        ${!report.all_sheets_closed ? `
+          <div style="text-align:right;font-size:12px;color:var(--text-3);margin-top:6px;">
+            All daily sheets must be closed before the weekly filing can be submitted.
+          </div>` : ''}
+      ` : ''}
+
+      ${isLocked ? `
+        <div style="background:var(--green-bg);border:1px solid var(--green-border);
+          border-radius:var(--radius);padding:14px 16px;display:flex;
+          align-items:center;gap:10px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+            fill="none" stroke="var(--green-text)" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+          <span style="font-size:13px;font-weight:600;color:var(--green-text);">
+            Filed by ${report.submitted_by_name || '—'} on
+            ${report.submitted_at
+              ? new Date(report.submitted_at).toLocaleDateString('en-GB',
+                  { day: 'numeric', month: 'short', year: 'numeric' })
+              : '—'}
+          </span>
+        </div>
+      ` : ''}`;
+  }
+
+  async function weeklyPrepare() {
+    const btn = document.getElementById('weekly-prepare-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/weekly/prepare/', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not prepare weekly report.', 'error');
+        return;
+      }
+      const report = await res.json();
+      const content = document.getElementById('weekly-content');
+      if (content) _renderWeeklyReportDetail(content, report);
+      _toast('Weekly filing prepared.', 'success');
+    } catch {
+      _toast('Network error.', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Prepare This Week'; }
+    }
+  }
+
+  async function weeklySubmit(reportId) {
+    const btn = document.getElementById('weekly-submit-btn');
+    if (btn && btn.style.opacity === '0.4') return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+    // Save notes first
+    const notes = document.getElementById('weekly-notes')?.value.trim() || '';
+    if (notes) {
+      await Auth.fetch(`/api/v1/finance/weekly/${reportId}/notes/`, {
+        method  : 'PATCH',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ bm_notes: notes }),
+      }).catch(() => {});
+    }
+
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/submit/`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Submission failed.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit & Lock Filing'; }
+        return;
+      }
+      const report = await res.json();
+      const content = document.getElementById('weekly-content');
+      if (content) _renderWeeklyReportDetail(content, report);
+      _toast('Weekly filing submitted and locked.', 'success');
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit & Lock Filing'; }
+    }
+  }
+
+  async function weeklyDownloadPDF(reportId) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/pdf/`);
+      if (!res.ok) { _toast('Could not generate PDF.', 'error'); return; }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `weekly_report_${reportId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      _toast('Download failed.', 'error');
+    }
+  }
+
   // ── Jobs Archive (drill-down history) ─────────────────────
   let _historyLevel  = 'year';
   let _historyYear   = null;
@@ -2380,6 +2797,10 @@ return {
     _onPinInput,
     _submitPin,
     toggleSheetRow,
+    weeklyPrepare,
+    weeklySubmit,
+    weeklyDownloadPDF,
+    setServicesPeriod,
   };
 
 })();

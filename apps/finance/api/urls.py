@@ -32,7 +32,14 @@ from .views import (
     InvoiceSendView,
     InvoicePDFView,
     CashierReceiptListView,
+    WeeklyReportListView,
+    WeeklyReportDetailView,
+    WeeklyReportPrepareView,
+    WeeklyReportNotesView,
+    WeeklyReportSubmitView,
+    WeeklyReportPDFView,
 )
+
 
 urlpatterns = [
     # ── Daily Sales Sheet ─────────────────────────────────────────────────
@@ -84,4 +91,11 @@ urlpatterns = [
     path('invoices/<int:pk>/send/',              InvoiceSendView.as_view(),                   name='invoice-send'),
     path('invoices/<int:pk>/pdf/',               InvoicePDFView.as_view(),                    name='invoice-pdf'),
     path('cashier/receipts/',                CashierReceiptListView.as_view(),            name='cashier-receipts'),
+    # ── Weekly Report ─────────────────────────────────────────────────────
+    path('weekly/',                    WeeklyReportListView.as_view(),    name='weekly-list'),
+    path('weekly/prepare/',            WeeklyReportPrepareView.as_view(), name='weekly-prepare'),
+    path('weekly/<int:pk>/',           WeeklyReportDetailView.as_view(),  name='weekly-detail'),
+    path('weekly/<int:pk>/notes/',     WeeklyReportNotesView.as_view(),   name='weekly-notes'),
+    path('weekly/<int:pk>/submit/',    WeeklyReportSubmitView.as_view(),  name='weekly-submit'),
+    path('weekly/<int:pk>/pdf/',       WeeklyReportPDFView.as_view(),     name='weekly-pdf'),
 ]

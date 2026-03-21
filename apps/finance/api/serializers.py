@@ -11,6 +11,11 @@ from apps.finance.models import (
     Invoice,
     InvoiceLineItem,
 )
+from apps.finance.models import (
+    DailySalesSheet,
+    WeeklyReport
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily Sales Sheet
@@ -472,3 +477,59 @@ class InvoiceCreateSerializer(serializers.Serializer):
                 {'bill_to_email': 'Email address required for email delivery.'}
             )
         return data
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Weekly Report
+# ─────────────────────────────────────────────────────────────────────────────
+
+from apps.finance.models import WeeklyReport
+
+class WeeklyReportListSerializer(serializers.ModelSerializer):
+    branch_name      = serializers.CharField(source='branch.name', read_only=True)
+    branch_code      = serializers.CharField(source='branch.code', read_only=True)
+    submitted_by_name = serializers.SerializerMethodField()
+    total_collected  = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    sheets_count     = serializers.IntegerField(read_only=True)
+    all_sheets_closed = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model  = WeeklyReport
+        fields = [
+            'id', 'branch', 'branch_name', 'branch_code',
+            'week_number', 'year', 'date_from', 'date_to',
+            'status',
+            'total_cash', 'total_momo', 'total_pos',
+            'total_collected', 'total_petty_cash_out',
+            'total_jobs_created', 'total_jobs_complete',
+            'total_jobs_cancelled', 'carry_forward_count',
+            'sheets_count', 'all_sheets_closed',
+            'submitted_by_name', 'submitted_at',
+            'bm_notes', 'pdf_path', 'created_at',
+        ]
+
+    def get_submitted_by_name(self, obj) -> str:
+        if obj.submitted_by:
+            return obj.submitted_by.full_name
+        return ''
+
+
+class WeeklyReportDetailSerializer(WeeklyReportListSerializer):
+    daily_sheets     = serializers.SerializerMethodField()
+    inventory_snapshot = serializers.JSONField(read_only=True)
+
+    class Meta(WeeklyReportListSerializer.Meta):
+        fields = WeeklyReportListSerializer.Meta.fields + [
+            'daily_sheets',
+            'inventory_snapshot',
+        ]
+
+    def get_daily_sheets(self, obj) -> list:
+        sheets = obj.daily_sheets.all().order_by('date')
+        return DailySalesSheetListSerializer(sheets, many=True).data
+
+
+class WeeklyReportNotesSerializer(serializers.Serializer):
+    """BM adds or updates notes on a weekly report."""
+    bm_notes = serializers.CharField(allow_blank=True)

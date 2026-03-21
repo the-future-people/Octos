@@ -14,6 +14,7 @@ from apps.finance.models import (
     BranchTransferCredit,
     Invoice,
     InvoiceLineItem,
+    WeeklyReport,
 )
 from apps.finance.models.invoice import Invoice
 from apps.finance.sheet_engine import SheetEngine
@@ -41,8 +42,10 @@ from .serializers import (
     CashierSignOffSerializer,
     InvoiceSerializer,
     InvoiceCreateSerializer,
+    WeeklyReportListSerializer,
+    WeeklyReportDetailSerializer,
+    WeeklyReportNotesSerializer,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily Sales Sheet
@@ -1937,6 +1940,361 @@ def _send_invoice_whatsapp(invoice):
     print(f"[WhatsApp] Sending invoice {invoice.invoice_number} to {invoice.bill_to_phone}")
     return True
 
+def _generate_weekly_pdf(report):
+    """
+    Generate the weekly filing PDF.
+    Page 1: Cover page matching Farhat brand template
+    Page 2+: Filing content — revenue, jobs, cashiers, notes
+    """
+    import os
+    import calendar
+    from django.conf import settings
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle,
+        Paragraph, Spacer, HRFlowable, PageBreak,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+    from reportlab.platypus.flowables import Flowable
+
+    media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
+    weekly_dir  = os.path.join(media_root, 'weekly')
+    os.makedirs(weekly_dir, exist_ok=True)
+
+    output_path = os.path.join(
+        weekly_dir,
+        f"weekly_{report.branch.code}_W{report.week_number}_{report.year}.pdf"
+    )
+
+    branch = report.branch
+    W, H   = A4  # 595 x 842 pts
+
+    # ── Colors ────────────────────────────────────────────────────────────
+    FARHAT_RED   = colors.HexColor('#E31E24')
+    FARHAT_GOLD  = colors.HexColor('#F5A623')
+    WHITE        = colors.white
+    BLACK        = colors.HexColor('#111111')
+    GREY         = colors.HexColor('#666666')
+    LIGHT_GREY   = colors.HexColor('#f5f5f5')
+    BORDER_GREY  = colors.HexColor('#e0e0e0')
+
+    # ── Styles ────────────────────────────────────────────────────────────
+    def fmt(n):
+        return f"GHS {float(n or 0):,.2f}"
+
+    # ── Custom cover page flowable ─────────────────────────────────────────
+    class CoverPage(Flowable):
+        def __init__(self, width, height, branch, report):
+            Flowable.__init__(self)
+            self.width   = width
+            self.height  = height
+            self.branch  = branch
+            self.report  = report
+
+        def draw(self):
+            c = self.canv
+            W = self.width
+            H = self.height
+
+            # White background
+            c.setFillColor(colors.white)
+            c.rect(0, 0, W, H, fill=1, stroke=0)
+
+            # Red center panel (60% width, full height)
+            panel_x = W * 0.20
+            panel_w = W * 0.60
+            c.setFillColor(FARHAT_RED)
+            c.rect(panel_x, 0, panel_w, H, fill=1, stroke=0)
+
+            # ── Logo area (white bird silhouette approximation) ──────────
+            # Draw a simple white circle as logo placeholder
+            logo_cx = panel_x + panel_w / 2
+            logo_cy = H * 0.72
+            logo_r  = 28
+
+            c.setFillColor(WHITE)
+            c.circle(logo_cx, logo_cy, logo_r, fill=1, stroke=0)
+
+            # Draw stylized F in the circle
+            c.setFillColor(FARHAT_RED)
+            c.setFont('Helvetica-Bold', 22)
+            c.drawCentredString(logo_cx, logo_cy - 8, 'F')
+
+            # ── Branch name ───────────────────────────────────────────────
+            branch_name = self.branch.name.upper()
+            # Split into two lines if long
+            words = branch_name.split()
+            if len(words) >= 2:
+                line1 = ' '.join(words[:-1])
+                line2 = words[-1]
+            else:
+                line1 = branch_name
+                line2 = ''
+
+            c.setFillColor(WHITE)
+            c.setFont('Helvetica-Bold', 32)
+            c.drawCentredString(logo_cx, H * 0.55, line1)
+            if line2:
+                c.drawCentredString(logo_cx, H * 0.47, line2)
+
+            # ── Week / Month / Year ───────────────────────────────────────
+            month_name = calendar.month_name[self.report.date_from.month].upper()
+            week_str   = f"WEEK {self.report.week_number},  {month_name},  {self.report.year}"
+
+            c.setFillColor(FARHAT_GOLD)
+            c.setFont('Helvetica-Bold', 14)
+            c.drawCentredString(logo_cx, H * 0.36, week_str)
+
+            # ── Contact info ──────────────────────────────────────────────
+            email = self.branch.email or 'info@farhatprintingpress.com'
+            phone = self.branch.phone or self.branch.whatsapp_number or '+233 556244194'
+
+            c.setFillColor(WHITE)
+            c.setFont('Helvetica-Bold', 11)
+            c.drawCentredString(logo_cx, H * 0.26, email)
+            c.drawCentredString(logo_cx, H * 0.21, phone)
+
+            # ── Footer ────────────────────────────────────────────────────
+            c.setFillColor(FARHAT_GOLD)
+            c.setFont('Helvetica-Bold', 7)
+            c.drawCentredString(logo_cx, H * 0.07, 'MANDATORY WEEKLY FILING')
+            c.drawCentredString(logo_cx, H * 0.055, 'STRICTLY CONFIDENTIAL')
+
+            c.setFillColor(WHITE)
+            c.setFont('Helvetica', 7)
+            c.drawCentredString(logo_cx, H * 0.035, 'Property of Farhat Printing Press')
+
+    # ── Build document ────────────────────────────────────────────────────
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize      = A4,
+        rightMargin   = 20*mm,
+        leftMargin    = 20*mm,
+        topMargin     = 20*mm,
+        bottomMargin  = 20*mm,
+    )
+
+    styles = getSampleStyleSheet()
+    story  = []
+
+    # Page 1 — Cover
+    story.append(CoverPage(W, H, branch, report))
+    story.append(PageBreak())
+
+    # ── Content page styles ───────────────────────────────────────────────
+    CW = A4[0] - 40*mm  # content width
+
+    h1_style = ParagraphStyle('h1', fontSize=18, fontName='Helvetica-Bold',
+                               textColor=BLACK, spaceAfter=4)
+    h2_style = ParagraphStyle('h2', fontSize=11, fontName='Helvetica-Bold',
+                               textColor=BLACK, spaceAfter=4)
+    label_style = ParagraphStyle('lbl', fontSize=8, fontName='Helvetica-Bold',
+                                  textColor=GREY, letterSpacing=0.5,
+                                  spaceAfter=8)
+    body_style  = ParagraphStyle('body', fontSize=9, fontName='Helvetica',
+                                  textColor=GREY)
+    right_style = ParagraphStyle('right', fontSize=9, fontName='Helvetica',
+                                  alignment=TA_RIGHT, textColor=BLACK)
+    right_bold  = ParagraphStyle('rightb', fontSize=10, fontName='Helvetica-Bold',
+                                  alignment=TA_RIGHT, textColor=BLACK)
+
+    # ── Page 2 header ─────────────────────────────────────────────────────
+    month_name = calendar.month_name[report.date_from.month]
+    story.append(Paragraph(f"{branch.name}", h1_style))
+    story.append(Paragraph(
+        f"Weekly Filing — Week {report.week_number}, {month_name} {report.year}  "
+        f"({report.date_from.strftime('%d %b')} – {report.date_to.strftime('%d %b %Y')})",
+        label_style
+    ))
+    story.append(HRFlowable(width=CW, thickness=2, color=FARHAT_RED))
+    story.append(Spacer(1, 6*mm))
+
+    # ── Revenue summary ───────────────────────────────────────────────────
+    story.append(Paragraph('REVENUE SUMMARY', label_style))
+
+    rev_data = [
+        ['Method', 'Amount (GHS)', '% of Total'],
+        ['Cash',   f"{float(report.total_cash):,.2f}",
+         f"{float(report.total_cash)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
+        ['Mobile Money', f"{float(report.total_momo):,.2f}",
+         f"{float(report.total_momo)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
+        ['POS',    f"{float(report.total_pos):,.2f}",
+         f"{float(report.total_pos)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
+        ['TOTAL COLLECTED', f"{float(report.total_collected):,.2f}", '100%'],
+        ['Petty Cash Out', f"({float(report.total_petty_cash_out):,.2f})", ''],
+        ['Net Cash in Till', f"{float(report.net_cash_in_till):,.2f}", ''],
+    ]
+
+    rev_table = Table(rev_data, colWidths=[CW*0.45, CW*0.30, CW*0.25])
+    rev_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
+        ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
+        ('FONTSIZE',      (0,0), (-1,-1), 9),
+        ('FONTNAME',      (0,4), (-1,4),  'Helvetica-Bold'),
+        ('BACKGROUND',    (0,4), (-1,4),  colors.HexColor('#fff0f0')),
+        ('TEXTCOLOR',     (0,4), (-1,4),  FARHAT_RED),
+        ('ALIGN',         (1,0), (-1,-1), 'RIGHT'),
+        ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
+        ('TOPPADDING',    (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING',   (0,0), (-1,-1), 8),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
+    ]))
+    story.append(rev_table)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Daily breakdown ───────────────────────────────────────────────────
+    story.append(Paragraph('DAILY BREAKDOWN', label_style))
+
+    day_headers = ['Date', 'Day', 'Status', 'Cash', 'MoMo', 'POS', 'Total', 'Jobs']
+    day_data    = [day_headers]
+
+    sheets = report.daily_sheets.all().order_by('date')
+    for sheet in sheets:
+        day_name = sheet.date.strftime('%A')
+        total    = float(sheet.total_cash + sheet.total_momo + sheet.total_pos)
+        day_data.append([
+            sheet.date.strftime('%d %b'),
+            day_name,
+            sheet.status,
+            f"{float(sheet.total_cash):,.2f}",
+            f"{float(sheet.total_momo):,.2f}",
+            f"{float(sheet.total_pos):,.2f}",
+            f"{total:,.2f}",
+            str(sheet.total_jobs_created),
+        ])
+
+    if day_data[1:]:
+        day_table = Table(
+            day_data,
+            colWidths=[CW*0.1, CW*0.12, CW*0.11, CW*0.14, CW*0.14, CW*0.12, CW*0.14, CW*0.09]
+        )
+        day_table.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
+            ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
+            ('FONTSIZE',      (0,0), (-1,-1), 8),
+            ('ALIGN',         (3,0), (-1,-1), 'RIGHT'),
+            ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
+            ('TOPPADDING',    (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('LEFTPADDING',   (0,0), (-1,-1), 6),
+            ('RIGHTPADDING',  (0,0), (-1,-1), 6),
+            ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+        ]))
+        story.append(day_table)
+    else:
+        story.append(Paragraph('No daily sheets linked.', body_style))
+
+    story.append(Spacer(1, 6*mm))
+
+    # ── Jobs summary ──────────────────────────────────────────────────────
+    story.append(Paragraph('JOBS SUMMARY', label_style))
+
+    jobs_data = [
+        ['Metric', 'Count'],
+        ['Total Jobs Created',   str(report.total_jobs_created)],
+        ['Completed',            str(report.total_jobs_complete)],
+        ['Cancelled',            str(report.total_jobs_cancelled)],
+        ['Carry Forward (Unpaid)', str(report.carry_forward_count)],
+    ]
+
+    jobs_table = Table(jobs_data, colWidths=[CW*0.65, CW*0.35])
+    jobs_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
+        ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
+        ('FONTSIZE',      (0,0), (-1,-1), 9),
+        ('ALIGN',         (1,0), (1,-1),  'RIGHT'),
+        ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
+        ('TOPPADDING',    (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING',   (0,0), (-1,-1), 8),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
+        ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+    ]))
+    story.append(jobs_table)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Inventory placeholder ─────────────────────────────────────────────
+    story.append(Paragraph('INVENTORY', label_style))
+    if report.inventory_snapshot:
+        story.append(Paragraph(str(report.inventory_snapshot), body_style))
+    else:
+        inv_placeholder = Table(
+            [['Consumables tracking will appear here once inventory module is active.']],
+            colWidths=[CW]
+        )
+        inv_placeholder.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0), (-1,-1), colors.HexColor('#fffbec')),
+            ('FONTNAME',      (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE',      (0,0), (-1,-1), 9),
+            ('TEXTCOLOR',     (0,0), (-1,-1), colors.HexColor('#7a5c00')),
+            ('BOX',           (0,0), (-1,-1), 0.5, colors.HexColor('#f0d878')),
+            ('TOPPADDING',    (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+            ('LEFTPADDING',   (0,0), (-1,-1), 12),
+        ]))
+        story.append(inv_placeholder)
+
+    story.append(Spacer(1, 6*mm))
+
+    # ── BM Notes ──────────────────────────────────────────────────────────
+    story.append(Paragraph('BRANCH MANAGER NOTES', label_style))
+    notes_text = report.bm_notes or '—'
+    notes_table = Table([[notes_text]], colWidths=[CW])
+    notes_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,-1), colors.HexColor('#f9f9f9')),
+        ('FONTNAME',      (0,0), (-1,-1), 'Helvetica'),
+        ('FONTSIZE',      (0,0), (-1,-1), 9),
+        ('TEXTCOLOR',     (0,0), (-1,-1), BLACK),
+        ('BOX',           (0,0), (-1,-1), 0.5, BORDER_GREY),
+        ('TOPPADDING',    (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('LEFTPADDING',   (0,0), (-1,-1), 12),
+    ]))
+    story.append(notes_table)
+    story.append(Spacer(1, 8*mm))
+
+    # ── Sign-off block ────────────────────────────────────────────────────
+    story.append(HRFlowable(width=CW, thickness=1, color=BORDER_GREY))
+    story.append(Spacer(1, 4*mm))
+
+    submitted_by = report.submitted_by.full_name if report.submitted_by else '—'
+    submitted_at = (
+        report.submitted_at.strftime('%d %b %Y, %I:%M %p')
+        if report.submitted_at else '—'
+    )
+
+    signoff_data = [
+        ['Filed by', submitted_by, 'Date', submitted_at],
+        ['Branch',   branch.name,  'Week', f"W{report.week_number}/{report.year}"],
+    ]
+    signoff_table = Table(signoff_data, colWidths=[CW*0.15, CW*0.35, CW*0.15, CW*0.35])
+    signoff_table.setStyle(TableStyle([
+        ('FONTNAME',      (0,0), (0,-1),  'Helvetica-Bold'),
+        ('FONTNAME',      (2,0), (2,-1),  'Helvetica-Bold'),
+        ('FONTSIZE',      (0,0), (-1,-1), 9),
+        ('TEXTCOLOR',     (0,0), (0,-1),  GREY),
+        ('TEXTCOLOR',     (2,0), (2,-1),  GREY),
+        ('TOPPADDING',    (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(signoff_table)
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph(
+        'This document is the property of Farhat Printing Press. '
+        'Strictly confidential — for internal use only.',
+        ParagraphStyle('ft', fontSize=7, fontName='Helvetica',
+                       textColor=GREY, alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+
+    # Save path
+    report.pdf_path = output_path
+    report.save(update_fields=['pdf_path', 'updated_at'])
 
 def _send_invoice_email(invoice):
     """Send invoice PDF via Django email."""
@@ -1972,3 +2330,268 @@ def _send_invoice_email(invoice):
     except Exception as e:
         print(f"[Email] Failed to send invoice {invoice.invoice_number}: {e}")
         return False
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Weekly Report
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WeeklyReportListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/weekly/
+    Returns weekly reports for the requesting user's branch.
+    """
+    serializer_class   = WeeklyReportListSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs   = WeeklyReport.objects.select_related(
+            'branch', 'submitted_by'
+        ).prefetch_related('daily_sheets')
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+        return qs
+
+
+class WeeklyReportDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/finance/weekly/<id>/
+    Full weekly report detail including daily sheets.
+    """
+    serializer_class   = WeeklyReportDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs   = WeeklyReport.objects.select_related(
+            'branch', 'submitted_by'
+        ).prefetch_related('daily_sheets')
+        if hasattr(user, 'branch') and user.branch:
+            qs = qs.filter(branch=user.branch)
+        return qs
+
+
+class WeeklyReportPrepareView(APIView):
+    """
+    POST /api/v1/finance/weekly/prepare/
+    Creates or refreshes a DRAFT weekly report for the current week.
+    Aggregates all closed daily sheets Mon–Sat into the report.
+    Can be called multiple times — safe to re-prepare a DRAFT.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.jobs.models import Job
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Resolve current week Mon–Sat ──────────────────────────────
+        today     = timezone.localdate()
+        monday    = today - timedelta(days=today.weekday())  # weekday() 0=Mon
+        saturday  = monday + timedelta(days=5)
+
+        # ISO week number
+        week_number = today.isocalendar()[1]
+        year        = today.isocalendar()[0]
+
+        # ── Get or create the report ──────────────────────────────────
+        report, created = WeeklyReport.objects.get_or_create(
+            branch      = branch,
+            week_number = week_number,
+            year        = year,
+            defaults    = {
+                'date_from' : monday,
+                'date_to'   : saturday,
+                'status'    : WeeklyReport.Status.DRAFT,
+            }
+        )
+
+        if report.is_locked:
+            return Response(
+                {'detail': 'This weekly report is already locked.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Find all sheets for this week ─────────────────────────────
+        sheets = DailySalesSheet.objects.filter(
+            branch = branch,
+            date__range = [monday, saturday],
+        )
+
+        # ── Link sheets ───────────────────────────────────────────────
+        report.daily_sheets.set(sheets)
+
+        # ── Aggregate from closed sheets only ─────────────────────────
+        from django.db.models import Sum
+
+        closed_sheets = sheets.exclude(status=DailySalesSheet.Status.OPEN)
+
+        report.total_cash           = closed_sheets.aggregate(t=Sum('total_cash'))['t']           or 0
+        report.total_momo           = closed_sheets.aggregate(t=Sum('total_momo'))['t']           or 0
+        report.total_pos            = closed_sheets.aggregate(t=Sum('total_pos'))['t']            or 0
+        report.total_petty_cash_out = closed_sheets.aggregate(t=Sum('total_petty_cash_out'))['t'] or 0
+        report.total_credit_issued  = closed_sheets.aggregate(t=Sum('total_credit_issued'))['t']  or 0
+        report.net_cash_in_till     = closed_sheets.aggregate(t=Sum('net_cash_in_till'))['t']     or 0
+        report.total_jobs_created   = closed_sheets.aggregate(t=Sum('total_jobs_created'))['t']   or 0
+
+        # Job level counts from actual jobs
+        week_jobs = Job.objects.filter(
+            branch      = branch,
+            created_at__date__range = [monday, saturday],
+        )
+        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
+        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
+        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
+
+        report.date_from = monday
+        report.date_to   = saturday
+        report.save()
+
+        return Response(
+            WeeklyReportDetailSerializer(report).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class WeeklyReportNotesView(APIView):
+    """
+    PATCH /api/v1/finance/weekly/<id>/notes/
+    BM adds or updates notes on a draft report.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            report = WeeklyReport.objects.get(pk=pk, branch=request.user.branch)
+        except WeeklyReport.DoesNotExist:
+            return Response({'detail': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if report.is_locked:
+            return Response({'detail': 'Report is locked.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = WeeklyReportNotesSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        report.bm_notes = serializer.validated_data['bm_notes']
+        report.save(update_fields=['bm_notes', 'updated_at'])
+        return Response(WeeklyReportDetailSerializer(report).data)
+
+
+class WeeklyReportSubmitView(APIView):
+    """
+    POST /api/v1/finance/weekly/<id>/submit/
+    BM submits and locks the weekly report.
+    All sheets must be closed before submission is allowed.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        try:
+            report = WeeklyReport.objects.prefetch_related(
+                'daily_sheets'
+            ).get(pk=pk, branch=request.user.branch)
+        except WeeklyReport.DoesNotExist:
+            return Response({'detail': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if report.is_locked:
+            return Response({'detail': 'Already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not report.daily_sheets.exists():
+            return Response(
+                {'detail': 'No daily sheets linked. Prepare the report first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not report.all_sheets_closed:
+            open_sheets = report.daily_sheets.filter(
+                status=DailySalesSheet.Status.OPEN
+            ).values_list('date', flat=True)
+            dates = ', '.join(str(d) for d in open_sheets)
+            return Response(
+                {'detail': f'Cannot submit — sheets still open: {dates}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Re-aggregate to make sure figures are fresh ───────────────
+        from django.db.models import Sum
+        from apps.jobs.models import Job
+
+        closed_sheets = report.daily_sheets.exclude(status=DailySalesSheet.Status.OPEN)
+        report.total_cash           = closed_sheets.aggregate(t=Sum('total_cash'))['t']           or 0
+        report.total_momo           = closed_sheets.aggregate(t=Sum('total_momo'))['t']           or 0
+        report.total_pos            = closed_sheets.aggregate(t=Sum('total_pos'))['t']            or 0
+        report.total_petty_cash_out = closed_sheets.aggregate(t=Sum('total_petty_cash_out'))['t'] or 0
+        report.total_credit_issued  = closed_sheets.aggregate(t=Sum('total_credit_issued'))['t']  or 0
+        report.net_cash_in_till     = closed_sheets.aggregate(t=Sum('net_cash_in_till'))['t']     or 0
+        report.total_jobs_created   = closed_sheets.aggregate(t=Sum('total_jobs_created'))['t']   or 0
+
+        week_jobs = Job.objects.filter(
+            branch                  = report.branch,
+            created_at__date__range = [report.date_from, report.date_to],
+        )
+        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
+        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
+        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
+
+        # ── Lock the report ───────────────────────────────────────────
+        report.status       = WeeklyReport.Status.LOCKED
+        report.submitted_by = request.user
+        report.submitted_at = timezone.now()
+        report.save()
+
+        # ── Generate PDF ──────────────────────────────────────────────
+        try:
+            _generate_weekly_pdf(report)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Weekly PDF generation failed: {e}", exc_info=True)
+
+        return Response(WeeklyReportDetailSerializer(report).data)
+
+
+class WeeklyReportPDFView(APIView):
+    """
+    GET /api/v1/finance/weekly/<id>/pdf/
+    Download the weekly report PDF.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            report = WeeklyReport.objects.get(pk=pk, branch=request.user.branch)
+        except WeeklyReport.DoesNotExist:
+            return Response({'detail': 'Report not found.'}, status=404)
+
+        if not report.pdf_path:
+            try:
+                _generate_weekly_pdf(report)
+            except Exception as e:
+                return Response({'detail': f'PDF generation failed: {e}'}, status=500)
+
+        import os
+        if not os.path.exists(report.pdf_path):
+            try:
+                _generate_weekly_pdf(report)
+            except Exception as e:
+                return Response({'detail': f'PDF generation failed: {e}'}, status=500)
+
+        from django.http import FileResponse
+        response = FileResponse(
+            open(report.pdf_path, 'rb'),
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="weekly_{report.branch.code}_W{report.week_number}_{report.year}.pdf"'
+        )
+        return response
