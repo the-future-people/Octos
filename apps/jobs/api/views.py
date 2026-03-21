@@ -215,97 +215,133 @@ class CashierConfirmPaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-            try:
-                job = Job.objects.get(pk=pk, status=Job.PENDING_PAYMENT)
-            except Job.DoesNotExist:
+        try:
+            job = Job.objects.get(pk=pk, status=Job.PENDING_PAYMENT)
+        except Job.DoesNotExist:
+            return Response(
+                {'detail': 'Job not found or not awaiting payment.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = CashierPaymentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        deposit_pct    = serializer.validated_data['deposit_percentage']
+        notes          = serializer.validated_data.get('notes', '')
+        payment_method = serializer.validated_data.get('payment_method', 'CASH')
+        split_legs     = serializer.validated_data.get('split_legs', [])
+
+        # ── Calculate amount paid ─────────────────────────────────────
+        if job.estimated_cost:
+            amount_paid = (job.estimated_cost * deposit_pct) / 100
+        else:
+            amount_paid = None
+
+        # ── Validate split legs sum ───────────────────────────────────
+        if payment_method == 'SPLIT' and split_legs:
+            legs_total = sum(float(leg['amount']) for leg in split_legs)
+            if amount_paid and abs(legs_total - float(amount_paid)) > 0.01:
                 return Response(
-                    {'detail': 'Job not found or not awaiting payment.'},
-                    status=status.HTTP_404_NOT_FOUND,
+                    {'detail': f'Split legs total (GHS {legs_total:.2f}) must equal amount due (GHS {float(amount_paid):.2f}).'},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            serializer = CashierPaymentSerializer(data=request.data)
-            if not serializer.is_valid():
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # ── Persist payment info on job ───────────────────────────────
+        job.deposit_percentage = deposit_pct
+        job.amount_paid        = amount_paid
+        job.payment_method     = 'SPLIT' if payment_method == 'SPLIT' else payment_method
+        job.momo_reference     = serializer.validated_data.get('momo_reference', '')
+        job.pos_approval_code  = serializer.validated_data.get('pos_approval_code', '')
+        job.cash_tendered      = serializer.validated_data.get('cash_tendered')
+        job.change_given       = serializer.validated_data.get('change_given')
+        job.save(update_fields=[
+            'deposit_percentage', 'amount_paid',
+            'payment_method', 'momo_reference',
+            'pos_approval_code', 'cash_tendered',
+            'change_given', 'updated_at',
+        ])
 
-            deposit_pct = serializer.validated_data['deposit_percentage']
-            notes       = serializer.validated_data.get('notes', '')
+        # ── Advance FSM to COMPLETE ───────────────────────────────────
+        try:
+            result = JobStatusEngine.advance(
+                job       = job,
+                to_status = Job.COMPLETE,
+                actor     = request.user,
+                notes     = notes or f"Payment confirmed: {deposit_pct}% deposit",
+            )
+        except (ValueError, PermissionError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Calculate amount paid
-            if job.estimated_cost:
-                amount_paid = (job.estimated_cost * deposit_pct) / 100
-            else:
-                amount_paid = None
+        result['deposit_percentage'] = deposit_pct
+        result['amount_paid']        = str(amount_paid) if amount_paid else None
+        result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
+        result['payment_method']     = payment_method
 
-            # Persist deposit info on the job
-            # Persist deposit and payment info on the job
-            job.deposit_percentage = deposit_pct
-            job.amount_paid        = amount_paid
-            job.payment_method     = serializer.validated_data.get('payment_method', 'CASH')
-            job.momo_reference     = serializer.validated_data.get('momo_reference', '')
-            job.pos_approval_code  = serializer.validated_data.get('pos_approval_code', '')
-            job.cash_tendered      = serializer.validated_data.get('cash_tendered')
-            job.change_given       = serializer.validated_data.get('change_given')
-            job.save(update_fields=[
-                'deposit_percentage', 'amount_paid',
-                'payment_method', 'momo_reference',
-                'pos_approval_code', 'cash_tendered',
-                'change_given', 'updated_at',
-            ])
+        # ── Issue receipt ─────────────────────────────────────────────
+        try:
+            from apps.finance.receipt_engine import ReceiptEngine
+            from apps.finance.models import DailySalesSheet, PaymentLeg
 
-            # Advance FSM to COMPLETE — for INSTANT jobs, payment = job done
-            try:
-                result = JobStatusEngine.advance(
-                    job       = job,
-                    to_status = Job.COMPLETE,
-                    actor     = request.user,
-                    notes     = notes or f"Payment confirmed: {deposit_pct}% deposit",
-                )
-            except (ValueError, PermissionError) as e:
-                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            daily_sheet = DailySalesSheet.objects.filter(
+                branch = job.branch,
+                status = DailySalesSheet.Status.OPEN,
+            ).order_by('-date').first()
 
-            result['deposit_percentage'] = deposit_pct
-            result['amount_paid']        = str(amount_paid) if amount_paid else None
-            result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
-            result['payment_method']     = serializer.validated_data.get('payment_method', 'CASH')
+            if daily_sheet:
+                engine = ReceiptEngine(job.branch)
 
-                # ── Issue receipt ─────────────────────────────────────────
-            receipt_number = None
-            try:
-                    from apps.finance.receipt_engine import ReceiptEngine
-                    from apps.finance.models import DailySalesSheet
-
-                    daily_sheet = DailySalesSheet.objects.filter(
-                        branch = job.branch,
-                        status = DailySalesSheet.Status.OPEN,
-                    ).order_by('-date').first()
-
-                    if daily_sheet:
-                        engine  = ReceiptEngine(job.branch)
-                        receipt = engine.issue(
+                if payment_method == 'SPLIT' and split_legs:
+                    # Issue receipt for split payment
+                    receipt = engine.issue(
+                        job               = job,
+                        cashier           = request.user,
+                        daily_sheet       = daily_sheet,
+                        payment_method    = 'SPLIT',
+                        amount_paid       = amount_paid,
+                        balance_due       = job.balance_due or 0,
+                        customer_phone    = serializer.validated_data.get('customer_phone', ''),
+                        company_name      = serializer.validated_data.get('company_name', ''),
+                        split_legs        = split_legs,
+                    )
+                    # Create PaymentLeg records
+                    for i, leg in enumerate(split_legs, 1):
+                        PaymentLeg.objects.create(
                             job               = job,
-                            cashier           = request.user,
-                            daily_sheet       = daily_sheet,
-                            payment_method    = serializer.validated_data.get('payment_method', 'CASH'),
-                            amount_paid       = amount_paid,
-                            balance_due       = job.balance_due or 0,
-                            momo_reference    = serializer.validated_data.get('momo_reference', ''),
-                            pos_approval_code = serializer.validated_data.get('pos_approval_code', ''),
-                            customer_phone    = serializer.validated_data.get('customer_phone', ''),
-                            company_name      = serializer.validated_data.get('company_name', ''),
+                            receipt           = receipt,
+                            payment_method    = leg['method'],
+                            amount            = leg['amount'],
+                            momo_reference    = leg.get('reference', '') if leg['method'] == 'MOMO' else '',
+                            pos_approval_code = leg.get('reference', '') if leg['method'] == 'POS'  else '',
+                            sequence          = i,
                         )
-                        receipt_number          = receipt.receipt_number
-                        result['receipt_id']    = receipt.id
-                        result['receipt_number'] = receipt_number
-                    else:
-                        result['receipt_number'] = None
-                        result['receipt_id']     = None
-            except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"ReceiptEngine failed: {e}", exc_info=True)
-                    result['receipt_number'] = None
-                    result['receipt_id']     = None
+                else:
+                    receipt = engine.issue(
+                        job               = job,
+                        cashier           = request.user,
+                        daily_sheet       = daily_sheet,
+                        payment_method    = payment_method,
+                        amount_paid       = amount_paid,
+                        balance_due       = job.balance_due or 0,
+                        momo_reference    = serializer.validated_data.get('momo_reference', ''),
+                        pos_approval_code = serializer.validated_data.get('pos_approval_code', ''),
+                        customer_phone    = serializer.validated_data.get('customer_phone', ''),
+                        company_name      = serializer.validated_data.get('company_name', ''),
+                    )
 
-            return Response(result)
+                result['receipt_number'] = receipt.receipt_number
+                result['receipt_id']     = receipt.id
+            else:
+                result['receipt_number'] = None
+                result['receipt_id']     = None
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"ReceiptEngine failed: {e}", exc_info=True)
+            result['receipt_number'] = None
+            result['receipt_id']     = None
+
+        return Response(result)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Files

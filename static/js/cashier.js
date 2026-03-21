@@ -361,7 +361,7 @@ const Cashier = (() => {
   function selectMethod(method) {
     selectedMethod = method;
 
-    ['CASH', 'MOMO', 'POS'].forEach(m => {
+    ['CASH', 'MOMO', 'POS', 'SPLIT'].forEach(m => {
       const btn = document.getElementById(`pm-${m.toLowerCase()}`);
       if (btn) btn.classList.toggle('selected', m === method);
     });
@@ -372,6 +372,11 @@ const Cashier = (() => {
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
     if (cashField) cashField.classList.toggle('visible', method === 'CASH');
+    if (method === 'SPLIT') {
+      momoField?.classList.remove('visible');
+      posField?.classList.remove('visible');
+      cashField?.classList.remove('visible');
+    }
 
     if (method !== 'CASH') {
       const changeRow = document.getElementById('cm-change-row');
@@ -380,15 +385,20 @@ const Cashier = (() => {
       if (input)     input.value = '';
     }
 
+    const splitFields = document.getElementById('split-fields');
+    if (splitFields) splitFields.style.display = method === 'SPLIT' ? 'block' : 'none';
+    if (method === 'SPLIT') _updateSplitFields();
+
     const btn = document.getElementById('confirm-submit-btn');
     if (btn) btn.className = `cm-confirm-btn ${method.toLowerCase()}`;
 
     const hint = document.getElementById('cm-payment-hint');
     if (hint) {
       hint.classList.add('visible');
-      if (method === 'CASH')      hint.textContent = 'Enter cash amount tendered by customer';
-      else if (method === 'MOMO') hint.textContent = 'Enter MoMo reference number to continue';
-      else if (method === 'POS')  hint.textContent = 'Enter POS approval code to continue';
+      if (method === 'CASH')       hint.textContent = 'Enter cash amount tendered by customer';
+      else if (method === 'MOMO')  hint.textContent = 'Enter MoMo reference number to continue';
+      else if (method === 'POS')   hint.textContent = 'Enter POS approval code to continue';
+      else if (method === 'SPLIT') hint.textContent = 'Enter amounts for each payment leg';
     }
 
     _updateAmountDue();
@@ -453,9 +463,12 @@ const Cashier = (() => {
       const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
       ready = tendered >= due && tendered > 0;
     } else if (selectedMethod === 'MOMO') {
-      ready = !!(document.getElementById('momo-ref')?.value.trim());
+      const ref = document.getElementById('momo-ref')?.value.trim() || '';
+      ready = /^\d{11}$/.test(ref);
     } else if (selectedMethod === 'POS') {
       ready = !!(document.getElementById('pos-ref')?.value.trim());
+    } else if (selectedMethod === 'SPLIT') {
+      ready = _validateSplitLegs().valid;
     }
 
     btn.disabled      = !ready;
@@ -506,10 +519,27 @@ const Cashier = (() => {
         payment_method    : selectedMethod,
         notes,
       };
-      if (selectedMethod === 'MOMO') body.momo_reference    = momoRef;
+      if (selectedMethod === 'MOMO') {
+        const ref = document.getElementById('momo-ref')?.value.trim() || '';
+        if (!/^\d{11}$/.test(ref)) {
+          _toast('MoMo reference must be exactly 11 digits.', 'error');
+          if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Confirm Payment'; }
+          return;
+        }
+        body.momo_reference = ref;
+      }
       if (selectedMethod === 'POS')  body.pos_approval_code = posCode;
-      if (phone)                     body.customer_phone    = phone;
-      if (company)                   body.company_name      = company;
+      if (selectedMethod === 'SPLIT') {
+        const validation = _validateSplitLegs();
+        if (!validation.valid) {
+          _toast(validation.error, 'error');
+          if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Confirm Payment'; }
+          return;
+        }
+        body.split_legs = validation.legs;
+      }
+      if (phone)   body.customer_phone = phone;
+      if (company) body.company_name   = company;
       if (selectedMethod === 'CASH') {
         const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
         const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -1687,6 +1717,98 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     else if (level === 'week')  _loadHistoryLevel('week',  { year, month });
   }
 
+  // ── Split payment helpers ──────────────────────────────────
+  function _validateSplitLegs() {
+    const method1 = document.getElementById('split-method-1')?.value || 'MOMO';
+    const method2 = document.getElementById('split-method-2')?.value || 'CASH';
+    const amount1 = parseFloat(document.getElementById('split-amount-1')?.value || 0);
+    const amount2 = parseFloat(document.getElementById('split-amount-2')?.value || 0);
+    const ref1    = document.getElementById('split-ref-1-input')?.value.trim() || '';
+    const ref2    = document.getElementById('split-ref-2-input')?.value.trim() || '';
+
+    if (!amount1 || amount1 <= 0) return { valid: false, error: 'Enter amount for first payment leg.' };
+    if (!amount2 || amount2 <= 0) return { valid: false, error: 'Second payment amount is 0 — adjust first amount.' };
+
+    if (method1 === 'MOMO') {
+      if (!ref1) return { valid: false, error: 'MoMo reference required for first leg.' };
+      if (!/^\d{11}$/.test(ref1)) return { valid: false, error: 'First leg MoMo reference must be exactly 11 digits.' };
+    }
+    if (method1 === 'POS') {
+      if (!ref1) return { valid: false, error: 'POS approval code required for first leg.' };
+    }
+    if (method2 === 'MOMO') {
+      if (!ref2) return { valid: false, error: 'MoMo reference required for second leg.' };
+      if (!/^\d{11}$/.test(ref2)) return { valid: false, error: 'Second leg MoMo reference must be exactly 11 digits.' };
+    }
+    if (method2 === 'POS') {
+      if (!ref2) return { valid: false, error: 'POS approval code required for second leg.' };
+    }
+    if (method1 === method2) return { valid: false, error: 'Both legs cannot use the same payment method.' };
+
+    const legs = [
+      { method: method1, amount: amount1.toFixed(2), reference: ref1 },
+      { method: method2, amount: amount2.toFixed(2), reference: ref2 },
+    ];
+
+    return { valid: true, legs };
+  }
+
+  function _updateSplitRemainder() {
+    if (!activeJob) return;
+    const total   = parseFloat(activeJob.estimated_cost || 0);
+    const amount1 = parseFloat(document.getElementById('split-amount-1')?.value || 0);
+    const remain  = Math.max(0, total - amount1);
+
+    const amount2El = document.getElementById('split-amount-2');
+    if (amount2El) amount2El.value = remain > 0 ? remain.toFixed(2) : '';
+
+    const indicator = document.getElementById('split-balance-indicator');
+    if (indicator) {
+      const fmt = n => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+      if (amount1 > total) {
+        indicator.style.color = 'var(--red-text)';
+        indicator.textContent = `First leg (${fmt(amount1)}) exceeds total (${fmt(total)})`;
+      } else if (amount1 > 0) {
+        indicator.style.color = 'var(--text-3)';
+        indicator.textContent = `${fmt(amount1)} + ${fmt(remain)} = ${fmt(total)}`;
+      } else {
+        indicator.textContent = '';
+      }
+    }
+    _updateConfirmBtn();
+  }
+
+  function _updateSplitFields() {
+    const method1 = document.getElementById('split-method-1')?.value || 'MOMO';
+    const method2 = document.getElementById('split-method-2')?.value || 'CASH';
+
+    // Show/hide reference fields
+    const ref1El     = document.getElementById('split-ref-1');
+    const ref1Label  = document.getElementById('split-ref-1-label');
+    const ref1Input  = document.getElementById('split-ref-1-input');
+    const ref2El     = document.getElementById('split-ref-2');
+    const ref2Label  = document.getElementById('split-ref-2-label');
+    const ref2Input  = document.getElementById('split-ref-2-input');
+
+    if (ref1El) ref1El.style.display = ['MOMO','POS'].includes(method1) ? 'block' : 'none';
+    if (ref1Label && ref1Input) {
+      ref1Label.innerHTML = method1 === 'MOMO'
+        ? 'MoMo Reference (11 digits) <span class="cm-req">*</span>'
+        : 'POS Approval Code <span class="cm-req">*</span>';
+      ref1Input.placeholder = method1 === 'MOMO' ? '11-digit reference' : 'Approval code';
+    }
+
+    if (ref2El) ref2El.style.display = ['MOMO','POS'].includes(method2) ? 'block' : 'none';
+    if (ref2Label && ref2Input) {
+      ref2Label.innerHTML = method2 === 'MOMO'
+        ? 'MoMo Reference (11 digits) <span class="cm-req">*</span>'
+        : 'POS Approval Code <span class="cm-req">*</span>';
+      ref2Input.placeholder = method2 === 'MOMO' ? '11-digit reference' : 'Approval code';
+    }
+
+    _updateConfirmBtn();
+  }
+
   // ── Public API ─────────────────────────────────────────────
   return {
     init,
@@ -1710,6 +1832,8 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     _switchReceiptsTab,
     _historyDrillDown,
     _historyDrillUp,
+    _updateSplitRemainder,
+    _updateSplitFields,
   };
 })();
 

@@ -46,6 +46,7 @@ class ReceiptEngine:
         pos_approval_code: str = '',
         customer_phone: str = '',
         company_name: str = '',
+        split_legs: list = None,
     ):
         """
         Issue a receipt for a completed payment.
@@ -106,8 +107,8 @@ class ReceiptEngine:
             payment_method    = payment_method,
             amount_paid       = amount_paid,
             balance_due       = balance_due,
-            momo_reference    = momo_reference,
-            pos_approval_code = pos_approval_code,
+            momo_reference    = momo_reference    if payment_method != 'SPLIT' else '',
+            pos_approval_code = pos_approval_code if payment_method != 'SPLIT' else '',
             customer_name     = customer_name,
             customer_phone    = phone,
             company_name      = company_name,
@@ -261,12 +262,24 @@ class ReceiptEngine:
         lines.append(SEP)
 
         # ── Payment ───────────────────────────────────────────────────
-        lines.append(row('Payment Method:', receipt.get_payment_method_display()))
+        split_legs = receipt.payment_legs.all().order_by('sequence')
 
-        if receipt.momo_reference:
-            lines.append(row('MoMo Ref:', receipt.momo_reference))
-        if receipt.pos_approval_code:
-            lines.append(row('POS Code:', receipt.pos_approval_code))
+        if split_legs.exists():
+            lines.append(row('Payment Method:', 'SPLIT'))
+            lines.append(SEP)
+            for leg in split_legs:
+                method_label = dict(leg.Method.choices).get(leg.payment_method, leg.payment_method)
+                lines.append(row(f"{method_label}:", f"GHS {float(leg.amount):,.2f}"))
+                if leg.momo_reference:
+                    lines.append(row('  MoMo Ref:', leg.momo_reference))
+                if leg.pos_approval_code:
+                    lines.append(row('  POS Code:', leg.pos_approval_code))
+        else:
+            lines.append(row('Payment Method:', receipt.get_payment_method_display()))
+            if receipt.momo_reference:
+                lines.append(row('MoMo Ref:', receipt.momo_reference))
+            if receipt.pos_approval_code:
+                lines.append(row('POS Code:', receipt.pos_approval_code))
 
         lines.append(SEP)
 

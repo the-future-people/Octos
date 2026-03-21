@@ -396,7 +396,7 @@ class JobRouteSerializer(serializers.Serializer):
 class CashierPaymentSerializer(serializers.Serializer):
     deposit_percentage = serializers.ChoiceField(choices=[70, 100])
     payment_method     = serializers.ChoiceField(
-        choices=['CASH', 'MOMO', 'POS'],
+        choices=['CASH', 'MOMO', 'POS', 'SPLIT'],
         default='CASH',
     )
     momo_reference     = serializers.CharField(required=False, allow_blank=True)
@@ -406,3 +406,75 @@ class CashierPaymentSerializer(serializers.Serializer):
     notes              = serializers.CharField(required=False, allow_blank=True)
     cash_tendered      = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     change_given       = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+
+    # Split payment legs
+    split_legs         = serializers.ListField(
+        child     = serializers.DictField(),
+        required  = False,
+        allow_empty = True,
+        default   = list,
+    )
+
+    def validate_momo_reference(self, value):
+        if value and not value.isdigit():
+            raise serializers.ValidationError(
+                'MoMo reference must contain digits only.'
+            )
+        if value and len(value) != 11:
+            raise serializers.ValidationError(
+                f'MoMo reference must be exactly 11 digits (got {len(value)}).'
+            )
+        return value
+
+    def validate_split_legs(self, value):
+        if not value:
+            return value
+        if len(value) != 2:
+            raise serializers.ValidationError(
+                'Split payment must have exactly 2 legs.'
+            )
+        for leg in value:
+            method = leg.get('method', '')
+            amount = leg.get('amount')
+            if method not in ['CASH', 'MOMO', 'POS']:
+                raise serializers.ValidationError(
+                    f'Invalid payment method in split leg: {method}'
+                )
+            if not amount or float(amount) <= 0:
+                raise serializers.ValidationError(
+                    'Each split leg must have a positive amount.'
+                )
+            if method == 'MOMO':
+                ref = leg.get('reference', '')
+                if not ref:
+                    raise serializers.ValidationError(
+                        'MoMo leg requires a reference number.'
+                    )
+                if not ref.isdigit() or len(ref) != 11:
+                    raise serializers.ValidationError(
+                        f'MoMo reference must be exactly 11 digits (got {len(ref)}).'
+                    )
+            if method == 'POS':
+                code = leg.get('reference', '')
+                if not code:
+                    raise serializers.ValidationError(
+                        'POS leg requires an approval code.'
+                    )
+        return value
+
+    def validate(self, data):
+        method = data.get('payment_method', 'CASH')
+
+        if method == 'MOMO' and not data.get('momo_reference'):
+            raise serializers.ValidationError(
+                {'momo_reference': 'MoMo reference is required for MoMo payments.'}
+            )
+        if method == 'POS' and not data.get('pos_approval_code'):
+            raise serializers.ValidationError(
+                {'pos_approval_code': 'POS approval code is required for POS payments.'}
+            )
+        if method == 'SPLIT' and not data.get('split_legs'):
+            raise serializers.ValidationError(
+                {'split_legs': 'Split legs are required for split payments.'}
+            )
+        return data

@@ -157,6 +157,22 @@ class JobStatusEngine:
         self.job.status = to_status
         self.job.save(update_fields=['status', 'updated_at'])
 
+        # ── Auto-deduct inventory on job completion ───────────────────
+        if to_status == 'COMPLETE':
+            try:
+                from apps.inventory.inventory_engine import InventoryEngine
+                InventoryEngine(self.job.branch).deduct_for_job(
+                    job   = self.job,
+                    actor = actor,
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    'InventoryEngine: auto-deduction failed for job %s',
+                    self.job.job_number,
+                )
+                # Never block job completion — inventory is non-critical
+
         JobStatusLog.objects.create(
             job             = self.job,
             from_status     = from_status,
