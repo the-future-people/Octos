@@ -29,7 +29,9 @@ urlpatterns = [
     path('api/v1/analytics/',     include('apps.analytics.urls')),
     path('portal/cashier/', cashier_view, name='cashier'),
     path('portal/attendant/', attendant_view, name='attendant'),
+    path('api/v1/inventory/', include('apps.inventory.api.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
 
 
 

@@ -201,34 +201,78 @@ class DailySalesSheetCloseView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        try:
-            sheet = DailySalesSheet.objects.select_related('branch').get(pk=pk)
-        except DailySalesSheet.DoesNotExist:
-            return Response(
-                {'detail': 'Sheet not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        try:
-            notes = request.data.get('notes', '').strip()
-            engine = SheetEngine(sheet.branch)
-            closed = engine.close_sheet(
-                sheet,
-                closed_by=request.user,
-                auto=False,
-            )
-            if notes:
-                closed.notes = notes
-                closed.save(update_fields=['notes'])
-            return Response(
-                DailySalesSheetDetailSerializer(
-                    closed, context={'request': request}
-                ).data
-            )
-        except ValueError as e:
-            return Response(
-                {'detail': str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            from django.utils import timezone
+            from datetime import timedelta
+            from apps.accounts.models import CustomUser
+
+            try:
+                sheet = DailySalesSheet.objects.select_related('branch').get(pk=pk)
+            except DailySalesSheet.DoesNotExist:
+                return Response(
+                    {'detail': 'Sheet not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # ── Validate floats payload ───────────────────────────────
+            floats_data = request.data.get('floats', [])
+            for f in floats_data:
+                amount = float(f.get('opening_float', 0))
+                if amount < 20 or amount > 100 or amount % 5 != 0:
+                    return Response(
+                        {'detail': f"Float amount GHS {amount} is invalid. Must be GHS 20–100 in multiples of GHS 5."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            try:
+                notes  = request.data.get('notes', '').strip()
+                engine = SheetEngine(sheet.branch)
+                closed = engine.close_sheet(
+                    sheet,
+                    closed_by = request.user,
+                    auto      = False,
+                )
+                if notes:
+                    closed.notes = notes
+                    closed.save(update_fields=['notes'])
+
+                # ── Stage tomorrow's floats (no sheet created yet) ────
+                if floats_data:
+                    tomorrow = sheet.date + timedelta(days=1)
+
+                    # Never stage floats for Sunday
+                    if tomorrow.weekday() == 6:
+                        pass  # Sunday — no float, no sheet
+                    else:
+                        for f in floats_data:
+                            try:
+                                cashier = CustomUser.objects.get(pk=f['cashier_id'])
+                                # Remove any existing staged float for this cashier/date
+                                CashierFloat.objects.filter(
+                                    cashier        = cashier,
+                                    scheduled_date = tomorrow,
+                                    daily_sheet    = None,
+                                ).delete()
+                                CashierFloat.objects.create(
+                                    cashier        = cashier,
+                                    daily_sheet    = None,
+                                    scheduled_date = tomorrow,
+                                    opening_float  = float(f['opening_float']),
+                                    float_set_by   = request.user,
+                                    float_set_at   = timezone.now(),
+                                )
+                            except CustomUser.DoesNotExist:
+                                pass  # If cashier not found, skip staging float for them
+
+                return Response(
+                    DailySalesSheetDetailSerializer(
+                        closed, context={'request': request}
+                    ).data
+                )
+            except ValueError as e:
+                return Response(
+                    {'detail': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2068,19 +2112,34 @@ def _generate_weekly_pdf(report):
             c.drawCentredString(logo_cx, H * 0.035, 'Property of Farhat Printing Press')
 
     # ── Build document ────────────────────────────────────────────────────
-    doc = SimpleDocTemplate(
+    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate
+
+    doc = BaseDocTemplate(
         output_path,
-        pagesize      = A4,
-        rightMargin   = 20*mm,
-        leftMargin    = 20*mm,
-        topMargin     = 20*mm,
-        bottomMargin  = 20*mm,
+        pagesize     = A4,
+        rightMargin  = 20*mm,
+        leftMargin   = 20*mm,
+        topMargin    = 20*mm,
+        bottomMargin = 20*mm,
     )
 
+    # Cover page template — full bleed, no margins
+    cover_frame   = Frame(0, 0, W, H, leftPadding=0, rightPadding=0,
+                          topPadding=0, bottomPadding=0, id='cover')
+    content_frame = Frame(20*mm, 20*mm, W - 40*mm, H - 40*mm, id='normal')
+
+    doc.addPageTemplates([
+        PageTemplate(id='Cover',  frames=cover_frame),
+        PageTemplate(id='Later',  frames=content_frame),
+    ])
+
     styles = getSampleStyleSheet()
+    from reportlab.platypus import NextPageTemplate
+
     story  = []
 
-    # Page 1 — Cover
+    # Page 1 — Cover (full bleed)
+    story.append(NextPageTemplate('Later'))
     story.append(CoverPage(W, H, branch, report))
     story.append(PageBreak())
 
@@ -2453,6 +2512,18 @@ class WeeklyReportPrepareView(APIView):
 
         report.date_from = monday
         report.date_to   = saturday
+
+        # ── Inventory snapshot ────────────────────────────────────────
+        try:
+            from apps.inventory.inventory_engine import InventoryEngine
+            report.inventory_snapshot = InventoryEngine(branch).generate_weekly_snapshot(
+                date_from = monday,
+                date_to   = saturday,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Inventory snapshot failed: {e}", exc_info=True)
+
         report.save()
 
         return Response(
@@ -2543,6 +2614,16 @@ class WeeklyReportSubmitView(APIView):
         report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
         report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
         report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
+        # ── Refresh inventory snapshot on submit ──────────────────────
+        try:
+            from apps.inventory.inventory_engine import InventoryEngine
+            report.inventory_snapshot = InventoryEngine(report.branch).generate_weekly_snapshot(
+                date_from = report.date_from,
+                date_to   = report.date_to,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Inventory snapshot failed: {e}", exc_info=True)
 
         # ── Lock the report ───────────────────────────────────────────
         report.status       = WeeklyReport.Status.LOCKED

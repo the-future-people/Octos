@@ -743,10 +743,10 @@ const Cashier = (() => {
       return;
     }
     if (s.should_lock) {
-      _lockQueue('Your shift has ended. Please complete sign-off.');
-      openSignOffWizard(false);
-      return;
-    }
+          _lockQueue('Your shift has ended. Please complete sign-off.');
+          openSignOffWizard(false);
+          return;
+        }
     if (s.should_prompt) {
       _showSignOffBanner(s.minutes_remaining, s.shift_end);
     }
@@ -852,7 +852,8 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
   }
 
   // ── Sign-off wizard ────────────────────────────────────────
-  function openSignOffWizard(dismissible = true) {
+  function openSignOffWizard(dismissible = true, floatId = null) {
+    if (floatId) _signOffFloatId = floatId;
     _signOffStep = 1;
     document.getElementById('signoff-wizard')?.remove();
 

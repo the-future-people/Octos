@@ -286,6 +286,7 @@ async function loadRecentJobs() {
       _loadFinancePane();
     }
     if (paneId === 'reports')                 _loadReportsPane();
+    if (paneId === 'inventory')               _loadInventoryPane();
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
@@ -716,7 +717,41 @@ async function loadRecentJobs() {
 
   function toggleEODConfirm() {
     const checked = document.getElementById('eod-ack-checkbox').checked;
-    document.getElementById('eod-confirm-btn').disabled = !checked;
+    const floatsValid = _validateAllFloats();
+    document.getElementById('eod-confirm-btn').disabled = !(checked && floatsValid);
+  }
+
+  function _validateFloatInput(input) {
+    const val = parseFloat(input.value);
+    if (val < 20 || val > 100 || val % 5 !== 0) {
+      input.style.borderColor = 'var(--red-text)';
+    } else {
+      input.style.borderColor = 'var(--green-text)';
+    }
+    toggleEODConfirm();
+  }
+
+  function _validateAllFloats() {
+    const inputs = document.querySelectorAll('[id^="float-input-"]');
+    if (!inputs.length) return true; // no cashiers — no float needed
+    for (const input of inputs) {
+      const val = parseFloat(input.value || 0);
+      if (!val || val < 20 || val > 100 || val % 5 !== 0) return false;
+    }
+    return true;
+  }
+
+  function _getFloatData() {
+    const inputs  = document.querySelectorAll('[id^="float-input-"]');
+    const floats  = [];
+    inputs.forEach(input => {
+      const cashierId = input.id.replace('float-input-', '');
+      floats.push({
+        cashier_id    : parseInt(cashierId),
+        opening_float : parseFloat(input.value),
+      });
+    });
+    return floats;
   }
 
   function _fmt(n) {
@@ -913,6 +948,38 @@ async function loadRecentJobs() {
       creditEl.innerHTML = '<div class="eod-empty-note">No credit sales today.</div>';
     }
 
+    // ── Tomorrow's float inputs ───────────────────────────────────────────
+    const floatContainer = document.getElementById('eod-cashier-floats');
+    if (floatContainer) {
+      const cashiers = d.cashier_activity || [];
+      if (cashiers.length) {
+        floatContainer.innerHTML = cashiers.map(c => `
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            padding:12px 14px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);margin-bottom:8px;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">${_esc(c.cashier_name)}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Tomorrow's opening float</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:12px;color:var(--text-3);">GHS</span>
+              <input type="number" id="float-input-${c.cashier_id}"
+                min="20" max="100" step="5" value="50"
+                style="width:80px;padding:6px 10px;border:1.5px solid var(--border);
+                       border-radius:var(--radius-sm);background:var(--panel);
+                       color:var(--text);font-size:14px;font-weight:700;
+                       font-family:'JetBrains Mono',monospace;text-align:right;"
+                oninput="Dashboard._validateFloatInput(this)">
+            </div>
+          </div>`).join('');
+      } else {
+        floatContainer.innerHTML = `
+          <div style="font-size:13px;color:var(--text-3);padding:12px 0;">
+            No cashiers active today — no float needed.
+          </div>`;
+      }
+    }
+
     // ── Show content ──────────────────────────────────────────────
     document.getElementById('eod-loading').style.display = 'none';
     document.getElementById('eod-content').style.display = 'block';
@@ -970,7 +1037,7 @@ async function loadRecentJobs() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes }),
+          body: JSON.stringify({ notes, floats: _getFloatData() }),
         }
       );
       if (res.ok) {
@@ -1429,6 +1496,347 @@ async function loadRecentJobs() {
     container.appendChild(el);
     setTimeout(() => el.remove(), 3500);
   }
+
+// ── Inventory pane ────────────────────────────────────────────────────
+  let _inventoryTab = 'stock';
+
+  async function _loadInventoryPane() {
+    const pane = document.getElementById('pane-inventory');
+    if (!pane) return;
+
+    pane.innerHTML = `
+      <div class="section-head" style="margin-bottom:0;">
+        <span class="section-title">Inventory</span>
+      </div>
+      <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px;">
+        ${[['stock','Stock Levels'],['movements','Movements'],['waste','Waste Incidents']].map(([t,l]) => `
+          <button class="reports-tab ${_inventoryTab===t?'active':''}" data-tab="${t}"
+            onclick="Dashboard.switchInventoryTab('${t}')"
+            style="padding:10px 18px;font-size:13px;">${l}</button>`).join('')}
+      </div>
+      <div id="inventory-content">
+        <div class="loading-cell"><span class="spin"></span> Loading...</div>
+      </div>`;
+
+    await _loadInventoryTab(_inventoryTab);
+  }
+
+  async function switchInventoryTab(tab) {
+    _inventoryTab = tab;
+    document.querySelectorAll('#pane-inventory .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    await _loadInventoryTab(tab);
+  }
+
+  async function _loadInventoryTab(tab) {
+    const content = document.getElementById('inventory-content');
+    if (!content) return;
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading...</div>';
+    if (tab === 'stock')     await _renderStockLevels(content);
+    if (tab === 'movements') await _renderStockMovements(content);
+    if (tab === 'waste')     await _renderWasteIncidents(content);
+  }
+
+  async function _renderStockLevels(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/inventory/stock/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = data.results || data;
+
+      if (!items.length) {
+        container.innerHTML = '<div class="loading-cell">No stock data available.</div>';
+        return;
+      }
+
+      // Group by category
+      const grouped = {};
+      items.forEach(item => {
+        const cat = item.category || 'Other';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(item);
+      });
+
+      const fmt = n => parseFloat(n).toLocaleString('en-GH', { minimumFractionDigits: 2 });
+
+      let html = `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+          <button onclick="Dashboard.openReceiveStock()"
+            style="padding:8px 18px;background:var(--text);color:#fff;border:none;
+                   border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                   cursor:pointer;font-family:'DM Sans',sans-serif;">
+            + Receive Stock
+          </button>
+        </div>`;
+
+      for (const [cat, catItems] of Object.entries(grouped)) {
+        html += `
+          <div style="margin-bottom:20px;">
+            <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">${cat}</div>
+            <div style="background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);overflow:hidden;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr style="background:var(--bg);">
+                    <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                      border-bottom:2px solid var(--border);">Item</th>
+                    <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                      border-bottom:2px solid var(--border);">Size</th>
+                    <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                      border-bottom:2px solid var(--border);">Stock</th>
+                    <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                      border-bottom:2px solid var(--border);">Reorder At</th>
+                    <th style="text-align:center;padding:9px 16px;font-size:10.5px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                      border-bottom:2px solid var(--border);">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${catItems.map(item => {
+                    const qty      = parseFloat(item.quantity);
+                    const rp       = parseFloat(item.reorder_point);
+                    const isLow    = qty <= rp;
+                    const isCrit   = rp > 0 && qty <= rp * 0.5;
+                    const statusBg = isCrit ? 'var(--red-bg)'   : isLow ? 'var(--amber-bg)'   : 'var(--green-bg)';
+                    const statusFg = isCrit ? 'var(--red-text)' : isLow ? 'var(--amber-text)' : 'var(--green-text)';
+                    const statusTx = isCrit ? 'Critical'        : isLow ? 'Low'               : 'OK';
+                    const isPercent = item.unit_type === 'PERCENT';
+                    const qtyDisplay = isPercent
+                      ? `<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">
+                           <div style="width:80px;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+                             <div style="height:100%;width:${qty}%;background:${statusFg};border-radius:3px;"></div>
+                           </div>
+                           <span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${qty}%</span>
+                         </div>`
+                      : `<span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+                           ${fmt(qty)} ${item.unit_label}
+                         </span>`;
+                    return `
+                      <tr style="border-bottom:1px solid var(--border);">
+                        <td style="padding:11px 16px;font-size:13px;font-weight:500;color:var(--text);">
+                          ${_esc(item.name)}
+                        </td>
+                        <td style="padding:11px 16px;font-size:12px;color:var(--text-3);">
+                          ${item.paper_size !== 'N/A' ? item.paper_size : '—'}
+                        </td>
+                        <td style="padding:11px 16px;text-align:right;">${qtyDisplay}</td>
+                        <td style="padding:11px 16px;text-align:right;font-size:12px;color:var(--text-3);
+                          font-family:'JetBrains Mono',monospace;">
+                          ${rp > 0 ? rp + ' ' + item.unit_label : '—'}
+                        </td>
+                        <td style="padding:11px 16px;text-align:center;">
+                          <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+                            background:${statusBg};color:${statusFg};">${statusTx}</span>
+                        </td>
+                      </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+
+      container.innerHTML = html;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load stock levels.</div>';
+    }
+  }
+
+  async function _renderStockMovements(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/inventory/movements/?page_size=50');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = data.results || data;
+
+      if (!items.length) {
+        container.innerHTML = '<div class="loading-cell">No movements recorded yet.</div>';
+        return;
+      }
+
+      const typeColor = {
+        OPENING    : 'var(--green-text)',
+        IN         : 'var(--green-text)',
+        OUT        : 'var(--text-3)',
+        WASTE      : 'var(--red-text)',
+        CORRECTION : 'var(--amber-text)',
+      };
+      const typeBg = {
+        OPENING    : 'var(--green-bg)',
+        IN         : 'var(--green-bg)',
+        OUT        : 'var(--bg)',
+        WASTE      : 'var(--red-bg)',
+        CORRECTION : 'var(--amber-bg)',
+      };
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);">
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Date</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Item</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Type</th>
+                <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Qty</th>
+                <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Balance</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(m => {
+                const date = new Date(m.created_at).toLocaleDateString('en-GB',
+                  { day: 'numeric', month: 'short', year: 'numeric' });
+                const isOut = ['OUT','WASTE'].includes(m.movement_type);
+                return `
+                  <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text-3);">${date}</td>
+                    <td style="padding:10px 16px;font-size:13px;color:var(--text);font-weight:500;">
+                      ${_esc(m.consumable_name || '—')}
+                    </td>
+                    <td style="padding:10px 16px;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;
+                        background:${typeBg[m.movement_type]||'var(--bg)'};
+                        color:${typeColor[m.movement_type]||'var(--text-3)'};">
+                        ${m.movement_type}
+                      </span>
+                    </td>
+                    <td style="padding:10px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;
+                      color:${isOut ? 'var(--red-text)' : 'var(--green-text)'};">
+                      ${isOut ? '-' : '+'}${parseFloat(m.quantity).toFixed(2)}
+                    </td>
+                    <td style="padding:10px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-3);">
+                      ${parseFloat(m.balance_after).toFixed(2)}
+                    </td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text-3);
+                      max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                      ${_esc(m.notes || '—')}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load movements.</div>';
+    }
+  }
+
+  async function _renderWasteIncidents(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/inventory/waste/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = data.results || data;
+
+      if (!items.length) {
+        container.innerHTML = '<div class="loading-cell">No waste incidents recorded.</div>';
+        return;
+      }
+
+      const reasonColor = {
+        JAM      : 'var(--amber-text)',
+        MISPRINT : 'var(--red-text)',
+        DAMAGE   : 'var(--red-text)',
+        OTHER    : 'var(--text-3)',
+      };
+      const reasonBg = {
+        JAM      : 'var(--amber-bg)',
+        MISPRINT : 'var(--red-bg)',
+        DAMAGE   : 'var(--red-bg)',
+        OTHER    : 'var(--bg)',
+      };
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);">
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Date</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Item</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Reason</th>
+                <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Qty</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Reported By</th>
+                <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
+                  border-bottom:2px solid var(--border);">Job</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(w => {
+                const date = new Date(w.created_at).toLocaleDateString('en-GB',
+                  { day: 'numeric', month: 'short', year: 'numeric' });
+                return `
+                  <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text-3);">${date}</td>
+                    <td style="padding:10px 16px;font-size:13px;color:var(--text);font-weight:500;">
+                      ${_esc(w.consumable_name || '—')}
+                    </td>
+                    <td style="padding:10px 16px;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;
+                        background:${reasonBg[w.reason]||'var(--bg)'};
+                        color:${reasonColor[w.reason]||'var(--text-3)'};">
+                        ${w.reason}
+                      </span>
+                    </td>
+                    <td style="padding:10px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;
+                      color:var(--red-text);">
+                      -${parseFloat(w.quantity).toFixed(2)}
+                    </td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text-2);">
+                      ${_esc(w.reported_by_name || '—')}
+                    </td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text-3);
+                      font-family:'JetBrains Mono',monospace;">
+                      ${_esc(w.job_number || '—')}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load waste incidents.</div>';
+    }
+  }
+
+  function openReceiveStock() {
+    // TODO — modal for receiving stock
+    _toast('Receive stock coming soon.', 'info');
+  }
+
 // ── Reports pane ─────────────────────────────────────────────
 async function _loadReportsPane() {
     const pane = document.getElementById('pane-reports');
@@ -2801,6 +3209,9 @@ return {
     weeklySubmit,
     weeklyDownloadPDF,
     setServicesPeriod,
+    switchInventoryTab,
+    openReceiveStock,
+    _validateFloatInput,
   };
 
 })();

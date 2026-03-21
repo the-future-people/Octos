@@ -15,6 +15,11 @@ class CashierFloat(AuditModel):
         'finance.DailySalesSheet',
         on_delete=models.PROTECT,
         related_name='cashier_floats',
+        null=True, blank=True,
+    )
+    scheduled_date = models.DateField(
+        null=True, blank=True,
+        help_text='Date this float is scheduled for — set when pre-created at EOD',
     )
     cashier = models.ForeignKey(
         'accounts.CustomUser',
