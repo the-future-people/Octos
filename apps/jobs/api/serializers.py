@@ -402,6 +402,7 @@ class CashierPaymentSerializer(serializers.Serializer):
     momo_reference     = serializers.CharField(required=False, allow_blank=True)
     pos_approval_code  = serializers.CharField(required=False, allow_blank=True)
     customer_phone     = serializers.CharField(required=False, allow_blank=True)
+    company_name       = serializers.CharField(required=False, allow_blank=True)
     notes              = serializers.CharField(required=False, allow_blank=True)
     cash_tendered      = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     change_given       = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)

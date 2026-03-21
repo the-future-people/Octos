@@ -201,7 +201,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
             'cashier_name', 'payment_method',
             'amount_paid', 'balance_due',
             'momo_reference', 'pos_approval_code',
-            'customer_name', 'customer_phone',
+            'customer_name', 'customer_phone', 'company_name',
             'subtotal', 'vat_rate', 'vat_amount',
             'nhil_amount', 'getfund_amount',
             'whatsapp_status', 'whatsapp_sent_at',

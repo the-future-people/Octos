@@ -31,7 +31,7 @@ class ReceiptEngine:
     def __init__(self, branch) -> None:
         self.branch = branch
 
-    # ── Issue ─────────────────────────────────────────────────────
+    # ── Issue ─────────────────────────────────────────────────────────────
 
     @transaction.atomic
     def issue(
@@ -45,6 +45,7 @@ class ReceiptEngine:
         momo_reference: str = '',
         pos_approval_code: str = '',
         customer_phone: str = '',
+        company_name: str = '',
     ):
         """
         Issue a receipt for a completed payment.
@@ -59,6 +60,7 @@ class ReceiptEngine:
             momo_reference   : Mandatory for MOMO payments
             pos_approval_code: Mandatory for POS payments
             customer_phone   : For walk-in customers with no profile
+            company_name     : Company or sender name — optional
 
         Returns:
             Receipt instance
@@ -69,7 +71,7 @@ class ReceiptEngine:
         """
         from apps.finance.models import Receipt
 
-        # ── Validate payment reference fields ─────────────────────
+        # ── Validate payment reference fields ─────────────────────────
         if payment_method == Receipt.PaymentMethod.MOMO and not momo_reference:
             raise ValueError(
                 'MoMo reference number is mandatory for MoMo payments.'
@@ -79,24 +81,22 @@ class ReceiptEngine:
                 'POS approval code is mandatory for POS payments.'
             )
 
-        # ── Customer snapshot ──────────────────────────────────────
-        customer_name, phone = self._snapshot_customer(
-            job, customer_phone
-        )
+        # ── Customer snapshot ─────────────────────────────────────────
+        customer_name, phone = self._snapshot_customer(job, customer_phone)
 
-        # ── VAT calculation ────────────────────────────────────────
+        # ── VAT calculation ───────────────────────────────────────────
         subtotal, vat_amount, nhil_amount, getfund_amount = self._calc_vat(
             amount_paid
         )
 
-        # ── Generate receipt number ────────────────────────────────
+        # ── Generate receipt number ───────────────────────────────────
         year           = timezone.now().year
         receipt_number, sequence = Receipt.generate_receipt_number(
             branch_code=self.branch.code,
             year=year,
         )
 
-        # ── Create receipt ─────────────────────────────────────────
+        # ── Create receipt ────────────────────────────────────────────
         receipt = Receipt.objects.create(
             job               = job,
             daily_sheet       = daily_sheet,
@@ -110,6 +110,7 @@ class ReceiptEngine:
             pos_approval_code = pos_approval_code,
             customer_name     = customer_name,
             customer_phone    = phone,
+            company_name      = company_name,
             subtotal          = subtotal,
             vat_rate          = self.branch.vat_rate,
             vat_amount        = vat_amount,
@@ -124,20 +125,18 @@ class ReceiptEngine:
             amount_paid,
         )
 
-        # ── Auto-create minimal customer profile for walk-in ───────
+        # ── Auto-create minimal customer profile for walk-in ──────────
         if not job.customer and phone:
             self._create_walkin_profile(job, customer_name, phone)
 
         return receipt
 
-    # ── WhatsApp delivery ─────────────────────────────────────────
+    # ── WhatsApp delivery ─────────────────────────────────────────────────
 
     def send_whatsapp(self, receipt) -> bool:
         """
         Queue a WhatsApp receipt delivery.
         Returns True if queued successfully, False otherwise.
-
-        Currently logs the intent — wire to WhatsApp API when ready.
         """
         from apps.finance.models import Receipt
 
@@ -154,7 +153,6 @@ class ReceiptEngine:
             message = self._format_whatsapp_message(receipt)
 
             # TODO: wire to WhatsApp Business API / Twilio
-            # For now, log the intent and mark as sent
             logger.info(
                 'ReceiptEngine: WhatsApp receipt queued for %s → %s',
                 receipt.receipt_number,
@@ -176,14 +174,14 @@ class ReceiptEngine:
             receipt.save(update_fields=['whatsapp_status'])
             return False
 
-    # ── Thermal print format ──────────────────────────────────────
+    # ── Thermal print format ──────────────────────────────────────────────
 
     def format_thermal(self, receipt) -> str:
         """
         Format receipt as plain text for 80mm thermal printer.
         Monospace layout — 42 characters wide.
-
-        Returns a string ready to send to the printer.
+        Line items are tabulated downward, one per row.
+        VAT lines always shown (0.00 when not registered).
         """
         W     = 42
         SEP   = '-' * W
@@ -196,11 +194,11 @@ class ReceiptEngine:
             gap = W - len(label) - len(value)
             return f"{label}{' ' * max(gap, 1)}{value}"
 
-        branch    = self.branch
-        job       = receipt.job
+        branch = self.branch
+        job    = receipt.job
         lines: list[str] = []
 
-        # Header
+        # ── Header ────────────────────────────────────────────────────
         lines += [
             centre('FARHAT PRINTING PRESS'),
             centre(branch.name),
@@ -211,7 +209,7 @@ class ReceiptEngine:
             SEP,
         ]
 
-        # Receipt meta
+        # ── Receipt meta ──────────────────────────────────────────────
         lines += [
             row('Receipt No:', receipt.receipt_number),
             row('Date:', receipt.created_at.strftime('%d/%m/%Y %I:%M %p')),
@@ -219,25 +217,51 @@ class ReceiptEngine:
             SEP,
         ]
 
-        # Customer
-        lines += [
-            row('Customer:', receipt.customer_name or 'Walk-in'),
-            row('Phone:', receipt.customer_phone or '—'),
-            SEP,
-        ]
+        # ── Customer ──────────────────────────────────────────────────
+        lines.append(row('Customer:', receipt.customer_name or 'Walk-in'))
+        if receipt.company_name:
+            lines.append(row('Company:', receipt.company_name))
+        lines.append(row('Phone:', receipt.customer_phone or '—'))
+        lines.append(SEP)
 
-        # Job details
+        # ── Job details ───────────────────────────────────────────────
         lines += [
             row('Job No:', job.job_number),
-            row('Service:', job.title),
-            row('Type:', job.job_type),
+            row('Type:', job.job_type or '—'),
             SEP,
         ]
 
-        # Payment
-        lines += [
-            row('Payment Method:', receipt.get_payment_method_display()),
-        ]
+        # ── Line items — tabulated downward ───────────────────────────
+        line_items = job.line_items.select_related('service').order_by('position')
+
+        if line_items.exists():
+            # Column headers
+            lines.append(f"{'ITEM':<24} {'QTY':>4} {'AMOUNT':>12}")
+            lines.append(SEP)
+            for li in line_items:
+                name = (li.label or li.service.name)[:24]
+                qty  = str(li.sets if li.sets > 1 else li.quantity)
+                amt  = f"GHS {float(li.line_total):,.2f}"
+                # Truncate name if needed
+                if len(name) > 20:
+                    name = name[:20] + '…'
+                lines.append(f"{name:<24} {qty:>4} {amt:>12}")
+                # Show spec detail on next line if multi-page
+                if li.pages and li.pages > 1:
+                    spec = f"  {li.pages}pp × {li.sets} sets"
+                    if li.paper_size:
+                        spec += f" · {li.paper_size}"
+                    spec_color = ' · Colour' if li.is_color else ' · B&W'
+                    spec += spec_color
+                    lines.append(spec[:W])
+        else:
+            # Fallback to job title if no line items
+            lines.append(row('Service:', job.title[:30] if job.title else '—'))
+
+        lines.append(SEP)
+
+        # ── Payment ───────────────────────────────────────────────────
+        lines.append(row('Payment Method:', receipt.get_payment_method_display()))
 
         if receipt.momo_reference:
             lines.append(row('MoMo Ref:', receipt.momo_reference))
@@ -246,27 +270,22 @@ class ReceiptEngine:
 
         lines.append(SEP)
 
-        # Amounts
-        lines += [
-            row('Subtotal:', f"GHS {receipt.subtotal:.2f}"),
-        ]
-
-        if float(receipt.vat_rate) > 0:
-            lines += [
-                row(f"VAT ({receipt.vat_rate}%):", f"GHS {receipt.vat_amount:.2f}"),
-                row('NHIL:', f"GHS {receipt.nhil_amount:.2f}"),
-                row('GetFund:', f"GHS {receipt.getfund_amount:.2f}"),
-            ]
+        # ── Amounts — VAT always shown ────────────────────────────────
+        lines.append(row('Subtotal:', f"GHS {float(receipt.subtotal):,.2f}"))
+        lines.append(row(
+            f"VAT ({receipt.vat_rate}%):",
+            f"GHS {float(receipt.vat_amount):,.2f}"
+        ))
+        lines.append(row('NHIL:', f"GHS {float(receipt.nhil_amount):,.2f}"))
+        lines.append(row('GetFund:', f"GHS {float(receipt.getfund_amount):,.2f}"))
 
         lines += [
             THICK,
-            row('AMOUNT PAID:', f"GHS {receipt.amount_paid:.2f}"),
+            row('AMOUNT PAID:', f"GHS {float(receipt.amount_paid):,.2f}"),
         ]
 
         if float(receipt.balance_due) > 0:
-            lines += [
-                row('BALANCE DUE:', f"GHS {receipt.balance_due:.2f}"),
-            ]
+            lines.append(row('BALANCE DUE:', f"GHS {float(receipt.balance_due):,.2f}"))
 
         lines += [
             THICK,
@@ -282,9 +301,10 @@ class ReceiptEngine:
         Format receipt as a WhatsApp message.
         Concise, readable on a phone screen.
         """
-        job      = receipt.job
-        branch   = self.branch
-        lines    = [
+        job    = receipt.job
+        branch = self.branch
+
+        lines = [
             f"*FARHAT PRINTING PRESS*",
             f"_{branch.name}_",
             f"",
@@ -292,23 +312,41 @@ class ReceiptEngine:
             f"*Date:* {receipt.created_at.strftime('%d/%m/%Y %I:%M %p')}",
             f"",
             f"*Job:* {job.job_number}",
-            f"*Service:* {job.title}",
+        ]
+
+        # Line items
+        line_items = job.line_items.select_related('service').order_by('position')
+        if line_items.exists():
+            lines.append(f"*Services:*")
+            for li in line_items:
+                name = li.label or li.service.name
+                lines.append(f"  • {name} — GHS {float(li.line_total):,.2f}")
+        else:
+            lines.append(f"*Service:* {job.title}")
+
+        lines += [
             f"",
-            f"*Amount Paid:* GHS {receipt.amount_paid:.2f}",
+            f"*Amount Paid:* GHS {float(receipt.amount_paid):,.2f}",
         ]
 
         if float(receipt.balance_due) > 0:
-            lines.append(f"*Balance Due:* GHS {receipt.balance_due:.2f}")
+            lines.append(f"*Balance Due:* GHS {float(receipt.balance_due):,.2f}")
 
         lines += [
             f"*Payment:* {receipt.get_payment_method_display()}",
+        ]
+
+        if receipt.company_name:
+            lines.append(f"*Company:* {receipt.company_name}")
+
+        lines += [
             f"",
             f"Thank you for your patronage! 🙏",
         ]
 
         return '\n'.join(lines)
 
-    # ── Internal helpers ──────────────────────────────────────────
+    # ── Internal helpers ──────────────────────────────────────────────────
 
     def _snapshot_customer(self, job, walk_in_phone: str) -> tuple[str, str]:
         """
@@ -331,14 +369,14 @@ class ReceiptEngine:
         if not self.branch.vat_registered:
             return amount, 0, 0, 0
 
-        vat_rate      = float(self.branch.vat_rate) / 100
-        nhil_rate     = float(self.branch.nhil_rate) / 100
-        getfund_rate  = float(self.branch.getfund_rate) / 100
-        total_rate    = 1 + vat_rate + nhil_rate + getfund_rate
+        vat_rate       = float(self.branch.vat_rate) / 100
+        nhil_rate      = float(self.branch.nhil_rate) / 100
+        getfund_rate   = float(self.branch.getfund_rate) / 100
+        total_rate     = 1 + vat_rate + nhil_rate + getfund_rate
 
-        subtotal      = round(float(amount) / total_rate, 2)
-        vat_amount    = round(subtotal * vat_rate, 2)
-        nhil_amount   = round(subtotal * nhil_rate, 2)
+        subtotal       = round(float(amount) / total_rate, 2)
+        vat_amount     = round(subtotal * vat_rate, 2)
+        nhil_amount    = round(subtotal * nhil_rate, 2)
         getfund_amount = round(subtotal * getfund_rate, 2)
 
         return subtotal, vat_amount, nhil_amount, getfund_amount
@@ -372,7 +410,7 @@ class ReceiptEngine:
                 job.job_number,
             )
 
-    # ── Class-level convenience ───────────────────────────────────
+    # ── Class-level convenience ───────────────────────────────────────────
 
     @classmethod
     def issue_for_job(cls, job, cashier, daily_sheet, **kwargs):

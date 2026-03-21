@@ -315,6 +315,7 @@ const Cashier = (() => {
     _s('confirm-branch-phone',   activeJob.branch_phone   || '—');
 
     _v('confirm-phone', activeJob.customer_phone || '');
+    _v('confirm-company', '');
     _v('confirm-notes', '');
     _v('momo-ref', '');
     _v('pos-ref',  '');
@@ -493,6 +494,7 @@ const Cashier = (() => {
 
     const notes   = document.getElementById('confirm-notes')?.value.trim()  || '';
     const phone   = document.getElementById('confirm-phone')?.value.trim()  || '';
+    const company = document.getElementById('confirm-company')?.value.trim() || '';
     const momoRef = document.getElementById('momo-ref')?.value.trim()       || '';
     const posCode = document.getElementById('pos-ref')?.value.trim()        || '';
     const btn     = document.getElementById('confirm-submit-btn');
@@ -507,6 +509,7 @@ const Cashier = (() => {
       if (selectedMethod === 'MOMO') body.momo_reference    = momoRef;
       if (selectedMethod === 'POS')  body.pos_approval_code = posCode;
       if (phone)                     body.customer_phone    = phone;
+      if (company)                   body.company_name      = company;
       if (selectedMethod === 'CASH') {
         const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
         const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);

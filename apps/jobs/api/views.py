@@ -291,6 +291,7 @@ class CashierConfirmPaymentView(APIView):
                             momo_reference    = serializer.validated_data.get('momo_reference', ''),
                             pos_approval_code = serializer.validated_data.get('pos_approval_code', ''),
                             customer_phone    = serializer.validated_data.get('customer_phone', ''),
+                            company_name      = serializer.validated_data.get('company_name', ''),
                         )
                         receipt_number          = receipt.receipt_number
                         result['receipt_id']    = receipt.id
