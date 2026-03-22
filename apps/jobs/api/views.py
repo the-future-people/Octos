@@ -564,6 +564,21 @@ class SaveDraftView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Sunday block — no drafts on Sunday
+        if timezone.localdate().weekday() == 6:
+            return Response(
+                {'detail': 'Branch is closed on Sundays. No jobs can be recorded.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Branch lock — no drafts past closing time
+        lock = SheetEngine(branch).get_branch_lock_status()
+        if not lock['can_create_jobs']:
+            return Response(
+                {'detail': lock['lock_reason']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         line_items_data = request.data.get('line_items', [])
         customer_id     = request.data.get('customer')
         channel         = request.data.get('channel', 'WALK_IN')
