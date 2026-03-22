@@ -76,18 +76,20 @@ class PricingEngine:
         multiplier = self.rule.color_multiplier if is_color else Decimal('1.00')
         unit       = self.service.unit
 
-        if unit == 'page':
+        # Normalise unit — handle both legacy lowercase and PER_ prefixed formats
+        unit_norm = unit.upper().replace('PER_', '')
+
+        if unit_norm in ('COPY', 'PIECE', 'PAGE', 'SHEET'):
+            # Per-copy/piece services: base × pages × sets × color
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
-        elif unit in ('piece', 'sheet'):
-            subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
-        elif unit == 'sqm':
+        elif unit_norm in ('SQFT', 'SQCM', 'SQM'):
+            # Area-based: base × quantity only (quantity = area)
             subtotal = base * multiplier * Decimal(str(quantity))
-        elif unit == 'set':
-            subtotal = base * multiplier * Decimal(str(quantity))
-        elif unit == 'flat':
+        elif unit_norm == 'JOB':
+            # Flat per job — no quantity multiplication
             subtotal = base * multiplier
         else:
-            subtotal = base * multiplier * Decimal(str(quantity))
+            subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
 
         total = subtotal.quantize(Decimal('0.01'))
 

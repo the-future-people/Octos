@@ -502,14 +502,21 @@ class ServiceCreateView(APIView):
         branch = getattr(request.user, 'branch', None)
 
         # ── Create service ────────────────────────────────────
+        sides = d.get('sides', 'SINGLE')
         service = Service.objects.create(
-            name        = d['name'],
-            code        = d['code'],
-            category    = d['category'],
-            unit        = d['unit'],
-            description = d['description'],
-            image       = d.get('image'),
-            is_active   = True,
+            name           = d['name'],
+            code           = d['code'],
+            category       = d['category'],
+            unit           = d['unit'],
+            description    = d['description'],
+            image          = d.get('image'),
+            is_active      = True,
+            smart_defaults = {
+                'sides'   : sides,
+                'pages'   : 1,
+                'sets'    : 1,
+                'is_color': 'color' in d['name'].lower() or 'colour' in d['name'].lower(),
+            },
         )
 
         # ── Create pricing rule for this branch ───────────────
@@ -549,7 +556,7 @@ class ServiceCreateView(APIView):
                 pass
 
         # ── Auto-map toner based on paper size ────────────────
-        _auto_map_toner_for_service(service, mappings_data)
+        _auto_map_toner_for_service(service, mappings_data, sides=d.get('sides', 'SINGLE'))
 
         return Response(
             ServiceSerializer(service).data,
@@ -609,6 +616,8 @@ def _auto_map_toner_for_service(service, manual_mappings):
 
     for paper in paper_consumables:
         rate   = TONER_RATES.get(paper.paper_size, 0.01)
+        if sides == 'DOUBLE':
+            rate = rate * 2
         toners = [black_toner]
         if applies_color:
             toners = [black_toner, cyan_toner, magenta_toner, yellow_toner]
@@ -626,7 +635,7 @@ def _auto_map_toner_for_service(service, manual_mappings):
                 }
             )
 
-def _auto_map_toner_for_service(service, manual_mappings):
+def _auto_map_toner_for_service(service, manual_mappings, sides='SINGLE'):
     """
     Auto-create toner ServiceConsumable mappings based on
     paper consumables selected by the BM.

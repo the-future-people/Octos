@@ -1331,11 +1331,27 @@ async function loadRecentJobs() {
     }
 
     grid.innerHTML = services.map(s => `
-      <div class="service-card">
-        <div class="service-card-name">${_esc(s.name)}</div>
-        <div class="service-card-price">${s.base_price != null ? 'GHS ' + Number(s.base_price).toFixed(2) : '—'}</div>
-        <div class="service-card-desc">${_esc(s.description || '')}</div>
-      </div>`).join('');
+        <div class="service-card">
+          ${s.image
+            ? `<div class="service-card-img">
+                <img src="${s.image}" alt="${_esc(s.name)}"
+                  style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);">
+               </div>`
+            : `<div class="service-card-img service-card-img--placeholder">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="1.5" opacity="0.3">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+               </div>`
+          }
+          <div class="service-card-body">
+            <div class="service-card-name">${_esc(s.name)}</div>
+            <div class="service-card-price">${s.base_price != null ? 'GHS ' + Number(s.base_price).toFixed(2) : '—'}</div>
+            <div class="service-card-desc">${_esc(s.description || '')}</div>
+          </div>
+        </div>`).join('');
   }
 
   // ── Outsource modal ────────────────────────────────────────
@@ -3192,6 +3208,7 @@ const kpiCards = [
     document.getElementById('svc-error').style.display         = 'none';
     document.getElementById('svc-category').value   = 'INSTANT';
     document.getElementById('svc-unit').value       = 'PER_PIECE';
+    document.getElementById('svc-sides').value      = 'SINGLE';
 
     document.getElementById('add-service-overlay').classList.add('open');
 
@@ -3358,6 +3375,8 @@ const kpiCards = [
     });
 
     // Build FormData (multipart for image upload)
+    const sides = document.getElementById('svc-sides').value;
+
     const fd = new FormData();
     fd.append('name',        name);
     fd.append('code',        code);
@@ -3365,6 +3384,7 @@ const kpiCards = [
     fd.append('unit',        unit);
     fd.append('base_price',  price);
     fd.append('description', desc);
+    fd.append('sides',       sides);
     if (imageFile) fd.append('image', imageFile);
     if (mappings.length) {
       fd.append('consumable_mappings', JSON.stringify(mappings));
@@ -3382,6 +3402,7 @@ const kpiCards = [
       const data = await res.json();
 
       if (!res.ok) {
+        console.error('Service create error:', JSON.stringify(data));
         const msg = Object.values(data).flat().join(' ');
         _showSvcError(msg || 'Failed to save service.');
         return;

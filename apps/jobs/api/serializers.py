@@ -546,6 +546,10 @@ class ServiceCreateSerializer(serializers.Serializer):
     description       = serializers.CharField(allow_blank=True, default='')
     base_price        = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
     image             = serializers.ImageField(required=False, allow_null=True)
+    sides = serializers.ChoiceField(
+        choices=['SINGLE', 'DOUBLE', 'NA'],
+        default='SINGLE',
+    )
     consumable_mappings = ServiceConsumableMappingSerializer(many=True, required=False, default=list)
 
     def validate_name(self, value):

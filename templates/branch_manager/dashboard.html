@@ -231,6 +231,7 @@
   </header>
 
   <!-- ── Body layout ─────────────────────────────────────── -->
+  <div class="body-layout-wrapper">
   <div class="body-layout">
 
     <!-- Sidebar -->
@@ -560,6 +561,8 @@
     </div><!-- /main-content -->
   </div><!-- /body-layout -->
 </div><!-- /app-shell -->
+</div><!-- /body-layout -->
+</div><!-- /body-layout-wrapper -->
 
 
 <!-- ═══════════════════════════════════════
@@ -761,8 +764,8 @@
           </div>
         </div>
 
-        <!-- Category + Unit -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <!-- Category + Unit + Sides -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
           <div class="eod-field">
             <label class="eod-field-label">Category <span style="color:var(--red-text)">*</span></label>
             <select class="eod-textarea" id="svc-category" style="padding:8px 10px;height:auto;">
@@ -779,6 +782,14 @@
               <option value="PER_SQFT">Per Sq Ft</option>
               <option value="PER_SQCM">Per Sq Cm</option>
               <option value="PER_JOB">Per Job</option>
+            </select>
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Sides</label>
+            <select class="eod-textarea" id="svc-sides" style="padding:8px 10px;height:auto;">
+              <option value="SINGLE">1-sided</option>
+              <option value="DOUBLE">2-sided</option>
+              <option value="NA">N/A</option>
             </select>
           </div>
         </div>
@@ -849,7 +860,7 @@
 <script src="{% static 'js/branch_manager/dashboard.js' %}"></script>
 <script src="{% static 'js/nj_controller.js' %}"></script>
 <script src="{% static 'js/invoice_controller.js' %}"></script>
-
+<script src="{% static 'js/week_greeter.js' %}"></script>
 <script>
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     document.getElementById('app-shell').classList.toggle('collapsed');
