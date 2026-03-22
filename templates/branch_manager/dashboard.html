@@ -533,13 +533,16 @@
         <div class="pane" id="pane-services">
           <div class="section-head">
             <span class="section-title">Active Services</span>
-            <span id="meta-services-count" class="section-link"></span>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span id="meta-services-count" class="section-link"></span>
+              <button class="btn-dark" style="padding:6px 14px;font-size:12px;"
+                onclick="Dashboard.openAddServiceModal()">+ Add Service</button>
+            </div>
           </div>
           <div id="services-grid" class="services-grid">
             <div class="loading-cell" style="grid-column:1/-1;"><span class="spin"></span> Loading…</div>
           </div>
         </div>
-
         <!-- ── STAFF ────────────────────────────────────── -->
         <div class="pane" id="pane-staff">
           <div class="section-head">
@@ -722,8 +725,124 @@
 </div>
 
 <div id="toast-container"></div>
-{% include "branch_manager/eod_modal.html" %}
-{% include "branch_manager/set_pin_modal.html" %}
+<!-- ── Add Service Modal ──────────────────────────────────────── -->
+<div class="eod-overlay" id="add-service-overlay">
+  <div class="eod-modal" style="max-width:620px;">
+
+    <!-- Header -->
+    <div class="eod-header">
+      <div class="eod-header-left">
+        <div class="eod-title">Add New Service</div>
+        <div class="eod-subtitle">Fill in the details below to register a new service</div>
+      </div>
+      <button class="eod-close-btn" onclick="Dashboard.closeAddServiceModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Content -->
+    <div class="eod-content" id="add-service-content" style="display:block;">
+
+      <!-- Name + Code -->
+      <div class="eod-section">
+        <div class="eod-section-title">Service Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Service Name <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-name" type="text" placeholder="e.g. A5 Color Printing"
+              oninput="Dashboard._svcAutoCode()" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Service Code <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-code" type="text" placeholder="e.g. A5-COL-PRINT"
+              style="padding:8px 10px;height:auto;font-family:'JetBrains Mono',monospace;text-transform:uppercase;">
+          </div>
+        </div>
+
+        <!-- Category + Unit -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Category <span style="color:var(--red-text)">*</span></label>
+            <select class="eod-textarea" id="svc-category" style="padding:8px 10px;height:auto;">
+              <option value="INSTANT">Instant</option>
+              <option value="PRODUCTION">Production</option>
+              <option value="DESIGN">Design</option>
+            </select>
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Unit</label>
+            <select class="eod-textarea" id="svc-unit" style="padding:8px 10px;height:auto;">
+              <option value="PER_COPY">Per Copy</option>
+              <option value="PER_PIECE">Per Piece</option>
+              <option value="PER_SQFT">Per Sq Ft</option>
+              <option value="PER_SQCM">Per Sq Cm</option>
+              <option value="PER_JOB">Per Job</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Base Price + Description -->
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Base Price (GHS) <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-price" type="number" min="0" step="0.01"
+              placeholder="0.00" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Description</label>
+            <input class="eod-textarea" id="svc-description" type="text"
+              placeholder="Short description of this service…" style="padding:8px 10px;height:auto;">
+          </div>
+        </div>
+
+        <!-- Image -->
+        <div class="eod-field">
+          <label class="eod-field-label">Service Image <span style="font-size:10px;color:var(--text-3);">(optional)</span></label>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <input type="file" id="svc-image" accept="image/*" onchange="Dashboard._svcPreviewImage()"
+              style="font-size:12px;color:var(--text-2);">
+            <img id="svc-image-preview" src="" alt=""
+              style="display:none;width:48px;height:48px;object-fit:cover;
+                border-radius:6px;border:1px solid var(--border);">
+          </div>
+        </div>
+      </div>
+
+      <!-- Consumable Mappings -->
+      <div class="eod-section">
+        <div class="eod-section-title">Inventory Mappings
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">
+            Which materials does this service consume?
+          </span>
+        </div>
+        <div class="eod-info-note amber" style="display:block;margin-bottom:12px;">
+          Set how much of each material is used per page/set. Leave unchecked to skip.
+        </div>
+        <div id="svc-consumables-list">
+          <div class="loading-cell"><span class="spin"></span> Loading consumables…</div>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div id="svc-error" class="eod-info-note red" style="display:none;margin-top:8px;"></div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="eod-footer" style="display:flex;">
+      <button class="eod-cancel-btn" onclick="Dashboard.closeAddServiceModal()">Cancel</button>
+      <button class="eod-confirm-btn" id="svc-submit-btn" onclick="Dashboard.submitAddService()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Save Service
+      </button>
+    </div>
+
+  </div>
+</div>
 
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/jobs.js' %}"></script>

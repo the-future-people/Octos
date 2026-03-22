@@ -13,7 +13,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'code', 'category', 'unit',
             'description', 'requires_design', 'requires_file_upload',
-            'is_active', 'spec_template', 'smart_defaults',
+            'is_active', 'spec_template', 'smart_defaults', 'image',
         ]
 
 
@@ -522,3 +522,41 @@ class CashierPaymentSerializer(serializers.Serializer):
                 {'split_legs': 'Split legs are required for split payments.'}
             )
         return attrs
+
+# ─────────────────────────────────────────────────────────────
+# Service Create
+# ─────────────────────────────────────────────────────────────
+
+class ServiceConsumableMappingSerializer(serializers.Serializer):
+    """One consumable mapping submitted with a new service."""
+    consumable_id      = serializers.IntegerField()
+    quantity_per_unit  = serializers.DecimalField(max_digits=8, decimal_places=4, min_value=0.0001)
+    applies_to_color   = serializers.BooleanField(default=True)
+    applies_to_bw      = serializers.BooleanField(default=True)
+
+
+class ServiceCreateSerializer(serializers.Serializer):
+    name              = serializers.CharField(max_length=100)
+    code              = serializers.CharField(max_length=20)
+    category          = serializers.ChoiceField(choices=['INSTANT', 'PRODUCTION', 'DESIGN'])
+    unit              = serializers.ChoiceField(
+        choices=['PER_COPY', 'PER_PIECE', 'PER_SQFT', 'PER_SQCM', 'PER_JOB'],
+        default='PER_PIECE',
+    )
+    description       = serializers.CharField(allow_blank=True, default='')
+    base_price        = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    image             = serializers.ImageField(required=False, allow_null=True)
+    consumable_mappings = ServiceConsumableMappingSerializer(many=True, required=False, default=list)
+
+    def validate_name(self, value):
+        from apps.jobs.models import Service
+        if Service.objects.filter(name__iexact=value).exists():
+            raise serializers.ValidationError('A service with this name already exists.')
+        return value
+
+    def validate_code(self, value):
+        from apps.jobs.models import Service
+        code = value.upper().replace(' ', '-')
+        if Service.objects.filter(code=code).exists():
+            raise serializers.ValidationError('A service with this code already exists.')
+        return code

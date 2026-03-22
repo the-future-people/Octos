@@ -479,7 +479,222 @@ class ServiceListView(generics.ListAPIView):
             qs = qs.filter(category=category)
         return qs
 
+class ServiceCreateView(APIView):
+    """
+    POST /api/v1/jobs/services/create/
+    Create a new service with pricing rule and optional consumable mappings.
+    Temporarily accessible by Branch Manager — will move to HQ/Belt role later.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes     = [MultiPartParser, FormParser]
 
+    def post(self, request):
+        from apps.jobs.api.serializers import ServiceCreateSerializer
+        from apps.jobs.models import Service, PricingRule
+        from apps.inventory.models import ConsumableItem, ServiceConsumable
+        import json
+
+        serializer = ServiceCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d      = serializer.validated_data
+        branch = getattr(request.user, 'branch', None)
+
+        # ── Create service ────────────────────────────────────
+        service = Service.objects.create(
+            name        = d['name'],
+            code        = d['code'],
+            category    = d['category'],
+            unit        = d['unit'],
+            description = d['description'],
+            image       = d.get('image'),
+            is_active   = True,
+        )
+
+        # ── Create pricing rule for this branch ───────────────
+        if branch:
+            PricingRule.objects.create(
+                service    = service,
+                branch     = branch,
+                base_price = d['base_price'],
+                is_active  = True,
+            )
+
+        # ── Resolve consumable mappings ───────────────────────
+        # Serializer can't deserialize JSON string from multipart
+        # so we always parse from raw request data
+        raw_mappings  = request.data.get('consumable_mappings')
+        mappings_data = []
+        if raw_mappings and isinstance(raw_mappings, str):
+            try:
+                mappings_data = json.loads(raw_mappings)
+            except json.JSONDecodeError:
+                mappings_data = []
+
+        # ── Create consumable mappings ────────────────────────
+        for mapping in mappings_data:
+            try:
+                consumable = ConsumableItem.objects.get(pk=mapping['consumable_id'])
+                ServiceConsumable.objects.get_or_create(
+                    service    = service,
+                    consumable = consumable,
+                    defaults   = {
+                        'quantity_per_unit': mapping['quantity_per_unit'],
+                        'applies_to_color' : mapping.get('applies_to_color', True),
+                        'applies_to_bw'    : mapping.get('applies_to_bw', True),
+                    }
+                )
+            except ConsumableItem.DoesNotExist:
+                pass
+
+        # ── Auto-map toner based on paper size ────────────────
+        _auto_map_toner_for_service(service, mappings_data)
+
+        return Response(
+            ServiceSerializer(service).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def _auto_map_toner_for_service(service, manual_mappings):
+    """
+    Auto-create toner ServiceConsumable mappings based on
+    paper consumables selected by the BM.
+
+    Rules:
+      A5 paper → 0.005% toner per page
+      A4 paper → 0.01% toner per page
+      A3 paper → 0.02% toner per page
+      Color services → all 4 toners (CMYK)
+      B&W services   → black toner only
+      Ambiguous name → both color and B&W
+    """
+    from apps.inventory.models import ConsumableItem, ServiceConsumable
+
+    selected_ids = [m['consumable_id'] for m in (manual_mappings or [])]
+    if not selected_ids:
+        return
+
+    paper_consumables = ConsumableItem.objects.filter(
+        id__in         = selected_ids,
+        category__name = 'Paper',
+    ).exclude(unit_type='PERCENT')
+
+    if not paper_consumables.exists():
+        return
+
+    TONER_RATES = {
+        'A5': 0.005,
+        'A4': 0.01,
+        'A3': 0.02,
+        'A2': 0.04,
+    }
+
+    name_lower    = service.name.lower()
+    is_color_name = 'color' in name_lower or 'colour' in name_lower
+    is_bw_name    = 'b&w' in name_lower or 'bw' in name_lower or 'black' in name_lower
+
+    if is_color_name and not is_bw_name:
+        applies_color, applies_bw = True, False
+    elif is_bw_name and not is_color_name:
+        applies_color, applies_bw = False, True
+    else:
+        applies_color, applies_bw = True, True
+
+    black_toner   = ConsumableItem.objects.filter(name__icontains='Toner Black').first()
+    cyan_toner    = ConsumableItem.objects.filter(name__icontains='Toner Cyan').first()
+    magenta_toner = ConsumableItem.objects.filter(name__icontains='Toner Magenta').first()
+    yellow_toner  = ConsumableItem.objects.filter(name__icontains='Toner Yellow').first()
+
+    for paper in paper_consumables:
+        rate   = TONER_RATES.get(paper.paper_size, 0.01)
+        toners = [black_toner]
+        if applies_color:
+            toners = [black_toner, cyan_toner, magenta_toner, yellow_toner]
+
+        for toner in toners:
+            if not toner:
+                continue
+            ServiceConsumable.objects.get_or_create(
+                service    = service,
+                consumable = toner,
+                defaults   = {
+                    'quantity_per_unit': rate,
+                    'applies_to_color' : applies_color,
+                    'applies_to_bw'    : applies_bw,
+                }
+            )
+
+def _auto_map_toner_for_service(service, manual_mappings):
+    """
+    Auto-create toner ServiceConsumable mappings based on
+    paper consumables selected by the BM.
+
+    Rules:
+      A5 paper → 0.005% toner per page
+      A4 paper → 0.01% toner per page
+      A3 paper → 0.02% toner per page
+      Color services → all 4 toners (CMYK)
+      B&W services   → black toner only
+      Ambiguous name → both color and B&W
+    """
+    from apps.inventory.models import ConsumableItem, ServiceConsumable
+
+    selected_ids = [m['consumable_id'] for m in (manual_mappings or [])]
+    if not selected_ids:
+        return
+
+    paper_consumables = ConsumableItem.objects.filter(
+        id__in         = selected_ids,
+        category__name = 'Paper',
+    ).exclude(unit_type='PERCENT')
+
+    if not paper_consumables.exists():
+        return
+
+    TONER_RATES = {
+        'A5': 0.005,
+        'A4': 0.01,
+        'A3': 0.02,
+        'A2': 0.04,
+    }
+
+    name_lower    = service.name.lower()
+    is_color_name = 'color' in name_lower or 'colour' in name_lower
+    is_bw_name    = 'b&w' in name_lower or 'bw' in name_lower or 'black' in name_lower
+
+    if is_color_name and not is_bw_name:
+        applies_color, applies_bw = True, False
+    elif is_bw_name and not is_color_name:
+        applies_color, applies_bw = False, True
+    else:
+        applies_color, applies_bw = True, True
+
+    black_toner   = ConsumableItem.objects.filter(name__icontains='Toner Black').first()
+    cyan_toner    = ConsumableItem.objects.filter(name__icontains='Toner Cyan').first()
+    magenta_toner = ConsumableItem.objects.filter(name__icontains='Toner Magenta').first()
+    yellow_toner  = ConsumableItem.objects.filter(name__icontains='Toner Yellow').first()
+
+    for paper in paper_consumables:
+        rate = TONER_RATES.get(paper.paper_size, 0.01)
+        toners = [black_toner]
+        if applies_color:
+            toners = [black_toner, cyan_toner, magenta_toner, yellow_toner]
+
+        for toner in toners:
+            if not toner:
+                continue
+            ServiceConsumable.objects.get_or_create(
+                service    = service,
+                consumable = toner,
+                defaults   = {
+                    'quantity_per_unit': rate,
+                    'applies_to_color' : applies_color,
+                    'applies_to_bw'    : applies_bw,
+                }
+            )
+            
 class PricingRuleListView(generics.ListAPIView):
     serializer_class   = PricingRuleSerializer
     permission_classes = [IsAuthenticated]

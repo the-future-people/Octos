@@ -108,10 +108,13 @@ const Auth = {
     if (!token) { this.logout('expired'); return null; }
 
     const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      ...(options.headers || {}),
-    };
+        'Authorization': `Bearer ${token}`,
+        ...(options.headers || {}),
+      };
+      // Only set Content-Type for JSON — let browser set it for FormData
+      if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
 
     let res = await fetch(url, { ...options, headers });
 
