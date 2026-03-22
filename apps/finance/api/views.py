@@ -547,9 +547,9 @@ class CashierShiftStatusView(APIView):
         except Exception:
             shift_end = None
 
-        # No HR shift record — fall back to 19:30 branch closing time
+        # No HR shift record — fall back to branch closing_time
         if not shift_end:
-            shift_end = dt_time(19, 30)
+            shift_end = branch.closing_time
 
         # Compute minutes remaining
         now            = timezone.now()
@@ -2276,13 +2276,62 @@ def _generate_weekly_pdf(report):
     story.append(jobs_table)
     story.append(Spacer(1, 6*mm))
 
-    # ── Inventory placeholder ─────────────────────────────────────────────
+    # ── Inventory ─────────────────────────────────────────────────────────
     story.append(Paragraph('INVENTORY', label_style))
-    if report.inventory_snapshot:
-        story.append(Paragraph(str(report.inventory_snapshot), body_style))
+    snapshot = report.inventory_snapshot
+    items    = snapshot.get('items', []) if snapshot else []
+    low_stock = snapshot.get('low_stock', []) if snapshot else []
+
+    if items:
+        inv_headers = ['Consumable', 'Category', 'Unit', 'Opening', 'Received', 'Consumed', 'Closing', 'Status']
+        inv_data    = [inv_headers]
+        for item in items:
+            is_low  = item.get('is_low', False)
+            status_label = 'LOW' if is_low else 'OK'
+            inv_data.append([
+                item.get('consumable', '—'),
+                item.get('category', '—'),
+                item.get('unit', '—'),
+                str(item.get('opening', 0)),
+                str(item.get('received', 0)),
+                str(item.get('consumed', 0)),
+                str(item.get('closing', 0)),
+                status_label,
+            ])
+
+        col_w = [CW*0.28, CW*0.12, CW*0.07, CW*0.08, CW*0.09, CW*0.09, CW*0.08, CW*0.09]
+        inv_table = Table(inv_data, colWidths=col_w, repeatRows=1)
+
+        # Build row styles — highlight low stock rows red
+        row_styles = [
+            ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
+            ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
+            ('FONTSIZE',      (0,0), (-1,-1), 8),
+            ('ALIGN',         (3,0), (-1,-1), 'RIGHT'),
+            ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
+            ('TOPPADDING',    (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('LEFTPADDING',   (0,0), (-1,-1), 6),
+            ('RIGHTPADDING',  (0,0), (-1,-1), 6),
+            ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+        ]
+        for i, item in enumerate(items, start=1):
+            if item.get('is_low', False):
+                row_styles.append(('TEXTCOLOR', (7,i), (7,i), FARHAT_RED))
+                row_styles.append(('FONTNAME',  (7,i), (7,i), 'Helvetica-Bold'))
+
+        inv_table.setStyle(TableStyle(row_styles))
+        story.append(inv_table)
+
+        if low_stock:
+            story.append(Spacer(1, 3*mm))
+            story.append(Paragraph(
+                f"<font color='#E31E24'><b>Low stock alert:</b></font> {', '.join(low_stock)}",
+                body_style
+            ))
     else:
         inv_placeholder = Table(
-            [['Consumables tracking will appear here once inventory module is active.']],
+            [['No inventory data available for this period.']],
             colWidths=[CW]
         )
         inv_placeholder.setStyle(TableStyle([
@@ -2577,6 +2626,14 @@ class WeeklyReportSubmitView(APIView):
 
         if report.is_locked:
             return Response({'detail': 'Already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Submit only allowed on Saturday after Saturday's sheet is closed
+        today = timezone.localdate()
+        if today.weekday() != 5:  # 5 = Saturday
+            return Response(
+                {'detail': 'Weekly report can only be submitted on Saturday after closing.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not report.daily_sheets.exists():
             return Response(
