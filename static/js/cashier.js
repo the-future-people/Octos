@@ -36,6 +36,7 @@ const Cashier = (() => {
     await loadQueue();
     _startPolling();
     _startShiftPolling();
+    WeekGreeter.init();
   }
 
   // ── Context ────────────────────────────────────────────────

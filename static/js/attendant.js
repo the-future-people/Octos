@@ -36,8 +36,9 @@ const Attendant = (() => {
       _loadRecentJobs(),
       _loadDraftCount(),
     ]);
-    AtNotifications.startPolling();
-  }
+  AtNotifications.startPolling();
+      WeekGreeter.init();
+    }
 
   // ── Context ────────────────────────────────────────────────
   async function _loadContext() {

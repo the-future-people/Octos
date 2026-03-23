@@ -220,7 +220,7 @@
         if (!_shouldShow(userId)) return;
 
         // Small delay so page renders first
-        setTimeout(() => _show(firstName), 800);
+        setTimeout(() => _show(firstName), 300);
       } catch (e) {
         // Silent — greeter is non-critical
       }
