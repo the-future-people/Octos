@@ -43,3 +43,14 @@ staticfiles
 .coverage
 htmlcov
 config/__pycache__/
+
+# Docker environment
+.env.docker
+
+# Database dumps
+*.dump
+*.sql
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.db

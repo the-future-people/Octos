@@ -75,3 +75,97 @@ class PermissionListView(generics.ListAPIView):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
     permission_classes = [IsAuthenticated]
+
+class SetDownloadPinView(APIView):
+    """
+    POST /api/v1/accounts/pin/set/
+    Sets or updates the BM's 4-digit download PIN.
+    Body: { "pin": "1234", "confirm_pin": "1234" }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        pin         = str(request.data.get('pin', '')).strip()
+        confirm_pin = str(request.data.get('confirm_pin', '')).strip()
+
+        if not pin or not confirm_pin:
+            return Response(
+                {'detail': 'Both pin and confirm_pin are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(pin) != 4 or not pin.isdigit():
+            return Response(
+                {'detail': 'PIN must be exactly 4 digits.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if pin != confirm_pin:
+            return Response(
+                {'detail': 'PINs do not match.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.set_download_pin(pin)
+        return Response({'detail': 'Download PIN set successfully.'})
+
+
+class VerifyDownloadPinView(APIView):
+    """
+    POST /api/v1/accounts/pin/verify/
+    Verifies the PIN and logs the sheet download.
+    Body: { "pin": "1234", "sheet_id": 13 }
+    Returns: { "valid": true, "token": "<one-time-token>" }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.finance.models import DailySalesSheet, SheetDownloadLog
+
+        pin      = str(request.data.get('pin', '')).strip()
+        sheet_id = request.data.get('sheet_id')
+
+        if not pin or not sheet_id:
+            return Response(
+                {'detail': 'pin and sheet_id are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check PIN is set
+        if not request.user.download_pin_set:
+            return Response(
+                {'detail': 'No PIN set.', 'requires_setup': True},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Verify PIN
+        if not request.user.verify_download_pin(pin):
+            return Response(
+                {'detail': 'Incorrect PIN. Please try again.', 'valid': False},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Verify sheet exists and belongs to user's branch
+        try:
+            sheet = DailySalesSheet.objects.get(
+                pk=sheet_id,
+                branch=request.user.branch,
+            )
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Log the download
+        ip = (
+            request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+            or request.META.get('REMOTE_ADDR')
+        )
+        SheetDownloadLog.objects.create(
+            sheet         = sheet,
+            downloaded_by = request.user,
+            ip_address    = ip or None,
+        )
+
+        return Response({'valid': True, 'sheet_id': sheet.id})

@@ -1,0 +1,86 @@
+<!-- ═══════════════════════════════════════
+     PIN MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="pin-modal" onclick="if(event.target===this)Dashboard.closePinModal()">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="pin-modal-title">Download PDF</div>
+        <div class="modal-subtitle" id="pin-modal-subtitle">Enter your 4-digit PIN to continue</div>
+      </div>
+      <button class="modal-x" onclick="Dashboard.closePinModal()">×</button>
+    </div>
+    <div class="modal-body" style="padding:24px;">
+
+      <!-- Set PIN state -->
+      <div id="pin-set-state" style="display:none;">
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:20px;line-height:1.6;">
+          You haven't set a download PIN yet. Create a 4-digit PIN to secure PDF downloads.
+          This PIN is separate from your account password.
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            New PIN
+          </label>
+          <div id="pin-set-dots" style="display:flex;gap:10px;justify-content:center;margin-bottom:6px;">
+            ${[0,1,2,3].map(i => `
+              <div id="pin-set-dot-${i}" style="width:14px;height:14px;border-radius:50%;
+                background:var(--border);transition:background 0.15s;"></div>`).join('')}
+          </div>
+          <input type="password" id="pin-set-input" maxlength="4" inputmode="numeric"
+            pattern="[0-9]*"
+            style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+                   border-radius:8px;font-size:20px;letter-spacing:0.5em;text-align:center;
+                   background:var(--surface);color:var(--text);outline:none;font-family:'JetBrains Mono',monospace;"
+            oninput="Dashboard._onPinInput('set')"
+            placeholder="••••"/>
+        </div>
+        <div style="margin-bottom:6px;">
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Confirm PIN
+          </label>
+          <input type="password" id="pin-confirm-input" maxlength="4" inputmode="numeric"
+            pattern="[0-9]*"
+            style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+                   border-radius:8px;font-size:20px;letter-spacing:0.5em;text-align:center;
+                   background:var(--surface);color:var(--text);outline:none;font-family:'JetBrains Mono',monospace;"
+            oninput="Dashboard._onPinInput('confirm')"
+            placeholder="••••"/>
+        </div>
+        <div id="pin-set-error" style="font-size:12px;color:var(--red-text);
+          margin-top:8px;display:none;"></div>
+      </div>
+
+      <!-- Verify PIN state -->
+      <div id="pin-verify-state" style="display:none;">
+        <div style="display:flex;gap:12px;justify-content:center;margin-bottom:20px;">
+          ${[0,1,2,3].map(i => `
+            <div id="pin-dot-${i}" style="width:16px;height:16px;border-radius:50%;
+              background:var(--border);transition:background 0.15s;"></div>`).join('')}
+        </div>
+        <input type="password" id="pin-verify-input" maxlength="4" inputmode="numeric"
+          pattern="[0-9]*"
+          style="width:100%;padding:12px 14px;border:1.5px solid var(--border);
+                 border-radius:8px;font-size:24px;letter-spacing:0.8em;text-align:center;
+                 background:var(--surface);color:var(--text);outline:none;
+                 font-family:'JetBrains Mono',monospace;"
+          oninput="Dashboard._onPinInput('verify')"
+          onkeydown="if(event.key==='Enter')Dashboard._submitPin()"
+          placeholder="••••"/>
+        <div id="pin-verify-error" style="font-size:12px;color:var(--red-text);
+          margin-top:10px;text-align:center;display:none;"></div>
+        <div id="pin-attempts" style="font-size:11px;color:var(--text-3);
+          margin-top:6px;text-align:center;"></div>
+      </div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="Dashboard.closePinModal()">Cancel</button>
+      <button class="btn-dark" id="pin-submit-btn" onclick="Dashboard._submitPin()">
+        Confirm
+      </button>
+    </div>
+  </div>
+</div>

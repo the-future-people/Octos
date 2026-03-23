@@ -22,7 +22,7 @@ class RoleListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for dropdowns."""
     class Meta:
         model = Role
-        fields = ['id', 'name', 'codename']
+        fields = ['id', 'name']
 
 class BranchMinimalSerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,14 +36,21 @@ class UserSerializer(serializers.ModelSerializer):
     role_detail   = RoleListSerializer(source='role', read_only=True)
     branch_detail = BranchMinimalSerializer(source='branch', read_only=True)
     full_name     = serializers.SerializerMethodField()
+    role_name     = serializers.SerializerMethodField()
 
     class Meta:
         model  = CustomUser
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'role_detail', 'branch', 'branch_detail',
+            'role', 'role_name', 'role_detail', 'branch', 'branch_detail',
             'phone', 'employee_id', 'is_active', 'created_at',
+            'download_pin_set',
         ]
+
+   
+
+    def get_role_name(self, obj):
+        return obj.role.name if obj.role else None
 
     def get_full_name(self, obj):
         return obj.full_name or obj.email

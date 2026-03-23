@@ -279,6 +279,17 @@ class Job(AuditModel):
         null=True, blank=True,
         help_text='Set when a draft expires or is manually discarded.',
     )
+    # ── Cash handling ─────────────────────────────────────────────────────────
+    cash_tendered = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Amount of cash given by customer',
+    )
+    change_given = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Change returned to customer',
+    )
 
     # ── Notes ──
     notes = models.TextField(blank=True)

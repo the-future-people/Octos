@@ -85,6 +85,11 @@ class Receipt(AuditModel):
     # ── Customer details (snapshot at time of issue) ──────────
     customer_name     = models.CharField(max_length=150, blank=True)
     customer_phone    = models.CharField(max_length=20, blank=True)
+    company_name      = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text='Company or sender name — shown on receipt when provided',
+    )
 
     # ── VAT (future-proofed, zero until GRA registered) ───────
     subtotal          = models.DecimalField(

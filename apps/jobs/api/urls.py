@@ -30,4 +30,9 @@ urlpatterns = [
     path('drafts/',              views.DraftListView.as_view(),   name='draft-list'),
     path('drafts/save/',         views.SaveDraftView.as_view(),   name='draft-save'),
     path('drafts/<int:pk>/discard/', views.DiscardDraftView.as_view(), name='draft-discard'),
+    path('reports/services/', views.ServicePerformanceView.as_view(), name='service-performance'),
+    path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
+    path('history/', views.JobHistoryView.as_view(), name='job-history'),
+    path('services/',        views.ServiceListView.as_view(),   name='service-list'),
+    path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),
 ]

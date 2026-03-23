@@ -18,7 +18,7 @@ class SheetEngine:
     - Auto-open a sheet for a branch on a given date
     - Provide a fallback open if the scheduled task missed
     - Enforce the staged end-of-day close sequence
-    - Handle the 10-minute payment extension when jobs are pending
+    - Handle the payment extension when ≥5 jobs are pending at cashier lock
     - Auto-close sheets that were never manually closed
     - Freeze and snapshot totals at close — numbers never change after
 
@@ -29,14 +29,22 @@ class SheetEngine:
     - Regular pending payments cannot carry over — BM must resolve
     - Credit account and cross-branch jobs are legitimate carryovers
     - Sheet is immutable once closed — no reopening ever
+
+    Close sequence (relative to branch.closing_time = 19:25):
+    - 6:55pm  — warning modal shown to all portal users
+    - 7:25pm  — job creation locked for attendants and all staff
+    - 7:30pm  — cashier locked (closing_time + 5 min)
+    - 7:45pm  — cashier extended lock if ≥5 pending payments exist
+    - 8:30pm  — BM auto-close (closing_time + 65 min)
     """
 
     # ── Close sequence timings (minutes before/after closing_time) ──
-    WARNING_BEFORE_CLOSE    = 30   # full screen warning modal
-    ATTENDANT_LOCK_AT_CLOSE = 0    # no new jobs at closing_time
-    CASHIER_LOCK_AFTER      = 30   # cashiers locked 30 min after closing_time
-    BM_AUTOCLOSE_AFTER      = 60   # sheet auto-closes 60 min after closing_time
-    PAYMENT_EXTENSION       = 10   # extra minutes granted when pending jobs exist
+    WARNING_BEFORE_CLOSE        = 30   # warning modal at 6:55pm
+    ATTENDANT_LOCK_AT_CLOSE     = 0    # job creation locked at 7:25pm (closing_time)
+    CASHIER_LOCK_AFTER          = 5    # cashier locked at 7:30pm
+    BM_AUTOCLOSE_AFTER          = 65   # sheet auto-closes at 8:30pm
+    PAYMENT_EXTENSION           = 15   # extra minutes when ≥5 pending jobs
+    PENDING_EXTENSION_THRESHOLD = 5    # minimum pending jobs to trigger extension
 
     def __init__(self, branch) -> None:
         self.branch = branch
@@ -96,6 +104,7 @@ class SheetEngine:
                 self.branch.code,
                 target_date,
             )
+            self._link_staged_floats(sheet)
 
         return sheet, created
 
@@ -125,6 +134,61 @@ class SheetEngine:
             target_date=today,
             opened_by=opened_by,
         )
+
+    def set_first_job_opener(self, sheet, user) -> None:
+        """
+        Record the first job creator as the operational sheet opener.
+        Called after the first job is saved to a system-opened sheet.
+        No-op if opened_by is already set.
+        """
+        if sheet.opened_by is None and user is not None:
+            sheet.opened_by = user
+            sheet.save(update_fields=['opened_by'])
+            logger.info(
+                'SheetEngine: sheet %s opened_by set to user %s (first job)',
+                sheet.pk,
+                user.pk,
+            )
+
+    def _link_staged_floats(self, sheet) -> int:
+        """
+        Link any pre-staged cashier floats to the newly opened sheet.
+        Called automatically when a sheet is created.
+
+        Staged floats are created by the BM at EOD the previous evening
+        with daily_sheet=None and scheduled_date=tomorrow.
+        This method links them to the sheet when it opens.
+
+        Returns count of floats linked.
+        """
+        from apps.finance.models import CashierFloat
+
+        staged = CashierFloat.objects.filter(
+            daily_sheet    = None,
+            scheduled_date = sheet.date,
+            cashier__branch = self.branch,
+        )
+
+        count = staged.count()
+        if count:
+            staged.update(daily_sheet=sheet)
+            logger.info(
+                'SheetEngine: linked %d staged float(s) to sheet %s for branch %s',
+                count,
+                sheet.pk,
+                self.branch.code,
+            )
+        else:
+            logger.warning(
+                'SheetEngine: no staged floats found for sheet %s branch %s on %s — '
+                'BM may not have set tomorrow\'s float at EOD.',
+                sheet.pk,
+                self.branch.code,
+                sheet.date,
+            )
+
+        return count
+    
     # ── Close sequence ────────────────────────────────────────────
 
     def get_close_schedule(self) -> dict:
@@ -194,8 +258,7 @@ class SheetEngine:
 
         Raises:
             ValueError : Sheet is already closed
-            ValueError : Non-carryover pending payments still exist
-                         and extension window has also passed
+            ValueError : Attempted to close before closing_time (manual only)
         """
         from apps.finance.models import DailySalesSheet
 
@@ -210,7 +273,6 @@ class SheetEngine:
             now      = timezone.now()
 
             if now < schedule['attendant_lock_at']:
-                # Calculate how long until closing time
                 mins_remaining = int(
                     (schedule['attendant_lock_at'] - now).total_seconds() / 60
                 )
@@ -242,6 +304,10 @@ class SheetEngine:
         sheet.closed_by = closed_by
         sheet.closed_at = timezone.now()
         sheet.save()
+
+        # Alert HQ if auto-closed — BM failed to close manually
+        if auto:
+            self._notify_hq_auto_close(sheet)
 
         logger.info(
             'SheetEngine: sheet %s closed — %s',
@@ -414,6 +480,41 @@ class SheetEngine:
             logger.exception(
                 'SheetEngine: failed to notify BM for sheet %s', sheet.pk
             )
+
+    def _notify_hq_auto_close(self, sheet) -> None:
+        """
+        Red alert to HQ when a sheet is auto-closed.
+        Means the BM failed to close the sheet manually by 8:30pm.
+        HQ recipients are determined by role — to be wired once HQ
+        role is defined in the accounts app.
+        """
+        try:
+            logger.warning(
+                'SheetEngine: sheet %s for branch %s was AUTO-CLOSED — '
+                'BM did not close manually. HQ alert pending role definition.',
+                sheet.pk,
+                self.branch.code,
+            )
+            # TODO: wire to HQ role once defined
+            # from apps.notifications.services import notify_many
+            # from apps.accounts.models import CustomUser
+            # hq_users = CustomUser.objects.filter(role__name='HQ_ADMIN', is_active=True)
+            # notify_many(
+            #     recipients=hq_users,
+            #     verb='SHEET_AUTO_CLOSED',
+            #     message=(
+            #         f"ALERT: {self.branch.name} sheet was auto-closed at 8:30pm. "
+            #         f"Branch Manager did not file EOD. Summoned for questioning."
+            #     ),
+            #     link=f'/portal/finance/sheets/{sheet.pk}/',
+            # )
+        except Exception:
+            logger.exception(
+                'SheetEngine: failed to send HQ auto-close alert for sheet %s', sheet.pk
+            )
+
+    # ── Carry forward ─────────────────────────────────────────────
+
     @transaction.atomic
     def carry_forward_pending_jobs(self, sheet) -> int:
         """
@@ -440,20 +541,57 @@ class SheetEngine:
 
         return count
 
-    def get_branch_lock_status(self) -> dict:
+    # ── Lock status ───────────────────────────────────────────────
+
+    def get_branch_lock_status(self, sheet=None) -> dict:
         """
         Returns the current lock state for the branch.
         Used by the frontend to show/hide the New Job button.
 
+        Args:
+            sheet : Today's DailySalesSheet — required for extension check.
+                    If None, extension logic is skipped.
+
         Returns dict with:
-            can_create_jobs  : bool
-            can_close_sheet  : bool
-            lock_reason      : str or None
-            schedule         : dict of close timestamps
-            mins_to_close    : int (negative if past closing time)
+            can_create_jobs   : bool
+            can_close_sheet   : bool
+            lock_reason       : str or None
+            extension_active  : bool
+            extension_reason  : str or None
+            schedule          : dict of close timestamps
+            mins_to_close     : int (negative if past closing time)
         """
         now      = timezone.now()
+        today    = timezone.localdate()
         schedule = self.get_close_schedule()
+
+        # Sunday — always fully locked
+        if today.weekday() == 6:
+            return {
+                'can_create_jobs'  : False,
+                'can_close_sheet'  : False,
+                'lock_reason'      : 'Branch is closed on Sundays.',
+                'extension_active' : False,
+                'extension_reason' : None,
+                'mins_to_close'    : 0,
+                'schedule'         : {},
+            }
+
+        # Evaluate payment extension for cashier lock
+        extension_active = False
+        extension_reason = None
+        cashier_lock_at  = schedule['cashier_lock_at']
+
+        if sheet is not None:
+            pending_count = self.get_pending_payment_count(sheet)
+            if pending_count >= self.PENDING_EXTENSION_THRESHOLD:
+                cashier_lock_at  = cashier_lock_at + timedelta(minutes=self.PAYMENT_EXTENSION)
+                extension_active = True
+                extension_reason = (
+                    f"{pending_count} payment(s) still in queue — "
+                    f"cashier close extended by {self.PAYMENT_EXTENSION} minutes to "
+                    f"{cashier_lock_at.strftime('%H:%M')}."
+                )
 
         mins_to_close = int(
             (schedule['attendant_lock_at'] - now).total_seconds() / 60
@@ -473,19 +611,21 @@ class SheetEngine:
                 )
 
         return {
-            'can_create_jobs' : can_create,
-            'can_close_sheet' : can_close,
-            'lock_reason'     : lock_reason,
-            'mins_to_close'   : mins_to_close,
-            'schedule'        : {
+            'can_create_jobs'  : can_create,
+            'can_close_sheet'  : can_close,
+            'lock_reason'      : lock_reason,
+            'extension_active' : extension_active,
+            'extension_reason' : extension_reason,
+            'mins_to_close'    : mins_to_close,
+            'schedule'         : {
                 'warning_at'        : schedule['warning_at'].isoformat(),
                 'attendant_lock_at' : schedule['attendant_lock_at'].isoformat(),
-                'cashier_lock_at'   : schedule['cashier_lock_at'].isoformat(),
+                'cashier_lock_at'   : cashier_lock_at.isoformat(),
                 'bm_autoclose_at'   : schedule['bm_autoclose_at'].isoformat(),
                 'closing_time'      : self.branch.closing_time.strftime('%H:%M'),
             },
         }
-    
+
     # ── Class-level convenience ───────────────────────────────────
 
     @classmethod

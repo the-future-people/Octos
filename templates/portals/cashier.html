@@ -181,6 +181,14 @@
           <span class="receipt-row-label">Payment Method</span>
           <span class="receipt-row-val" id="receipt-method">—</span>
         </div>
+        <div class="receipt-row" id="receipt-cash-row" style="display:none;">
+          <span class="receipt-row-label">Cash Tendered</span>
+          <span class="receipt-row-val" id="receipt-cash-tendered">—</span>
+        </div>
+        <div class="receipt-row" id="receipt-change-row" style="display:none;">
+          <span class="receipt-row-label">Change Given</span>
+          <span class="receipt-row-val" id="receipt-change-given">—</span>
+        </div>
         <div class="receipt-row">
           <span class="receipt-row-label">Receipt No.</span>
           <span class="receipt-row-val" id="receipt-number">—</span>
@@ -212,7 +220,7 @@
 
 
   <div id="toast-container"></div>
-
+  <script src="{% static 'js/week_greeter.js' %}"></script>
   <script src="{% static 'js/auth.js' %}"></script>
   <script src="{% static 'js/cashier.js' %}"></script>
 

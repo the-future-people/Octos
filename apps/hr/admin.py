@@ -3,7 +3,7 @@ from apps.hr.models import (
     Employee, PayrollRecord, JobPosition,
     Applicant, StageScore, StageQuestionnaire, OnboardingRecord
 )
-
+from apps.hr.models import EmployeeShift, ShiftOverride, EmployeeShiftSwap
 
 class PayrollInline(admin.TabularInline):
     model = PayrollRecord
@@ -81,3 +81,45 @@ class OnboardingRecordAdmin(admin.ModelAdmin):
     ]
     list_filter = ['status', 'employment_type']
     readonly_fields = ['created_at', 'updated_at']
+
+
+
+
+class ShiftOverrideInline(admin.TabularInline):
+    model = ShiftOverride
+    extra = 0
+    readonly_fields = ['created_at']
+    fields = ['date', 'override_type', 'override_start', 'override_end', 'swap_ref', 'notes']
+
+
+@admin.register(EmployeeShift)
+class EmployeeShiftAdmin(admin.ModelAdmin):
+    list_display  = ['employee', 'branch', 'get_day', 'start_time', 'end_time', 'is_active']
+    list_filter   = ['branch', 'day_of_week', 'is_active']
+    search_fields = ['employee__user__first_name', 'employee__user__last_name']
+
+    def get_day(self, obj):
+        return obj.get_day_of_week_display()
+    get_day.short_description = 'Day'
+
+
+@admin.register(ShiftOverride)
+class ShiftOverrideAdmin(admin.ModelAdmin):
+    list_display  = ['employee', 'date', 'override_type', 'override_start', 'override_end', 'swap_ref']
+    list_filter   = ['override_type', 'date']
+    search_fields = ['employee__user__first_name', 'employee__user__last_name']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(EmployeeShiftSwap)
+class EmployeeShiftSwapAdmin(admin.ModelAdmin):
+    list_display  = [
+        'initiated_by', 'accepted_by', 'status',
+        'initiator_date', 'compensation_date', 'approved_by', 'approved_at'
+    ]
+    list_filter   = ['status']
+    search_fields = [
+        'initiated_by__user__first_name', 'initiated_by__user__last_name',
+        'accepted_by__user__first_name',  'accepted_by__user__last_name',
+    ]
+    readonly_fields = ['approved_at', 'accepted_at', 'created_at', 'updated_at']

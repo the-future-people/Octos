@@ -50,6 +50,8 @@ body {
   flex-direction: column;
 }
 
+.cm-pm#pm-split { color: var(--momo-text); background: var(--bg); }
+.cm-pm#pm-split.selected { border-color: #e8a020; background: #fff8ec; color: #7a4f00; }
 a { text-decoration: none; color: inherit; }
 button { cursor: pointer; font-family: inherit; border: none; background: none; }
 
@@ -270,7 +272,9 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   flex-direction: column;
   gap: 20px;
   min-width: 0;
+  min-height: 100vh;
 }
+html { overflow-y: scroll; }
 
 /* ── Summary strip ─────────────────────────────────────── */
 .summary-strip {
@@ -621,7 +625,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   display: flex; flex-direction: column; align-items: center;
   gap: 3px; text-align: center; padding: 4px 0;
 }
-.cm-biz-name { font-size: 14px; font-weight: 800; color: var(--text); font-family: 'Syne', sans-serif; }
+.cm-biz-name { font-size: 15px; font-weight: 800; color: var(--text); font-family: 'Outfit', sans-serif; letter-spacing: -0.3px; }
 .cm-biz-branch { font-size: 12px; font-weight: 600; color: var(--text-2); }
 .cm-biz-contact { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
 .cm-biz-sep { color: var(--border-dark); }
@@ -670,10 +674,10 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .cm-total-val { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 700; color: var(--text); }
 
 /* Section label */
-.cm-section-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: -6px; }
-
+.cm-section-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin-bottom: 6px; }
 /* Payment method buttons */
-.cm-pm-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.cm-pm-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+.cm-pm-row-split { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 4px; }
 .cm-pm {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 10px 8px;
@@ -839,6 +843,43 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .cm-change-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--amber-text); }
 .cm-change-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--amber-text); }
 
+.cm-meta { flex-wrap: wrap; row-gap: 4px; }
+.cm-section-label { position: relative; z-index: 1; }
+.cm-meta-chip:last-child .cm-meta-v {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+/* ── Two-panel modal layout ── */
+.cm-info-panel {
+  padding: 20px 22px;
+  border-bottom: 2px solid var(--border);
+  position: relative;
+}
+.cm-payment-panel {
+    padding: 20px 22px 0;
+    background: var(--panel);
+  }
+.cm-supplementary {
+    padding: 16px 22px 24px;
+    background: var(--bg);
+    border-top: 1.5px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+  }
+.cm-close {
+  position: absolute; top: 16px; right: 16px;
+}
+.cm-payment-hint {
+  font-size: 11.5px; font-weight: 600;
+  color: var(--text-3); text-align: center;
+  padding: 6px 0 2px;
+  display: none;
+}
+
+.cm-payment-hint.visible { display: block; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(14px); }
@@ -887,7 +928,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
     min-width: unset;
   }
 }
-
 @media (max-width: 480px) {
   .page-shell {
     padding: 16px 12px 32px;

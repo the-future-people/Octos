@@ -35,6 +35,12 @@ class Service(AuditModel):
     requires_design      = models.BooleanField(default=False)
     requires_file_upload = models.BooleanField(default=False)
     is_active            = models.BooleanField(default=True)
+    image                = models.ImageField(
+        upload_to = 'services/',
+        null      = True,
+        blank     = True,
+        help_text = 'Service thumbnail image',
+    )
 
     # ── Dynamic spec template ────────────────────────────────────
     # Defines which fields the New Job modal renders for this service.

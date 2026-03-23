@@ -125,7 +125,22 @@
         </div>
       </div>
 
-      <!-- 8. Acknowledgement -->
+      <!-- 8. Tomorrow's Float -->
+      <div class="eod-section">
+        <div class="eod-section-title">Tomorrow's Opening Float
+          <span style="font-size:11px;font-weight:500;color:var(--red-text);margin-left:6px;">Required</span>
+        </div>
+        <div class="eod-info-note amber" style="display:block;margin-bottom:12px;">
+          Set the cash float for tomorrow before closing. Max GHS 100 — use small denominations (GHS 5, 10, 20) for change.
+        </div>
+        <div id="eod-cashier-floats">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- 9. Acknowledgement -->
+
+      <!-- 9. Acknowledgement -->
       <div class="eod-section eod-ack-section">
         <label class="eod-ack-label">
           <input type="checkbox" id="eod-ack-checkbox" onchange="Dashboard.toggleEODConfirm()">

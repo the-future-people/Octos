@@ -110,7 +110,7 @@ class Employee(AuditModel):
         ordering = ['branch', 'role', 'user__first_name']
 
     def __str__(self):
-        return f"{self.employee_number} — {self.user.get_full_name()} ({self.branch.name})"
+        return f"{self.employee_number} — {self.full_name} ({self.branch.name})"
 
     def save(self, *args, **kwargs):
         if not self.employee_number:
@@ -128,7 +128,7 @@ class Employee(AuditModel):
 
     @property
     def full_name(self):
-        return self.user.get_full_name()
+        return self.user.full_name
 
     @property
     def is_active(self):

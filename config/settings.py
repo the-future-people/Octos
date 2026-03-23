@@ -1,5 +1,23 @@
 from pathlib import Path
-from decouple import config
+from datetime import timedelta
+from celery.schedules import crontab
+
+import os
+from decouple import config as decouple_config
+# Override decouple with actual OS env vars (for Docker)
+class EnvConfig:
+    def __call__(self, key, default=None, cast=None):
+        val = os.environ.get(key)
+        if val is not None:
+            if cast:
+                return cast(val)
+            return val
+        if cast is not None:
+            return decouple_config(key, default=default, cast=cast)
+        return decouple_config(key, default=default)
+config = EnvConfig()
+
+config = EnvConfig()
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -132,7 +150,7 @@ REST_FRAMEWORK = {
 }
 
 # JWT Settings
-from datetime import timedelta
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -140,3 +158,29 @@ SIMPLE_JWT = {
 }
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_BEAT_SCHEDULE = {
+    'open-sheets-5am': {
+        'task': 'apps.finance.tasks.open_sheets',
+        'schedule': crontab(hour=5, minute=0),
+    },
+    'close-sheets-every-15min': {
+        'task': 'apps.finance.tasks.close_sheets',
+        'schedule': crontab(minute='*/15'),
+    },
+    'warn-sheets-every-5min': {
+        'task': 'apps.finance.tasks.warn_sheets',
+        'schedule': crontab(minute='*/5'),
+    },
+    'suspend-overdue-daily': {
+        'task': 'apps.finance.tasks.suspend_overdue',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    'expire-drafts-nightly': {
+        'task': 'apps.jobs.tasks.expire_drafts',
+        'schedule': crontab(hour=2, minute=0),
+    },
+}

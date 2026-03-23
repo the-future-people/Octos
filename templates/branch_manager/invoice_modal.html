@@ -1,0 +1,28 @@
+<div class="modal-overlay" id="invoice-modal">
+  <div class="modal" style="max-width:620px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="invoice-modal-title">Invoice</div>
+        <div class="modal-subtitle">Generate and send a professional invoice</div>
+      </div>
+      <button class="modal-x" onclick="Invoice.close()">×</button>
+    </div>
+    <div style="padding:12px 24px 0;display:flex;gap:6px;flex-shrink:0;">
+      <div id="inv-dot-1" style="flex:1;height:3px;border-radius:2px;background:var(--text);transition:background 0.2s;"></div>
+      <div id="inv-dot-2" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-3" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-4" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+    </div>
+    <div class="modal-body" id="invoice-modal-body" style="padding-top:16px;"></div>
+    <div class="modal-foot">
+      <button id="invoice-back-btn" onclick="Invoice.back()"
+        style="display:none;padding:8px 18px;background:none;border:1px solid var(--border);
+               border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text-2);font-family:inherit;">
+        ← Back
+      </button>
+      <div style="flex:1;"></div>
+      <button class="btn-ghost" onclick="Invoice.close()">Cancel</button>
+      <button class="btn-dark" id="invoice-next-btn" onclick="Invoice.next()">Continue →</button>
+    </div>
+  </div>
+</div>

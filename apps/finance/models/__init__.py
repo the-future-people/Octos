@@ -6,6 +6,10 @@ from .receipt import Receipt
 from .credit_account import CreditAccount
 from .credit_payment import CreditPayment
 from .branch_transfer_credit import BranchTransferCredit
+from .invoice import Invoice, InvoiceLineItem
+from .sheet_download_log import SheetDownloadLog
+from .weekly_report import WeeklyReport
+from .payment_leg import PaymentLeg
 
 __all__ = [
     'DailySalesSheet',
@@ -16,4 +20,9 @@ __all__ = [
     'CreditAccount',
     'CreditPayment',
     'BranchTransferCredit',
+    'Invoice',
+    'InvoiceLineItem',
+    'SheetDownloadLog',
+    'WeeklyReport',
+    'PaymentLeg'
 ]

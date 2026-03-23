@@ -6,8 +6,166 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard — Octos</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+  <style>
+    /* ── Jobs pane scoped styles ─────────────────────────── */
+    .jobs-stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .jobs-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .filter-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .filter-tab {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .filter-tab:hover { border-color: var(--border-dark); color: var(--text); }
+    .filter-tab.active { background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
+    .filter-tab[data-status="DRAFT"].active           { background: #888; border-color: #888; }
+    .filter-tab[data-status="PENDING_PAYMENT"].active { background: var(--amber-text); border-color: var(--amber-text); }
+    .filter-tab[data-status="IN_PROGRESS"].active     { background: var(--blue-text);  border-color: var(--blue-text); }
+    .filter-tab[data-status="READY"].active           { background: var(--green-text); border-color: var(--green-text); }
+    .filter-tab[data-status="HALTED"].active          { background: var(--red-text);   border-color: var(--red-text); }
+    .filter-tab[data-status="COMPLETE"].active        { background: var(--green-text); border-color: var(--green-text); }
+    .filter-tab[data-status="CANCELLED"].active       { background: #aaa; border-color: #aaa; }
+    .toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .inp-sm {
+      padding: 7px 12px; font-size: 12.5px;
+      border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--text);
+      outline: none; transition: border-color var(--transition); font-family: inherit;
+    }
+    .inp-sm:focus { border-color: var(--border-dark); background: var(--panel); }
+    .inp-sm::placeholder { color: var(--text-3); }
+    .sel-sm {
+      padding: 7px 26px 7px 10px; font-size: 12.5px;
+      border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--text-2);
+      outline: none; appearance: none; cursor: pointer;
+      transition: border-color var(--transition); font-family: inherit;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239a9690' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 8px center;
+    }
+    .sel-sm:focus { border-color: var(--border-dark); }
+    .jobs-table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .jobs-pagination {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-top: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .jobs-page-info { font-size: 12.5px; color: var(--text-3); }
+    .jobs-page-btns { display: flex; gap: 6px; }
+    .jobs-page-btn {
+      padding: 5px 14px; border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border); background: var(--bg);
+      font-size: 12.5px; color: var(--text-2); cursor: pointer;
+      transition: all var(--transition); font-family: inherit;
+    }
+    .jobs-page-btn:hover:not(:disabled) { border-color: var(--border-dark); color: var(--text); }
+    .jobs-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .empty-cell { text-align: center !important; padding: 60px 20px !important; }
+    .empty-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px; color: var(--text-3);
+    }
+    .empty-text { font-size: 13.5px; color: var(--text-3); font-weight: 500; }
+    /* Detail modal internals */
+    .detail-section { margin-bottom: 20px; }
+    .detail-section-title {
+      font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-3);
+      margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .detail-field { display: flex; flex-direction: column; gap: 3px; }
+    .detail-label { font-size: 10.5px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.3px; }
+    .detail-val { font-size: 13.5px; color: var(--text-2); font-weight: 500; }
+    .timeline { display: flex; flex-direction: column; gap: 0; }
+    .timeline-item { display: flex; gap: 12px; padding: 10px 0; position: relative; }
+    .timeline-item + .timeline-item::before {
+      content: ''; position: absolute; left: 11px; top: 0;
+      width: 2px; height: 10px; background: var(--border);
+    }
+    .tl-dot {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: var(--bg); border: 2px solid var(--border);
+      flex-shrink: 0; margin-top: 1px;
+      display: flex; align-items: center; justify-content: center; color: var(--text-3);
+    }
+    .tl-dot.green { background: var(--green-bg); border-color: var(--green-border); color: var(--green-text); }
+    .tl-dot.red   { background: var(--red-bg);   border-color: var(--red-border);   color: var(--red-text); }
+    .tl-body { flex: 1; }
+    .tl-status { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .tl-meta   { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+    .tl-notes  {
+      font-size: 12px; color: var(--text-2); margin-top: 4px;
+      padding: 6px 10px; background: var(--bg);
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+    }
+    .transition-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+    .transition-btn {
+      padding: 7px 16px; border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border); background: var(--bg);
+      font-size: 12.5px; font-weight: 600; color: var(--text-2);
+      cursor: pointer; transition: all var(--transition); font-family: inherit;
+    }
+    .transition-btn:hover { border-color: var(--text); background: var(--text); color: #fff; }
+    /* Type badges */
+    .type-badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 5px;
+      font-size: 10.5px; font-weight: 700;
+      letter-spacing: 0.3px; text-transform: uppercase;
+    }
+    .type-instant    { background: #eef3ff; color: #3355cc; }
+    .type-production { background: #f5f0ff; color: #7733cc; }
+    .type-design     { background: #fff0f7; color: #cc3388; }
+    /* Jobs pane page header */
+    .jobs-pane-head {
+      display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 20px;
+    }
+    .jobs-pane-title {
+      font-family: 'Syne', sans-serif; font-size: 18px;
+      font-weight: 800; color: var(--text); letter-spacing: -0.3px;
+    }
+    .jobs-pane-actions { display: flex; gap: 8px; }
+  </style>
 </head>
 <body>
 
@@ -73,6 +231,7 @@
   </header>
 
   <!-- ── Body layout ─────────────────────────────────────── -->
+  <div class="body-layout-wrapper">
   <div class="body-layout">
 
     <!-- Sidebar -->
@@ -87,17 +246,17 @@
           <span class="sidebar-label">Overview</span>
         </div>
 
+        <div class="sidebar-item" data-pane="finance" data-label="Day Sheet"
+          onclick="Dashboard.switchPane('finance', 'Day Sheet')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="sidebar-label">Day Sheet</span>
+        </div>
+
         <div class="sidebar-item" data-pane="jobs" data-label="Jobs"
           onclick="Dashboard.switchPane('jobs', 'Jobs')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           <span class="sidebar-label">Jobs</span>
           <span class="sidebar-badge" id="sidebar-badge-jobs">0</span>
-        </div>
-
-        <div class="sidebar-item" data-pane="finance" data-label="Finance"
-          onclick="Dashboard.switchPane('finance', 'Finance')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          <span class="sidebar-label">Finance</span>
         </div>
 
         <div class="sidebar-item" data-pane="inbox" data-label="Inbox"
@@ -126,11 +285,15 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span class="sidebar-label">Staff</span>
         </div>
-
+        <div class="sidebar-item" data-pane="inventory" data-label="Inventory"
+              onclick="Dashboard.switchPane('inventory', 'Inventory')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+              <span class="sidebar-label">Inventory</span>
+            </div>
         <div class="sidebar-item" data-pane="reports" data-label="Reports"
           onclick="Dashboard.switchPane('reports', 'Reports')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          <span class="sidebar-label">Reports</span>
+          <span class="sidebar-label">Reports & Filing</span>
         </div>
 
       </div>
@@ -219,7 +382,7 @@
 
           <div class="section-head">
             <span class="section-title">Recent Jobs</span>
-            <a href="/portal/jobs/" class="section-link">View all →</a>
+            <a href="#" class="section-link" onclick="Dashboard.switchPane('jobs','Jobs');return false;">View all →</a>
           </div>
           <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
             <table class="p-table">
@@ -243,8 +406,100 @@
 
         <!-- ── JOBS ─────────────────────────────────────── -->
         <div class="pane" id="pane-jobs">
-          <div class="loading-cell"><span class="spin"></span> Loading jobs…</div>
-        </div>
+
+          <!-- Page header -->
+          <div class="jobs-pane-head">
+            <div class="jobs-pane-title">Jobs</div>
+            <div class="jobs-pane-actions">
+              <button class="hero-btn hero-btn-secondary" style="padding:8px 16px;" onclick="Invoice.open()">
+                <div class="hero-btn-icon" style="width:24px;height:24px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <div class="hero-btn-label">
+                  <span class="hero-btn-title" style="font-size:13px;">Invoice</span>
+                </div>
+              </button>
+              <button class="hero-btn hero-btn-primary" style="padding:8px 16px;" onclick="NJ.open()">
+                <div class="hero-btn-icon" style="width:24px;height:24px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </div>
+                <div class="hero-btn-label">
+                  <span class="hero-btn-title" style="font-size:13px;">New Job</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Stat strip -->
+          <div class="jobs-stat-strip">
+            <div class="stat-card blue">
+              <div class="stat-num" id="jobs-stat-total">—</div>
+              <div class="stat-lbl">Total Jobs</div>
+            </div>
+            <div class="stat-card amber">
+              <div class="stat-num" id="jobs-stat-in-progress">—</div>
+              <div class="stat-lbl">In Progress</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-num" id="jobs-stat-complete">—</div>
+              <div class="stat-lbl">Complete</div>
+            </div>
+            <div class="stat-card purple">
+              <div class="stat-num" id="jobs-stat-revenue">—</div>
+              <div class="stat-lbl">Revenue (GHS)</div>
+            </div>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="jobs-toolbar">
+            <div class="filter-tabs" id="jobs-filter-tabs">
+              <button class="filter-tab active" data-status="all">All Today</button>
+              <button class="filter-tab" data-status="DRAFT">Draft</button>
+              <button class="filter-tab" data-status="PENDING_PAYMENT">Pending Payment</button>
+              <button class="filter-tab" data-status="IN_PROGRESS">In Progress</button>
+              <button class="filter-tab" data-status="READY">Ready</button>
+              <button class="filter-tab" data-status="HALTED">Halted</button>
+              <button class="filter-tab" data-status="COMPLETE">Complete</button>
+              <button class="filter-tab" data-status="CANCELLED">Cancelled</button>
+            </div>
+            <div class="toolbar-right">
+              <input type="text" id="jobs-search" class="inp-sm" placeholder="Search jobs…" style="width:180px;">
+              <select id="jobs-type" class="sel-sm">
+                <option value="">All Types</option>
+                <option value="INSTANT">Instant</option>
+                <option value="PRODUCTION">Production</option>
+                <option value="DESIGN">Design</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Table -->
+          <div class="jobs-table-wrap">
+            <table class="p-table">
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Customer</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Price</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="jobs-tbody">
+                <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading jobs…</td></tr>
+              </tbody>
+            </table>
+            <div class="jobs-pagination" id="jobs-pagination" style="display:none;">
+              <span class="jobs-page-info" id="jobs-page-info"></span>
+              <div class="jobs-page-btns">
+                <button class="jobs-page-btn" id="jobs-btn-prev" onclick="Jobs.prevPage()">← Prev</button>
+                <button class="jobs-page-btn" id="jobs-btn-next" onclick="Jobs.nextPage()">Next →</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /pane-jobs -->
 
         <!-- ── FINANCE ──────────────────────────────────── -->
         <div class="pane" id="pane-finance">
@@ -252,16 +507,8 @@
         </div>
 
         <!-- ── INBOX ────────────────────────────────────── -->
-       <div class="pane" id="pane-inbox">
-          <div class="section-head">
-            <span class="section-title">Recent Conversations</span>
-            <a href="/portal/inbox/" class="section-link">Open full inbox →</a>
-          </div>
-          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
-            <div id="inbox-tab-list">
-              <div class="loading-cell"><span class="spin"></span> Loading…</div>
-            </div>
-          </div>
+        <div class="pane" id="pane-inbox">
+          <div class="loading-cell"><span class="spin"></span> Loading inbox…</div>
         </div>
 
         <!-- ── PERFORMANCE ───────────────────────────────── -->
@@ -287,13 +534,16 @@
         <div class="pane" id="pane-services">
           <div class="section-head">
             <span class="section-title">Active Services</span>
-            <span id="meta-services-count" class="section-link"></span>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span id="meta-services-count" class="section-link"></span>
+              <button class="btn-dark" style="padding:6px 14px;font-size:12px;"
+                onclick="Dashboard.openAddServiceModal()">+ Add Service</button>
+            </div>
           </div>
           <div id="services-grid" class="services-grid">
             <div class="loading-cell" style="grid-column:1/-1;"><span class="spin"></span> Loading…</div>
           </div>
         </div>
-
         <!-- ── STAFF ────────────────────────────────────── -->
         <div class="pane" id="pane-staff">
           <div class="section-head">
@@ -302,27 +552,24 @@
           <div class="loading-cell">Coming soon.</div>
         </div>
 
-        <!-- ── REPORTS ───────────────────────────────────── -->
+       <!-- ── REPORTS ───────────────────────────────────── -->
         <div class="pane" id="pane-reports">
-          <div class="section-head">
-            <span class="section-title">Reports</span>
-          </div>
-          <div class="loading-cell">Coming soon.</div>
         </div>
-
+        
+        <div class="pane" id="pane-inventory"></div>
       </div><!-- /pane-area -->
     </div><!-- /main-content -->
   </div><!-- /body-layout -->
 </div><!-- /app-shell -->
+</div><!-- /body-layout -->
+</div><!-- /body-layout-wrapper -->
 
 
 <!-- ═══════════════════════════════════════
      NEW JOB MODAL
 ═══════════════════════════════════════ -->
 <div class="modal-overlay" id="new-job-modal">
-  <div class="modal" style="max-width:780px;">
-
-    <!-- Header -->
+  <div class="modal" style="max-width:780px;max-height:92vh;height:92vh;">
     <div class="modal-head">
       <div>
         <div class="modal-title">New Job</div>
@@ -330,8 +577,6 @@
       </div>
       <button class="modal-x" onclick="closeNewJobModal()">×</button>
     </div>
-
-    <!-- Type toggle -->
     <div style="padding:16px 24px 0;">
       <div class="nj-toggle" id="nj-type-toggle">
         <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
@@ -340,12 +585,7 @@
         <div class="nj-toggle-pill" id="nj-toggle-pill"></div>
       </div>
     </div>
-
-    <!-- Dynamic body — rendered by NJ controller -->
-    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;">
-    </div>
-
-    <!-- Footer -->
+    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;"></div>
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
       <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
@@ -353,7 +593,63 @@
         Create Job
       </button>
     </div>
+  </div>
+</div>
 
+
+<!-- ═══════════════════════════════════════
+     JOB DETAIL MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="job-detail-modal" onclick="if(event.target===this)closeDetailModal()">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="detail-title">Job Detail</div>
+        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:var(--text-3);"></div>
+      </div>
+      <button class="modal-x" onclick="closeDetailModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="detail-body">
+      <div style="text-align:center;padding:40px;color:var(--text-3);"><span class="spin"></span> Loading…</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     TRANSITION MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="transition-modal" onclick="if(event.target===this)closeTransitionModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Update Job Status</div>
+        <div class="modal-subtitle" id="transition-job-ref"></div>
+      </div>
+      <button class="modal-x" onclick="closeTransitionModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="detail-section">
+        <div class="detail-section-title">Move to</div>
+        <div class="transition-btns" id="transition-btns"></div>
+      </div>
+      <div style="margin-top:16px;">
+        <label style="font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:0.3px;text-transform:uppercase;display:block;margin-bottom:5px;">Notes (optional)</label>
+        <textarea id="transition-notes"
+          style="padding:9px 12px;font-size:13.5px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);outline:none;width:100%;resize:vertical;min-height:60px;font-family:inherit;"
+          placeholder="Add context about this status change…"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeTransitionModal()">Cancel</button>
+      <button class="btn-dark" id="transition-submit-btn" onclick="Jobs.confirmTransition()">
+        Confirm Transition
+      </button>
+    </div>
   </div>
 </div>
 
@@ -399,26 +695,188 @@
 </div>
 
 
+<!-- ═══════════════════════════════════════
+     INVOICE MODAL
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="invoice-modal">
+  <div class="modal" style="max-width:620px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="invoice-modal-title">Invoice</div>
+        <div class="modal-subtitle">Generate and send a professional invoice</div>
+      </div>
+      <button class="modal-x" onclick="Invoice.close()">×</button>
+    </div>
+    <div style="padding:12px 24px 0;display:flex;gap:6px;flex-shrink:0;">
+      <div id="inv-dot-1" style="flex:1;height:3px;border-radius:2px;background:var(--text);transition:background 0.2s;"></div>
+      <div id="inv-dot-2" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-3" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+      <div id="inv-dot-4" style="flex:1;height:3px;border-radius:2px;background:var(--border);transition:background 0.2s;"></div>
+    </div>
+    <div class="modal-body" id="invoice-modal-body" style="padding-top:16px;"></div>
+    <div class="modal-foot">
+      <button id="invoice-back-btn" onclick="Invoice.back()"
+        style="display:none;padding:8px 18px;background:none;border:1px solid var(--border);
+               border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text-2);font-family:inherit;">
+        ← Back
+      </button>
+      <div style="flex:1;"></div>
+      <button class="btn-ghost" onclick="Invoice.close()">Cancel</button>
+      <button class="btn-dark" id="invoice-next-btn" onclick="Invoice.next()">Continue →</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
-{% include "branch_manager/eod_modal.html" %}
+<!-- ── Add Service Modal ──────────────────────────────────────── -->
+<div class="eod-overlay" id="add-service-overlay">
+  <div class="eod-modal" style="max-width:620px;">
+
+    <!-- Header -->
+    <div class="eod-header">
+      <div class="eod-header-left">
+        <div class="eod-title">Add New Service</div>
+        <div class="eod-subtitle">Fill in the details below to register a new service</div>
+      </div>
+      <button class="eod-close-btn" onclick="Dashboard.closeAddServiceModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Content -->
+    <div class="eod-content" id="add-service-content" style="display:block;">
+
+      <!-- Name + Code -->
+      <div class="eod-section">
+        <div class="eod-section-title">Service Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Service Name <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-name" type="text" placeholder="e.g. A5 Color Printing"
+              oninput="Dashboard._svcAutoCode()" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Service Code <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-code" type="text" placeholder="e.g. A5-COL-PRINT"
+              style="padding:8px 10px;height:auto;font-family:'JetBrains Mono',monospace;text-transform:uppercase;">
+          </div>
+        </div>
+
+        <!-- Category + Unit + Sides -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Category <span style="color:var(--red-text)">*</span></label>
+            <select class="eod-textarea" id="svc-category" style="padding:8px 10px;height:auto;">
+              <option value="INSTANT">Instant</option>
+              <option value="PRODUCTION">Production</option>
+              <option value="DESIGN">Design</option>
+            </select>
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Unit</label>
+            <select class="eod-textarea" id="svc-unit" style="padding:8px 10px;height:auto;">
+              <option value="PER_COPY">Per Copy</option>
+              <option value="PER_PIECE">Per Piece</option>
+              <option value="PER_SQFT">Per Sq Ft</option>
+              <option value="PER_SQCM">Per Sq Cm</option>
+              <option value="PER_JOB">Per Job</option>
+            </select>
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Sides</label>
+            <select class="eod-textarea" id="svc-sides" style="padding:8px 10px;height:auto;">
+              <option value="SINGLE">1-sided</option>
+              <option value="DOUBLE">2-sided</option>
+              <option value="NA">N/A</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Base Price + Description -->
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Base Price (GHS) <span style="color:var(--red-text)">*</span></label>
+            <input class="eod-textarea" id="svc-price" type="number" min="0" step="0.01"
+              placeholder="0.00" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Description</label>
+            <input class="eod-textarea" id="svc-description" type="text"
+              placeholder="Short description of this service…" style="padding:8px 10px;height:auto;">
+          </div>
+        </div>
+
+        <!-- Image -->
+        <div class="eod-field">
+          <label class="eod-field-label">Service Image <span style="font-size:10px;color:var(--text-3);">(optional)</span></label>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <input type="file" id="svc-image" accept="image/*" onchange="Dashboard._svcPreviewImage()"
+              style="font-size:12px;color:var(--text-2);">
+            <img id="svc-image-preview" src="" alt=""
+              style="display:none;width:48px;height:48px;object-fit:cover;
+                border-radius:6px;border:1px solid var(--border);">
+          </div>
+        </div>
+      </div>
+
+      <!-- Consumable Mappings -->
+      <div class="eod-section">
+        <div class="eod-section-title">Inventory Mappings
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">
+            Which materials does this service consume?
+          </span>
+        </div>
+        <div class="eod-info-note amber" style="display:block;margin-bottom:12px;">
+          Set how much of each material is used per page/set. Leave unchecked to skip.
+        </div>
+        <div id="svc-consumables-list">
+          <div class="loading-cell"><span class="spin"></span> Loading consumables…</div>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div id="svc-error" class="eod-info-note red" style="display:none;margin-top:8px;"></div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="eod-footer" style="display:flex;">
+      <button class="eod-cancel-btn" onclick="Dashboard.closeAddServiceModal()">Cancel</button>
+      <button class="eod-confirm-btn" id="svc-submit-btn" onclick="Dashboard.submitAddService()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Save Service
+      </button>
+    </div>
+
+  </div>
+</div>
+
 <script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/branch_manager/jobs.js' %}"></script>
 <script src="{% static 'js/branch_manager/dashboard.js' %}"></script>
 <script src="{% static 'js/nj_controller.js' %}"></script>
-
+<script src="{% static 'js/invoice_controller.js' %}"></script>
+<script src="{% static 'js/week_greeter.js' %}"></script>
 <script>
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     document.getElementById('app-shell').classList.toggle('collapsed');
   });
 
   function closeNewJobModal() {
-  NJ.tryAutoSaveDraft();
-  document.getElementById('new-job-modal').classList.remove('open');
-}
-  function closeOutsourceModal() { document.getElementById('outsource-modal').classList.remove('open'); }
+    if (typeof NJ !== 'undefined') NJ.tryAutoSaveDraft();
+    document.getElementById('new-job-modal').classList.remove('open');
+  }
+  function closeDetailModal()     { document.getElementById('job-detail-modal').classList.remove('open'); }
+  function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }
+  function closeOutsourceModal()  { document.getElementById('outsource-modal').classList.remove('open'); }
 
   document.addEventListener('click', e => {
     if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {
-      Notifications.close();
+      if (typeof Notifications !== 'undefined') Notifications.close();
     }
   });
 </script>

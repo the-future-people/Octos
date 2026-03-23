@@ -1,46 +1,52 @@
-<div class="cm-overlay" id="confirm-overlay" onclick="if(event.target===this)Cashier.closeConfirm()">
+<div class="cm-overlay" id="confirm-overlay">
   <div class="cm">
 
-    <!-- Head -->
-    <div class="cm-head">
-      <div class="cm-head-left">
-        <span class="cm-title">Collect Payment</span>
-        <span class="cm-ref" id="confirm-job-ref">—</span>
-      </div>
+    <!-- ── INFORMATION PANEL ── -->
+    <div class="cm-info-panel">
+
+      <!-- Close button -->
       <button class="cm-close" onclick="Cashier.closeConfirm()">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
-    </div>
 
-    <!-- Body -->
-    <div class="cm-body">
+      <!-- Company header -->
+      <div class="cm-biz-header">
+        <div class="cm-biz-name">Farhat Printing Press</div>
+        <div class="cm-biz-branch" id="confirm-branch-name">—</div>
+        <div class="cm-biz-contact">
+          <span id="confirm-branch-address">—</span>
+          <span class="cm-biz-sep">·</span>
+          <span id="confirm-branch-phone">—</span>
+        </div>
+      </div>
 
-      <!-- Job title + meta -->
-      <div class="cm-job-title" id="confirm-job-name">—</div>
+      <div class="cm-dash"></div>
+
+      <!-- Meta row — all inline including ref -->
       <div class="cm-meta">
         <span class="cm-meta-chip"><span class="cm-meta-k">Attendant</span><span class="cm-meta-v" id="confirm-attendant">—</span></span>
         <span class="cm-meta-dot"></span>
         <span class="cm-meta-chip"><span class="cm-meta-k">Type</span><span class="cm-meta-v" id="confirm-type">—</span></span>
         <span class="cm-meta-dot"></span>
         <span class="cm-meta-chip"><span class="cm-meta-k">Customer</span><span class="cm-meta-v" id="confirm-customer">—</span></span>
+        <span class="cm-meta-dot"></span>
+        <span class="cm-meta-chip"><span class="cm-meta-k">Ref</span><span class="cm-meta-v" id="confirm-job-ref">—</span></span>
       </div>
 
-      <!-- Dashed divider -->
       <div class="cm-dash"></div>
 
       <!-- Line items -->
       <div class="cm-items-head">
         <span>Item</span>
-        <span>Qty</span>
+        <span>Details</span>
         <span>Amount</span>
       </div>
       <div class="cm-items" id="confirm-line-items">
         <!-- populated by JS -->
       </div>
 
-      <!-- Dashed divider -->
       <div class="cm-dash"></div>
 
       <!-- Total -->
@@ -49,11 +55,25 @@
         <span class="cm-total-val" id="confirm-est-cost">—</span>
       </div>
 
-      <!-- Dashed divider -->
-      <div class="cm-dash"></div>
+    </div>
+
+    <!-- ── PAYMENT PANEL ── -->
+    <div class="cm-payment-panel">
+
+      <!-- Amount due + deposit -->
+      <div class="cm-amount-row">
+        <div class="cm-amount-box" id="amount-due-box">
+          <span class="cm-amount-label">Collect from customer</span>
+          <span class="cm-amount-val" id="confirm-amount-due">—</span>
+        </div>
+        <div class="cm-deposit-pills">
+          <button class="cm-pill selected" id="opt-100" onclick="Cashier.selectDeposit(100)">100%</button>
+          <button class="cm-pill" id="opt-70" onclick="Cashier.selectDeposit(70)">70%</button>
+        </div>
+      </div>
 
       <!-- Payment method -->
-      <div class="cm-section-label">Payment Method</div>
+      <div class="cm-section-label" style="margin-top:16px;">Payment Method</div>
       <div class="cm-pm-row">
         <button class="cm-pm" id="pm-cash" onclick="Cashier.selectMethod('CASH')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M22 10H2M6 14h.01"/></svg>
@@ -67,34 +87,104 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
           POS
         </button>
+        </div>
+      <div class="cm-pm-row-split">
+        <button class="cm-pm" id="pm-split" onclick="Cashier.selectMethod('SPLIT')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+       Split
+        </button>
+      </div>
+
+      <!-- Payment hint — below method buttons -->
+      <div class="cm-payment-hint" id="cm-payment-hint">Select a payment method to continue</div>
+
+      <!-- Cash tendered (cash only) -->
+      <div class="cm-ref-field" id="cash-tendered-field">
+        <label class="cm-field-label">Cash Tendered <span class="cm-req">*</span></label>
+        <input type="number" class="cm-input" id="cash-tendered" placeholder="0.00"
+          oninput="Cashier.calcChange()" step="0.01" min="0">
+        <div class="cm-change-row" id="cm-change-row" style="display:none;">
+          <span class="cm-change-label">Change due</span>
+          <span class="cm-change-val" id="cm-change-val">GHS 0.00</span>
+        </div>
       </div>
 
       <!-- MoMo reference -->
       <div class="cm-ref-field" id="momo-ref-field">
         <label class="cm-field-label">MoMo Reference <span class="cm-req">*</span></label>
-        <input type="text" class="cm-input" id="momo-ref" placeholder="e.g. GHA-123456789">
+        <input type="number" class="cm-input" id="momo-ref" placeholder="11-digit reference number"
+          oninput="Cashier._updateConfirmBtn()" maxlength="11">
       </div>
 
       <!-- POS approval code -->
       <div class="cm-ref-field" id="pos-ref-field">
         <label class="cm-field-label">POS Approval Code <span class="cm-req">*</span></label>
-        <input type="text" class="cm-input" id="pos-ref" placeholder="e.g. 123456">
+        <input type="text" class="cm-input" id="pos-ref" placeholder="e.g. 123456"
+          oninput="Cashier._updateConfirmBtn()">
+      </div>
+      <!-- Split payment fields -->
+      <div class="cm-ref-field" id="split-fields" style="display:none;">
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:10px;">First Payment</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="cm-field-label">Method <span class="cm-req">*</span></label>
+            <select class="cm-input" id="split-method-1" onchange="Cashier._updateSplitFields()">
+              <option value="MOMO">MoMo</option>
+              <option value="CASH">Cash</option>
+              <option value="POS">POS</option>
+            </select>
+          </div>
+          <div>
+            <label class="cm-field-label">Amount (GHS) <span class="cm-req">*</span></label>
+            <input type="number" class="cm-input" id="split-amount-1" placeholder="0.00"
+              step="0.01" min="0" oninput="Cashier._updateSplitRemainder()">
+          </div>
+        </div>
+        <div id="split-ref-1" style="display:none;margin-bottom:8px;">
+          <label class="cm-field-label" id="split-ref-1-label">Reference <span class="cm-req">*</span></label>
+          <input type="text" class="cm-input" id="split-ref-1-input" placeholder="11-digit MoMo ref"
+            oninput="Cashier._updateConfirmBtn()">
+        </div>
+
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
+          letter-spacing:0.5px;margin-bottom:10px;margin-top:4px;">Second Payment</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="cm-field-label">Method</label>
+            <select class="cm-input" id="split-method-2" onchange="Cashier._updateSplitFields()">
+              <option value="CASH">Cash</option>
+              <option value="MOMO">MoMo</option>
+              <option value="POS">POS</option>
+            </select>
+          </div>
+          <div>
+            <label class="cm-field-label">Amount (GHS)</label>
+            <input type="number" class="cm-input" id="split-amount-2" placeholder="0.00"
+              step="0.01" min="0" readonly
+              style="background:var(--bg);opacity:0.7;">
+          </div>
+        </div>
+        <div id="split-ref-2" style="display:none;margin-bottom:8px;">
+          <label class="cm-field-label" id="split-ref-2-label">Reference <span class="cm-req">*</span></label>
+          <input type="text" class="cm-input" id="split-ref-2-input" placeholder="11-digit MoMo ref"
+            oninput="Cashier._updateConfirmBtn()">
+        </div>
+        <div id="split-balance-indicator" style="font-size:12px;color:var(--text-3);margin-top:4px;"></div>
       </div>
 
-      <!-- Amount + deposit inline -->
-      <div class="cm-amount-row">
-        <div class="cm-amount-box" id="amount-due-box">
-          <span class="cm-amount-label">Collect from customer</span>
-          <span class="cm-amount-val" id="confirm-amount-due">—</span>
-        </div>
-        <div class="cm-deposit-pills">
-          <button class="cm-pill selected" id="opt-100" onclick="Cashier.selectDeposit(100)">100%</button>
-          <button class="cm-pill" id="opt-70" onclick="Cashier.selectDeposit(70)">70%</button>
-        </div>
-      </div>
+      </div><!-- /cm-payment-panel -->
 
-      <!-- Phone + Notes row -->
-      <div class="cm-fields-row">
+    <!-- ── SUPPLEMENTARY PANEL ── -->
+    <div class="cm-supplementary">
+      <!-- Company/Sender row -->
+          <div class="cm-field">
+            <label class="cm-field-label">Company / Sender <span class="cm-opt">(optional — shown on receipt)</span></label>
+            <input type="text" class="cm-input" id="confirm-company" placeholder="e.g. ABC Ltd, University of Ghana…">
+          </div>
+
+          <!-- Phone + Notes row -->
+          <div class="cm-fields-row">
         <div class="cm-field">
           <label class="cm-field-label">Phone <span class="cm-opt">(for receipt)</span></label>
           <input type="tel" class="cm-input" id="confirm-phone" placeholder="0244123456">
@@ -105,11 +195,14 @@
         </div>
       </div>
 
-      <!-- Confirm button -->
-      <button class="cm-confirm-btn" id="confirm-submit-btn" onclick="Cashier.confirmPayment()">
+      </div><!-- /cm-supplementary -->
+
+    <!-- ── CONFIRM BUTTON ── -->
+    <div style="padding:0 22px 24px;background:var(--bg);">
+      <button class="cm-confirm-btn" id="confirm-submit-btn" onclick="Cashier.confirmPayment()" disabled style="opacity:0.4;">
         Confirm Payment
       </button>
-
     </div>
+
   </div>
 </div>

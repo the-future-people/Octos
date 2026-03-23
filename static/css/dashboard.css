@@ -66,9 +66,62 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
 }
+html { overflow-y: scroll; }
 a { text-decoration: none; color: inherit; }
 button { cursor: pointer; font-family: inherit; border: none; background: none; }
 input, select, textarea { font-family: inherit; }
+
+/* ── Sticky header + sidebar layout ─────────────────────── */
+html, body {
+  height  : 100%;
+  overflow: hidden;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
+#app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  position   : sticky;
+  top        : 0;
+  z-index    : 100;
+  flex-shrink: 0;
+}
+
+.body-layout-wrapper {
+  flex      : 1;
+  overflow  : hidden;
+  min-height: 0;
+  display   : flex;
+  justify-content: center;
+}
+
+
+
+.main-content {
+  flex           : 1;
+  display        : flex;
+  flex-direction : column;
+  overflow       : hidden;
+  min-height     : 100vh;
+}
+
+.info-strip {
+  flex-shrink: 0;
+}
+
+body {
+  background: var(--bg);
+}
 
 /* ── App shell ────────────────────────────────────────────── */
 .app-shell {
@@ -393,9 +446,7 @@ input, select, textarea { font-family: inherit; }
   flex-shrink: 0;
   transition: width var(--transition);
   overflow: hidden;
-  position: sticky;
-  top: var(--topbar-h);
-  height: calc(100vh - var(--topbar-h));
+  height: 100%;
 }
 
 .app-shell.collapsed .sidebar {
@@ -514,6 +565,7 @@ input, select, textarea { font-family: inherit; }
   min-width: 0;
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
 
 /* Info strip */
@@ -544,9 +596,10 @@ input, select, textarea { font-family: inherit; }
 
 /* Content pane area */
 .pane-area {
-  flex: 1;
-  padding: 28px 28px 48px;
-  overflow-y: auto;
+  flex          : 1;
+  padding       : 28px 28px 80px;
+  overflow-y    : auto;
+  min-height    : 0;
 }
 
 /* ── Stat cards ───────────────────────────────────────────── */
@@ -922,7 +975,6 @@ input, select, textarea { font-family: inherit; }
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
-
 /* ── Modal ────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
@@ -945,8 +997,11 @@ input, select, textarea { font-family: inherit; }
   border-radius: 16px;
   width: 100%;
   max-width: 560px;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: 92vh;
+  height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 24px 64px rgba(0,0,0,0.16);
   border: 1px solid var(--border);
   transform: translateY(10px) scale(0.98);
@@ -956,6 +1011,7 @@ input, select, textarea { font-family: inherit; }
 .modal.wide { max-width: 760px; }
 
 .modal-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -984,9 +1040,15 @@ input, select, textarea { font-family: inherit; }
 }
 .modal-x:hover { background: var(--red-bg); border-color: var(--red-border); color: var(--red-text); }
 
-.modal-body { padding: 20px 24px; }
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
 
 .modal-foot {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1743,6 +1805,21 @@ textarea.form-input { resize: vertical; min-height: 60px; }
 .eod-confirm-btn:hover:not(:disabled) { opacity: 0.88; }
 .eod-confirm-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+.reports-tabs {
+  display: flex; gap: 4px; margin-bottom: 20px;
+  border-bottom: 1px solid var(--border); padding-bottom: 0;
+}
+.reports-tab {
+  padding: 8px 16px; font-size: 13px; font-weight: 600;
+  color: var(--text-3); background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; margin-bottom: -1px;
+  transition: all var(--transition);
+}
+.reports-tab:hover { color: var(--text); }
+.reports-tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+
 /* Responsive */
 @media (max-width: 600px) {
   .eod-revenue-grid { grid-template-columns: 1fr 1fr; }
@@ -1794,4 +1871,64 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   .hero-actions { flex-direction: column; }
   .hero-btn { width: 100%; }
   .branch-pill { display: none; }
+}
+/* ── Sheet detail expanded row ────────────────────────────── */
+.sheet-detail-td {
+  padding: 0 !important;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── Service Cards ───────────────────────────────────────── */
+.service-card {
+  background    : var(--panel);
+  border        : 1px solid var(--border);
+  border-radius : var(--radius);
+  overflow      : hidden;
+  display       : flex;
+  flex-direction: column;
+  transition    : box-shadow 0.15s;
+}
+.service-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+.service-card-img {
+  width           : 100%;
+  height          : 140px;
+  background      : var(--bg);
+  display         : flex;
+  align-items     : center;
+  justify-content : center;
+  overflow        : hidden;
+  border-bottom   : 1px solid var(--border);
+}
+.service-card-img--placeholder {
+  background: var(--bg);
+}
+.service-card-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.service-card-name {
+  font-size  : 13px;
+  font-weight: 700;
+  color      : var(--text);
+  line-height: 1.3;
+}
+.service-card-price {
+  font-size  : 12px;
+  font-weight: 600;
+  color      : var(--green-text, #1a7a4a);
+  font-family: 'JetBrains Mono', monospace;
+}
+.service-card-desc {
+  font-size  : 11px;
+  color      : var(--text-3);
+  line-height: 1.5;
+  margin-top : 2px;
 }
