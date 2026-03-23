@@ -25,7 +25,13 @@ class InventoryEngine:
                     continue
                 pages    = li.pages or 1
                 sets     = li.sets  or 1
-                quantity = Decimal(str(mapping.quantity_per_unit)) * pages * sets
+                # For PER_JOB services (binding, lamination etc),
+                # deduct per set only — not per page
+                from apps.jobs.models import Service
+                if li.service.unit in ('PER_JOB', 'PER_PIECE'):
+                    quantity = Decimal(str(mapping.quantity_per_unit)) * sets
+                else:
+                    quantity = Decimal(str(mapping.quantity_per_unit)) * pages * sets
                 quantity = quantity.quantize(Decimal('0.01'))
                 if quantity <= 0:
                     continue
