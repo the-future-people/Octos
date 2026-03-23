@@ -1848,9 +1848,128 @@ async function loadRecentJobs() {
     }
   }
 
-  function openReceiveStock() {
-    // TODO — modal for receiving stock
-    _toast('Receive stock coming soon.', 'info');
+  async function openReceiveStock() {
+    // Reset form
+    document.getElementById('recv-consumable').value          = '';
+    document.getElementById('recv-consumable-search').value   = '';
+    document.getElementById('recv-consumable-dropdown').style.display = 'none';
+    document.getElementById('recv-quantity').value     = '';
+    document.getElementById('recv-notes').value        = '';
+    document.getElementById('recv-error').style.display = 'none';
+    document.getElementById('recv-submit-btn').disabled = false;
+    document.getElementById('recv-submit-btn').textContent = 'Confirm Receipt';
+
+    document.getElementById('recv-overlay').classList.add('open');
+
+    // Load consumables if not already loaded
+    if (!_consumables.length) {
+      await _loadConsumables();
+    }
+
+    // Populate consumable dropdown
+    const sel = document.getElementById('recv-consumable');
+    sel.innerHTML = '<option value="">Select consumable…</option>';
+    _consumables.forEach(c => {
+      const opt       = document.createElement('option');
+      opt.value       = c.consumable;
+      opt.textContent = `${c.name} (${c.quantity} ${c.unit_label} in stock)`;
+      sel.appendChild(opt);
+    });
+  }
+
+function _recvShowDropdown() {
+    _recvFilterConsumables();
+  }
+
+  function _recvFilterConsumables() {
+    const query    = document.getElementById('recv-consumable-search').value.toLowerCase();
+    const dropdown = document.getElementById('recv-consumable-dropdown');
+    const filtered = _consumables.filter(c =>
+      c.name.toLowerCase().includes(query)
+    );
+
+    if (!filtered.length) {
+      dropdown.style.display = 'none';
+      return;
+    }
+
+    dropdown.innerHTML = filtered.map(c => `
+      <div onclick="Dashboard._recvSelectConsumable(${c.consumable}, '${_esc(c.name)}', '${c.quantity} ${c.unit_label}')"
+        style="padding:9px 12px;font-size:13px;cursor:pointer;
+               border-bottom:1px solid var(--border);
+               transition:background 0.1s;"
+        onmouseover="this.style.background='var(--bg)'"
+        onmouseout="this.style.background=''">
+        <div style="font-weight:600;color:var(--text);">${_esc(c.name)}</div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+          ${c.quantity} ${c.unit_label} in stock
+        </div>
+      </div>
+    `).join('');
+
+    dropdown.style.display = 'block';
+  }
+
+  function _recvSelectConsumable(id, name, stock) {
+    document.getElementById('recv-consumable').value        = id;
+    document.getElementById('recv-consumable-search').value = name;
+    document.getElementById('recv-consumable-dropdown').style.display = 'none';
+  }
+
+  function closeReceiveStock() {
+    document.getElementById('recv-overlay').classList.remove('open');
+  }
+
+  async function submitReceiveStock() {
+    const btn          = document.getElementById('recv-submit-btn');
+    const err          = document.getElementById('recv-error');
+    const consumableId = document.getElementById('recv-consumable').value;
+    const quantity     = document.getElementById('recv-quantity').value.trim();
+    const notes        = document.getElementById('recv-notes').value.trim();
+
+    err.style.display = 'none';
+
+    if (!consumableId) { err.textContent = 'Please select a consumable.'; err.style.display = 'block'; return; }
+    if (!quantity || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0) {
+      err.textContent = 'Please enter a valid quantity.'; err.style.display = 'block'; return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const res = await Auth.fetch('/api/v1/inventory/stock/receive/', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({
+          consumable_id : parseInt(consumableId),
+          quantity      : parseFloat(quantity),
+          notes         : notes,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = Object.values(data).flat().join(' ');
+        err.textContent    = msg || 'Failed to receive stock.';
+        err.style.display  = 'block';
+        return;
+      }
+
+      closeReceiveStock();
+      _toast(`Stock received successfully.`, 'success');
+
+      // Reload inventory tab to reflect new balance
+      switchInventoryTab(document.querySelector('.inv-tab.active')?.dataset.tab || 'stock');
+
+    } catch {
+      err.textContent   = 'Network error. Please try again.';
+      err.style.display = 'block';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Confirm Receipt';
+    }
   }
 
 // ── Reports pane ─────────────────────────────────────────────
@@ -3473,6 +3592,11 @@ return {
     _svcAutoCode,
     _svcPreviewImage,
     _svcToggleConsumable,
+    closeReceiveStock,
+    submitReceiveStock,
+    _recvFilterConsumables,
+    _recvShowDropdown,
+    _recvSelectConsumable,
   };
 
 })();

@@ -855,6 +855,72 @@
   </div>
 </div>
 
+<!-- ── Receive Stock Modal ──────────────────────────────────── -->
+<div class="eod-overlay" id="recv-overlay">
+  <div class="eod-modal" style="max-width:480px;">
+
+    <div class="eod-header">
+      <div class="eod-header-left">
+        <div class="eod-title">Receive Stock</div>
+        <div class="eod-subtitle">Record new stock arriving at the branch</div>
+      </div>
+      <button class="eod-close-btn" onclick="Dashboard.closeReceiveStock()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="eod-content" style="display:block;">
+      <div class="eod-section">
+
+        <div class="eod-field" style="margin-bottom:14px;position:relative;">
+          <label class="eod-field-label">Consumable <span style="color:var(--red-text)">*</span></label>
+          <input class="eod-textarea" id="recv-consumable-search" type="text"
+            placeholder="Search consumable…" autocomplete="off"
+            oninput="Dashboard._recvFilterConsumables()"
+            onfocus="Dashboard._recvShowDropdown()"
+            style="padding:8px 10px;height:auto;">
+          <input type="hidden" id="recv-consumable">
+          <div id="recv-consumable-dropdown"
+            style="display:none;position:absolute;top:100%;left:0;right:0;
+                   background:var(--panel);border:1.5px solid var(--border);
+                   border-radius:var(--radius-sm);box-shadow:var(--shadow-md);
+                   max-height:200px;overflow-y:auto;z-index:999;margin-top:2px;">
+          </div>
+        </div>
+
+        <div class="eod-field" style="margin-bottom:14px;">
+          <label class="eod-field-label">Quantity Received <span style="color:var(--red-text)">*</span></label>
+          <input class="eod-textarea" id="recv-quantity" type="number"
+            min="0.01" step="0.01" placeholder="e.g. 500"
+            style="padding:8px 10px;height:auto;">
+        </div>
+
+        <div class="eod-field" style="margin-bottom:4px;">
+          <label class="eod-field-label">Notes <span style="font-size:10px;color:var(--text-3);font-weight:400;">(optional)</span></label>
+          <input class="eod-textarea" id="recv-notes" type="text"
+            placeholder="Supplier name, invoice number, etc…"
+            style="padding:8px 10px;height:auto;">
+        </div>
+
+        <div id="recv-error" class="eod-info-note red" style="display:none;margin-top:12px;"></div>
+
+      </div>
+    </div>
+
+    <div class="eod-footer" style="display:flex;">
+      <button class="eod-cancel-btn" onclick="Dashboard.closeReceiveStock()">Cancel</button>
+      <button class="eod-confirm-btn" id="recv-submit-btn" onclick="Dashboard.submitReceiveStock()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Confirm Receipt
+      </button>
+    </div>
+
+  </div>
+</div>
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/branch_manager/jobs.js' %}"></script>
 <script src="{% static 'js/branch_manager/dashboard.js' %}"></script>
