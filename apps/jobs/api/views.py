@@ -915,6 +915,160 @@ class SaveDraftView(APIView):
             'expires_at' : expires.isoformat(),
         }, status=status.HTTP_201_CREATED)
 
+class LateJobView(APIView):
+    """
+    POST /api/v1/jobs/late/
+    BM creates a post-closing job after branch closing time.
+    Requires a mandatory reason. Job goes directly to cashier queue.
+    Logged with BM name, timestamp and reason for HQ audit.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.jobs.models import Job, JobLineItem, Service
+        from apps.jobs.pricing_engine import PricingEngine
+        from apps.finance.sheet_engine import SheetEngine
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from django.utils import timezone
+
+        user   = request.user
+        branch = getattr(user, 'branch', None)
+
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Only BM can create late jobs
+        role_name = getattr(getattr(user, 'role', None), 'name', '')
+        if role_name != 'BRANCH_MANAGER':
+            return Response(
+                {'detail': 'Only a Branch Manager can create post-closing jobs.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Must be past closing time
+        bm_schedule = HRShiftEngine(branch).get_role_schedule('BRANCH_MANAGER')
+        if bm_schedule['can_create_jobs'] and not bm_schedule['is_post_closing']:
+            return Response(
+                {'detail': 'Branch is still open. Use the standard New Job flow.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Reason is mandatory
+        reason = request.data.get('post_closing_reason', '').strip()
+        if not reason:
+            return Response(
+                {'detail': 'A reason is required for post-closing jobs.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Must have line items
+        line_items_data = request.data.get('line_items', [])
+        if not line_items_data:
+            return Response(
+                {'detail': 'At least one service is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get today's sheet
+        sheet, _ = SheetEngine(branch).get_or_open_today()
+        if not sheet:
+            return Response(
+                {'detail': 'No active sheet for today.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Price line items
+        from decimal import Decimal
+        total        = Decimal('0.00')
+        priced_items = []
+        names        = []
+
+        for item in line_items_data:
+            try:
+                svc = Service.objects.get(pk=item['service'])
+            except Service.DoesNotExist:
+                continue
+
+            pg       = int(item.get('pages', 1))
+            sets     = int(item.get('sets', 1))
+            is_color = bool(item.get('is_color', False))
+
+            pricing    = PricingEngine.get_price(
+                service  = svc,
+                branch   = branch,
+                quantity = sets,
+                is_color = is_color,
+                pages    = pg,
+            )
+            line_total = Decimal(str(pricing.get('total', 0)))
+            unit_price = Decimal(str(pricing.get('base_price', 0)))
+            total     += line_total
+            names.append(svc.name)
+            priced_items.append({
+                'service'   : svc,
+                'pages'     : pg,
+                'sets'      : sets,
+                'quantity'  : sets,
+                'is_color'  : is_color,
+                'paper_size': item.get('paper_size', 'A4'),
+                'sides'     : item.get('sides', 'SINGLE'),
+                'unit_price': unit_price,
+                'line_total': line_total,
+            })
+
+        if not priced_items:
+            return Response(
+                {'detail': 'No valid services found.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Build title
+        if len(names) == 1:
+            title = names[0]
+        elif len(names) <= 3:
+            title = ', '.join(names)
+        else:
+            title = ', '.join(names[:3]) + f' +{len(names)-3} more'
+
+        # Create job
+        job = Job.objects.create(
+            branch                   = branch,
+            intake_by                = user,
+            daily_sheet              = sheet,
+            title                    = title,
+            job_type                 = 'INSTANT',
+            status                   = Job.PENDING_PAYMENT,
+            estimated_cost           = total,
+            post_closing             = True,
+            post_closing_reason      = reason,
+            post_closing_approved_by = user,
+            intake_channel           = request.data.get('intake_channel', 'WALK_IN'),
+        )
+
+        # Create line items
+        for i, item in enumerate(priced_items):
+            JobLineItem.objects.create(
+                job        = job,
+                service    = item['service'],
+                quantity   = item['quantity'],
+                pages      = item['pages'],
+                sets       = item['sets'],
+                is_color   = item['is_color'],
+                paper_size = item['paper_size'],
+                sides      = item['sides'],
+                unit_price = item['unit_price'],
+                line_total = item['line_total'],
+                position   = i,
+            )
+
+        from apps.jobs.api.serializers import JobListSerializer
+        return Response(
+            JobListSerializer(job, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 class DraftListView(generics.ListAPIView):
     """

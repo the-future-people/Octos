@@ -290,6 +290,11 @@
               <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
               <span class="sidebar-label">Inventory</span>
             </div>
+            <div class="sidebar-item" data-pane="invoices" data-label="Invoices"
+            onclick="Dashboard.switchPane('invoices', 'Invoices')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span class="sidebar-label">Invoices</span>
+        </div>
         <div class="sidebar-item" data-pane="reports" data-label="Reports"
           onclick="Dashboard.switchPane('reports', 'Reports')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -350,6 +355,21 @@
                 <span class="hero-btn-title">Outsource Job</span>
                 <span class="hero-btn-sub">Route a job to another branch</span>
               </div>
+              <button id="late-job-btn" class="hero-btn hero-btn-secondary"
+                onclick="Dashboard.openLateJobModal()"
+                style="display:none;border-color:var(--amber-border);background:var(--amber-bg);">
+                <div class="hero-btn-icon" style="background:var(--amber-bg);">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="var(--amber-text)" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                </div>
+                <div class="hero-btn-label">
+                  <span class="hero-btn-title" style="color:var(--amber-text);">Late Job</span>
+                  <span class="hero-btn-sub" style="color:var(--amber-text);opacity:0.8;">Post-closing entry</span>
+                </div>
+              </button>
             </button>
           </div>
 
@@ -551,6 +571,18 @@
           </div>
           <div class="loading-cell">Coming soon.</div>
         </div>
+
+        <!-- ── INVOICES ───────────────────────────────────────────────────── -->
+          <div class="pane" id="pane-invoices">
+            <div class="section-head">
+              <span class="section-title">Invoices</span>
+              <button class="btn-dark" style="padding:6px 14px;font-size:12px;"
+                onclick="Dashboard.openCreateInvoice()">+ New Invoice</button>
+            </div>
+            <div id="invoices-content">
+              <div class="loading-cell"><span class="spin"></span> Loading…</div>
+            </div>
+          </div>
 
        <!-- ── REPORTS ───────────────────────────────────── -->
         <div class="pane" id="pane-reports">
@@ -919,6 +951,93 @@
       </button>
     </div>
 
+  </div>
+</div>
+<!-- ── Late Job Modal ────────────────────────────────────────── -->
+<div class="eod-overlay" id="late-job-overlay">
+  <div class="eod-modal" style="max-width:520px;">
+    <div class="eod-header">
+      <div class="eod-header-left">
+        <div class="eod-title" style="color:var(--amber-text);">⏰ Late Job Entry</div>
+        <div class="eod-subtitle">Post-closing job — logged and auditable by HQ</div>
+      </div>
+      <button class="eod-close-btn" onclick="Dashboard.closeLateJobModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="eod-content" style="display:block;">
+      <div class="eod-section">
+        <div class="eod-info-note amber" style="display:block;margin-bottom:16px;">
+          This job will be flagged as <strong>post-closing</strong> and visible to HQ.
+          A reason is mandatory.
+        </div>
+
+        <div class="eod-field" style="margin-bottom:14px;">
+          <label class="eod-field-label">Reason <span style="color:var(--red-text)">*</span></label>
+          <input class="eod-textarea" id="late-job-reason" type="text"
+            placeholder="e.g. Regular customer called ahead, already inside branch…"
+            style="padding:8px 10px;height:auto;">
+        </div>
+
+        <div class="eod-field" style="margin-bottom:14px;">
+          <label class="eod-field-label">Service <span style="color:var(--red-text)">*</span></label>
+          <input class="eod-textarea" id="late-job-svc-search" type="text"
+            placeholder="Search service…" autocomplete="off"
+            oninput="Dashboard._lateJobFilterServices()"
+            onfocus="Dashboard._lateJobFilterServices()"
+            style="padding:8px 10px;height:auto;">
+          <input type="hidden" id="late-job-svc-id">
+          <div id="late-job-svc-dropdown"
+            style="display:none;position:absolute;background:var(--panel);
+                   border:1.5px solid var(--border);border-radius:var(--radius-sm);
+                   box-shadow:var(--shadow-md);max-height:180px;overflow-y:auto;
+                   z-index:999;margin-top:2px;left:26px;right:26px;">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+          <div class="eod-field">
+            <label class="eod-field-label">Pages</label>
+            <input class="eod-textarea" id="late-job-pages" type="number"
+              min="1" value="1" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Copies</label>
+            <input class="eod-textarea" id="late-job-sets" type="number"
+              min="1" value="1" style="padding:8px 10px;height:auto;">
+          </div>
+          <div class="eod-field">
+            <label class="eod-field-label">Color</label>
+            <select class="eod-textarea" id="late-job-color"
+              style="padding:8px 10px;height:auto;">
+              <option value="false">B&W</option>
+              <option value="true">Colour</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="late-job-error" class="eod-info-note red"
+          style="display:none;margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <div class="eod-footer" style="display:flex;">
+      <button class="eod-cancel-btn" onclick="Dashboard.closeLateJobModal()">Cancel</button>
+      <button class="eod-confirm-btn" id="late-job-submit-btn"
+        onclick="Dashboard.submitLateJob()"
+        style="background:var(--amber-text);">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Record Late Job
+      </button>
+    </div>
   </div>
 </div>
 <script src="{% static 'js/auth.js' %}"></script>

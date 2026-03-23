@@ -35,4 +35,5 @@ urlpatterns = [
     path('history/', views.JobHistoryView.as_view(), name='job-history'),
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),
     path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),
+    path('late/', views.LateJobView.as_view(), name='late-job'),
 ]

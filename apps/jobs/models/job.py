@@ -291,6 +291,24 @@ class Job(AuditModel):
         help_text='Change returned to customer',
     )
 
+    # ── Post-closing ──────────────────────────────────────────────
+    post_closing = models.BooleanField(
+        default   = False,
+        help_text = 'True if job was created after branch closing time — BM only.',
+    )
+    post_closing_reason = models.TextField(
+        blank     = True,
+        help_text = 'Mandatory reason for post-closing job — entered by BM.',
+    )
+    post_closing_approved_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'post_closing_jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'BM who approved this post-closing job.',
+    )
+
     # ── Notes ──
     notes = models.TextField(blank=True)
 

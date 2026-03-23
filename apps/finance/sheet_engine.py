@@ -38,13 +38,9 @@ class SheetEngine:
     - 8:30pm  — BM auto-close (closing_time + 65 min)
     """
 
-    # ── Close sequence timings (minutes before/after closing_time) ──
-    WARNING_BEFORE_CLOSE        = 30   # warning modal at 6:55pm
-    ATTENDANT_LOCK_AT_CLOSE     = 0    # job creation locked at 7:25pm (closing_time)
-    CASHIER_LOCK_AFTER          = 5    # cashier locked at 7:30pm
-    BM_AUTOCLOSE_AFTER          = 65   # sheet auto-closes at 8:30pm
-    PAYMENT_EXTENSION           = 15   # extra minutes when ≥5 pending jobs
-    PENDING_EXTENSION_THRESHOLD = 5    # minimum pending jobs to trigger extension
+    # ── Timing now driven by ShiftEngine + ShiftRoleConfig ────────
+    # No hardcoded constants — all times come from BranchShift seeds
+    WARNING_BEFORE_CLOSE = 30  # kept for warn task only
 
     def __init__(self, branch) -> None:
         self.branch = branch
@@ -191,26 +187,84 @@ class SheetEngine:
     
     # ── Close sequence ────────────────────────────────────────────
 
-    def get_close_schedule(self) -> dict:
+    def get_branch_lock_status(self, sheet=None, role_name: str = 'ATTENDANT') -> dict:
         """
-        Returns the computed timestamps for today's close sequence
-        based on the branch's closing_time.
+        Returns the current lock state for the branch for a given role.
+        Uses ShiftEngine for all timing — no hardcoded constants.
+
+        Args:
+            sheet     : Today's DailySalesSheet — for extension check
+            role_name : Role to check lock status for
+
+        Returns dict with:
+            can_create_jobs   : bool
+            can_close_sheet   : bool
+            lock_reason       : str or None
+            extension_active  : bool
+            extension_reason  : str or None
+            schedule          : dict of close timestamps
+            mins_to_close     : int
         """
-        today        = timezone.localdate()
-        closing_time = self.branch.closing_time  # TimeField
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
 
-        def _dt(t: time):
-            from datetime import datetime
-            naive = datetime.combine(today, t)
-            return timezone.make_aware(naive)
+        now    = timezone.now()
+        today  = timezone.localdate()
 
-        base = _dt(closing_time)
+        # Sunday — always fully locked
+        if today.weekday() == 6:
+            return {
+                'can_create_jobs'  : False,
+                'can_close_sheet'  : False,
+                'lock_reason'      : 'Branch is closed on Sundays.',
+                'extension_active' : False,
+                'extension_reason' : None,
+                'mins_to_close'    : 0,
+                'schedule'         : {},
+            }
+
+        engine       = HRShiftEngine(self.branch)
+        att_schedule = engine.get_role_schedule('ATTENDANT',      target_date=today)
+        cash_schedule= engine.get_role_schedule('CASHIER',        target_date=today)
+        bm_schedule  = engine.get_role_schedule('BRANCH_MANAGER', target_date=today)
+
+        from datetime import datetime
+        attendant_lock_at = datetime.fromisoformat(att_schedule['job_lock_at'])
+        cashier_lock_at   = datetime.fromisoformat(cash_schedule['job_lock_at'])
+        bm_autoclose_at   = datetime.fromisoformat(bm_schedule['autoclose_at']) if bm_schedule['autoclose_at'] else None
+        shift_end         = datetime.fromisoformat(bm_schedule['shift_end'])
+        warning_at        = shift_end - timedelta(minutes=30)
+
+        # Role-specific lock time
+        role_lock_at = {
+            'ATTENDANT'     : attendant_lock_at,
+            'CASHIER'       : cashier_lock_at,
+            'BRANCH_MANAGER': bm_autoclose_at or attendant_lock_at,
+        }.get(role_name, attendant_lock_at)
+
+        can_create   = now < role_lock_at
+        can_close    = now >= shift_end
+        mins_to_close = int((role_lock_at - now).total_seconds() / 60)
+
+        lock_reason = None
+        if not can_create:
+            lock_reason = att_schedule.get('lock_reason') or (
+                f"Shift ended at {shift_end.strftime('%I:%M %p')}. No new jobs can be recorded."
+            )
 
         return {
-            'warning_at'       : base - timedelta(minutes=self.WARNING_BEFORE_CLOSE),
-            'attendant_lock_at': base,
-            'cashier_lock_at'  : base + timedelta(minutes=self.CASHIER_LOCK_AFTER),
-            'bm_autoclose_at'  : base + timedelta(minutes=self.BM_AUTOCLOSE_AFTER),
+            'can_create_jobs'  : can_create,
+            'can_close_sheet'  : can_close,
+            'lock_reason'      : lock_reason,
+            'extension_active' : False,
+            'extension_reason' : None,
+            'mins_to_close'    : mins_to_close,
+            'schedule'         : {
+                'warning_at'        : warning_at.isoformat(),
+                'attendant_lock_at' : att_schedule['job_lock_at'],
+                'cashier_lock_at'   : cash_schedule['job_lock_at'],
+                'bm_autoclose_at'   : bm_schedule['autoclose_at'],
+                'shift_end'         : bm_schedule['shift_end'],
+            },
         }
 
     def has_pending_payments(self, sheet) -> bool:

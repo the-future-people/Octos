@@ -3,7 +3,7 @@ from .payroll import PayrollRecord
 from .position import JobPosition
 from .recruitment import Applicant, StageScore, StageQuestionnaire
 from .onboarding import OnboardingRecord
-from .scheduling import EmployeeShift, ShiftOverride, EmployeeShiftSwap
+from .scheduling import EmployeeShift, ShiftOverride, EmployeeShiftSwap, BranchShift, ShiftRoleConfig
 
 __all__ = [
     'Employee',
@@ -16,4 +16,6 @@ __all__ = [
     'EmployeeShift',
     'ShiftOverride',
     'EmployeeShiftSwap',
+    'BranchShift',
+    'ShiftRoleConfig',
 ]

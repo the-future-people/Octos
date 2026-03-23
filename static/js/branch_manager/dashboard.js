@@ -40,8 +40,11 @@ const Dashboard = (() => {
       _loadServicesAndCustomers(),
     ]);
     _renderMetrics(currentPeriod);
-    Notifications.startPolling();
-  }
+      Notifications.startPolling();
+      WeekGreeter.init();
+      _checkLateJobButton();
+      setInterval(_checkLateJobButton, 60000);
+    }
 
   // ── Context ────────────────────────────────────────────────
   async function loadContext() {
@@ -280,6 +283,7 @@ async function loadRecentJobs() {
     if (paneId === 'jobs'    && !jobsLoaded)  _loadJobsPane();
     if (paneId === 'inbox'   && !inboxLoaded) loadInboxTab();
     if (paneId === 'services'&& !svcLoaded)   loadServicesTab();
+    if (paneId === 'invoices' && !_invoicesLoaded) _loadInvoicesPane();
     if (paneId === 'finance') {
       const pane = document.getElementById('pane-finance');
       if (pane) pane.dataset.loaded = '';
@@ -3551,6 +3555,229 @@ const kpiCards = [
     err.textContent    = msg;
     err.style.display  = 'block';
   }
+
+  // ── Invoices pane ─────────────────────────────────────────
+  let _invoicesLoaded = false;
+
+  async function _loadInvoicesPane() {
+    _invoicesLoaded = true;
+    const container = document.getElementById('invoices-content');
+    if (!container) return;
+
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/invoices/');
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const invoices = Array.isArray(data) ? data : (data.results || []);
+
+      if (!invoices.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:48px;color:var(--text-3);font-size:13px;">
+            No invoices yet. Create one to get started.
+          </div>`;
+        return;
+      }
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH', {minimumFractionDigits:2})}`;
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Invoice No</th>
+                <th>Type</th>
+                <th>Bill To</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoices.map(inv => `
+                <tr>
+                  <td>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;">
+                      ${_esc(inv.invoice_number)}
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge ${inv.invoice_type === 'PROFORMA' ? 'badge-production' : 'badge-instant'}">
+                      ${inv.invoice_type}
+                    </span>
+                  </td>
+                  <td>
+                    <div style="font-weight:600;font-size:13px;">${_esc(inv.bill_to_name || '—')}</div>
+                    ${inv.bill_to_company ? `<div style="font-size:11px;color:var(--text-3);">${_esc(inv.bill_to_company)}</div>` : ''}
+                  </td>
+                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">
+                    ${fmt(inv.total)}
+                  </td>
+                  <td>
+                    <span class="badge ${_invoiceStatusBadge(inv.status)}">
+                      ${inv.status}
+                    </span>
+                  </td>
+                  <td style="font-size:12px;color:var(--text-3);">
+                    ${inv.issue_date ? new Date(inv.issue_date).toLocaleDateString('en-GH') : '—'}
+                  </td>
+                  <td>
+                    <button onclick="Dashboard.downloadInvoicePDF(${inv.id}, '${_esc(inv.invoice_number)}')"
+                      style="padding:5px 12px;font-size:12px;font-weight:600;
+                        background:var(--bg);border:1px solid var(--border);
+                        border-radius:var(--radius-sm);cursor:pointer;
+                        font-family:'DM Sans',sans-serif;color:var(--text-2);
+                        transition:all 0.15s;"
+                      onmouseover="this.style.borderColor='var(--border-dark)'"
+                      onmouseout="this.style.borderColor='var(--border)'">
+                      ↓ PDF
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = `<div class="loading-cell">Could not load invoices.</div>`;
+    }
+  }
+
+  function _invoiceStatusBadge(status) {
+    return {
+      'DRAFT'  : 'badge-draft',
+      'SENT'   : 'badge-progress',
+      'VIEWED' : 'badge-pending',
+      'PAID'   : 'badge-done',
+    }[status] || 'badge-draft';
+  }
+
+  async function downloadInvoicePDF(id, invoiceNumber) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/invoices/${id}/pdf/`);
+      if (!res.ok) { _toast('Could not download PDF.', 'error'); return; }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${invoiceNumber}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      _toast('Download failed.', 'error');
+    }
+  }
+
+  function openCreateInvoice() {
+    _toast('Invoice creation coming soon.', 'info');
+  }
+
+  // ── Late Job ──────────────────────────────────────────────────
+  function openLateJobModal() {
+    document.getElementById('late-job-reason').value    = '';
+    document.getElementById('late-job-svc-search').value= '';
+    document.getElementById('late-job-svc-id').value   = '';
+    document.getElementById('late-job-pages').value     = '1';
+    document.getElementById('late-job-sets').value      = '1';
+    document.getElementById('late-job-color').value     = 'false';
+    document.getElementById('late-job-error').style.display = 'none';
+    document.getElementById('late-job-svc-dropdown').style.display = 'none';
+    document.getElementById('late-job-overlay').classList.add('open');
+  }
+
+  function closeLateJobModal() {
+    document.getElementById('late-job-overlay').classList.remove('open');
+  }
+
+  function _lateJobFilterServices() {
+    const query    = document.getElementById('late-job-svc-search').value.toLowerCase();
+    const dropdown = document.getElementById('late-job-svc-dropdown');
+    const filtered = services.filter(s =>
+      s.name.toLowerCase().includes(query)
+    );
+    if (!filtered.length) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = filtered.map(s => `
+      <div onclick="Dashboard._lateJobSelectService(${s.id}, '${_esc(s.name)}')"
+        style="padding:9px 12px;font-size:13px;cursor:pointer;
+               border-bottom:1px solid var(--border);"
+        onmouseover="this.style.background='var(--bg)'"
+        onmouseout="this.style.background=''">
+        <div style="font-weight:600;color:var(--text);">${_esc(s.name)}</div>
+        <div style="font-size:11px;color:var(--text-3);">${s.category}</div>
+      </div>
+    `).join('');
+    dropdown.style.display = 'block';
+  }
+
+  function _lateJobSelectService(id, name) {
+    document.getElementById('late-job-svc-id').value    = id;
+    document.getElementById('late-job-svc-search').value= name;
+    document.getElementById('late-job-svc-dropdown').style.display = 'none';
+  }
+
+  async function submitLateJob() {
+    const btn    = document.getElementById('late-job-submit-btn');
+    const err    = document.getElementById('late-job-error');
+    err.style.display = 'none';
+
+    const reason  = document.getElementById('late-job-reason').value.trim();
+    const svcId   = document.getElementById('late-job-svc-id').value;
+    const pages   = parseInt(document.getElementById('late-job-pages').value) || 1;
+    const sets    = parseInt(document.getElementById('late-job-sets').value)  || 1;
+    const isColor = document.getElementById('late-job-color').value === 'true';
+
+    if (!reason) { err.textContent = 'Reason is required.'; err.style.display = 'block'; return; }
+    if (!svcId)  { err.textContent = 'Please select a service.'; err.style.display = 'block'; return; }
+
+    btn.disabled    = true;
+    btn.textContent = 'Recording…';
+
+    try {
+      const res = await Auth.fetch('/api/v1/jobs/late/', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({
+          post_closing_reason : reason,
+          line_items          : [{
+            service  : parseInt(svcId),
+            pages,
+            sets,
+            is_color : isColor,
+          }],
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        err.textContent   = data.detail || Object.values(data).flat().join(' ');
+        err.style.display = 'block';
+        return;
+      }
+
+      closeLateJobModal();
+      _toast(`Late job ${data.job_number} recorded and sent to cashier.`, 'success');
+
+    } catch {
+      err.textContent   = 'Network error. Please try again.';
+      err.style.display = 'block';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Record Late Job';
+    }
+  }
+
+  function _checkLateJobButton() {
+    const btn = document.getElementById('late-job-btn');
+    if (!btn) return;
+    const now     = new Date();
+    const hours   = now.getHours();
+    const minutes = now.getMinutes();
+    // Show after 19:30
+    const isPastClosing = hours > 19 || (hours === 19 && minutes >= 30);
+    btn.style.display = isPastClosing ? 'inline-flex' : 'none';
+  }
   // ── Public API ─────────────────────────────────────────────
 return {
     init,
@@ -3597,6 +3824,14 @@ return {
     _recvFilterConsumables,
     _recvShowDropdown,
     _recvSelectConsumable,
+    downloadInvoicePDF,
+    openCreateInvoice,
+    openLateJobModal,
+    closeLateJobModal,
+    submitLateJob,
+    _lateJobFilterServices,
+    _lateJobSelectService,
+    _checkLateJobButton,
   };
 
 })();

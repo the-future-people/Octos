@@ -96,56 +96,50 @@ class Command(BaseCommand):
 
     def _run_close(self) -> None:
         """
-        Auto-close any open sheet whose BM close window has passed.
-        BM close window = closing_time + BM_AUTOCLOSE_AFTER minutes.
+        Auto-close any open sheet whose BM autoclose window has passed.
+        Timing driven by ShiftEngine + ShiftRoleConfig — no hardcoded times.
         """
         from apps.finance.models import DailySalesSheet
         from apps.finance.sheet_engine import SheetEngine
-        from datetime import datetime, timedelta
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from datetime import datetime
 
         now    = timezone.now()
         today  = timezone.localdate()
         closed = 0
 
         open_sheets = DailySalesSheet.objects.filter(
-            date=today,
-            status=DailySalesSheet.Status.OPEN,
+            date   = today,
+            status = DailySalesSheet.Status.OPEN,
         ).select_related('branch')
 
         for sheet in open_sheets:
-            branch       = sheet.branch
-            closing_time = branch.closing_time
-            naive_close  = datetime.combine(today, closing_time)
-            aware_close  = timezone.make_aware(naive_close)
-            autoclose_at = aware_close + timedelta(
-                minutes=SheetEngine.BM_AUTOCLOSE_AFTER
-            )
+            branch = sheet.branch
+            try:
+                bm_schedule  = HRShiftEngine(branch).get_role_schedule('BRANCH_MANAGER', target_date=today)
+                autoclose_str = bm_schedule.get('autoclose_at')
+                if not autoclose_str:
+                    continue
+                autoclose_at = datetime.fromisoformat(autoclose_str)
 
-            if now >= autoclose_at:
-                try:
+                if now >= autoclose_at:
                     engine = SheetEngine(branch)
                     engine.close_sheet(sheet, closed_by=None, auto=True)
                     closed += 1
                     self.stdout.write(
-                        self.style.SUCCESS(
-                            f'  Auto-closed sheet for {branch.code}'
-                        )
+                        self.style.SUCCESS(f'  Auto-closed sheet for {branch.code}')
                     )
-                except Exception as exc:
-                    logger.exception(
-                        'run_sheet_tasks close: failed for branch %s',
-                        branch.code,
-                    )
-                    self.stdout.write(
-                        self.style.ERROR(
-                            f'  ERROR closing sheet for {branch.code}: {exc}'
-                        )
-                    )
+            except Exception as exc:
+                logger.exception(
+                    'run_sheet_tasks close: failed for branch %s', branch.code
+                )
+                self.stdout.write(
+                    self.style.ERROR(f'  ERROR closing sheet for {branch.code}: {exc}')
+                )
 
         self.stdout.write(
             self.style.SUCCESS(f'close complete — {closed} sheet(s) auto-closed')
         )
-
     # ── Warn ──────────────────────────────────────────────────────
 
     def _run_warn(self) -> None:
@@ -171,12 +165,15 @@ class Command(BaseCommand):
 
         for sheet in open_sheets:
             branch       = sheet.branch
-            closing_time = branch.closing_time
-            naive_close  = datetime.combine(today, closing_time)
-            aware_close  = timezone.make_aware(naive_close)
-            warn_at      = aware_close - timedelta(
-                minutes=SheetEngine.WARNING_BEFORE_CLOSE
-            )
+
+            from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+            bm_schedule  = HRShiftEngine(branch).get_role_schedule('BRANCH_MANAGER', target_date=today)
+            shift_end_str = bm_schedule.get('shift_end')
+            if not shift_end_str:
+                continue
+            from datetime import datetime as dt
+            aware_close  = dt.fromisoformat(shift_end_str)
+            warn_at      = aware_close - timedelta(minutes=SheetEngine.WARNING_BEFORE_CLOSE)
 
             # Only fire once — within the 5-minute check window
             window_end = warn_at + timedelta(minutes=5)

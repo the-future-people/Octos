@@ -523,40 +523,16 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : float_record.cover_until,
             })
 
-        # Resolve shift end from HR records
-        shift_end = None
-        try:
-            employee = user.employee_profile
-            override = ShiftOverride.objects.filter(
-                employee      = employee,
-                date          = today,
-            ).exclude(
-                override_type = ShiftOverride.ABSENCE,
-            ).order_by('-created_at').first()
+        # Resolve shift end via ShiftEngine
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from datetime import datetime as dt
 
-            if override and override.override_end:
-                shift_end = override.override_end
-            else:
-                base = EmployeeShift.objects.filter(
-                    employee    = employee,
-                    day_of_week = today.weekday(),
-                    is_active   = True,
-                ).first()
-                if base:
-                    shift_end = base.end_time
-        except Exception:
-            shift_end = None
-
-        # No HR shift record — fall back to branch closing_time
-        if not shift_end:
-            shift_end = branch.closing_time
-
-        # Compute minutes remaining
+        cash_schedule  = HRShiftEngine(branch).get_role_schedule('CASHIER', target_date=today)
+        signoff_dt     = dt.fromisoformat(cash_schedule['signoff_at'])
         now            = timezone.now()
-        shift_end_dt   = datetime.combine(today, shift_end)
-        shift_end_dt   = timezone.make_aware(shift_end_dt)
-        delta          = shift_end_dt - now
+        delta          = signoff_dt - now
         mins_remaining = max(0, int(delta.total_seconds() / 60))
+        shift_end      = dt.fromisoformat(cash_schedule['shift_end']).time()
 
         return Response({
             'has_shift'        : True,
