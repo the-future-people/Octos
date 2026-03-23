@@ -595,6 +595,34 @@ class SheetEngine:
 
         return count
 
+    def get_close_schedule(self) -> dict:
+        """
+        Returns the computed timestamps for today's close sequence.
+        Delegates to ShiftEngine for all timing.
+        """
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from datetime import datetime
+
+        today  = timezone.localdate()
+        engine = HRShiftEngine(self.branch)
+
+        att_schedule  = engine.get_role_schedule('ATTENDANT',      target_date=today)
+        cash_schedule = engine.get_role_schedule('CASHIER',        target_date=today)
+        bm_schedule   = engine.get_role_schedule('BRANCH_MANAGER', target_date=today)
+
+        shift_end    = datetime.fromisoformat(bm_schedule['shift_end'])
+        warning_at   = shift_end - timedelta(minutes=self.WARNING_BEFORE_CLOSE)
+        autoclose_at = datetime.fromisoformat(bm_schedule['autoclose_at']) if bm_schedule['autoclose_at'] else shift_end + timedelta(minutes=60)
+
+        return {
+            'warning_at'       : warning_at,
+            'attendant_lock_at': datetime.fromisoformat(att_schedule['job_lock_at']),
+            'cashier_lock_at'  : datetime.fromisoformat(cash_schedule['job_lock_at']),
+            'bm_autoclose_at'  : autoclose_at,
+            'shift_end'        : shift_end,
+        }
+    
+    
     # ── Lock status ───────────────────────────────────────────────
 
     def get_branch_lock_status(self, sheet=None) -> dict:
