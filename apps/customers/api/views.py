@@ -2,43 +2,63 @@ from rest_framework import generics, filters, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from apps.customers.models import CustomerProfile
-from .serializers import CustomerSerializer, CustomerListSerializer, CustomerCreateSerializer
+from django.utils import timezone
 
+from apps.customers.models import CustomerProfile
+from apps.finance.models import CreditAccount, CreditPayment, DailySalesSheet
+from apps.customers.credit_engine import CreditEngine, CreditLimitExceeded, CreditAccountNotActive
+
+from .serializers import (
+    CustomerSerializer, CustomerListSerializer, CustomerCreateSerializer,
+    CreditAccountSerializer, CreditAccountNominateSerializer,
+    CreditPaymentSerializer, CreditSettleSerializer,
+)
+
+
+# ── Customer views ────────────────────────────────────────────────────────────
 
 class CustomerListView(generics.ListAPIView):
-    queryset = CustomerProfile.objects.select_related('preferred_branch').all()
-    serializer_class = CustomerListSerializer
+    queryset           = CustomerProfile.objects.select_related('preferred_branch').all()
+    serializer_class   = CustomerListSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter]
-    search_fields = ['phone', 'first_name', 'last_name', 'email']
+    filter_backends    = [filters.SearchFilter]
+    search_fields      = ['phone', 'first_name', 'last_name', 'email', 'company_name']
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        tier = self.request.query_params.get('tier')
+        qs          = super().get_queryset()
+        tier        = self.request.query_params.get('tier')
         is_priority = self.request.query_params.get('is_priority')
+        branch      = self.request.query_params.get('branch')
         if tier:
             qs = qs.filter(tier=tier)
         if is_priority is not None:
             qs = qs.filter(is_priority=is_priority.lower() == 'true')
+        if branch:
+            qs = qs.filter(branch_id=branch)
         return qs
 
 
 class CustomerDetailView(generics.RetrieveUpdateAPIView):
-    queryset = CustomerProfile.objects.select_related('preferred_branch').all()
-    serializer_class = CustomerSerializer
+    queryset           = CustomerProfile.objects.select_related('preferred_branch').all()
+    serializer_class   = CustomerSerializer
     permission_classes = [IsAuthenticated]
 
 
 class CustomerCreateView(generics.CreateAPIView):
-    serializer_class = CustomerCreateSerializer
+    serializer_class   = CustomerCreateSerializer
     permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        # Auto-assign branch from the creating user if not provided
+        user   = self.request.user
+        branch = serializer.validated_data.get('preferred_branch') or getattr(user, 'branch', None)
+        serializer.save(branch=branch)
 
 
 class CustomerLookupView(APIView):
     """
+    GET /api/v1/customers/lookup/?phone=<phone>
     Look up a customer by phone number.
-    Used by attendants when a customer walks in or calls.
     """
     permission_classes = [IsAuthenticated]
 
@@ -47,14 +67,242 @@ class CustomerLookupView(APIView):
         if not phone:
             return Response(
                 {'detail': 'Phone number is required.'},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            customer = CustomerProfile.objects.get(phone=phone)
+            customer   = CustomerProfile.objects.get(phone=phone)
             serializer = CustomerSerializer(customer)
             return Response(serializer.data)
         except CustomerProfile.DoesNotExist:
             return Response(
                 {'detail': 'Customer not found.'},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
+
+
+# ── Credit Account views ──────────────────────────────────────────────────────
+
+class CreditAccountListView(generics.ListAPIView):
+    """
+    GET /api/v1/customers/credit/
+    Lists credit accounts for the requesting user's branch.
+    """
+    serializer_class   = CreditAccountSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        branch = getattr(self.request.user, 'branch', None)
+        qs     = CreditAccount.objects.select_related(
+            'customer', 'branch', 'nominated_by', 'approved_by'
+        )
+        if branch:
+            qs = qs.filter(branch=branch)
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
+
+
+class CreditAccountDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/customers/credit/<pk>/
+    """
+    serializer_class   = CreditAccountSerializer
+    permission_classes = [IsAuthenticated]
+    queryset           = CreditAccount.objects.select_related(
+        'customer', 'branch', 'nominated_by', 'approved_by'
+    )
+
+
+class CreditAccountNominateView(APIView):
+    """
+    POST /api/v1/customers/credit/nominate/
+    BM nominates a customer for a credit account.
+    Creates account in PENDING status — awaits Belt Manager approval.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreditAccountNominateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        account = serializer.save(
+            nominated_by = request.user,
+            nominated_at = timezone.now(),
+            status       = CreditAccount.Status.PENDING,
+        )
+
+        # Notify Belt Manager
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+            belt_managers = CustomUser.objects.filter(
+                role__name='BELT_MANAGER',
+                branch__belt=request.user.branch.belt if request.user.branch else None,
+            )
+            for bm in belt_managers:
+                notify(
+                    recipient = bm,
+                    message   = (
+                        f"{request.user.full_name} has nominated "
+                        f"{account.customer.display_name} for a credit account "
+                        f"(limit: GHS {account.credit_limit}). Please review."
+                    ),
+                    category  = 'CREDIT',
+                    link      = f'/credit/{account.id}/',
+                )
+        except Exception:
+            pass
+
+        return Response(
+            CreditAccountSerializer(account).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreditAccountApproveView(APIView):
+    """
+    POST /api/v1/customers/credit/<pk>/approve/
+    Belt Manager approves a PENDING credit account → sets to ACTIVE.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            account = CreditAccount.objects.get(pk=pk, status=CreditAccount.Status.PENDING)
+        except CreditAccount.DoesNotExist:
+            return Response(
+                {'detail': 'Pending credit account not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        account.status      = CreditAccount.Status.ACTIVE
+        account.approved_by = request.user
+        account.approved_at = timezone.now()
+        account.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
+
+        # Notify the nominating BM
+        try:
+            from apps.notifications.services import notify
+            notify(
+                recipient = account.nominated_by,
+                message   = (
+                    f"Credit account for {account.customer.display_name} "
+                    f"has been approved by {request.user.full_name}. "
+                    f"Limit: GHS {account.credit_limit}."
+                ),
+                category  = 'CREDIT',
+                link      = f'/credit/{account.id}/',
+            )
+        except Exception:
+            pass
+
+        return Response(CreditAccountSerializer(account).data)
+
+
+class CreditAccountSuspendView(APIView):
+    """
+    POST /api/v1/customers/credit/<pk>/suspend/
+    Suspends an active credit account.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            account = CreditAccount.objects.get(pk=pk, status=CreditAccount.Status.ACTIVE)
+        except CreditAccount.DoesNotExist:
+            return Response(
+                {'detail': 'Active credit account not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response(
+                {'detail': 'Suspension reason is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        account.status            = CreditAccount.Status.SUSPENDED
+        account.suspended_at      = timezone.now()
+        account.suspended_by      = request.user
+        account.suspension_reason = reason
+        account.save(update_fields=[
+            'status', 'suspended_at', 'suspended_by',
+            'suspension_reason', 'updated_at',
+        ])
+
+        return Response(CreditAccountSerializer(account).data)
+
+
+# ── Credit Settlement views ───────────────────────────────────────────────────
+
+class CreditSettleView(APIView):
+    """
+    POST /api/v1/customers/credit/<pk>/settle/
+    Cashier records a settlement payment against a credit account.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            account = CreditAccount.objects.select_related('customer', 'branch').get(pk=pk)
+        except CreditAccount.DoesNotExist:
+            return Response(
+                {'detail': 'Credit account not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = CreditSettleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        # Fetch today's sheet
+        try:
+            sheet = DailySalesSheet.objects.get(
+                pk       = data['sheet_id'],
+                status   = 'OPEN',
+                branch   = account.branch,
+            )
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'No open sheet found for this branch.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payment = CreditEngine.settle(
+                credit_account = account,
+                amount         = data['amount'],
+                method         = data['method'],
+                sheet          = sheet,
+                cashier        = request.user,
+                reference      = data.get('reference', ''),
+                notes          = data.get('notes', ''),
+            )
+        except CreditAccountNotActive as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            CreditPaymentSerializer(payment).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreditPaymentHistoryView(generics.ListAPIView):
+    """
+    GET /api/v1/customers/credit/<pk>/payments/
+    Lists all settlement payments for a credit account.
+    """
+    serializer_class   = CreditPaymentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return CreditPayment.objects.filter(
+            credit_account_id=self.kwargs['pk']
+        ).select_related('credit_account__customer', 'received_by').order_by('-created_at')

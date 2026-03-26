@@ -498,6 +498,7 @@ class CashierShiftStatusView(APIView):
                 'should_lock'      : True,
                 'is_signed_off'    : True,
                 'float_id'         : float_record.id,
+                'sheet_id'         : float_record.daily_sheet_id,
                 'is_overtime'      : False,
                 'overtime_until'   : None,
                 'is_cover'         : False,
@@ -517,6 +518,7 @@ class CashierShiftStatusView(APIView):
                 'should_lock'      : mins_remaining <= 0,
                 'is_signed_off'    : False,
                 'float_id'         : float_record.id,
+                'sheet_id'         : float_record.daily_sheet_id,
                 'is_overtime'      : True,
                 'overtime_until'   : float_record.overtime_until,
                 'is_cover'         : float_record.is_cover,
@@ -534,6 +536,20 @@ class CashierShiftStatusView(APIView):
         mins_remaining = max(0, int(delta.total_seconds() / 60))
         shift_end      = dt.fromisoformat(cash_schedule['shift_end']).time()
 
+        # Resolve sheet_id — from float if available, else today's open sheet
+        sheet_id = None
+        if float_record:
+            sheet_id = float_record.daily_sheet_id
+        else:
+            try:
+                from apps.finance.models import DailySalesSheet
+                open_sheet = DailySalesSheet.objects.get(
+                    branch=branch, date=today, status='OPEN'
+                )
+                sheet_id = open_sheet.pk
+            except DailySalesSheet.DoesNotExist:
+                pass
+
         return Response({
             'has_shift'        : True,
             'shift_end'        : shift_end,
@@ -542,6 +558,7 @@ class CashierShiftStatusView(APIView):
             'should_lock'      : mins_remaining <= 0,
             'is_signed_off'    : float_record.is_signed_off if float_record else False,
             'float_id'         : float_record.id if float_record else None,
+            'sheet_id'         : sheet_id,
             'is_overtime'      : float_record.is_overtime if float_record else False,
             'overtime_until'   : float_record.overtime_until if float_record else None,
             'is_cover'         : float_record.is_cover if float_record else False,
@@ -1262,14 +1279,31 @@ class EODSummaryView(APIView):
         )
 
         # ── Revenue summary ───────────────────────────────────────
+        # ── Revenue summary — computed live from jobs ─────────────────────────────
+        from decimal import Decimal
+        def _sum_method(method):
+            return jobs.filter(
+                status='COMPLETE', payment_method=method, amount_paid__isnull=False
+            ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
+
+        live_cash   = _sum_method('CASH')
+        live_momo   = _sum_method('MOMO')
+        live_pos    = _sum_method('POS')
+        live_credit = jobs.filter(
+            status='COMPLETE', payment_method='CREDIT', amount_paid__isnull=False
+        ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
+        live_petty    = sheet.total_petty_cash_out  # petty cash has its own model
+        live_settled  = sheet.total_credit_settled  # credit settlements
+        live_net      = live_cash + live_settled - live_petty
         revenue = {
-            'cash' : str(sheet.total_cash),
-            'momo' : str(sheet.total_momo),
-            'pos'  : str(sheet.total_pos),
-            'total': str(sheet.total_cash + sheet.total_momo + sheet.total_pos),
-            'credit_issued'  : str(sheet.total_credit_issued),
-            'petty_cash_out' : str(sheet.total_petty_cash_out),
-            'net_cash_in_till': str(sheet.net_cash_in_till),
+            'cash'            : str(live_cash),
+            'momo'            : str(live_momo),
+            'pos'             : str(live_pos),
+            'total'           : str(live_cash + live_momo + live_pos),
+            'credit_issued'   : str(live_credit),
+            'credit_settled'  : str(live_settled),
+            'petty_cash_out'  : str(live_petty),
+            'net_cash_in_till': str(live_net),
         }
 
         # ── Jobs summary ──────────────────────────────────────────
@@ -1341,7 +1375,7 @@ class EODSummaryView(APIView):
                 cashier=f.cashier,
             ).order_by('created_at')
 
-            by_method = txns.values('payment_method').annotate(
+            by_method = txns.order_by().values('payment_method').annotate(
                 total=Sum('amount_paid'),
                 count=Count('id'),
             )
@@ -1420,6 +1454,23 @@ class EODSummaryView(APIView):
             'public_holiday_name': sheet.public_holiday_name,
         }
 
+        # ── Branch cashiers (for float staging even with no activity) ─
+        from apps.accounts.models import CustomUser
+        branch_cashiers = list(
+            CustomUser.objects.filter(
+                branch    = branch,
+                role__name = 'CASHIER',
+                is_active = True,
+            ).values('id', 'first_name', 'last_name')
+        )
+        branch_cashiers_list = [
+            {
+                'cashier_id'  : c['id'],
+                'cashier_name': f"{c['first_name']} {c['last_name']}".strip(),
+            }
+            for c in branch_cashiers
+        ]
+
         return Response({
             'meta'            : meta,
             'revenue'         : revenue,
@@ -1428,6 +1479,7 @@ class EODSummaryView(APIView):
             'float_opened'    : float_opened,
             'petty_cash'      : petty_cash_list,
             'credit_sales'    : credit_list,
+            'branch_cashiers' : branch_cashiers_list,
         })
 
 # ─────────────────────────────────────────────────────────────────────────────

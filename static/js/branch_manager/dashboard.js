@@ -720,18 +720,16 @@ async function loadRecentJobs() {
   }
 
   function toggleEODConfirm() {
-    const checked = document.getElementById('eod-ack-checkbox').checked;
-    const floatsValid = _validateAllFloats();
-    document.getElementById('eod-confirm-btn').disabled = !(checked && floatsValid);
+    const allSignedOff = !document.getElementById('eod-cashier-blocker') ||
+      document.getElementById('eod-cashier-blocker').style.display === 'none';
+    _updateEODIntegrity(allSignedOff);
   }
 
   function _validateFloatInput(input) {
     const val = parseFloat(input.value);
-    if (val < 20 || val > 100 || val % 5 !== 0) {
-      input.style.borderColor = 'var(--red-text)';
-    } else {
-      input.style.borderColor = 'var(--green-text)';
-    }
+    const valid = val >= 20 && val <= 100 && val % 5 === 0;
+    input.style.borderColor = valid ? 'var(--border)' : 'var(--red-border)';
+    input.style.background  = valid ? 'var(--panel)'  : 'var(--red-bg)';
     toggleEODConfirm();
   }
 
@@ -766,228 +764,318 @@ async function loadRecentJobs() {
     const meta = d.meta;
     const rev  = d.revenue;
     const jobs = d.jobs;
+    const fmt  = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH', {minimumFractionDigits:2})}`;
 
-    // Subtitle
+    // ── Header ────────────────────────────────────────────────────
     const dateStr = new Date(meta.date).toLocaleDateString('en-GH', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
-    document.getElementById('eod-subtitle').textContent =
-      `${dateStr} · ${meta.branch}`;
+    document.getElementById('eod-subtitle').textContent = `${dateStr} · ${meta.branch}`;
     document.getElementById('eod-ack-branch').textContent = meta.branch;
 
-    // ── Revenue ──────────────────────────────────────────────────
-    document.getElementById('eod-cash').textContent        = _fmt(rev.cash);
-    document.getElementById('eod-momo').textContent        = _fmt(rev.momo);
-    document.getElementById('eod-pos').textContent         = _fmt(rev.pos);
-    document.getElementById('eod-total').textContent       = _fmt(rev.total);
-    document.getElementById('eod-credit-issued').textContent  = _fmt(rev.credit_issued);
-    document.getElementById('eod-petty-cash-out').textContent = _fmt(rev.petty_cash_out);
-    document.getElementById('eod-net-cash').textContent    = _fmt(rev.net_cash_in_till);
+    // Set BM name in acknowledgement
+    const user = Auth.getUser();
+    const bmName = user?.full_name || user?.first_name || 'Branch Manager';
+    const bmEl = document.getElementById('eod-ack-bm-name');
+    if (bmEl) bmEl.textContent = bmName;
 
-    // ── Jobs checklist ───────────────────────────────────────────
-    const cl = document.getElementById('eod-jobs-checklist');
-    cl.innerHTML = [
-      _checkItem('ok',
-        `${jobs.total} jobs created · ${jobs.completed} completed`,
-        jobs.cancelled ? `${jobs.cancelled} cancelled` : null),
-      _checkItem('ok',
-        `${jobs.local} local jobs · ${jobs.routed_out} routed out`,
-        jobs.routed_in ? `${jobs.routed_in} routed in from other branches` : null),
-      jobs.pending_payment > 0
-        ? _checkItem('warn',
-            `${jobs.pending_payment} pending payment — will carry forward`,
-            `${jobs.pending_untouched} never touched by cashier`)
-        : _checkItem('ok', 'All jobs paid — no carry-forwards', null),
-      d.float_opened
-        ? _checkItem('ok', 'Cashier float opened today', null)
-        : _checkItem('warn', 'No cashier float was opened today', null),
-    ].join('');
+    // ── 1. Revenue ────────────────────────────────────────────────
+    // Use live totals for open sheet
+    const liveCash  = parseFloat(rev.cash  || 0);
+    const liveMomo  = parseFloat(rev.momo  || 0);
+    const livePos   = parseFloat(rev.pos   || 0);
+    const liveTotal = liveCash + liveMomo + livePos;
 
-    // ── Pending payments list ─────────────────────────────────────
-    const pendingBadge = document.getElementById('eod-pending-badge');
-    pendingBadge.textContent = jobs.pending_payment;
-    pendingBadge.style.display = jobs.pending_payment ? 'inline-flex' : 'none';
+    document.getElementById('eod-cash').textContent          = fmt(liveCash);
+    document.getElementById('eod-momo').textContent          = fmt(liveMomo);
+    document.getElementById('eod-pos').textContent           = fmt(livePos);
+    document.getElementById('eod-total').textContent         = fmt(liveTotal);
+    document.getElementById('eod-credit-issued').textContent  = fmt(rev.credit_issued);
+    document.getElementById('eod-credit-settled').textContent = fmt(rev.credit_settled || 0);
+    document.getElementById('eod-petty-cash-out').textContent = fmt(rev.petty_cash_out);
+    document.getElementById('eod-net-cash').textContent       = fmt(rev.net_cash_in_till);
 
-    const pendingNote = document.getElementById('eod-pending-note');
-    pendingNote.style.display = jobs.pending_list.length ? 'block' : 'none';
+    // ── 2. Jobs Grid ──────────────────────────────────────────────
+    const jobsGrid = document.getElementById('eod-jobs-grid');
+    if (jobsGrid) {
+      const jobCards = [
+        { label: 'Total Jobs',   value: jobs.total,         color: 'blue' },
+        { label: 'Completed',    value: jobs.completed,     color: 'green' },
+        { label: 'Pending',      value: jobs.pending_payment, color: 'amber' },
+        { label: 'Cancelled',    value: jobs.cancelled,     color: 'red' },
+      ];
+      jobsGrid.innerHTML = jobCards.map(c => `
+        <div style="padding:14px 16px;background:var(--${c.color}-bg);
+          border:1px solid var(--${c.color}-border);border-radius:var(--radius-sm);
+          text-align:center;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;
+            font-weight:800;color:var(--${c.color}-text);">${c.value}</div>
+          <div style="font-size:11px;font-weight:600;color:var(--${c.color}-text);
+            margin-top:4px;opacity:0.8;">${c.label}</div>
+        </div>
+      `).join('');
+    }
 
-    document.getElementById('eod-pending-list').innerHTML =
-      jobs.pending_list.length
-        ? _jobMiniTable(jobs.pending_list)
-        : '<div class="eod-empty-note">No pending payments.</div>';
+    // ── 3. Cashier Sign-Off ───────────────────────────────────────
+    const cashierEl      = document.getElementById('eod-cashier-activity');
+    const floatWarn      = document.getElementById('eod-float-warning');
+    const cashierBlocker = document.getElementById('eod-cashier-blocker');
+    const signoffStatus  = document.getElementById('eod-cashier-signoff-status');
 
-    const untouchedSubtitle = document.getElementById('eod-untouched-subtitle');
-    const untouchedNote     = document.getElementById('eod-untouched-note');
-    untouchedSubtitle.style.display = jobs.untouched_list.length ? 'block' : 'none';
-    untouchedNote.style.display     = jobs.untouched_list.length ? 'block' : 'none';
-    document.getElementById('eod-untouched-list').innerHTML =
-      jobs.untouched_list.length ? _jobMiniTable(jobs.untouched_list) : '';
-
-    // ── Cashier activity ─────────────────────────────────────────
-    const cashierEl = document.getElementById('eod-cashier-activity');
-    const floatWarn = document.getElementById('eod-float-warning');
     floatWarn.style.display = d.float_opened ? 'none' : 'block';
 
-    if (d.cashier_activity.length) {
+    let allSignedOff = true;
+
+    if (d.cashier_activity && d.cashier_activity.length) {
       cashierEl.innerHTML = d.cashier_activity.map(c => {
-        const methods = ['CASH', 'MOMO', 'POS'].map(m => {
-          const info = c.method_breakdown[m];
+        if (!c.is_signed_off) allSignedOff = false;
+
+        const variance      = parseFloat(c.variance || 0);
+        const varDisplay    = variance >= 0 ? `+${fmt(variance)}` : fmt(variance);
+        const varColor      = variance >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+        const signoffBadge  = c.is_signed_off
+          ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;
+               border-radius:20px;font-size:11px;font-weight:700;
+               background:var(--green-bg);color:var(--green-text);
+               border:1px solid var(--green-border);">✓ Signed off</span>`
+          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;
+               border-radius:20px;font-size:11px;font-weight:700;
+               background:var(--red-bg);color:var(--red-text);
+               border:1px solid var(--red-border);">⚠ Not signed off</span>`;
+
+        const methods = ['CASH','MOMO','POS'].map(m => {
+          const info = c.method_breakdown?.[m];
           if (!info) return '';
-          return `
-            <div class="eod-method-pill ${m.toLowerCase()}">
-              <span class="eod-method-pill-label">${m}</span>
-              <span class="eod-method-pill-val">${_fmt(info.total)}</span>
-            </div>`;
+          return `<div style="padding:8px 12px;border-radius:var(--radius-sm);
+            border:1px solid var(--border);background:var(--panel);min-width:90px;">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;
+              letter-spacing:0.4px;color:var(--text-3);margin-bottom:3px;">${m}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--text);">${fmt(info.total)}</div>
+            <div style="font-size:10px;color:var(--text-3);">${info.count} txn</div>
+          </div>`;
         }).join('');
 
-        const activeFrom = c.active_from
-          ? new Date(c.active_from).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
-          : '—';
-        const activeTo = c.active_to
-          ? new Date(c.active_to).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' })
-          : '—';
-
-        const variance    = parseFloat(c.variance || 0);
-        const varClass    = variance === 0 ? 'variance-ok' : 'variance-warn';
-        const varDisplay  = variance >= 0 ? `+${_fmt(variance)}` : _fmt(variance);
-        const signoffHtml = c.is_signed_off
-          ? `<span class="eod-signoff-badge ok">✓ Signed off</span>`
-          : `<span class="eod-signoff-badge pending">⚠ Not signed off</span>`;
-
         return `
-          <div class="eod-cashier-card">
-            <div class="eod-cashier-head">
+          <div style="border:1px solid var(--border);border-radius:var(--radius);
+            margin-bottom:12px;overflow:hidden;
+            ${!c.is_signed_off ? 'border-color:var(--red-border);' : ''}">
+
+            <!-- Cashier header -->
+            <div style="display:flex;align-items:center;justify-content:space-between;
+              padding:12px 16px;background:var(--bg);border-bottom:1px solid var(--border);">
               <div>
-                <div class="eod-cashier-name">${c.cashier_name}</div>
-                <div class="eod-cashier-meta">Active ${activeFrom} → ${activeTo} · ${c.transaction_count} transactions</div>
+                <div style="font-size:14px;font-weight:700;color:var(--text);">
+                  ${_esc(c.cashier_name)}
+                </div>
+                <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                  ${c.transaction_count} transactions
+                </div>
               </div>
               <div style="display:flex;align-items:center;gap:10px;">
-                ${signoffHtml}
-                <div class="eod-cashier-total">${_fmt(c.total_collected)}</div>
+                ${signoffBadge}
+                <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
+                  font-weight:800;color:var(--green-text);">${fmt(c.total_collected)}</div>
               </div>
             </div>
-            <div class="eod-cashier-body">
-              <div class="eod-cashier-methods">${methods}</div>
-              <div class="eod-cashier-float-row">
-                <div class="eod-float-item">
-                  <span class="eod-float-label">Opening Float</span>
-                  <span class="eod-float-val">${_fmt(c.opening_float)}</span>
+
+            <!-- Float + Variance row -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;
+              gap:0;border-bottom:1px solid var(--border);">
+              ${[
+                ['Opening Float', fmt(c.opening_float), 'var(--text)'],
+                ['Expected Cash', fmt(c.expected_cash), 'var(--text)'],
+                ['Closing Count', fmt(c.closing_cash),  'var(--text)'],
+                ['Variance',      varDisplay,            varColor],
+              ].map(([label, val, color]) => `
+                <div style="padding:10px 14px;border-right:1px solid var(--border);">
+                  <div style="font-size:10px;font-weight:700;text-transform:uppercase;
+                    letter-spacing:0.4px;color:var(--text-3);margin-bottom:3px;">${label}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                    font-weight:700;color:${color};">${val}</div>
                 </div>
-                <div class="eod-float-item">
-                  <span class="eod-float-label">Expected Cash</span>
-                  <span class="eod-float-val">${_fmt(c.expected_cash)}</span>
-                </div>
-                <div class="eod-float-item">
-                  <span class="eod-float-label">Closing Cash</span>
-                  <span class="eod-float-val">${_fmt(c.closing_cash)}</span>
-                </div>
-                <div class="eod-float-item">
-                  <span class="eod-float-label">Variance</span>
-                  <span class="eod-float-val ${varClass}">${varDisplay}</span>
-                </div>
-                ${c.variance_notes ? `
-                <div class="eod-float-item" style="flex:1;">
-                  <span class="eod-float-label">Variance Notes</span>
-                  <span class="eod-float-val" style="font-family:inherit;font-size:12px;">${c.variance_notes}</span>
-                </div>` : ''}
-              </div>
+              `).join('')}
+            </div>
+
+            <!-- Method breakdown -->
+            <div style="padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;">
+              ${methods || '<span style="font-size:12px;color:var(--text-3);">No transactions recorded.</span>'}
             </div>
           </div>`;
       }).join('');
     } else {
-      cashierEl.innerHTML = '<div class="eod-empty-note">No cashier activity recorded today.</div>';
+      cashierEl.innerHTML = `<div class="eod-empty-note">No cashier activity today.</div>`;
+      allSignedOff = true; // no cashier = no block
     }
 
-    // ── Petty cash ────────────────────────────────────────────────
-    const pettyEl = document.getElementById('eod-petty-list');
-    if (d.petty_cash.length) {
-      pettyEl.innerHTML = `
+    // Show/hide cashier blocker
+    cashierBlocker.style.display = allSignedOff ? 'none' : 'block';
+    if (signoffStatus) {
+      signoffStatus.innerHTML = allSignedOff
+        ? `<span style="font-size:11px;font-weight:700;color:var(--green-text);">✓ All signed off</span>`
+        : `<span style="font-size:11px;font-weight:700;color:var(--red-text);">⚠ Sign-off pending</span>`;
+    }
+
+    // ── 4. Pending Payments ───────────────────────────────────────
+    const pendingBadge = document.getElementById('eod-pending-badge');
+    if (jobs.pending_payment > 0) {
+      pendingBadge.textContent     = jobs.pending_payment;
+      pendingBadge.style.display   = 'inline-flex';
+    } else {
+      pendingBadge.style.display   = 'none';
+    }
+
+    document.getElementById('eod-pending-note').style.display =
+      jobs.pending_list?.length ? 'block' : 'none';
+
+    document.getElementById('eod-pending-list').innerHTML =
+      jobs.pending_list?.length
+        ? _jobMiniTable(jobs.pending_list)
+        : '<div class="eod-empty-note">No pending payments. ✓</div>';
+
+    const untouchedSubtitle = document.getElementById('eod-untouched-subtitle');
+    const untouchedNote     = document.getElementById('eod-untouched-note');
+    untouchedSubtitle.style.display = jobs.untouched_list?.length ? 'block' : 'none';
+    untouchedNote.style.display     = jobs.untouched_list?.length ? 'block' : 'none';
+    document.getElementById('eod-untouched-list').innerHTML =
+      jobs.untouched_list?.length ? _jobMiniTable(jobs.untouched_list) : '';
+
+    // ── 5. Petty Cash ─────────────────────────────────────────────
+    const pettyList = document.getElementById('eod-petty-list');
+    if (d.petty_cash?.length) {
+      pettyList.innerHTML = `
         <table class="eod-table">
           <thead>
-            <tr>
-              <th>Reason</th>
-              <th>Recorded By</th>
-              <th>Time</th>
-              <th style="text-align:right;">Amount</th>
-            </tr>
+            <tr><th>Item / Purpose</th><th>Recorded By</th><th>Time</th><th>Amount</th></tr>
           </thead>
           <tbody>
             ${d.petty_cash.map(p => `
               <tr>
-                <td>${p.reason || '—'}</td>
-                <td>${p.recorded_by_name}</td>
-                <td>${p.created_at ? new Date(p.created_at).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                <td class="mono" style="text-align:right;">${_fmt(p.amount)}</td>
+                <td>${_esc(p.reason || p.purpose || '—')}</td>
+                <td>${_esc(p.recorded_by_name || '—')}</td>
+                <td style="font-size:11px;color:var(--text-3);">
+                  ${p.created_at ? new Date(p.created_at).toLocaleTimeString('en-GH',{hour:'2-digit',minute:'2-digit'}) : '—'}
+                </td>
+                <td class="mono">${fmt(p.amount)}</td>
               </tr>`).join('')}
           </tbody>
         </table>`;
     } else {
-      pettyEl.innerHTML = '<div class="eod-empty-note">No petty cash disbursements today.</div>';
+      pettyList.innerHTML = '<div class="eod-empty-note">No petty cash disbursements today. ✓</div>';
     }
 
-    // ── Credit sales ──────────────────────────────────────────────
-    const creditEl = document.getElementById('eod-credit-list');
-    if (d.credit_sales.length) {
-      creditEl.innerHTML = `
+    // ── 6. Credit Sales ───────────────────────────────────────────
+    const creditList = document.getElementById('eod-credit-list');
+    if (d.credit_sales?.length) {
+      creditList.innerHTML = `
         <table class="eod-table">
           <thead>
-            <tr>
-              <th>Job Ref</th>
-              <th>Title</th>
-              <th>Customer</th>
-              <th style="text-align:right;">Amount</th>
-            </tr>
+            <tr><th>Job</th><th>Customer</th><th>Amount</th></tr>
           </thead>
           <tbody>
             ${d.credit_sales.map(c => `
               <tr>
-                <td class="mono">${c.job_number}</td>
-                <td>${c.title || '—'}</td>
-                <td>${c.customer_name}</td>
-                <td class="mono" style="text-align:right;">${_fmt(c.estimated_cost)}</td>
+                <td>${_esc(c.title)}</td>
+                <td>${_esc(c.customer_name)}</td>
+                <td class="mono">${fmt(c.estimated_cost)}</td>
               </tr>`).join('')}
           </tbody>
         </table>`;
     } else {
-      creditEl.innerHTML = '<div class="eod-empty-note">No credit sales today.</div>';
+      creditList.innerHTML = '<div class="eod-empty-note">No credit sales today. ✓</div>';
     }
 
-    // ── Tomorrow's float inputs ───────────────────────────────────────────
+    // ── 8. Tomorrow's Float ───────────────────────────────────────
     const floatContainer = document.getElementById('eod-cashier-floats');
     if (floatContainer) {
-      const cashiers = d.cashier_activity || [];
+      // Use cashier_activity if available, else branch_cashiers
+      const cashiers = (d.cashier_activity?.length)
+        ? d.cashier_activity
+        : (d.branch_cashiers || []);
+
       if (cashiers.length) {
-        floatContainer.innerHTML = cashiers.map(c => `
-          <div style="display:flex;align-items:center;justify-content:space-between;
-            padding:12px 14px;background:var(--bg);border:1px solid var(--border);
-            border-radius:var(--radius-sm);margin-bottom:8px;">
-            <div>
-              <div style="font-size:13px;font-weight:600;color:var(--text);">${_esc(c.cashier_name)}</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Tomorrow's opening float</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-size:12px;color:var(--text-3);">GHS</span>
-              <input type="number" id="float-input-${c.cashier_id}"
-                min="20" max="100" step="5" value="50"
-                style="width:80px;padding:6px 10px;border:1.5px solid var(--border);
-                       border-radius:var(--radius-sm);background:var(--panel);
-                       color:var(--text);font-size:14px;font-weight:700;
-                       font-family:'JetBrains Mono',monospace;text-align:right;"
-                oninput="Dashboard._validateFloatInput(this)">
-            </div>
-          </div>`).join('');
+        // Check if tomorrow is Sunday — skip to Monday
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const isSunday = tomorrow.getDay() === 0;
+        const floatDate = isSunday
+          ? (() => { const m = new Date(tomorrow); m.setDate(m.getDate()+1); return m; })()
+          : tomorrow;
+        const floatDateStr = floatDate.toLocaleDateString('en-GH',{weekday:'long',month:'short',day:'numeric'});
+
+        floatContainer.innerHTML = `
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:10px;">
+            Float for <strong>${floatDateStr}</strong>
+            ${isSunday ? '(Monday — skipping Sunday)' : ''}
+          </div>
+          ${cashiers.map(c => `
+            <div style="display:flex;align-items:center;justify-content:space-between;
+              padding:12px 14px;background:var(--bg);border:1px solid var(--border);
+              border-radius:var(--radius-sm);margin-bottom:8px;">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--text);">
+                  ${_esc(c.cashier_name)}
+                </div>
+                <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                  Opening float for tomorrow
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;color:var(--text-3);font-weight:600;">GHS</span>
+                <input type="number"
+                  id="float-input-${c.cashier_id}"
+                  min="20" max="100" step="5" value="50"
+                  onchange="Dashboard._validateFloatInput(this)"
+                  oninput="Dashboard._validateFloatInput(this)"
+                  style="width:90px;padding:8px 10px;border:1.5px solid var(--border);
+                    border-radius:var(--radius-sm);background:var(--panel);
+                    color:var(--text);font-size:15px;font-weight:700;
+                    font-family:'JetBrains Mono',monospace;text-align:right;outline:none;">
+              </div>
+            </div>`).join('')}`;
       } else {
         floatContainer.innerHTML = `
-          <div style="font-size:13px;color:var(--text-3);padding:12px 0;">
-            No cashiers active today — no float needed.
+          <div class="eod-info-note amber">
+            No cashiers found for this branch. Float staging skipped.
           </div>`;
       }
     }
 
-    // ── Show content ──────────────────────────────────────────────
+    // ── Hide loading, show content ────────────────────────────────
     document.getElementById('eod-loading').style.display = 'none';
     document.getElementById('eod-content').style.display = 'block';
-    document.getElementById('eod-footer').style.display  = 'flex';
+
+    // ── Show footer ───────────────────────────────────────────────
+    document.getElementById('eod-footer').style.display = 'flex';
+
+    // ── Update integrity status in footer ─────────────────────────
+    _updateEODIntegrity(allSignedOff);
+  }
+
+  function _updateEODIntegrity(allSignedOff) {
+    const floatsValid    = _validateAllFloats();
+    const ackChecked     = document.getElementById('eod-ack-checkbox')?.checked;
+    const confirmBtn     = document.getElementById('eod-confirm-btn');
+    const footerStatus   = document.getElementById('eod-footer-status');
+    const cashierBlocker = document.getElementById('eod-cashier-blocker');
+    const floatBlocker   = document.getElementById('eod-float-blocker');
+
+    cashierBlocker.style.display = allSignedOff  ? 'none' : 'block';
+    floatBlocker.style.display   = floatsValid   ? 'none' : 'block';
+
+    const canClose = allSignedOff && floatsValid && ackChecked;
+    confirmBtn.disabled = !canClose;
+
+    if (footerStatus) {
+      const issues = [];
+      if (!allSignedOff) issues.push('cashier sign-off pending');
+      if (!floatsValid)  issues.push('tomorrow\'s float not set');
+      if (!ackChecked)   issues.push('acknowledgement required');
+      footerStatus.textContent = issues.length
+        ? `⚠ Blocked: ${issues.join(' · ')}`
+        : '✓ Ready to close';
+      footerStatus.style.color = issues.length ? 'var(--red-text)' : 'var(--green-text)';
+    }
   }
 
   function _checkItem(type, text, sub) {
@@ -1881,7 +1969,7 @@ async function loadRecentJobs() {
     });
   }
 
-function _recvShowDropdown() {
+  function _recvShowDropdown() {
     _recvFilterConsumables();
   }
 

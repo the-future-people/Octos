@@ -128,6 +128,7 @@ class JobListSerializer(serializers.ModelSerializer):
     branch_email     = serializers.EmailField(source='branch.email', read_only=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
+    customer_credit  = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
     deposit_due      = serializers.SerializerMethodField()
     line_items       = JobLineItemSerializer(many=True, read_only=True)
@@ -141,6 +142,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
+            'customer', 'customer_credit',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
         ]
@@ -150,6 +152,26 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_intake_by_name(self, obj):
         return obj.intake_by.full_name if obj.intake_by else None
+
+    def get_customer_credit(self, obj):
+        if not obj.customer:
+            return None
+        try:
+            from apps.finance.models import CreditAccount
+            account = CreditAccount.objects.get(
+                customer=obj.customer,
+                branch=obj.branch,
+                status='ACTIVE',
+            )
+            return {
+                'account_id'      : account.id,
+                'current_balance' : str(account.current_balance),
+                'available_credit': str(account.available_credit),
+                'credit_limit'    : str(account.credit_limit),
+                'display_name'    : account.customer.full_name,
+            }
+        except CreditAccount.DoesNotExist:
+            return None
 
     def get_deposit_due(self, obj):
         if obj.estimated_cost is None:
@@ -457,6 +479,14 @@ class CashierPaymentSerializer(serializers.Serializer):
         required=False,
         allow_empty=True,
         default=list,
+    )
+
+    # Partial credit
+    partial_credit_amount  = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
+    partial_credit_account = serializers.IntegerField(
+        required=False, allow_null=True
     )
 
     def validate_momo_reference(self, value):

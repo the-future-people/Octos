@@ -22,6 +22,7 @@ class CreditAccount(AuditModel):
         ORGANISATION = 'ORGANISATION', 'Organisation'
 
     class Status(models.TextChoices):
+        PENDING   = 'PENDING',   'Pending Approval'
         ACTIVE    = 'ACTIVE',    'Active'
         SUSPENDED = 'SUSPENDED', 'Suspended'
         CLOSED    = 'CLOSED',    'Closed'
@@ -30,6 +31,13 @@ class CreditAccount(AuditModel):
         'customers.CustomerProfile',
         on_delete=models.PROTECT,
         related_name='credit_account',
+    )
+    branch          = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='credit_accounts',
+        null=True,
+        blank=True,
     )
     account_type    = models.CharField(
         max_length=15,
@@ -76,16 +84,21 @@ class CreditAccount(AuditModel):
     )
 
     # ── Approval — Belt Manager only ──────────────────────────
-    recommended_by    = models.ForeignKey(
+    nominated_by      = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.PROTECT,
-        related_name='credit_accounts_recommended',
-        help_text='Branch Manager who recommended this account',
+        related_name='credit_accounts_nominated',
+        null=True,
+        blank=True,
+        help_text='Branch Manager who nominated this account',
     )
+    nominated_at      = models.DateTimeField(null=True, blank=True)
     approved_by       = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.PROTECT,
         related_name='credit_accounts_approved',
+        null=True,
+        blank=True,
         help_text='Belt Manager who approved this account',
     )
     approved_at       = models.DateTimeField(null=True, blank=True)
@@ -121,6 +134,12 @@ class CreditAccount(AuditModel):
     @property
     def is_over_limit(self) -> bool:
         return float(self.current_balance) >= float(self.credit_limit)
+
+    @property
+    def utilisation_pct(self) -> float:
+        if not self.credit_limit:
+            return 0
+        return round((float(self.current_balance) / float(self.credit_limit)) * 100, 1)
 
     @property
     def is_active(self) -> bool:

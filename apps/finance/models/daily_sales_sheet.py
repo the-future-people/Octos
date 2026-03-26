@@ -60,7 +60,8 @@ class DailySalesSheet(AuditModel):
     total_cash           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_momo           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_pos            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    total_credit_issued  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_credit_issued   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_credit_settled  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_refunds        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_damages        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_petty_cash_out = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -88,4 +89,4 @@ class DailySalesSheet(AuditModel):
     @property
     def total_collected(self):
         """Total cash actually received — excludes credit issued."""
-        return self.total_cash + self.total_momo + self.total_pos
+        return self.total_cash + self.total_momo + self.total_pos + self.total_credit_settled

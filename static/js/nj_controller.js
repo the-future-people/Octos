@@ -114,13 +114,64 @@ const NJ = (() => {
           <!-- Customer + channel row -->
           <div class="form-row-2" style="margin-bottom:14px;">
             <div class="form-group">
-              <label class="form-label">Customer</label>
+              <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;">
+                Customer
+                <button type="button" onclick="NJ._openAddCustomer()"
+                  style="font-size:11px;font-weight:700;color:var(--text);background:none;
+                    border:1px solid var(--border);border-radius:var(--radius-sm);
+                    padding:2px 8px;cursor:pointer;font-family:inherit;
+                    transition:all 0.15s;"
+                  onmouseover="this.style.borderColor='var(--border-dark)'"
+                  onmouseout="this.style.borderColor='var(--border)'">
+                  + New
+                </button>
+              </label>
               <select id="nj-customer" class="form-input">
                 <option value="">Walk-in / Unknown</option>
                 ${State.customers.map(c =>
-                  `<option value="${c.id}">${_esc(c.full_name || c.name || c.email || 'Customer ' + c.id)}</option>`
+                  `<option value="${c.id}">${_esc(c.display_name || c.full_name || c.phone)}</option>`
                 ).join('')}
               </select>
+              <!-- Inline add customer form -->
+              <div id="nj-add-customer-form" style="display:none;margin-top:10px;
+                padding:12px 14px;background:var(--bg);border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);">
+                <div style="font-size:11px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
+                  New Customer
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                  <input type="text" id="nc-first-name" placeholder="First name"
+                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+                  <input type="text" id="nc-last-name" placeholder="Last name"
+                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                  <input type="tel" id="nc-phone" placeholder="Phone (required)"
+                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+                  <input type="text" id="nc-company" placeholder="Company (optional)"
+                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+                </div>
+                <div id="nc-error" style="display:none;font-size:11px;color:var(--red-text);margin-bottom:8px;"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button type="button" onclick="NJ._closeAddCustomer()"
+                    style="padding:5px 12px;font-size:12px;font-weight:600;background:none;
+                      border:1px solid var(--border);border-radius:var(--radius-sm);
+                      cursor:pointer;color:var(--text-2);font-family:inherit;">
+                    Cancel
+                  </button>
+                  <button type="button" id="nc-save-btn" onclick="NJ._saveNewCustomer()"
+                    style="padding:5px 12px;font-size:12px;font-weight:700;background:var(--text);
+                      color:#fff;border:none;border-radius:var(--radius-sm);
+                      cursor:pointer;font-family:inherit;">
+                    Save Customer
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">Intake Channel</label>
@@ -972,6 +1023,84 @@ function _resetConfigurator() {
       }
     }
   }
+
+  // ── Inline add customer ───────────────────────────────────
+  function _openAddCustomer() {
+    const form = document.getElementById('nj-add-customer-form');
+    if (form) {
+      form.style.display = 'block';
+      document.getElementById('nc-first-name')?.focus();
+      document.getElementById('nc-error').style.display = 'none';
+    }
+  }
+
+  function _closeAddCustomer() {
+    const form = document.getElementById('nj-add-customer-form');
+    if (form) form.style.display = 'none';
+  }
+
+  async function _saveNewCustomer() {
+    const btn       = document.getElementById('nc-save-btn');
+    const errorEl   = document.getElementById('nc-error');
+    const firstName = document.getElementById('nc-first-name')?.value.trim() || '';
+    const lastName  = document.getElementById('nc-last-name')?.value.trim()  || '';
+    const phone     = document.getElementById('nc-phone')?.value.trim()      || '';
+    const company   = document.getElementById('nc-company')?.value.trim()    || '';
+
+    errorEl.style.display = 'none';
+
+    if (!phone) {
+      errorEl.textContent   = 'Phone number is required.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const res = await Auth.fetch('/api/v1/customers/create/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          first_name   : firstName,
+          last_name    : lastName,
+          phone,
+          company_name : company,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = Object.values(data).flat().join(' ');
+        errorEl.textContent   = msg || 'Could not save customer.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      // Add to State.customers and dropdown
+      State.customers.push(data);
+      const sel = document.getElementById('nj-customer');
+      if (sel) {
+        const opt       = document.createElement('option');
+        opt.value       = data.id;
+        opt.textContent = data.display_name || data.full_name || data.phone;
+        sel.appendChild(opt);
+        sel.value = data.id;
+      }
+
+      _closeAddCustomer();
+      _toast(`${data.display_name || data.full_name || phone} added.`, 'success');
+
+    } catch {
+      errorEl.textContent   = 'Network error. Please try again.';
+      errorEl.style.display = 'block';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Save Customer';
+    }
+  }
 return {
     setType,
     onServiceChange,
@@ -988,6 +1117,9 @@ return {
     tryAutoSaveDraft,
     _filterServiceChips,
     _serviceSearchKeydown,
+    _openAddCustomer,
+    _closeAddCustomer,
+    _saveNewCustomer,
   };
 
 })();

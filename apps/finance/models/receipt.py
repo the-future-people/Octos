@@ -30,10 +30,21 @@ class Receipt(AuditModel):
         POS    = 'POS',    'POS'
         CREDIT = 'CREDIT', 'Credit Account'
 
+    class ReceiptType(models.TextChoices):
+        JOB_PAYMENT        = 'JOB_PAYMENT',        'Job Payment'
+        CREDIT_SETTLEMENT  = 'CREDIT_SETTLEMENT',  'Credit Settlement'
+
     job           = models.ForeignKey(
         'jobs.Job',
         on_delete=models.PROTECT,
         related_name='receipts',
+        null=True,
+        blank=True,
+    )
+    receipt_type  = models.CharField(
+        max_length=20,
+        choices=ReceiptType.choices,
+        default=ReceiptType.JOB_PAYMENT,
     )
     daily_sheet   = models.ForeignKey(
         'finance.DailySalesSheet',

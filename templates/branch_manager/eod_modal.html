@@ -1,6 +1,6 @@
 {% load static %}
 <div class="eod-overlay" id="eod-overlay">
-  <div class="eod-modal">
+  <div class="eod-modal" style="max-width:780px;">
 
     <!-- ── Header ── -->
     <div class="eod-header">
@@ -21,13 +21,17 @@
       <span>Compiling day summary…</span>
     </div>
 
-    <!-- ── Content (hidden until loaded) ── -->
+    <!-- ── Content ── -->
     <div class="eod-content" id="eod-content" style="display:none;">
 
-      <!-- 1. Revenue Summary -->
+      <!-- ══ 1. REVENUE SUMMARY ══════════════════════════════════════ -->
       <div class="eod-section">
-        <div class="eod-section-title">Revenue Summary</div>
-        <div class="eod-revenue-grid">
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">💰</span> Revenue Summary
+        </div>
+
+        <!-- Payment method cards -->
+        <div class="eod-revenue-grid" style="margin-bottom:12px;">
           <div class="eod-rev-card cash">
             <div class="eod-rev-label">Cash</div>
             <div class="eod-rev-val" id="eod-cash">—</div>
@@ -45,106 +49,135 @@
             <div class="eod-rev-val" id="eod-total">—</div>
           </div>
         </div>
-        <div class="eod-rev-extras">
-          <div class="eod-rev-extra-row">
-            <span>Credit Issued</span>
-            <span id="eod-credit-issued">—</span>
+
+        <!-- Deductions + Net -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;">
+          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:4px;">Credit Issued</div>
+            <div id="eod-credit-issued" style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;color:var(--text);">—</div>
           </div>
-          <div class="eod-rev-extra-row">
-            <span>Petty Cash Out</span>
-            <span id="eod-petty-cash-out">—</span>
+          <div style="padding:12px 14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--green-text);margin-bottom:4px;">Credit Settled</div>
+            <div id="eod-credit-settled" style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;color:var(--green-text);">—</div>
           </div>
-          <div class="eod-rev-extra-row eod-net">
-            <span>Net Cash in Till</span>
-            <span id="eod-net-cash">—</span>
+          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:4px;">Petty Cash Out</div>
+            <div id="eod-petty-cash-out" style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;color:var(--text);">—</div>
+          </div>
+          <div style="padding:12px 14px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--green-text);margin-bottom:4px;">Net Cash in Till</div>
+            <div id="eod-net-cash" style="font-family:'JetBrains Mono',monospace;font-weight:800;font-size:16px;color:var(--green-text);">—</div>
           </div>
         </div>
       </div>
 
-      <!-- 2. Jobs Summary -->
+      <!-- ══ 2. JOBS OVERVIEW ════════════════════════════════════════ -->
       <div class="eod-section">
-        <div class="eod-section-title">Jobs Summary</div>
-        <div class="eod-checklist" id="eod-jobs-checklist">
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">📋</span> Jobs Overview
+        </div>
+        <div id="eod-jobs-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
           <!-- populated by JS -->
         </div>
       </div>
 
-      <!-- 3. Pending Payments -->
+      <!-- ══ 3. CASHIER SIGN-OFF ══════════════════════════════════════ -->
+      <div class="eod-section" id="eod-cashier-section">
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">🧾</span> Cashier Sign-Off
+          <span id="eod-cashier-signoff-status" style="margin-left:8px;"></span>
+        </div>
+        <div id="eod-cashier-activity">
+          <!-- populated by JS -->
+        </div>
+        <div class="eod-info-note amber" id="eod-float-warning" style="display:none;margin-top:10px;">
+          ⚠ No cashier float was opened today.
+        </div>
+        <!-- Integrity blocker — shown if cashier not signed off -->
+        <div class="eod-info-note red" id="eod-cashier-blocker" style="display:none;margin-top:10px;">
+          🔒 <strong>Cannot close sheet</strong> — cashier has not signed off. The cashier must complete their sign-off before EOD can be filed.
+        </div>
+      </div>
+
+      <!-- ══ 4. PENDING PAYMENTS ═════════════════════════════════════ -->
       <div class="eod-section" id="eod-pending-section">
-        <div class="eod-section-title">Pending Payments
-          <span class="eod-badge amber" id="eod-pending-badge"></span>
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">⏳</span> Pending Payments
+          <span class="eod-badge amber" id="eod-pending-badge" style="display:none;"></span>
         </div>
         <div class="eod-info-note amber" id="eod-pending-note" style="display:none;">
           These jobs will be <strong>carried forward</strong> to tomorrow's sheet.
         </div>
         <div id="eod-pending-list"></div>
-
-        <div class="eod-section-subtitle" id="eod-untouched-subtitle" style="display:none;">
-          Never touched by cashier
+        <div class="eod-section-subtitle" id="eod-untouched-subtitle" style="display:none;margin-top:12px;">
+          Never Processed by Cashier
         </div>
         <div class="eod-info-note red" id="eod-untouched-note" style="display:none;">
-          These jobs were created by attendants but never entered the cashier queue.
+          These jobs were recorded but never entered the cashier queue.
         </div>
         <div id="eod-untouched-list"></div>
       </div>
 
-      <!-- 4. Cashier Activity -->
-      <div class="eod-section">
-        <div class="eod-section-title">Cashier Activity</div>
-        <div id="eod-cashier-activity">
-          <!-- populated by JS -->
-        </div>
-        <div class="eod-info-note amber" id="eod-float-warning" style="display:none;">
-          No cashier float was opened today.
-        </div>
-      </div>
-
-      <!-- 5. Petty Cash -->
+      <!-- ══ 5. PETTY CASH ══════════════════════════════════════════ -->
       <div class="eod-section" id="eod-petty-section">
-        <div class="eod-section-title">Petty Cash Disbursements</div>
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">💵</span> Petty Cash Disbursements
+        </div>
         <div id="eod-petty-list">
           <div class="eod-empty-note">No petty cash disbursements today.</div>
         </div>
       </div>
 
-      <!-- 6. Credit Sales -->
+      <!-- ══ 6. CREDIT SALES ════════════════════════════════════════ -->
       <div class="eod-section" id="eod-credit-section">
-        <div class="eod-section-title">Credit Sales</div>
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">🏦</span> Credit Sales
+        </div>
         <div id="eod-credit-list">
           <div class="eod-empty-note">No credit sales today.</div>
         </div>
       </div>
 
-      <!-- 7. BM Notes -->
+      <!-- ══ 7. BM NOTES ════════════════════════════════════════════ -->
       <div class="eod-section">
-        <div class="eod-section-title">Branch Manager Notes</div>
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">📝</span> Branch Manager Notes
+        </div>
         <div class="eod-field">
-          <label class="eod-field-label">Remarks / Notes for today</label>
+          <label class="eod-field-label">Remarks / Observations for today</label>
           <textarea class="eod-textarea" id="eod-notes" rows="3"
-            placeholder="Add any remarks, observations or notes about today's operations…"></textarea>
+            placeholder="Add any remarks, incidents, observations or notes about today's operations…"></textarea>
         </div>
       </div>
 
-      <!-- 8. Tomorrow's Float -->
-      <div class="eod-section">
-        <div class="eod-section-title">Tomorrow's Opening Float
-          <span style="font-size:11px;font-weight:500;color:var(--red-text);margin-left:6px;">Required</span>
+      <!-- ══ 8. TOMORROW'S FLOAT ════════════════════════════════════ -->
+      <div class="eod-section" id="eod-float-section">
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">💰</span> Tomorrow's Opening Float
+          <span style="font-size:11px;font-weight:600;color:var(--red-text);margin-left:6px;">Required</span>
         </div>
         <div class="eod-info-note amber" style="display:block;margin-bottom:12px;">
-          Set the cash float for tomorrow before closing. Max GHS 100 — use small denominations (GHS 5, 10, 20) for change.
+          Set the opening float for each cashier for tomorrow. Must be GHS 20–100 in multiples of GHS 5.
         </div>
         <div id="eod-cashier-floats">
           <!-- populated by JS -->
         </div>
+        <!-- Float blocker — shown if float not set -->
+        <div class="eod-info-note red" id="eod-float-blocker" style="display:none;margin-top:10px;">
+          🔒 <strong>Float required</strong> — set tomorrow's opening float for all cashiers before closing.
+        </div>
       </div>
 
-      <!-- 9. Acknowledgement -->
-
-      <!-- 9. Acknowledgement -->
+      <!-- ══ 9. ACKNOWLEDGEMENT ═════════════════════════════════════ -->
       <div class="eod-section eod-ack-section">
         <label class="eod-ack-label">
           <input type="checkbox" id="eod-ack-checkbox" onchange="Dashboard.toggleEODConfirm()">
-          <span>I have reviewed this end-of-day report and confirm that the information above accurately reflects today's operations at <strong id="eod-ack-branch">this branch</strong>.</span>
+          <span>
+            I, <strong id="eod-ack-bm-name">Branch Manager</strong>, have reviewed this end-of-day report
+            and confirm that all information accurately reflects today's operations at
+            <strong id="eod-ack-branch">this branch</strong>.
+            I take full responsibility for this filing.
+          </span>
         </label>
       </div>
 
@@ -152,9 +185,12 @@
 
     <!-- ── Footer ── -->
     <div class="eod-footer" id="eod-footer" style="display:none;">
+      <div style="flex:1;font-size:11px;color:var(--text-3);" id="eod-footer-status"></div>
       <button class="eod-cancel-btn" onclick="Dashboard.closeEOD()">Cancel</button>
       <button class="eod-confirm-btn" id="eod-confirm-btn" disabled onclick="Dashboard.confirmCloseSheet()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
         Confirm &amp; Close Sheet
       </button>
     </div>

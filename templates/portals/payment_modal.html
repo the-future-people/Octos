@@ -88,10 +88,17 @@
           POS
         </button>
         </div>
-      <div class="cm-pm-row-split">
+      <div class="cm-pm-row-split" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         <button class="cm-pm" id="pm-split" onclick="Cashier.selectMethod('SPLIT')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-       Split
+          Split
+        </button>
+        <button class="cm-pm" id="pm-partial-credit" onclick="Cashier.selectMethod('PARTIAL_CREDIT')"
+          style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          + Credit
         </button>
       </div>
 
@@ -121,6 +128,45 @@
         <label class="cm-field-label">POS Approval Code <span class="cm-req">*</span></label>
         <input type="text" class="cm-input" id="pos-ref" placeholder="e.g. 123456"
           oninput="Cashier._updateConfirmBtn()">
+      </div>
+      <!-- Partial credit fields -->
+      <div class="cm-ref-field" id="partial-credit-fields" style="display:none;">
+        <div style="padding:10px 12px;background:var(--amber-bg);border:1px solid var(--amber-border);
+          border-radius:var(--radius-sm);margin-bottom:12px;font-size:12px;color:var(--amber-text);">
+          <strong id="pc-customer-name">Customer</strong> has
+          <strong id="pc-available">GHS 0.00</strong> available credit.
+          Balance owed: <strong id="pc-balance">GHS 0.00</strong>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="cm-field-label">Cash Method <span class="cm-req">*</span></label>
+            <select class="cm-input" id="pc-method" onchange="Cashier._updatePartialCredit()">
+              <option value="CASH">Cash</option>
+              <option value="MOMO">MoMo</option>
+              <option value="POS">POS</option>
+            </select>
+          </div>
+          <div>
+            <label class="cm-field-label">Amount Collected (GHS) <span class="cm-req">*</span></label>
+            <input type="number" class="cm-input" id="pc-amount" placeholder="0.00"
+              step="0.01" min="0" oninput="Cashier._updatePartialCredit()">
+          </div>
+        </div>
+        <div id="pc-ref-field" style="display:none;margin-bottom:8px;">
+          <label class="cm-field-label" id="pc-ref-label">Reference <span class="cm-req">*</span></label>
+          <input type="text" class="cm-input" id="pc-ref" placeholder="—"
+            oninput="Cashier._updateConfirmBtn()">
+        </div>
+        <div id="pc-credit-preview" style="display:none;padding:10px 12px;
+          background:var(--green-bg);border:1px solid var(--green-border);
+          border-radius:var(--radius-sm);font-size:12px;color:var(--green-text);">
+          <strong id="pc-credit-amount">GHS 0.00</strong> will be added to
+          <strong id="pc-credit-name">customer</strong>'s credit account.
+        </div>
+        <div id="pc-credit-error" style="display:none;padding:10px 12px;
+          background:var(--red-bg);border:1px solid var(--red-border);
+          border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);">
+        </div>
       </div>
       <!-- Split payment fields -->
       <div class="cm-ref-field" id="split-fields" style="display:none;">

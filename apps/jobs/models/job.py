@@ -309,6 +309,31 @@ class Job(AuditModel):
         help_text    = 'BM who approved this post-closing job.',
     )
 
+   # ── Credit ────────────────────────────────────────────────
+    credit_account = models.ForeignKey(
+        'finance.CreditAccount',
+        on_delete    = models.PROTECT,
+        related_name = 'jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'Credit account used if payment method is CREDIT.',
+    )
+    partial_credit_amount = models.DecimalField(
+        max_digits   = 10,
+        decimal_places = 2,
+        null         = True,
+        blank        = True,
+        help_text    = 'Amount added to credit account for partial credit payments.',
+    )
+    partial_credit_account = models.ForeignKey(
+        'finance.CreditAccount',
+        on_delete    = models.PROTECT,
+        related_name = 'partial_credit_jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'Credit account charged for the unpaid portion.',
+    )
+
     # ── Notes ──
     notes = models.TextField(blank=True)
 

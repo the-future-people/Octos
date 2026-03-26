@@ -183,4 +183,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.expire_drafts',
         'schedule': crontab(hour=2, minute=0),
     },
+    'check-credit-due-daily': {
+        'task': 'apps.finance.tasks.check_credit_due',
+        'schedule': crontab(hour=7, minute=30),
+    },
 }

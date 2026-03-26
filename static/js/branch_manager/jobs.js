@@ -93,7 +93,7 @@ const Jobs = {
     JobsState.jobType     = '';
     JobsState.searchQuery = '';
 
-    if (!embedded) {
+if (!embedded) {
       // Standalone page only
       Auth.guard();
       _setDate();
@@ -105,6 +105,7 @@ const Jobs = {
     _loadServices();
     _loadCustomers();
     _bindFilters();
+    WeekGreeter.init();
   },
 
   // ── Detail modal ─────────────────────────────────────────────────────────

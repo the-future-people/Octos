@@ -194,13 +194,59 @@ class CashierSummaryView(APIView):
                 'count': result['count'] or 0,
             }
 
+        # ── Credit settlements today ──────────────────────────
+        from apps.finance.models import CreditPayment, DailySalesSheet
+        try:
+            sheet = DailySalesSheet.objects.get(
+                branch=user.branch, date=today, status='OPEN'
+            )
+            settlements = CreditPayment.objects.filter(daily_sheet=sheet)
+
+            def _settle_total(method):
+                result = settlements.filter(payment_method=method).aggregate(
+                    total=Sum('amount'),
+                    count=Count('id'),
+                )
+                return {
+                    'total': result['total'] or 0,
+                    'count': result['count'] or 0,
+                }
+
+            settle_cash = _settle_total('CASH')
+            settle_momo = _settle_total('MOMO')
+            settle_pos  = _settle_total('POS')
+        except DailySalesSheet.DoesNotExist:
+            settle_cash = settle_momo = settle_pos = {'total': 0, 'count': 0}
+
+        # ── Combine job payments + settlements ────────────────
+        job_cash  = _total('CASH')
+        job_momo  = _total('MOMO')
+        job_pos   = _total('POS')
+
+        def _combine(job_t, settle_t):
+            return {
+                'total': str(Decimal(str(job_t['total'])) + Decimal(str(settle_t['total']))),
+                'count': job_t['count'] + settle_t['count'],
+            }
+
+        from decimal import Decimal
+        cash_combined  = _combine(job_cash,  settle_cash)
+        momo_combined  = _combine(job_momo,  settle_momo)
+        pos_combined   = _combine(job_pos,   settle_pos)
+        grand_total    = (
+            Decimal(cash_combined['total']) +
+            Decimal(momo_combined['total']) +
+            Decimal(pos_combined['total'])
+        )
+        grand_count = cash_combined['count'] + momo_combined['count'] + pos_combined['count']
+
         return Response({
-            'CASH' : _total('CASH'),
-            'MOMO' : _total('MOMO'),
-            'POS'  : _total('POS'),
+            'CASH' : cash_combined,
+            'MOMO' : momo_combined,
+            'POS'  : pos_combined,
             'total': {
-                'total': str(jobs.aggregate(t=Sum('amount_paid'))['t'] or 0),
-                'count': jobs.count(),
+                'total': str(grand_total),
+                'count': grand_count,
             },
         })
     
@@ -340,6 +386,53 @@ class CashierConfirmPaymentView(APIView):
             logging.getLogger(__name__).error(f"ReceiptEngine failed: {e}", exc_info=True)
             result['receipt_number'] = None
             result['receipt_id']     = None
+
+        # ── Partial credit handling ───────────────────────────
+        partial_credit_amount  = serializer.validated_data.get('partial_credit_amount')
+        partial_credit_account_id = serializer.validated_data.get('partial_credit_account')
+
+        if partial_credit_amount and partial_credit_account_id:
+            try:
+                from apps.finance.models import CreditAccount, DailySalesSheet
+                from apps.customers.credit_engine import CreditEngine
+                from decimal import Decimal
+
+                credit_account = CreditAccount.objects.get(pk=partial_credit_account_id)
+
+                # Get today's open sheet
+                sheet = DailySalesSheet.objects.filter(
+                    branch=job.branch, status='OPEN'
+                ).order_by('-date').first()
+
+                if sheet:
+                    # Deduct from credit account — increase balance
+                    credit_amount = Decimal(str(partial_credit_amount))
+                    CreditEngine.check_eligibility(credit_account, credit_amount)
+
+                    credit_account.current_balance += credit_amount
+                    credit_account.save(update_fields=['current_balance', 'updated_at'])
+
+                    # Update sheet credit issued
+                    from django.db.models import F
+                    DailySalesSheet.objects.filter(pk=sheet.pk).update(
+                        total_credit_issued=F('total_credit_issued') + credit_amount
+                    )
+
+                    # Link to job
+                    job.partial_credit_amount  = credit_amount
+                    job.partial_credit_account = credit_account
+                    job.save(update_fields=[
+                        'partial_credit_amount', 'partial_credit_account', 'updated_at'
+                    ])
+
+                    result['partial_credit_amount']  = str(credit_amount)
+                    result['partial_credit_account'] = credit_account.id
+
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(
+                    f"Partial credit failed: {e}", exc_info=True
+                )
 
         return Response(result)
 

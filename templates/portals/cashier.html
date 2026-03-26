@@ -12,30 +12,144 @@
 <body>
 
   <!-- ── Topbar ──────────────────────────────────────────────── -->
+    <!-- ── Topbar ──────────────────────────────────────────────── -->
   <div class="topbar">
     <div class="topbar-inner">
       <div class="topbar-brand">
         <span class="brand-logo">Octos</span>
         <span class="brand-divider"></span>
-        <span class="brand-role">Cashier</span>
+        <div style="display:flex;flex-direction:column;line-height:1.1;">
+          <span class="brand-role">Cashier</span>
+          <span id="cashier-branch-name" style="font-size:10px;font-weight:500;
+            color:var(--text-3);letter-spacing:0.3px;">—</span>
+        </div>
       </div>
       <div class="topbar-right">
         <div class="live-indicator">
           <div class="live-dot"></div>
           Live
         </div>
-        <div class="topbar-branch" id="cashier-branch-name">—</div>
-        <div class="topbar-user">
-          <div class="user-avatar" id="cashier-user-initials">—</div>
-          <span class="user-name" id="cashier-user-name">—</span>
+
+        <!-- Notification bell -->
+        <div style="position:relative;">
+          <button id="cashier-notif-btn" onclick="CashierNotif.toggle()"
+            style="position:relative;width:34px;height:34px;border-radius:50%;
+              background:none;border:1px solid var(--border);cursor:pointer;
+              display:flex;align-items:center;justify-content:center;
+              color:var(--text-2);transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span id="cashier-notif-badge"
+              style="display:none;position:absolute;top:-3px;right:-3px;
+                width:16px;height:16px;border-radius:50%;
+                background:var(--red-text);color:#fff;
+                font-size:9px;font-weight:700;
+                align-items:center;justify-content:center;">0</span>
+          </button>
+          <!-- Notification dropdown -->
+          <div id="cashier-notif-dropdown"
+            style="display:none;position:absolute;top:42px;right:0;width:320px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);
+              display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:13px;font-weight:700;color:var(--text);">Notifications</span>
+              <button onclick="CashierNotif.markAllRead()"
+                style="font-size:11px;color:var(--text-3);background:none;border:none;
+                  cursor:pointer;font-family:inherit;">Mark all read</button>
+            </div>
+            <div id="cashier-notif-list" style="max-height:320px;overflow-y:auto;">
+              <div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">
+                Loading…
+              </div>
+            </div>
+          </div>
         </div>
-        <button class="topbar-logout" onclick="Auth.logout()" title="Sign out">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-        </button>
+
+        <!-- User profile with dropdown -->
+        <div style="position:relative;">
+          <button id="cashier-profile-btn" onclick="CashierProfile.toggle()"
+            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+              background:none;border:1px solid var(--border);border-radius:20px;
+              cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <div class="user-avatar" id="cashier-user-initials">—</div>
+            <span class="user-name" id="cashier-user-name"
+              style="font-size:13px;font-weight:600;color:var(--text);">—</span>
+            <svg id="cashier-profile-arrow" xmlns="http://www.w3.org/2000/svg"
+              width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2.5"
+              style="color:var(--text-3);transition:transform 0.2s;">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <!-- Profile dropdown -->
+          <div id="cashier-profile-dropdown"
+            style="display:none;position:absolute;top:46px;right:0;width:200px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-size:13px;font-weight:700;color:var(--text);"
+                id="cashier-profile-name">—</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Cashier</div>
+            </div>
+            <div style="padding:6px 0;">
+              <button onclick="CashierProfile.close()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--text-2);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                My Profile
+              </button>
+              <button onclick="CashierProfile.close()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--text-2);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                Settings
+              </button>
+              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+              <button onclick="Auth.logout()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--red-text);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--red-bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -144,14 +258,15 @@
 
     </div><!-- /cashier-main-content -->
 
-  </div><!-- /page-shell -->
+  </div>
+  
+  <!-- /page-shell -->
 
 
   <!-- ═══════════════════════════════════════
        PAYMENT CONFIRMATION MODAL
   ═══════════════════════════════════════ -->
   {% include "portals/payment_modal.html" %}
-
   <!-- ═══════════════════════════════════════
        RECEIPT MODAL
   ═══════════════════════════════════════ -->
@@ -220,6 +335,107 @@
 
 
   <div id="toast-container"></div>
+  <script>
+  // ── Cashier notification handler ─────────────────────────
+  const CashierNotif = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd = document.getElementById('cashier-notif-dropdown');
+      if (dd) dd.style.display = 'block';
+      _load();
+    }
+    function close() {
+      open = false;
+      const dd = document.getElementById('cashier-notif-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+    async function _load() {
+      const list = document.getElementById('cashier-notif-list');
+      if (!list) return;
+      try {
+        const res  = await Auth.fetch('/api/v1/notifications/');
+        const data = await res.json();
+        if (!data.length) {
+          list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">All caught up ✓</div>';
+          return;
+        }
+        list.innerHTML = data.map(n => `
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border);
+            background:${n.is_read ? 'var(--panel)' : 'var(--bg)'};cursor:pointer;"
+            onclick="CashierNotif._markRead(${n.id}, this)">
+            <div style="font-size:12.5px;color:var(--text);margin-bottom:3px;">
+              ${n.message}
+            </div>
+            <div style="font-size:11px;color:var(--text-3);">${n.time_ago || ''}</div>
+          </div>`).join('');
+      } catch {}
+    }
+    async function _markRead(id, el) {
+      await Auth.fetch(`/api/v1/notifications/${id}/read/`, { method: 'POST' }).catch(() => {});
+      el?.style && (el.style.background = 'var(--panel)');
+      await _loadCount();
+    }
+    async function markAllRead() {
+      await Auth.fetch('/api/v1/notifications/read-all/', { method: 'POST' }).catch(() => {});
+      document.querySelectorAll('#cashier-notif-list > div').forEach(el => {
+        el.style.background = 'var(--panel)';
+      });
+      const badge = document.getElementById('cashier-notif-badge');
+      if (badge) badge.style.display = 'none';
+    }
+    async function _loadCount() {
+      try {
+        const res   = await Auth.fetch('/api/v1/notifications/unread-count/');
+        const data  = await res.json();
+        const count = data.count || 0;
+        const badge = document.getElementById('cashier-notif-badge');
+        if (badge) {
+          badge.textContent   = count > 99 ? '99+' : count;
+          badge.style.display = count > 0 ? 'flex' : 'none';
+        }
+      } catch {}
+    }
+    // Poll every 30s
+    _loadCount();
+    setInterval(_loadCount, 30000);
+    // Close on outside click
+    document.addEventListener('click', e => {
+      if (open && !document.getElementById('cashier-notif-btn')?.contains(e.target) &&
+          !document.getElementById('cashier-notif-dropdown')?.contains(e.target)) close();
+    });
+    return { toggle, close, markAllRead };
+  })();
+
+  // ── Cashier profile dropdown ──────────────────────────────
+  const CashierProfile = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd    = document.getElementById('cashier-profile-dropdown');
+      const arrow = document.getElementById('cashier-profile-arrow');
+      const name  = document.getElementById('cashier-profile-name');
+      const userName = document.getElementById('cashier-user-name')?.textContent;
+      if (dd)    dd.style.display        = 'block';
+      if (arrow) arrow.style.transform   = 'rotate(180deg)';
+      if (name && userName)  name.textContent = userName;
+    }
+    function close() {
+      open = false;
+      const dd    = document.getElementById('cashier-profile-dropdown');
+      const arrow = document.getElementById('cashier-profile-arrow');
+      if (dd)    dd.style.display      = 'none';
+      if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+    document.addEventListener('click', e => {
+      if (open && !document.getElementById('cashier-profile-btn')?.contains(e.target) &&
+          !document.getElementById('cashier-profile-dropdown')?.contains(e.target)) close();
+    });
+    return { toggle, close };
+  })();
+  </script>
   <script src="{% static 'js/week_greeter.js' %}"></script>
   <script src="{% static 'js/auth.js' %}"></script>
   <script src="{% static 'js/cashier.js' %}"></script>
