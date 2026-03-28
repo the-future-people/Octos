@@ -284,24 +284,771 @@ async function loadRecentJobs() {
     _set('breadcrumb-current', label);
 
     // Lazy load pane content
-    if (paneId === 'jobs'    && !jobsLoaded)  _loadJobsPane();
-    if (paneId === 'inbox'   && !inboxLoaded) loadInboxTab();
-    if (paneId === 'services'&& !svcLoaded)   loadServicesTab();
-    if (paneId === 'invoices' && !_invoicesLoaded) _loadInvoicesPane();
+   if (paneId === 'jobs'        && !jobsLoaded)  _loadJobsPane();
+    if (paneId === 'inbox'       && !inboxLoaded) loadInboxTab();
+    if (paneId === 'catalogue'   && !svcLoaded)   loadServicesTab();
+    if (paneId === 'performance')                 _loadPerformancePane();
     if (paneId === 'finance') {
       const pane = document.getElementById('pane-finance');
       if (pane) pane.dataset.loaded = '';
       _loadFinancePane();
     }
-    if (paneId === 'reports')                 _loadReportsPane();
-    if (paneId === 'inventory')               _loadInventoryPane();
+    if (paneId === 'reports')                     _loadReportsPane();
+    if (paneId === 'inventory')                   _loadInventoryPane();
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
-      function _loadJobsPane() {
-        jobsLoaded = true;
-        Jobs.init({ embedded: true });
+  let _jobsTab = 'today';
+
+  function _loadJobsPane() {
+    jobsLoaded = true;
+    const pane = document.getElementById('pane-jobs');
+    if (!pane) return;
+
+    // Inject tab bar above the existing jobs content
+    const tabBar = document.createElement('div');
+    tabBar.id = 'jobs-tab-bar';
+    tabBar.className = 'reports-tabs';
+    tabBar.style.marginBottom = '0';
+    tabBar.innerHTML = `
+      <button class="reports-tab active" data-tab="today"
+        onclick="Dashboard.switchJobsTab('today')">Today's Jobs</button>
+      <button class="reports-tab" data-tab="invoices"
+        onclick="Dashboard.switchJobsTab('invoices')">Invoices</button>
+      <button class="reports-tab" data-tab="receipts"
+        onclick="Dashboard.switchJobsTab('receipts')">Receipts</button>`;
+
+    // Wrap existing pane content in a tab content div
+    const existing = pane.innerHTML;
+    pane.innerHTML = '';
+    pane.appendChild(tabBar);
+
+    const tabContent = document.createElement('div');
+    tabContent.id = 'jobs-tab-content';
+    tabContent.innerHTML = existing;
+    pane.appendChild(tabContent);
+
+    Jobs.init({ embedded: true });
+    _jobsTab = 'today';
+  }
+
+  function switchJobsTab(tab) {
+    _jobsTab = tab;
+    document.querySelectorAll('#jobs-tab-bar .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    const content = document.getElementById('jobs-tab-content');
+    if (!content) return;
+
+    if (tab === 'today') {
+      // Re-init jobs pane content
+      content.innerHTML = `
+        <div class="jobs-pane-head">
+          <div class="jobs-pane-title">Jobs</div>
+          <div class="jobs-pane-actions">
+            <button class="hero-btn hero-btn-primary" style="padding:8px 16px;" onclick="NJ.open()">
+              <div class="hero-btn-icon" style="width:24px;height:24px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </div>
+              <div class="hero-btn-label">
+                <span class="hero-btn-title" style="font-size:13px;">New Job</span>
+              </div>
+            </button>
+          </div>
+        </div>
+        <div class="jobs-stat-strip">
+          <div class="stat-card blue"><div class="stat-num" id="jobs-stat-total">—</div><div class="stat-lbl">Total Jobs</div></div>
+          <div class="stat-card amber"><div class="stat-num" id="jobs-stat-in-progress">—</div><div class="stat-lbl">In Progress</div></div>
+          <div class="stat-card green"><div class="stat-num" id="jobs-stat-complete">—</div><div class="stat-lbl">Complete</div></div>
+          <div class="stat-card purple"><div class="stat-num" id="jobs-stat-revenue">—</div><div class="stat-lbl">Revenue (GHS)</div></div>
+        </div>
+        <div class="jobs-toolbar">
+          <div class="filter-tabs" id="jobs-filter-tabs">
+            <button class="filter-tab active" data-status="all">All Today</button>
+            <button class="filter-tab" data-status="DRAFT">Draft</button>
+            <button class="filter-tab" data-status="PENDING_PAYMENT">Pending Payment</button>
+            <button class="filter-tab" data-status="IN_PROGRESS">In Progress</button>
+            <button class="filter-tab" data-status="READY">Ready</button>
+            <button class="filter-tab" data-status="HALTED">Halted</button>
+            <button class="filter-tab" data-status="COMPLETE">Complete</button>
+            <button class="filter-tab" data-status="CANCELLED">Cancelled</button>
+          </div>
+          <div class="toolbar-right">
+            <input type="text" id="jobs-search" class="inp-sm" placeholder="Search jobs…" style="width:180px;">
+            <select id="jobs-type" class="sel-sm">
+              <option value="">All Types</option>
+              <option value="INSTANT">Instant</option>
+              <option value="PRODUCTION">Production</option>
+              <option value="DESIGN">Design</option>
+            </select>
+          </div>
+        </div>
+        <div class="jobs-table-wrap">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Job</th><th>Customer</th><th>Type</th>
+                <th>Status</th><th>Price</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-tbody">
+              <tr><td colspan="6" class="loading-cell"><span class="spin"></span> Loading jobs…</td></tr>
+            </tbody>
+          </table>
+          <div class="jobs-pagination" id="jobs-pagination" style="display:none;">
+            <span class="jobs-page-info" id="jobs-page-info"></span>
+            <div class="jobs-page-btns">
+              <button class="jobs-page-btn" id="jobs-btn-prev" onclick="Jobs.prevPage()">← Prev</button>
+              <button class="jobs-page-btn" id="jobs-btn-next" onclick="Jobs.nextPage()">Next →</button>
+            </div>
+          </div>
+        </div>`;
+      Jobs.init({ embedded: true });
+    }
+
+    if (tab === 'invoices') {
+      content.innerHTML = `
+        <div class="section-head">
+          <span class="section-title">Invoices</span>
+          <button class="btn-dark" style="padding:6px 14px;font-size:12px;"
+            onclick="Invoice.open()">+ New Invoice</button>
+        </div>
+        <div id="invoices-content">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>`;
+      _loadInvoicesContent();
+    }
+
+    if (tab === 'receipts') {
+      content.innerHTML = `
+        <div class="section-head">
+          <span class="section-title">Receipts</span>
+          <span style="font-size:12px;color:var(--text-3);">Read-only · Completed jobs</span>
+        </div>
+        <div id="receipts-content">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>`;
+      _loadReceiptsContent();
+    }
+  }
+
+  async function _loadInvoicesContent() {
+    const container = document.getElementById('invoices-content');
+    if (!container) return;
+
+    try {
+      const res      = await Auth.fetch('/api/v1/finance/invoices/');
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const invoices = Array.isArray(data) ? data : (data.results || []);
+
+      if (!invoices.length) {
+        container.innerHTML = `<div style="text-align:center;padding:48px;
+          color:var(--text-3);font-size:13px;">No invoices yet.</div>`;
+        return;
       }
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Invoice No</th><th>Type</th><th>Bill To</th>
+                <th>Amount</th><th>Status</th><th>Date</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoices.map(inv => `
+                <tr>
+                  <td style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;">
+                    ${_esc(inv.invoice_number)}</td>
+                  <td><span class="badge ${inv.invoice_type === 'PROFORMA' ? 'badge-production' : 'badge-instant'}">
+                    ${inv.invoice_type}</span></td>
+                  <td>
+                    <div style="font-weight:600;font-size:13px;">${_esc(inv.bill_to_name || '—')}</div>
+                    ${inv.bill_to_company ? `<div style="font-size:11px;color:var(--text-3);">${_esc(inv.bill_to_company)}</div>` : ''}
+                  </td>
+                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">
+                    ${_fmt(inv.total)}</td>
+                  <td><span class="badge ${_invoiceStatusBadge(inv.status)}">${inv.status}</span></td>
+                  <td style="font-size:12px;color:var(--text-3);">
+                    ${inv.issue_date ? new Date(inv.issue_date).toLocaleDateString('en-GH') : '—'}</td>
+                  <td>
+                    <button onclick="Dashboard.downloadInvoicePDF(${inv.id}, '${_esc(inv.invoice_number)}')"
+                      style="padding:5px 12px;font-size:12px;font-weight:600;
+                        background:var(--bg);border:1px solid var(--border);
+                        border-radius:var(--radius-sm);cursor:pointer;
+                        font-family:'DM Sans',sans-serif;color:var(--text-2);">↓ PDF</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      container.innerHTML = `<div class="loading-cell">Could not load invoices.</div>`;
+    }
+  }
+
+ // ── Receipts tab ───────────────────────────────────────────
+  let _receiptsPeriod  = 'day';
+  let _activeReceiptId = null;
+
+  async function _loadReceiptsContent() {
+    const container = document.getElementById('receipts-content');
+    if (!container) return;
+
+    container.innerHTML = `
+      <!-- Period selector -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:16px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text-2);">
+          Branch Receipts
+        </div>
+        <div class="reports-tabs" id="receipts-period-tabs" style="margin-bottom:0;">
+          <button class="reports-tab active" data-period="day"
+            onclick="Dashboard.setReceiptsPeriod('day')">Today</button>
+          <button class="reports-tab" data-period="week"
+            onclick="Dashboard.setReceiptsPeriod('week')">This Week</button>
+          <button class="reports-tab" data-period="month"
+            onclick="Dashboard.setReceiptsPeriod('month')">This Month</button>
+        </div>
+      </div>
+
+      <!-- Two-panel layout -->
+      <div style="display:flex;gap:0;border:1px solid var(--border);
+        border-radius:var(--radius);overflow:hidden;min-height:520px;">
+
+        <!-- Left — receipt list -->
+        <div id="receipts-list-panel"
+          style="width:300px;flex-shrink:0;border-right:1px solid var(--border);
+            overflow-y:auto;background:var(--panel);">
+          <div style="padding:20px;text-align:center;color:var(--text-3);">
+            <span class="spin"></span>
+          </div>
+        </div>
+
+        <!-- Right — receipt detail -->
+        <div id="receipts-detail-panel"
+          style="flex:1;display:flex;flex-direction:column;background:var(--bg);
+            overflow:hidden;position:relative;">
+          <div style="flex:1;display:flex;align-items:center;justify-content:center;
+            flex-direction:column;gap:12px;color:var(--text-3);padding:40px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" style="opacity:0.3;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <div style="font-size:13px;">Select a receipt to view details</div>
+          </div>
+        </div>
+
+      </div>`;
+
+    await _fetchReceipts();
+  }
+
+  async function _fetchReceipts() {
+    const listPanel = document.getElementById('receipts-list-panel');
+    if (!listPanel) return;
+
+    listPanel.innerHTML = `<div style="padding:20px;text-align:center;
+      color:var(--text-3);"><span class="spin"></span></div>`;
+
+    try {
+      const res      = await Auth.fetch(
+        `/api/v1/finance/receipts/?period=${_receiptsPeriod}&page_size=100`
+      );
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const receipts = Array.isArray(data) ? data : (data.results || []);
+
+      if (!receipts.length) {
+        listPanel.innerHTML = `
+          <div style="padding:32px 16px;text-align:center;
+            color:var(--text-3);font-size:13px;">
+            No receipts for this period.
+          </div>`;
+        return;
+      }
+
+      const methodColor = {
+        CASH  : { bg: 'var(--cash-bg)',  text: 'var(--cash-text)',  border: 'var(--cash-border)' },
+        MOMO  : { bg: 'var(--momo-bg)',  text: 'var(--momo-text)',  border: 'var(--momo-border)' },
+        POS   : { bg: 'var(--pos-bg)',   text: 'var(--pos-text)',   border: 'var(--pos-border)'  },
+        CREDIT: { bg: 'var(--bg)',       text: 'var(--text-3)',     border: 'var(--border)'      },
+      };
+
+      listPanel.innerHTML = receipts.map(r => {
+        const mc      = methodColor[r.payment_method] || methodColor.CREDIT;
+        const time    = r.created_at
+          ? new Date(r.created_at).toLocaleTimeString('en-GH', {
+              hour: '2-digit', minute: '2-digit'
+            })
+          : '—';
+        const date    = r.created_at
+          ? new Date(r.created_at).toLocaleDateString('en-GB', {
+              day: 'numeric', month: 'short'
+            })
+          : '—';
+        const isActive = r.id === _activeReceiptId;
+
+        return `
+          <div onclick="Dashboard.openReceipt(${r.id})"
+            id="receipt-row-${r.id}"
+            style="padding:14px 16px;border-bottom:1px solid var(--border);
+              cursor:pointer;background:${isActive ? 'var(--bg)' : 'var(--panel)'};
+              transition:background 0.12s;border-left:3px solid ${isActive ? 'var(--text)' : 'transparent'};"
+            onmouseover="this.style.background='var(--bg)'"
+            onmouseout="this.style.background='${isActive ? 'var(--bg)' : 'var(--panel)'}'">
+
+            <!-- Row top: receipt number + amount -->
+            <div style="display:flex;align-items:center;
+              justify-content:space-between;margin-bottom:4px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;
+                font-weight:700;color:var(--text);">
+                ${_esc(r.receipt_number || '#' + r.id)}
+              </span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:var(--text);">
+                ${_fmt(r.amount_paid)}
+              </span>
+            </div>
+
+            <!-- Row mid: customer -->
+            <div style="font-size:12px;color:var(--text-2);font-weight:500;
+              margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${_esc(r.customer_name || 'Walk-in')}
+            </div>
+
+            <!-- Row bottom: method badge + time -->
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:10px;font-weight:700;padding:2px 7px;
+                border-radius:4px;border:1px solid ${mc.border};
+                background:${mc.bg};color:${mc.text};">
+                ${r.payment_method || '—'}
+              </span>
+              <span style="font-size:11px;color:var(--text-3);
+                font-family:'JetBrains Mono',monospace;">
+                ${date} · ${time}
+              </span>
+            </div>
+
+          </div>`;
+      }).join('');
+
+      // Auto-open first receipt
+      if (receipts.length && !_activeReceiptId) {
+        openReceipt(receipts[0].id);
+      }
+
+    } catch {
+      listPanel.innerHTML = `<div style="padding:24px;text-align:center;
+        color:var(--red-text);font-size:13px;">Could not load receipts.</div>`;
+    }
+  }
+
+  async function openReceipt(receiptId) {
+    _activeReceiptId = receiptId;
+
+    // Highlight active row
+    document.querySelectorAll('[id^="receipt-row-"]').forEach(el => {
+      const isActive = el.id === `receipt-row-${receiptId}`;
+      el.style.background  = isActive ? 'var(--bg)'   : 'var(--panel)';
+      el.style.borderLeft  = isActive ? '3px solid var(--text)' : '3px solid transparent';
+    });
+
+    const detail = document.getElementById('receipts-detail-panel');
+    if (!detail) return;
+    detail.innerHTML = `<div style="flex:1;display:flex;align-items:center;
+      justify-content:center;padding:40px;">
+      <span class="spin"></span></div>`;
+
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/receipts/${receiptId}/`);
+      if (!res.ok) throw new Error();
+      const r = await res.json();
+      _renderReceiptDetail(detail, r);
+    } catch {
+      detail.innerHTML = `<div style="flex:1;display:flex;align-items:center;
+        justify-content:center;color:var(--red-text);font-size:13px;padding:40px;">
+        Could not load receipt.</div>`;
+    }
+  }
+
+  function _renderReceiptDetail(container, r) {
+    const methodColor = {
+      CASH  : { bg: 'var(--cash-bg)',  text: 'var(--cash-text)',  border: 'var(--cash-border)',  strong: 'var(--cash-strong)'  },
+      MOMO  : { bg: 'var(--momo-bg)',  text: 'var(--momo-text)',  border: 'var(--momo-border)',  strong: 'var(--momo-strong)'  },
+      POS   : { bg: 'var(--pos-bg)',   text: 'var(--pos-text)',   border: 'var(--pos-border)',   strong: 'var(--pos-strong)'   },
+      CREDIT: { bg: 'var(--bg)',       text: 'var(--text-3)',     border: 'var(--border)',       strong: 'var(--text-3)'       },
+    };
+    const mc = methodColor[r.payment_method] || methodColor.CREDIT;
+
+    const lineItems = (r.line_items || []).map(li => `
+      <div style="display:grid;grid-template-columns:1fr auto auto;
+        gap:12px;align-items:center;padding:9px 0;
+        border-bottom:1px solid var(--border);">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text);">
+            ${_esc(li.service_name || li.service || '—')}
+          </div>
+          ${li.pages && li.sets ? `
+            <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+              ${li.pages} pg × ${li.sets} set${li.sets !== 1 ? 's' : ''}
+              ${li.is_color ? ' · Colour' : ' · B&W'}
+            </div>` : ''}
+        </div>
+        <div style="font-size:12px;color:var(--text-3);text-align:right;">
+          ${li.unit_price != null ? _fmt(li.unit_price) : '—'}
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+          font-weight:600;color:var(--text);text-align:right;min-width:80px;">
+          ${li.line_total != null ? _fmt(li.line_total) : '—'}
+        </div>
+      </div>`).join('');
+
+    const issuedAt = r.created_at
+      ? new Date(r.created_at).toLocaleString('en-GH', {
+          day: 'numeric', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        })
+      : '—';
+
+    container.innerHTML = `
+      <div style="flex:1;overflow-y:auto;padding:24px;min-height:0;" id="receipt-printable">
+
+        <!-- ① Header -->
+        <div style="display:flex;align-items:flex-start;
+          justify-content:space-between;margin-bottom:20px;
+          padding-bottom:16px;border-bottom:1px solid var(--border);">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:18px;
+              font-weight:800;color:var(--text);letter-spacing:-0.3px;">
+              ${_esc(r.receipt_number || '—')}
+            </div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:3px;">
+              ${issuedAt}
+            </div>
+          </div>
+          <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+            font-weight:700;background:var(--green-bg);color:var(--green-text);
+            border:1px solid var(--green-border);">
+            PAID
+          </span>
+        </div>
+
+        <!-- ② Job summary -->
+        <div style="margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
+            Job
+          </div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);
+            margin-bottom:3px;">
+            ${_esc(r.job_title || r.job?.title || '—')}
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;
+            color:var(--text-3);">
+            ${_esc(r.job_number || r.job?.job_number || '—')}
+          </div>
+        </div>
+
+        <!-- ③ Line items -->
+        ${lineItems ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
+            Services
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:0 14px;">
+            <div style="display:grid;grid-template-columns:1fr auto auto;
+              gap:12px;padding:7px 0;border-bottom:1px solid var(--border);">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;">Service</div>
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Unit</div>
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;text-align:right;
+                min-width:80px;">Total</div>
+            </div>
+            ${lineItems}
+            <div style="display:flex;justify-content:space-between;
+              padding:10px 0;margin-top:2px;">
+              <span style="font-size:12px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.3px;">Subtotal</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:var(--text);">
+                ${_fmt(r.subtotal || r.amount_paid)}
+              </span>
+            </div>
+          </div>
+        </div>` : ''}
+
+        <!-- ④ Payment settlement -->
+        <div style="margin-bottom:20px;background:${mc.bg};
+          border:1px solid ${mc.border};border-radius:var(--radius-sm);
+          padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:${mc.text};
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px;">
+            Payment Settlement
+          </div>
+          ${[
+            ['Amount Due',    _fmt(r.subtotal || r.amount_paid), false],
+            ['Amount Paid',   _fmt(r.amount_paid),               true ],
+            r.cash_tendered != null && parseFloat(r.cash_tendered) > 0
+              ? ['Cash Tendered', _fmt(r.cash_tendered), false] : null,
+            r.change_given != null && parseFloat(r.change_given) > 0
+              ? ['Change Given', _fmt(r.change_given), false] : null,
+            r.balance_due != null && parseFloat(r.balance_due) > 0
+              ? ['Balance Due', _fmt(r.balance_due), false] : null,
+          ].filter(Boolean).map(([label, val, strong]) => `
+            <div style="display:flex;justify-content:space-between;
+              align-items:center;padding:5px 0;
+              ${strong ? 'border-top:1px solid ' + mc.border + ';margin-top:4px;padding-top:9px;' : ''}">
+              <span style="font-size:12px;font-weight:${strong ? '700' : '500'};
+                color:${mc.text};">${label}</span>
+              <span style="font-family:'JetBrains Mono',monospace;
+                font-size:${strong ? '16px' : '13px'};
+                font-weight:${strong ? '800' : '600'};
+                color:${strong ? mc.strong : mc.text};">${val}</span>
+            </div>`).join('')}
+        </div>
+
+        <!-- ⑤ Payment method -->
+        <div style="margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
+            Payment Method
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="padding:5px 14px;border-radius:20px;font-size:12px;
+              font-weight:700;background:${mc.bg};color:${mc.text};
+              border:1px solid ${mc.border};">
+              ${r.payment_method || '—'}
+            </span>
+            ${r.momo_reference ? `
+              <span style="font-size:12px;color:var(--text-3);">
+                Ref: <span style="font-family:'JetBrains Mono',monospace;
+                  font-weight:600;color:var(--text);">${_esc(r.momo_reference)}</span>
+              </span>` : ''}
+            ${r.pos_approval_code ? `
+              <span style="font-size:12px;color:var(--text-3);">
+                Approval: <span style="font-family:'JetBrains Mono',monospace;
+                  font-weight:600;color:var(--text);">${_esc(r.pos_approval_code)}</span>
+              </span>` : ''}
+          </div>
+        </div>
+
+        <!-- ⑥ People -->
+        <div style="margin-bottom:24px;background:var(--panel);
+          border:1px solid var(--border);border-radius:var(--radius-sm);
+          padding:14px 16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px;">
+            People
+          </div>
+          ${[
+            ['Customer',  r.customer_name || 'Walk-in'],
+            r.customer_phone ? ['Phone', r.customer_phone] : null,
+            ['Cashier',   r.cashier_name  || r.cashier?.full_name || '—'],
+            ['Attendant', r.intake_by_name || '—'],
+          ].filter(Boolean).map(([label, val]) => `
+            <div style="display:flex;justify-content:space-between;
+              padding:5px 0;border-bottom:1px solid var(--border);">
+              <span style="font-size:12px;color:var(--text-3);">${label}</span>
+              <span style="font-size:13px;font-weight:500;color:var(--text);">
+                ${_esc(val)}
+              </span>
+            </div>`).join('')}
+        </div>
+
+      </div>
+
+      <!-- ⑦ Actions -->
+      <div style="padding:16px 24px;border-top:1px solid var(--border);
+        background:var(--panel);display:flex;gap:10px;flex-shrink:0;">
+        <button onclick="Dashboard.printReceiptDetail()"
+          style="flex:1;padding:10px;background:var(--text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;
+            display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect x="6" y="14" width="12" height="8"/>
+          </svg>
+          Print Receipt
+        </button>
+        ${r.customer_phone ? `
+        <button onclick="Dashboard.sendReceiptWhatsApp(${r.id})"
+          style="flex:1;padding:10px;background:#25D366;color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;
+            display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+            viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          Send WhatsApp
+        </button>` : ''}
+      </div>`;
+  }
+
+  function setReceiptsPeriod(period) {
+    _receiptsPeriod  = period;
+    _activeReceiptId = null;
+    document.querySelectorAll('#receipts-period-tabs .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    // Reset detail panel
+    const detail = document.getElementById('receipts-detail-panel');
+    if (detail) detail.innerHTML = `
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:12px;color:var(--text-3);padding:40px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.5" style="opacity:0.3;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div style="font-size:13px;">Select a receipt to view details</div>
+      </div>`;
+    _fetchReceipts();
+  }
+
+  async function printReceiptDetail() {
+    if (!_activeReceiptId) return;
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/receipts/${_activeReceiptId}/thermal/`);
+      if (!res.ok) { _toast('Could not load receipt for printing.', 'error'); return; }
+      const data = await res.json();
+      const win  = window.open('', '_blank', 'width=300,height=600');
+      if (win) {
+win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Receipt</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      color: #000;
+      background: #fff;
+      display: flex;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      width: 80mm;
+      font-size: 11px;
+    }
+
+    @media print {
+      @page { margin: 8mm; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <pre>${data.text}</pre>
+</body>
+</html>`);
+        win.document.close();
+        win.focus();
+        setTimeout(() => { win.print(); win.close(); }, 300);
+      }
+    } catch {
+      _toast('Print error.', 'error');
+    }
+  }
+
+  async function sendReceiptWhatsApp(receiptId) {
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/receipts/${receiptId}/send-whatsapp/`,
+        { method: 'POST' }
+      );
+      if (res.ok) _toast('Receipt sent via WhatsApp.', 'success');
+      else _toast('WhatsApp delivery failed.', 'error');
+    } catch {
+      _toast('Network error.', 'error');
+    }
+  }
+
+  function printReceipt(id) {
+    openReceipt(id);
+  }
+
+// ── Performance pane ───────────────────────────────────────
+  let _performanceTab = 'metrics';
+
+  function _loadPerformancePane() {
+    const pane = document.getElementById('pane-performance');
+    if (!pane) return;
+
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Performance</span>
+      </div>
+      <div class="reports-tabs" id="performance-tab-bar">
+        <button class="reports-tab active" data-tab="metrics"
+          onclick="Dashboard.switchPerformanceTab('metrics')">Branch Metrics</button>
+        <button class="reports-tab" data-tab="services"
+          onclick="Dashboard.switchPerformanceTab('services')">Service Performance</button>
+      </div>
+      <div id="performance-tab-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    switchPerformanceTab('metrics');
+  }
+
+  function switchPerformanceTab(tab) {
+    _performanceTab = tab;
+    document.querySelectorAll('#performance-tab-bar .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    const content = document.getElementById('performance-tab-content');
+    if (!content) return;
+
+    if (tab === 'metrics') {
+      content.innerHTML = `
+        <div class="section-head" style="margin-top:16px;">
+          <span></span>
+          <div class="period-tabs">
+            <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
+            <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
+            <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
+          </div>
+        </div>
+        <div class="metrics-section">
+          <div class="metrics-grid" id="metrics-grid">
+            <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+              <span class="spin"></span> Loading metrics…
+            </div>
+          </div>
+        </div>`;
+      _renderMetrics(currentPeriod);
+    }
+
+    if (tab === 'services') {
+      content.innerHTML = `
+        <div id="services-report-content" style="margin-top:16px;">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>`;
+      _renderServicesReport(content);
+    }
+  }
 
 
   // ── Finance pane ───────────────────────────────────────────
@@ -2083,8 +2830,6 @@ async function _loadReportsPane() {
           onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
         <button class="reports-tab" data-tab="filing"
           onclick="Dashboard.switchReportsTab('filing')">Weekly Filing</button>
-        <button class="reports-tab" data-tab="services"
-          onclick="Dashboard.switchReportsTab('services')">Service Performance</button>
       </div>
 
       <div id="reports-content">
@@ -2110,9 +2855,8 @@ async function _loadReportsPane() {
     if (!content) return;
     content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
-    if (tab === 'history')  await _renderHistoryReport(content);
-    if (tab === 'filing')   await _renderWeeklyFiling(content);
-    if (tab === 'services') await _renderServicesReport(content);
+    if (tab === 'history') await _renderHistoryReport(content);
+    if (tab === 'filing')  await _renderWeeklyFiling(content);
   }
 
   // ── Sheets Archive ────────────────────────────────────────────
@@ -3974,6 +4718,13 @@ return {
     setPeriod,
     setReportsPeriod,
     switchReportsTab,
+    switchJobsTab,
+    switchPerformanceTab,
+    printReceipt,
+    openReceipt,
+    setReceiptsPeriod,
+    printReceiptDetail,
+    sendReceiptWhatsApp,
     loadInboxTab,
     loadServicesTab,
     openOutsourceModal,

@@ -860,7 +860,9 @@ class ReceiptDetailView(generics.RetrieveAPIView):
     """
     serializer_class   = ReceiptSerializer
     permission_classes = [IsAuthenticated]
-    queryset           = Receipt.objects.select_related('job', 'cashier')
+    queryset = Receipt.objects.select_related(
+        'job', 'job__intake_by', 'cashier'
+    ).prefetch_related('job__line_items__service')
 
 
 class ReceiptSendWhatsAppView(APIView):
@@ -914,6 +916,45 @@ class ReceiptThermalView(APIView):
         text   = engine.format_thermal(receipt)
 
         return Response({'text': text})
+
+class ReceiptListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/receipts/
+    Branch-scoped receipt list. Optional ?period=day|week|month filter.
+    """
+    serializer_class   = ReceiptSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.finance.models import Receipt
+
+        branch = getattr(self.request.user, 'branch', None)
+        if not branch:
+            return Receipt.objects.none()
+
+        qs = Receipt.objects.select_related(
+            'job', 'job__intake_by', 'cashier', 'daily_sheet'
+        ).prefetch_related(
+            'job__line_items__service'
+        ).filter(
+            daily_sheet__branch=branch
+        ).order_by('-created_at')
+
+        period = self.request.query_params.get('period')
+        now    = timezone.now()
+        since  = {
+            'day'  : now - timedelta(days=1),
+            'week' : now - timedelta(weeks=1),
+            'month': now - timedelta(days=30),
+        }.get(period)
+
+        if since:
+            qs = qs.filter(created_at__gte=since)
+
+        return qs
+
 
 class CashierReceiptListView(generics.ListAPIView):
     """

@@ -191,24 +191,34 @@ class POSSettleSerializer(serializers.Serializer):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ReceiptSerializer(serializers.ModelSerializer):
-    cashier_name = serializers.CharField(source='cashier.full_name', read_only=True)
-    job_number   = serializers.CharField(source='job.job_number', read_only=True)
+    cashier_name    = serializers.CharField(source='cashier.full_name',       read_only=True)
+    job_number      = serializers.CharField(source='job.job_number',          read_only=True)
+    job_title       = serializers.CharField(source='job.title',               read_only=True)
+    intake_by_name  = serializers.CharField(source='job.intake_by.full_name', read_only=True)
+    cash_tendered   = serializers.DecimalField(source='job.cash_tendered',    max_digits=10, decimal_places=2, read_only=True)
+    change_given    = serializers.DecimalField(source='job.change_given',     max_digits=10, decimal_places=2, read_only=True)
+    line_items      = serializers.SerializerMethodField()
+
+    def get_line_items(self, obj):
+        from apps.jobs.api.serializers import JobLineItemSerializer
+        return JobLineItemSerializer(obj.job.line_items.all(), many=True).data
 
     class Meta:
         model  = Receipt
         fields = [
-            'id', 'receipt_number', 'job', 'job_number',
-            'cashier_name', 'payment_method',
-            'amount_paid', 'balance_due',
+            'id', 'receipt_number', 'job', 'job_number', 'job_title',
+            'cashier_name', 'intake_by_name',
+            'payment_method', 'amount_paid', 'balance_due',
+            'cash_tendered', 'change_given',
             'momo_reference', 'pos_approval_code',
             'customer_name', 'customer_phone', 'company_name',
             'subtotal', 'vat_rate', 'vat_amount',
             'nhil_amount', 'getfund_amount',
+            'line_items',
             'whatsapp_status', 'whatsapp_sent_at',
             'print_status', 'printed_at',
             'is_void', 'created_at',
         ]
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Credit Account
