@@ -178,7 +178,11 @@
       <div class="topbar-toggle">
         <span class="brand-logo">Octos</span>
         <span class="brand-divider"></span>
-        <span class="brand-role">Branch Manager</span>
+        <div style="display:flex;flex-direction:column;line-height:1.1;">
+          <span class="brand-role">Branch Manager</span>
+          <span id="db-branch-name-left" style="font-size:10px;font-weight:500;
+            color:var(--text-3);letter-spacing:0.3px;">—</span>
+        </div>
         <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
@@ -201,11 +205,8 @@
           <div class="live-dot"></div>
           Active
         </div>
-        <div class="branch-pill" id="db-branch-pill">—</div>
-        <div class="user-chip">
-          <div class="user-avatar" id="db-user-initials">—</div>
-          <span class="user-name" id="db-user-name">—</span>
-        </div>
+
+           
         <div style="position:relative;">
           <button class="icon-btn" id="db-notif-btn" title="Notifications" onclick="Notifications.toggle()">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -222,9 +223,83 @@
             <div class="notif-footer" onclick="Notifications.close()">Close</div>
           </div>
         </div>
-        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+        
+        <div style="position:relative;">
+          <button id="db-profile-btn" onclick="BMProfile.toggle()"
+            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+              background:none;border:1px solid var(--border);border-radius:20px;
+              cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <div class="user-avatar" id="db-user-initials">—</div>
+            <span class="user-name" id="db-user-name"
+              style="font-size:13px;font-weight:600;color:var(--text);">—</span>
+            <svg id="db-profile-arrow" xmlns="http://www.w3.org/2000/svg"
+              width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2.5"
+              style="color:var(--text-3);transition:transform 0.2s;">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div id="db-profile-dropdown"
+            style="display:none;position:absolute;top:46px;right:0;width:200px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-size:13px;font-weight:700;color:var(--text);"
+                id="db-profile-name">—</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;"
+                id="db-branch-name-dropdown">—</div>
+            </div>
+            <div style="padding:6px 0;">
+              <button
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--text-2);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                My Profile
+              </button>
+              <button
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--text-2);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                Settings
+              </button>
+              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+              <button onclick="Auth.logout()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--red-text);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--red-bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -1063,6 +1138,37 @@
   function closeDetailModal()     { document.getElementById('job-detail-modal').classList.remove('open'); }
   function closeTransitionModal() { document.getElementById('transition-modal').classList.remove('open'); }
   function closeOutsourceModal()  { document.getElementById('outsource-modal').classList.remove('open'); }
+
+  // ── BM Profile dropdown ─────────────────────────────────
+  const BMProfile = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd    = document.getElementById('db-profile-dropdown');
+      const arrow = document.getElementById('db-profile-arrow');
+      const name  = document.getElementById('db-profile-name');
+      const branch = document.getElementById('db-branch-name-dropdown');
+      const userName   = document.getElementById('db-user-name')?.textContent;
+      const branchName = document.getElementById('db-branch-name-left')?.textContent;
+      if (dd)     dd.style.display      = 'block';
+      if (arrow)  arrow.style.transform = 'rotate(180deg)';
+      if (name)   name.textContent      = userName   || '—';
+      if (branch) branch.textContent    = branchName || '—';
+    }
+    function close() {
+      open = false;
+      const dd    = document.getElementById('db-profile-dropdown');
+      const arrow = document.getElementById('db-profile-arrow');
+      if (dd)    dd.style.display      = 'none';
+      if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+    document.addEventListener('click', e => {
+      if (open && !e.target.closest('#db-profile-btn') &&
+          !e.target.closest('#db-profile-dropdown')) close();
+    });
+    return { toggle, close };
+  })();
 
   document.addEventListener('click', e => {
     if (!e.target.closest('#db-notif-btn') && !e.target.closest('#notif-dropdown')) {

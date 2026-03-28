@@ -44,6 +44,8 @@ const Dashboard = (() => {
       WeekGreeter.init();
       _checkLateJobButton();
       setInterval(_checkLateJobButton, 60000);
+      setInterval(_checkClosingWarning, 60000);
+    _checkClosingWarning(); // check on load too
     }
 
   // ── Context ────────────────────────────────────────────────
@@ -65,6 +67,7 @@ const Dashboard = (() => {
         branchId = b.id;
         State.branchId = branchId;    // ← add this
         _set('db-branch-name', b.name || '—');
+        _set('db-branch-name-left', b.name || '—');
         _set('db-branch-pill', b.name || '—');
         if (b.region_name)      _set('meta-region', b.region_name);
         if (b.belt_name)        _set('meta-belt',   b.belt_name);
@@ -75,6 +78,7 @@ const Dashboard = (() => {
         if (br.ok) {
           const b = await br.json();
           _set('db-branch-name', b.name || '—');
+          _set('db-branch-name-left', b.name || '—');
           _set('db-branch-pill', b.name || '—');
           if (b.region_name)      _set('meta-region', b.region_name);
           if (b.belt_name)        _set('meta-belt',   b.belt_name);
@@ -3866,6 +3870,103 @@ const kpiCards = [
     const isPastClosing = hours > 19 || (hours === 19 && minutes >= 30);
     btn.style.display = isPastClosing ? 'inline-flex' : 'none';
   }
+
+  // ── Closing time warning ───────────────────────────────────
+  let _closingWarnShown = false;
+
+  function _checkClosingWarning() {
+    const now     = new Date();
+    const hours   = now.getHours();
+    const minutes = now.getMinutes();
+
+    // Show at 19:00 (30 mins before 19:30 closing)
+    const isWarningTime = hours === 19 && minutes >= 0 && minutes < 30;
+    if (!isWarningTime || _closingWarnShown) return;
+
+    // Don't interrupt if a modal is open
+    const openModals = document.querySelectorAll(
+      '.modal-overlay.open, .eod-overlay.open'
+    );
+    if (openModals.length > 0) return;
+
+    _closingWarnShown = true;
+    _showClosingModal();
+  }
+
+  function _showClosingModal() {
+    const existing = document.getElementById('closing-warn-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'closing-warn-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9998;
+      background:rgba(0,0,0,0.85);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;
+      animation:fadeIn 0.3s ease;`;
+
+    overlay.innerHTML = `
+      <div style="
+        background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:480px;
+        padding:32px;text-align:center;
+        box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+
+        <!-- Icon -->
+        <div style="width:64px;height:64px;border-radius:50%;
+          background:var(--amber-bg);border:2px solid var(--amber-border);
+          display:flex;align-items:center;justify-content:center;
+          margin:0 auto 20px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+            viewBox="0 0 24 24" fill="none"
+            stroke="var(--amber-text)" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+
+        <!-- Title -->
+        <div style="font-family:'Syne',sans-serif;font-size:22px;
+          font-weight:800;color:var(--text);margin-bottom:8px;">
+          30 Minutes to Closing
+        </div>
+        <div style="font-size:14px;color:var(--text-3);margin-bottom:8px;">
+          Branch closes at <strong style="color:var(--text);">7:30 PM</strong> today.
+        </div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
+          Ensure all jobs are processed and the cashier is prepared for end-of-day sign-off.
+        </div>
+
+        <!-- Countdown -->
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+          Auto-dismissing in <span id="closing-warn-countdown"
+            style="font-weight:700;color:var(--amber-text);">15</span>s
+        </div>
+
+        <!-- Dismiss button -->
+        <button onclick="document.getElementById('closing-warn-overlay').remove()"
+          style="padding:10px 28px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:14px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Dismiss
+        </button>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Auto-dismiss after 15 seconds
+    let count = 15;
+    const timer = setInterval(() => {
+      count--;
+      const el = document.getElementById('closing-warn-countdown');
+      if (el) el.textContent = count;
+      if (count <= 0) {
+        clearInterval(timer);
+        overlay.remove();
+      }
+    }, 1000);
+  }
   // ── Public API ─────────────────────────────────────────────
 return {
     init,
@@ -3920,6 +4021,7 @@ return {
     _lateJobFilterServices,
     _lateJobSelectService,
     _checkLateJobButton,
+    _showClosingModal,
   };
 
 })();

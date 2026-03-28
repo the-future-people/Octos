@@ -37,6 +37,7 @@ const Cashier = (() => {
     _startPolling();
     _startShiftPolling();
     WeekGreeter.init();
+    if (typeof CashierNotif !== 'undefined') CashierNotif.startPolling();
   }
 
   // ── Context ────────────────────────────────────────────────
@@ -818,64 +819,92 @@ const Cashier = (() => {
   }
 
 function _showSignOffBanner(minsRemaining, shiftEnd) {
-  if (document.getElementById('signoff-banner')) return;
+    // Only show once per session
+    if (document.getElementById('signoff-banner') ||
+        document.getElementById('closing-warn-overlay')) return;
 
-  const endTime  = _fmtTime(shiftEnd);
-  const isUrgent = minsRemaining <= 15;
+    const endTime  = _fmtTime(shiftEnd);
+    const isUrgent = minsRemaining <= 15;
 
-  const banner = document.createElement('div');
-  banner.id    = 'signoff-banner';
-  banner.style.cssText = `
-    position:sticky;top:56px;left:0;right:0;z-index:900;
-    background:${isUrgent ? '#1a1a1a' : '#fff8e6'};
-    border-bottom:2px solid ${isUrgent ? '#e8294a' : '#f0d878'};
-    padding:0 28px;
-    display:flex;align-items:center;justify-content:space-between;
-    gap:16px;height:52px;`;
-  banner.innerHTML = `
-    <div style="display:flex;align-items:center;gap:14px;">
+    const overlay = document.createElement('div');
+    overlay.id    = 'closing-warn-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9998;
+      background:rgba(0,0,0,0.85);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;`;
+
+    overlay.innerHTML = `
       <div style="
-        width:8px;height:8px;border-radius:50%;flex-shrink:0;
-        background:${isUrgent ? '#e8294a' : '#e8c84a'};
-        box-shadow:0 0 0 3px ${isUrgent ? 'rgba(232,41,74,0.25)' : 'rgba(232,200,74,0.3)'};
-        animation:pulse 1.5s ease-in-out infinite;">
-      </div>
-      <div>
-        <span style="
-          font-family:'Syne',sans-serif;
-          font-size:13px;font-weight:700;
-          color:${isUrgent ? '#ffffff' : '#1a1a1a'};">
-          Shift ends at ${endTime}
-        </span>
-        <span style="
-          font-size:12.5px;font-weight:400;margin-left:8px;
-          color:${isUrgent ? 'rgba(255,255,255,0.6)' : '#7a5c00'};">
-          ${minsRemaining} minute${minsRemaining !== 1 ? 's' : ''} remaining
-        </span>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <button onclick="Cashier.openSignOffWizard(true)"
-        style="
-          padding:7px 16px;
-          background:${isUrgent ? '#e8294a' : '#1a1a1a'};
-          color:#fff;border:none;border-radius:8px;
-          font-size:12px;font-weight:700;cursor:pointer;
-          font-family:'DM Sans',sans-serif;white-space:nowrap;">
-        Sign Off Now
-      </button>
-      <button onclick="document.getElementById('signoff-banner').remove()"
-        style="
-          padding:7px 10px;background:none;
-          border:1px solid ${isUrgent ? 'rgba(255,255,255,0.2)' : '#d0cdc6'};
-          border-radius:8px;font-size:12px;cursor:pointer;
-          color:${isUrgent ? 'rgba(255,255,255,0.5)' : '#9a9690'};
-          font-family:'DM Sans',sans-serif;">
-        Dismiss
-      </button>
-    </div>`;
-  document.body.insertBefore(banner, document.body.children[1]);
-}
+        background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:480px;
+        padding:32px;text-align:center;
+        box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+
+        <div style="width:64px;height:64px;border-radius:50%;
+          background:${isUrgent ? 'var(--red-bg)' : 'var(--amber-bg)'};
+          border:2px solid ${isUrgent ? 'var(--red-border)' : 'var(--amber-border)'};
+          display:flex;align-items:center;justify-content:center;
+          margin:0 auto 20px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+            viewBox="0 0 24 24" fill="none"
+            stroke="${isUrgent ? 'var(--red-text)' : 'var(--amber-text)'}" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+
+        <div style="font-family:'Syne',sans-serif;font-size:22px;
+          font-weight:800;color:var(--text);margin-bottom:8px;">
+          ${isUrgent ? 'Shift Ending Soon' : 'Shift Ending in 30 Minutes'}
+        </div>
+        <div style="font-size:14px;color:var(--text-3);margin-bottom:8px;">
+          Your shift ends at <strong style="color:var(--text);">${endTime}</strong>.
+        </div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
+          ${isUrgent
+            ? 'Please complete any active payments and prepare for sign-off.'
+            : 'Clear the payment queue and prepare for end-of-shift sign-off.'}
+        </div>
+
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+          Auto-dismissing in <span id="cashier-closing-countdown"
+            style="font-weight:700;color:${isUrgent ? 'var(--red-text)' : 'var(--amber-text)'};">15</span>s
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button onclick="Cashier.openSignOffWizard(true);document.getElementById('closing-warn-overlay').remove();"
+            style="padding:10px 24px;
+              background:${isUrgent ? 'var(--red-text)' : 'var(--text)'};
+              color:#fff;border:none;border-radius:var(--radius-sm);
+              font-size:14px;font-weight:700;cursor:pointer;
+              font-family:'DM Sans',sans-serif;">
+            Sign Off Now
+          </button>
+          <button onclick="document.getElementById('closing-warn-overlay').remove()"
+            style="padding:10px 24px;background:none;
+              border:1px solid var(--border);border-radius:var(--radius-sm);
+              font-size:14px;font-weight:600;cursor:pointer;
+              color:var(--text-2);font-family:'DM Sans',sans-serif;">
+            Dismiss
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Auto-dismiss after 15 seconds
+    let count = 15;
+    const timer = setInterval(() => {
+      count--;
+      const el = document.getElementById('cashier-closing-countdown');
+      if (el) el.textContent = count;
+      if (count <= 0) {
+        clearInterval(timer);
+        overlay.remove();
+      }
+    }, 1000);
+  }
 
   function _lockQueue(message) {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }

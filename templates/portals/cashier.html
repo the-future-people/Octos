@@ -397,15 +397,18 @@
         }
       } catch {}
     }
-    // Poll every 30s
-    _loadCount();
-    setInterval(_loadCount, 30000);
+    // Poll every 30s — called by Cashier.init() after auth confirmed
+    function startPolling() {
+      _loadCount();
+      setInterval(_loadCount, 30000);
+    }
+    return { toggle, close, markAllRead, startPolling };
     // Close on outside click
     document.addEventListener('click', e => {
       if (open && !document.getElementById('cashier-notif-btn')?.contains(e.target) &&
           !document.getElementById('cashier-notif-dropdown')?.contains(e.target)) close();
     });
-    return { toggle, close, markAllRead };
+    return { toggle, close, markAllRead, startPolling };
   })();
 
   // ── Cashier profile dropdown ──────────────────────────────
