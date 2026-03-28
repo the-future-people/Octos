@@ -25,6 +25,9 @@ const Attendant = (() => {
   // ── Boot ───────────────────────────────────────────────────
   async function init() {
     await Auth.guard(['ATTENDANT', 'BRANCH_MANAGER', 'SUPER_ADMIN']);
+    _set('at-meta-date', new Date().toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    }));
     await Promise.all([
       _loadContext(),
       _loadServicesAndCustomers(),
@@ -34,10 +37,11 @@ const Attendant = (() => {
       _loadStats(),
       _loadRecentJobs(),
       _loadDraftCount(),
+      _loadShift(),
     ]);
-  AtNotifications.startPolling();
-      WeekGreeter.init();
-    }
+    AtNotifications.startPolling();
+    WeekGreeter.init();
+  }
 
   // ── Context ────────────────────────────────────────────────
   async function _loadContext() {
@@ -58,6 +62,7 @@ const Attendant = (() => {
         State.branchId = b.id;
         _set('at-branch-name',      b.name || '—');
         _set('at-branch-name-left', b.name || '—');
+        _set('at-meta-branch',      b.name || '—');
       }
     } catch { /* silent */ }
   }
@@ -72,7 +77,34 @@ const Attendant = (() => {
     } catch { /* silent */ }
   }
 
-// ── Stats ──────────────────────────────────────────────────
+// ── Shift ──────────────────────────────────────────────────
+  async function _loadShift() {
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/cashier/shift-status/');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (!data.has_shift) {
+        _set('at-meta-shift-end', 'No shift');
+        return;
+      }
+
+      // Format shift_end ISO string to readable time
+      const end = data.overtime_until || data.shift_end;
+      if (!end) return;
+
+      const time = new Date(end).toLocaleTimeString('en-GH', {
+        hour  : '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      const label = data.is_overtime ? `${time} (OT)` : time;
+      _set('at-meta-shift-end', label);
+    } catch { /* silent */ }
+  }
+
+  // ── Stats ──────────────────────────────────────────────────
   async function _loadStats() {
     if (!_sheetId) return;
     try {

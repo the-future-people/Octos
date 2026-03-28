@@ -1,0 +1,58 @@
+<!-- ═══════════════════════════════════════
+     STAR RATING COMPONENT
+     Shared partial — include wherever employee ratings apply.
+     Placeholder: gamification/motivation system not yet built.
+═══════════════════════════════════════ -->
+<div class="star-rating" id="star-rating-{{ employee_id|default:'me' }}" title="Performance rating — coming soon">
+  <span class="star-rating-stars">
+    <svg class="star star-empty" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <svg class="star star-empty" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <svg class="star star-empty" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <svg class="star star-empty" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <svg class="star star-empty" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+  </span>
+  <span class="star-rating-label">—</span>
+</div>
+
+{% verbatim %}
+<style>
+/* Scoped to avoid polluting other stylesheets.
+   Move to dashboard.css / attendant.css when system is built. */
+.star-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+  user-select: none;
+}
+
+.star-rating-stars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.star {
+  color: var(--border-dark, #d0cdc6);
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.star.star-filled {
+  color: #e8c84a;
+  fill: #e8c84a;
+}
+
+.star.star-half {
+  color: #e8c84a;
+}
+
+.star-rating-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3, #9a9690);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.3px;
+}
+</style>
+{% endverbatim %}
