@@ -8,18 +8,22 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+  <link rel="stylesheet" href="{% static 'css/attendant.css' %}">
 </head>
 <body>
 
 <div class="app-shell" id="app-shell">
 
-  <!-- ── Topbar ──────────────────────────────────────────── -->
+<!-- ── Topbar ──────────────────────────────────────────── -->
   <header class="topbar">
     <div class="topbar-inner">
+
       <div class="topbar-toggle">
         <span class="brand-logo">Octos</span>
         <span class="brand-divider"></span>
-        <span class="brand-role">Attendant</span>
+        <div style="display:flex;flex-direction:column;line-height:1.1;">
+          <span class="brand-role">Attendant</span>
+        </div>
         <button class="toggle-btn" id="sidebar-toggle" title="Toggle sidebar" style="margin-left:auto;">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
@@ -42,11 +46,8 @@
           <div class="live-dot"></div>
           Active
         </div>
-        <div class="branch-pill" id="at-branch-pill">—</div>
-        <div class="user-chip">
-          <div class="user-avatar" id="at-user-initials">—</div>
-          <span class="user-name" id="at-user-name">—</span>
-        </div>
+
+        <!-- Notification bell -->
         <div style="position:relative;">
           <button class="icon-btn" id="at-notif-btn" title="Notifications" onclick="AtNotifications.toggle()">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -63,13 +64,59 @@
             <div class="notif-footer" onclick="AtNotifications.close()">Close</div>
           </div>
         </div>
-        <button class="icon-btn" title="Sign out" onclick="Auth.logout()">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+
+        <!-- Profile chip with dropdown -->
+        <div style="position:relative;">
+          <button id="at-profile-btn" onclick="AtProfile.toggle()"
+            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+              background:none;border:1px solid var(--border);border-radius:20px;
+              cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <div class="user-avatar" id="at-user-initials">—</div>
+            <span class="user-name" id="at-user-name"
+              style="font-size:13px;font-weight:600;color:var(--text);">—</span>
+            <svg id="at-profile-arrow" xmlns="http://www.w3.org/2000/svg"
+              width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2.5"
+              style="color:var(--text-3);transition:transform 0.2s;">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div id="at-profile-dropdown"
+            style="display:none;position:absolute;top:46px;right:0;width:200px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-size:13px;font-weight:700;color:var(--text);"
+                id="at-profile-name">—</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Attendant</div>
+            </div>
+            <div style="padding:6px 0;">
+              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+              <button onclick="Auth.logout()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;
+                  border:none;cursor:pointer;font-size:13px;color:var(--red-text);
+                  font-family:inherit;display:flex;align-items:center;gap:10px;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--red-bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </header>
-
   <!-- ── Body ────────────────────────────────────────────── -->
   <div class="body-layout">
 
@@ -148,31 +195,35 @@
     <!-- Main -->
     <div class="main-content">
 
-      <!-- Info strip -->
-      <div class="info-strip">
-        <div class="info-item">
-          <span class="info-key">Branch</span>
-          <span class="info-val" id="meta-branch">—</span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">Date</span>
-          <span class="info-val" id="meta-date">—</span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">My Jobs Today</span>
-          <span class="info-val" id="meta-my-jobs">0</span>
-        </div>
-        <div class="info-item">
-          <span class="info-key">Active Services</span>
-          <span class="info-val" id="meta-services">—</span>
-        </div>
-      </div>
-
       <!-- Pane area -->
       <div class="pane-area">
 
         <!-- ── OVERVIEW ──────────────────────────────────── -->
         <div class="pane active" id="pane-overview">
+
+          <!-- Stats strip -->
+          <div class="stats-strip">
+            <div class="stats-card recorded">
+              <div class="stats-label">Jobs Recorded</div>
+              <div class="stats-amount" id="strip-recorded">0</div>
+              <div class="stats-sub">today on this sheet</div>
+            </div>
+            <div class="stats-card value">
+              <div class="stats-label">Value Queued</div>
+              <div class="stats-amount" id="strip-value">GHS 0.00</div>
+              <div class="stats-sub">sent to cashier</div>
+            </div>
+            <div class="stats-card confirmed">
+              <div class="stats-label">Confirmed</div>
+              <div class="stats-amount" id="strip-confirmed">0</div>
+              <div class="stats-sub">paid by cashier</div>
+            </div>
+            <div class="stats-card rate">
+              <div class="stats-label">Completion Rate</div>
+              <div class="stats-amount" id="strip-rate">—</div>
+              <div class="stats-sub" id="strip-rate-sub">no jobs yet</div>
+            </div>
+          </div>
 
           <div class="hero-actions">
             <button class="hero-btn hero-btn-primary" onclick="NJ.open()">
@@ -186,30 +237,12 @@
             </button>
           </div>
 
-          <div class="stat-grid">
-            <div class="stat-card blue">
-              <div class="stat-num" id="stat-my-total">0</div>
-              <div class="stat-lbl">My Jobs Today</div>
-            </div>
-            <div class="stat-card amber">
-              <div class="stat-num" id="stat-my-pending">0</div>
-              <div class="stat-lbl">Pending Payment</div>
-            </div>
-            <div class="stat-card green">
-              <div class="stat-num" id="stat-my-complete">0</div>
-              <div class="stat-lbl">Complete</div>
-            </div>
-            <div class="stat-card purple">
-              <div class="stat-num" id="stat-my-drafts">0</div>
-              <div class="stat-lbl">Drafts</div>
-            </div>
-          </div>
-
           <div class="section-head">
             <span class="section-title">My Recent Jobs</span>
             <span class="section-link" style="cursor:pointer;"
               onclick="Attendant.toggleMyJobs()">View all →</span>
           </div>
+
           <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
             <table class="p-table">
               <thead>
@@ -307,53 +340,12 @@
 <!-- ═══════════════════════════════════════
      NEW JOB MODAL
 ═══════════════════════════════════════ -->
-<div class="modal-overlay" id="new-job-modal">
-  <div class="modal" style="max-width:780px;">
-    <div class="modal-head">
-      <div>
-        <div class="modal-title">New Job</div>
-        <div class="modal-subtitle">Record a new job for this branch</div>
-      </div>
-      <button class="modal-x" onclick="closeNewJobModal()">×</button>
-    </div>
-    <div style="padding:16px 24px 0;flex-shrink:0;">
-      <div class="nj-toggle" id="nj-type-toggle">
-        <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
-        <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
-        <button class="nj-toggle-btn"        data-type="DESIGN"     onclick="NJ.setType('DESIGN')">Design</button>
-        <div class="nj-toggle-pill" id="nj-toggle-pill"></div>
-      </div>
-    </div>
-    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;"></div>
-    <div class="modal-foot">
-      <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
-      <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Create Job
-      </button>
-    </div>
-  </div>
-</div>
-
+{% include "partials/new_job_modal.html" %}
 <!-- ═══════════════════════════════════════
      JOB DETAIL MODAL
 ═══════════════════════════════════════ -->
-<div class="modal-overlay" id="job-detail-modal" onclick="if(event.target===this)this.classList.remove('open')">
-  <div class="modal wide">
-    <div class="modal-head">
-      <div>
-        <div class="modal-title" id="detail-title">Job Detail</div>
-        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:var(--text-3);"></div>
-      </div>
-      <button class="modal-x" onclick="document.getElementById('job-detail-modal').classList.remove('open')">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="modal-body" id="detail-body">
-      <div style="text-align:center;padding:40px;color:var(--text-3);"><span class="spin"></span> Loading…</div>
-    </div>
-  </div>
-</div>
+{% include "partials/job_detail_modal.html" %}
+
 <div id="toast-container"></div>
 <script src="{% static 'js/week_greeter.js' %}"></script>
 <script src="{% static 'js/auth.js' %}"></script>
@@ -368,6 +360,36 @@
     NJ.tryAutoSaveDraft();
     document.getElementById('new-job-modal').classList.remove('open');
   }
+  function closeDetailModal() {
+    document.getElementById('job-detail-modal').classList.remove('open');
+  }
+  // ── Attendant profile dropdown ──────────────────────────
+  const AtProfile = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd    = document.getElementById('at-profile-dropdown');
+      const arrow = document.getElementById('at-profile-arrow');
+      const name  = document.getElementById('at-profile-name');
+      const userName = document.getElementById('at-user-name')?.textContent;
+      if (dd)    dd.style.display      = 'block';
+      if (arrow) arrow.style.transform = 'rotate(180deg)';
+      if (name && userName) name.textContent = userName;
+    }
+    function close() {
+      open = false;
+      const dd    = document.getElementById('at-profile-dropdown');
+      const arrow = document.getElementById('at-profile-arrow');
+      if (dd)    dd.style.display      = 'none';
+      if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+    document.addEventListener('click', e => {
+      if (open && !e.target.closest('#at-profile-btn') &&
+          !e.target.closest('#at-profile-dropdown')) close();
+    });
+    return { toggle, close };
+  })();
 
   document.addEventListener('click', e => {
     if (!e.target.closest('#at-notif-btn') && !e.target.closest('#notif-dropdown')) {

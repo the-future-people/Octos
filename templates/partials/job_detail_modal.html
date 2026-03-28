@@ -1,0 +1,20 @@
+<!-- ═══════════════════════════════════════
+     JOB DETAIL MODAL
+     Shared partial — included in dashboard.html, attendant.html
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="job-detail-modal" onclick="if(event.target===this)closeDetailModal()">
+  <div class="modal wide">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="detail-title">Job Detail</div>
+        <div class="modal-subtitle" id="detail-ref" style="font-family:monospace;font-size:13px;color:var(--text-3);"></div>
+      </div>
+      <button class="modal-x" onclick="closeDetailModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="detail-body">
+      <div style="text-align:center;padding:40px;color:var(--text-3);"><span class="spin"></span> Loading…</div>
+    </div>
+  </div>
+</div>

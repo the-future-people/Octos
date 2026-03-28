@@ -1,0 +1,81 @@
+/*
+ * Octos — Attendant Portal
+ * attendant.css
+ */
+
+/* ── Stats strip ───────────────────────────────────────── */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stats-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+
+.stats-card.recorded::before { background: #3355cc; }
+.stats-card.value::before    { background: #e8c84a; }
+.stats-card.confirmed::before { background: #22c98a; }
+.stats-card.rate::before     { background: var(--text); }
+
+.stats-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.stats-amount {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stats-card.recorded .stats-amount { color: #1a3599; }
+.stats-card.value    .stats-amount { color: #7a5c00; }
+.stats-card.confirmed .stats-amount { color: #1a6640; }
+
+.stats-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 540px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 16px 16px 0;
+    gap: 8px;
+  }
+
+  .stats-amount {
+    font-size: 18px;
+  }
+}

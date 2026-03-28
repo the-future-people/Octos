@@ -1,0 +1,31 @@
+<!-- ═══════════════════════════════════════
+     NEW JOB MODAL
+     Shared partial — included in dashboard.html, attendant.html
+═══════════════════════════════════════ -->
+<div class="modal-overlay" id="new-job-modal">
+  <div class="modal" style="max-width:780px;max-height:92vh;height:92vh;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">New Job</div>
+        <div class="modal-subtitle">Record a new job for this branch</div>
+      </div>
+      <button class="modal-x" onclick="closeNewJobModal()">×</button>
+    </div>
+    <div style="padding:16px 24px 0;flex-shrink:0;">
+      <div class="nj-toggle" id="nj-type-toggle">
+        <button class="nj-toggle-btn active" data-type="INSTANT"    onclick="NJ.setType('INSTANT')">Instant</button>
+        <button class="nj-toggle-btn"        data-type="PRODUCTION" onclick="NJ.setType('PRODUCTION')">Production</button>
+        <button class="nj-toggle-btn"        data-type="DESIGN"     onclick="NJ.setType('DESIGN')">Design</button>
+        <div class="nj-toggle-pill" id="nj-toggle-pill"></div>
+      </div>
+    </div>
+    <div class="modal-body" id="nj-modal-body" style="padding-top:16px;"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeNewJobModal()">Cancel</button>
+      <button class="btn-dark" id="nj-submit-btn" onclick="NJ.createJob()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create Job
+      </button>
+    </div>
+  </div>
+</div>

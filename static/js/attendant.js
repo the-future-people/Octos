@@ -25,7 +25,6 @@ const Attendant = (() => {
   // ── Boot ───────────────────────────────────────────────────
   async function init() {
     await Auth.guard(['ATTENDANT', 'BRANCH_MANAGER', 'SUPER_ADMIN']);
-    _setDate();
     await Promise.all([
       _loadContext(),
       _loadServicesAndCustomers(),
@@ -57,9 +56,8 @@ const Attendant = (() => {
       if (user.branch_detail) {
         const b = user.branch_detail;
         State.branchId = b.id;
-        _set('at-branch-name', b.name || '—');
-        _set('at-branch-pill', b.name || '—');
-        _set('meta-branch',    b.name || '—');
+        _set('at-branch-name',      b.name || '—');
+        _set('at-branch-name-left', b.name || '—');
       }
     } catch { /* silent */ }
   }
@@ -74,7 +72,7 @@ const Attendant = (() => {
     } catch { /* silent */ }
   }
 
-  // ── Stats ──────────────────────────────────────────────────
+// ── Stats ──────────────────────────────────────────────────
   async function _loadStats() {
     if (!_sheetId) return;
     try {
@@ -85,14 +83,32 @@ const Attendant = (() => {
       const data = await res.json();
       const jobs = Array.isArray(data) ? data : (data.results || []);
 
-      const total    = jobs.length;
-      const pending  = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
-      const complete = jobs.filter(j => j.status === 'COMPLETE').length;
+      const total     = jobs.length;
+      const pending   = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
+      const confirmed = jobs.filter(j =>
+        j.status === 'COMPLETE' || j.status === 'PAID' || j.status === 'CONFIRMED'
+      ).length;
+      const value     = jobs.reduce(
+        (sum, j) => sum + parseFloat(j.total_cost || 0), 0
+      );
+      const rate      = total > 0 ? Math.round((confirmed / total) * 100) : null;
 
+      // Strip cards
+      _set('strip-recorded',  total);
+      _set('strip-value',     'GHS ' + value.toLocaleString('en-GH', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      }));
+      _set('strip-confirmed', confirmed);
+      _set('strip-rate',      rate !== null ? rate + '%' : '—');
+      _set('strip-rate-sub',  rate !== null
+        ? `${confirmed} of ${total} job${total !== 1 ? 's' : ''}`
+        : 'no jobs yet'
+      );
+
+      // Overview stat cards
       _set('stat-my-total',    total);
       _set('stat-my-pending',  pending);
-      _set('stat-my-complete', complete);
-      _set('meta-my-jobs',     total);
+      _set('stat-my-complete', confirmed);
 
       const badge = document.getElementById('sidebar-badge-myjobs');
       if (badge) {
@@ -814,13 +830,6 @@ let _myJobsExpanded = false;
     return String(name).split(' ').slice(0,2)
       .map(w => w[0]?.toUpperCase() || '').join('') || '?';
   }
-
-  function _setDate() {
-    _set('meta-date', new Date().toLocaleDateString('en-GB', {
-      day:'numeric', month:'short', year:'numeric',
-    }));
-  }
-
   function _timeAgo(iso) {
     if (!iso) return '—';
     const diff = Date.now() - new Date(iso).getTime();
