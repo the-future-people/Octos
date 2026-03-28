@@ -336,7 +336,7 @@ const NJ = (() => {
   }
 
   // ── Service chip selection ─────────────────────────────────
-  function _selectServiceChip(serviceId) {
+function _selectServiceChip(serviceId) {
     currentService = State.services.find(s => s.id === serviceId) || null;
     if (!currentService) return;
 
@@ -352,42 +352,85 @@ const NJ = (() => {
     const title = document.getElementById('nj-configurator-title');
     if (title) title.textContent = currentService.name;
 
-    // Apply smart defaults silently
-    const d = currentService.smart_defaults || {};
+    // Render spec template fields
+    _renderSpecFields();
 
-    // Pages defaults to 1 always
-    const pagesEl = document.getElementById('nj-pages');
-    if (pagesEl) pagesEl.value = d.pages || 1;
+    // ── Binding: inject ring size selector, hide pages ────────
+    const isBinding = currentService.name.toLowerCase().includes('binding');
+    const pagesRow  = document.getElementById('nj-pages')?.closest('.nj-field-group') ||
+                      document.getElementById('nj-pages')?.closest('.spec-field-row') ||
+                      document.getElementById('nj-pages')?.parentElement;
 
-    const setsEl = document.getElementById('nj-sets');
-    if (setsEl) setsEl.value = d.sets || 1;
+    // Remove any existing ring selector
+    document.getElementById('nj-ring-size-row')?.remove();
 
-    // Pre-fill advanced fields from smart_defaults (hidden but set)
-    const paperEl = document.getElementById('nj-paper-size');
-    if (paperEl) paperEl.value = d.paper_size || 'A4';
+    if (isBinding) {
+      // Hide pages input — binding uses sets (number of documents) only
+      if (pagesRow) pagesRow.style.display = 'none';
 
-    const colorEl = document.getElementById('nj-color-mode');
-    if (colorEl) colorEl.value = d.is_color ? 'COLOR' : 'BW';
-
-    const sidesEl = document.getElementById('nj-sides');
-    if (sidesEl) sidesEl.value = d.sides || 'SINGLE';
-
-    // Reset advanced panel to closed
-    const adv = document.getElementById('nj-advanced-fields');
-    const arr = document.getElementById('nj-advanced-arrow');
-    if (adv) adv.style.display = 'none';
-    if (arr) arr.textContent = '▶';
-
-    // Render any extra spec_template fields
-    // Instant uses smart_defaults only — no spec_template fields needed
-    if (currentType !== 'INSTANT') {
-      _renderSpecFields();
-    } else {
+      // Inject ring size selector after the configurator title
       const specFields = document.getElementById('nj-spec-fields');
-      if (specFields) specFields.innerHTML = '';
+      const ringRow = document.createElement('div');
+      ringRow.id = 'nj-ring-size-row';
+      ringRow.style.cssText = 'margin-bottom:14px;';
+      ringRow.innerHTML = `
+        <label style="font-size:11px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;">
+          Ring Size (mm)
+        </label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="nj-ring-options">
+          ${[6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36].map(mm => `
+            <button type="button"
+              data-ring="${mm}"
+              onclick="NJ._selectRing(${mm}, this)"
+              style="padding:6px 12px;border-radius:var(--radius-sm);
+                font-size:12px;font-weight:600;cursor:pointer;
+                border:1.5px solid var(--border);background:var(--bg);
+                color:var(--text-2);font-family:inherit;transition:all 0.12s;"
+              onmouseover="if(!this.classList.contains('active'))this.style.borderColor='var(--border-dark)'"
+              onmouseout="if(!this.classList.contains('active'))this.style.borderColor='var(--border)'">
+              ${mm}mm
+            </button>`).join('')}
+        </div>
+        <input type="hidden" id="nj-ring-size" value="">
+        <div id="nj-ring-error" style="display:none;font-size:11px;
+          color:var(--red-text);margin-top:6px;">Please select a ring size.</div>`;
+
+      // Insert before spec fields
+      const cfgBody = specFields?.parentElement || cfg;
+      if (specFields) {
+        cfgBody.insertBefore(ringRow, specFields);
+      } else {
+        cfgBody.appendChild(ringRow);
+      }
+    } else {
+      // Restore pages row for non-binding services
+      if (pagesRow) pagesRow.style.display = '';
     }
+
     _triggerLinePrice();
   }
+
+  // ── Ring size selection ────────────────────────────────────
+  function _selectRing(mm, btn) {
+    document.querySelectorAll('#nj-ring-options button').forEach(b => {
+      b.classList.remove('active');
+      b.style.cssText = `padding:6px 12px;border-radius:var(--radius-sm);
+        font-size:12px;font-weight:600;cursor:pointer;
+        border:1.5px solid var(--border);background:var(--bg);
+        color:var(--text-2);font-family:inherit;transition:all 0.12s;`;
+    });
+    btn.classList.add('active');
+    btn.style.cssText = `padding:6px 12px;border-radius:var(--radius-sm);
+      font-size:12px;font-weight:600;cursor:pointer;
+      border:1.5px solid var(--text);background:var(--text);
+      color:#fff;font-family:inherit;transition:all 0.12s;`;
+    const input = document.getElementById('nj-ring-size');
+    if (input) input.value = mm;
+    document.getElementById('nj-ring-error').style.display = 'none';
+  }
+
+
   // ── Line price calculation (per item being configured) ─────
   function _triggerLinePrice() {
     clearTimeout(priceTimer);
@@ -431,7 +474,16 @@ const NJ = (() => {
     if (!currentService) { _toast('Select a service first.', 'error'); return; }
     const service = currentService;
 
-    const pages      = parseInt(document.getElementById('nj-pages')?.value      || 1);
+    const isBinding  = currentService.name.toLowerCase().includes('binding');
+    const ringSize   = document.getElementById('nj-ring-size')?.value || '';
+
+    // Validate ring size for binding jobs
+    if (isBinding && !ringSize) {
+      document.getElementById('nj-ring-error').style.display = 'block';
+      return;
+    }
+
+    const pages      = isBinding ? 1 : parseInt(document.getElementById('nj-pages')?.value || 1);
     const sets       = parseInt(document.getElementById('nj-sets')?.value       || 1);
     const is_color   = document.getElementById('nj-color-mode')?.value === 'COLOR';
     const paper_size = document.getElementById('nj-paper-size')?.value  || 'A4';
@@ -472,6 +524,7 @@ const NJ = (() => {
       specifications: specs,
       unit_price,
       line_total,
+      ring_size   : ringSize ? parseInt(ringSize) : null,
     });
 
     _renderCart();
@@ -1120,6 +1173,8 @@ return {
     _openAddCustomer,
     _closeAddCustomer,
     _saveNewCustomer,
+    _selectRing,
+    _selectServiceChip,
   };
 
 })();
