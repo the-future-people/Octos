@@ -54,3 +54,5 @@ config/__pycache__/
 # Celery
 celerybeat-schedule
 celerybeat-schedule.db
+celerybeat-schedule-shm
+celerybeat-schedule-wal
