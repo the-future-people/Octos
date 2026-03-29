@@ -839,6 +839,15 @@ class PriceCalculateView(APIView):
 
         is_color = request.query_params.get('is_color', 'false').lower() == 'true'
 
+        # Conditional pricing params
+        condition_params = {}
+        ring_size   = request.query_params.get('ring_size')
+        output_mode = request.query_params.get('output_mode')
+        if ring_size:
+            condition_params['ring_size'] = int(ring_size)
+        if output_mode:
+            condition_params['output_mode'] = output_mode
+
         try:
             service = Service.objects.get(pk=service_id)
             branch  = Branch.objects.get(pk=branch_id)
@@ -848,11 +857,12 @@ class PriceCalculateView(APIView):
             return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         result = PricingEngine.get_price(
-            service  = service,
-            branch   = branch,
-            quantity = quantity,
-            is_color = is_color,
-            pages    = pages,
+            service          = service,
+            branch           = branch,
+            quantity         = quantity,
+            is_color         = is_color,
+            pages            = pages,
+            condition_params = condition_params,
         )
         return Response(result)
 

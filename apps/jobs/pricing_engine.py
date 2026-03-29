@@ -45,7 +45,8 @@ class PricingEngine:
 
         return rule
 
-    def calculate(self, quantity: int = 1, is_color: bool = False, pages: int = 1):
+    def calculate(self, quantity: int = 1, is_color: bool = False, pages: int = 1,
+                  condition_params: dict = None):
         """
         Calculate the total cost for a job.
 
@@ -67,9 +68,9 @@ class PricingEngine:
                 'total'   : Decimal('0.00'),
             }
 
-        # ── Tiered pricing takes priority ─────────────────────
+       # ── Tiered pricing takes priority ─────────────────────
         if self.rule.pricing_tiers:
-            return self._calculate_tiered(quantity, pages)
+            return self._calculate_tiered(quantity, pages, condition_params or {})
 
         # ── Standard pricing ──────────────────────────────────
         base       = self.rule.base_price
@@ -108,20 +109,23 @@ class PricingEngine:
             'pricing_source' : 'branch' if self.rule.branch else 'company_default',
         }
 
-    def _calculate_tiered(self, quantity: int, pages: int):
+    def _calculate_tiered(self, quantity: int, pages: int, condition_params: dict = None):
         """
         Calculate price using pricing_tiers on the rule.
-        Determines whether to use per-unit or flat-fee logic
-        based on the keys present in the first tier.
+        Supports two tier modes:
+        1. Quantity range tiers — matched by min/max
+        2. Conditional tiers   — matched by condition + value/range
         """
-        tiers = self.rule.pricing_tiers
-        unit  = self.service.unit
+        tiers             = self.rule.pricing_tiers
+        unit              = self.service.unit
+        condition_params  = condition_params or {}
 
-        # If pages > 1 was explicitly passed, the tier is driven by page count.
-        # This covers both page-unit services (Typing) and piece-unit services
-        # tiered by pages (Binding). Otherwise fall back to quantity.
-        qty  = pages if pages > 1 else quantity
-        tier = self._find_tier(tiers, qty)
+        # Check if tiers are conditional (have a 'condition' key)
+        if tiers and 'condition' in tiers[0]:
+            tier = self._find_conditional_tier(tiers, condition_params)
+        else:
+            qty  = pages if pages > 1 else quantity
+            tier = self._find_tier(tiers, qty)
 
         if tier is None:
             return {
@@ -179,8 +183,52 @@ class PricingEngine:
                     return tier
         return None
 
+    @staticmethod
+    def _find_conditional_tier(tiers: list, condition_params: dict) -> dict | None:
+        """
+        Find a matching tier based on a condition field and value.
+
+        Supports two conditional formats:
+        1. Exact value match:
+           {"condition": "output_mode", "value": "DIGITAL", "flat_price": 20.00}
+
+        2. Range match on a numeric param:
+           {"condition": "ring_size", "min": 6, "max": 24, "flat_price": 10.00}
+        """
+        for tier in tiers:
+            condition = tier.get('condition')
+            if not condition:
+                continue
+
+            param_value = condition_params.get(condition)
+            if param_value is None:
+                continue
+
+            # Exact value match
+            if 'value' in tier:
+                if str(param_value) == str(tier['value']):
+                    return tier
+
+            # Numeric range match
+            elif 'min' in tier:
+                try:
+                    num_val = int(param_value)
+                    min_val = tier.get('min', 0)
+                    max_val = tier.get('max')
+                    if max_val is None:
+                        if num_val >= min_val:
+                            return tier
+                    else:
+                        if min_val <= num_val <= max_val:
+                            return tier
+                except (ValueError, TypeError):
+                    continue
+
+        return None
+
     @classmethod
     def get_price(cls, service, branch, quantity: int = 1,
-                  is_color: bool = False, pages: int = 1):
+                  is_color: bool = False, pages: int = 1,
+                  condition_params: dict = None):
         """Convenience class method for quick price lookups."""
-        return cls(service, branch).calculate(quantity, is_color, pages)
+        return cls(service, branch).calculate(quantity, is_color, pages, condition_params)
