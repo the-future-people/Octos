@@ -2357,7 +2357,7 @@ win.document.write(`<!DOCTYPE html>
   }
 
 // ── Inventory pane ────────────────────────────────────────────────────
-  let _inventoryTab = 'stock';
+  let _inventoryTab = 'consumables';
 
   async function _loadInventoryPane() {
     const pane = document.getElementById('pane-inventory');
@@ -2368,7 +2368,7 @@ win.document.write(`<!DOCTYPE html>
         <span class="section-title">Inventory</span>
       </div>
       <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px;">
-        ${[['stock','Stock Levels'],['movements','Movements'],['waste','Waste Incidents']].map(([t,l]) => `
+        ${[['consumables','Consumables'],['equipment','Equipment'],['movements','Movements'],['waste','Waste Incidents']].map(([t,l]) => `
           <button class="reports-tab ${_inventoryTab===t?'active':''}" data-tab="${t}"
             onclick="Dashboard.switchInventoryTab('${t}')"
             style="padding:10px 18px;font-size:13px;">${l}</button>`).join('')}
@@ -2392,9 +2392,588 @@ win.document.write(`<!DOCTYPE html>
     const content = document.getElementById('inventory-content');
     if (!content) return;
     content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading...</div>';
-    if (tab === 'stock')     await _renderStockLevels(content);
-    if (tab === 'movements') await _renderStockMovements(content);
-    if (tab === 'waste')     await _renderWasteIncidents(content);
+    if (tab === 'consumables') await _renderStockLevels(content);
+    if (tab === 'equipment')   await _renderEquipment(content);
+    if (tab === 'movements')   await _renderStockMovements(content);
+    if (tab === 'waste')       await _renderWasteIncidents(content);
+  }
+
+  // ── Equipment tab ─────────────────────────────────────────
+  async function _renderEquipment(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/inventory/equipment/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.results || []);
+
+      const conditionBadge = c => {
+        const map = {
+          GOOD          : ['#dcfce7','#166534','Good'],
+          FAIR          : ['#fef9c3','#854d0e','Fair'],
+          NEEDS_SERVICE : ['#ffedd5','#9a3412','Needs Service'],
+          OUT_OF_SERVICE: ['#fee2e2','#991b1b','Out of Service'],
+          OVERDUE       : ['#fee2e2','#991b1b','Overdue'],
+        };
+        const [bg, color, label] = map[c] || ['#f3f4f6','#374151', c];
+        return `<span style="padding:2px 10px;border-radius:20px;font-size:11px;
+          font-weight:700;background:${bg};color:${color};">${label}</span>`;
+      };
+
+      container.innerHTML = `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+          <button onclick="Dashboard._openAddEquipment()"
+            style="padding:8px 16px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;font-family:inherit;">
+            + Add Equipment
+          </button>
+        </div>
+        ${!items.length ? `
+          <div class="loading-cell">No equipment recorded for this branch.</div>` : `
+        <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Asset</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Equipment</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:center;text-transform:uppercase;letter-spacing:0.5px;">
+                  Qty</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Condition</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Last Serviced</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Next Due</th>
+                <th style="padding:10px 14px;font-size:11px;font-weight:700;
+                  color:var(--text-3);text-align:left;text-transform:uppercase;letter-spacing:0.5px;">
+                  Location</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(eq => `
+                <tr onclick="Dashboard._openEquipmentModal(${eq.id})"
+                  style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;"
+                  onmouseover="this.style.background='var(--bg)'"
+                  onmouseout="this.style.background=''">
+                  <td style="padding:12px 14px;font-size:12px;font-weight:700;
+                    color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+                    ${eq.asset_code}</td>
+                  <td style="padding:12px 14px;">
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">
+                      ${eq.name}</div>
+                    ${eq.manufacturer ? `<div style="font-size:11px;color:var(--text-3);">
+                      ${eq.manufacturer}</div>` : ''}
+                  </td>
+                  <td style="padding:12px 14px;text-align:center;font-size:13px;
+                    color:var(--text);">${eq.quantity}</td>
+                  <td style="padding:12px 14px;">${conditionBadge(eq.service_status)}</td>
+                  <td style="padding:12px 14px;font-size:12px;color:var(--text-2);">
+                    ${eq.last_serviced || '—'}</td>
+                  <td style="padding:12px 14px;font-size:12px;color:var(--text-2);">
+                    ${eq.next_service_due || '—'}</td>
+                  <td style="padding:12px 14px;font-size:12px;color:var(--text-2);">
+                    ${eq.location || '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}`;
+
+    } catch {
+      container.innerHTML = '<div class="loading-cell">Failed to load equipment.</div>';
+    }
+  }
+
+  // ── Equipment modal ───────────────────────────────────────
+  async function _openEquipmentModal(id) {
+    try {
+      const [eqRes, logsRes] = await Promise.all([
+        Auth.fetch(`/api/v1/inventory/equipment/${id}/`),
+        Auth.fetch(`/api/v1/inventory/equipment/${id}/maintenance/`),
+      ]);
+      if (!eqRes.ok) return;
+      const eq   = await eqRes.json();
+      const logs = logsRes.ok ? await logsRes.json() : [];
+
+      const conditionBadge = c => {
+        const map = {
+          GOOD          : ['#dcfce7','#166534','Good'],
+          FAIR          : ['#fef9c3','#854d0e','Fair'],
+          NEEDS_SERVICE : ['#ffedd5','#9a3412','Needs Service'],
+          OUT_OF_SERVICE: ['#fee2e2','#991b1b','Out of Service'],
+        };
+        const [bg, color, label] = map[c] || ['#f3f4f6','#374151', c];
+        return `<span style="padding:3px 12px;border-radius:20px;font-size:12px;
+          font-weight:700;background:${bg};color:${color};">${label}</span>`;
+      };
+
+      const logTypeLabel = t => ({
+        ROUTINE:'Routine', REPAIR:'Repair', REPLACEMENT:'Replacement',
+        INSPECTION:'Inspection', OTHER:'Other'
+      }[t] || t);
+
+      // Create modal overlay
+      const overlay = document.createElement('div');
+      overlay.id = 'equipment-modal-overlay';
+      overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.5);
+        z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;`;
+      overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+      overlay.innerHTML = `
+        <div style="background:var(--panel);border-radius:var(--radius);
+          width:100%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;
+          overflow:hidden;border:1px solid var(--border);">
+
+          <!-- Header -->
+          <div style="padding:20px 24px;border-bottom:1px solid var(--border);
+            display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;">
+            <div>
+              <div style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;
+                font-family:'JetBrains Mono',monospace;">${eq.asset_code}</div>
+              <div style="font-size:18px;font-weight:700;color:var(--text);">${eq.name}</div>
+              <div style="margin-top:6px;">${conditionBadge(eq.condition)}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button onclick="Dashboard._printEquipmentQR(${eq.id}, '${eq.asset_code}')"
+                style="padding:7px 14px;font-size:12px;font-weight:600;
+                  border:1px solid var(--border);border-radius:var(--radius-sm);
+                  background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;">
+                🏷 Print QR
+              </button>
+              <button onclick="Dashboard._openAddMaintenanceLog(${eq.id})"
+                style="padding:7px 14px;font-size:12px;font-weight:600;
+                  border:none;border-radius:var(--radius-sm);
+                  background:var(--text);color:#fff;cursor:pointer;font-family:inherit;">
+                + Log Service
+              </button>
+              <button onclick="document.getElementById('equipment-modal-overlay').remove()"
+                style="padding:7px 12px;font-size:16px;border:none;background:none;
+                  cursor:pointer;color:var(--text-3);">×</button>
+            </div>
+          </div>
+
+          <!-- Scrollable body -->
+          <div style="overflow-y:auto;flex:1;padding:24px;">
+
+            <!-- Details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;">
+              ${[
+                ['Quantity',     eq.quantity],
+                ['Manufacturer', eq.manufacturer || '—'],
+                ['Model Number', eq.model_number || '—'],
+                ['Serial No.',   eq.serial_number || '—'],
+                ['Location',     eq.location || '—'],
+                ['Purchase Date',eq.purchase_date || '—'],
+                ['Purchase Price', eq.purchase_price ? `GHS ${eq.purchase_price}` : '—'],
+                ['Warranty Expiry', eq.warranty_expiry || '—'],
+                ['Last Serviced', eq.last_serviced || '—'],
+                ['Next Service Due', eq.next_service_due || '—'],
+              ].map(([label, value]) => `
+                <div style="padding:10px 14px;background:var(--bg);
+                  border-radius:var(--radius-sm);border:1px solid var(--border);">
+                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                    ${label}</div>
+                  <div style="font-size:13px;color:var(--text);font-weight:500;">
+                    ${value}</div>
+                </div>`).join('')}
+            </div>
+
+            ${eq.notes ? `
+            <div style="padding:12px 14px;background:var(--bg);border-radius:var(--radius-sm);
+              border:1px solid var(--border);margin-bottom:24px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Notes</div>
+              <div style="font-size:13px;color:var(--text-2);">${eq.notes}</div>
+            </div>` : ''}
+
+            <!-- Maintenance history -->
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;">
+              Maintenance History
+              <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">
+                ${logs.length} record${logs.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            ${!logs.length ? `
+              <div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px;
+                background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">
+                No maintenance records yet. Log the first service above.
+              </div>` : logs.map(log => `
+              <div style="padding:14px;background:var(--bg);border-radius:var(--radius-sm);
+                border:1px solid var(--border);margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                  margin-bottom:8px;">
+                  <div>
+                    <span style="font-size:12px;font-weight:700;color:var(--text);">
+                      ${logTypeLabel(log.log_type)}</span>
+                    <span style="font-size:11px;color:var(--text-3);margin-left:8px;">
+                      ${log.service_date}</span>
+                  </div>
+                  ${conditionBadge(log.condition_after)}
+                </div>
+                <div style="font-size:13px;color:var(--text-2);margin-bottom:6px;">
+                  ${log.description}</div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                  <span style="font-size:11px;color:var(--text-3);">
+                    By: <strong>${log.performed_by}</strong></span>
+                  ${log.cost ? `<span style="font-size:11px;color:var(--text-3);">
+                    Cost: <strong>GHS ${log.cost}</strong></span>` : ''}
+                  ${log.next_due ? `<span style="font-size:11px;color:var(--text-3);">
+                    Next due: <strong>${log.next_due}</strong></span>` : ''}
+                  <span style="font-size:11px;color:var(--text-3);">
+                    Logged by: ${log.logged_by_name}</span>
+                </div>
+                ${log.parts_replaced ? `<div style="font-size:11px;color:var(--text-3);
+                  margin-top:4px;">Parts replaced: ${log.parts_replaced}</div>` : ''}
+              </div>`).join('')}
+
+          </div>
+        </div>`;
+
+      document.body.appendChild(overlay);
+
+    } catch {
+      _toast('Failed to load equipment details.', 'error');
+    }
+  }
+
+  // ── Add maintenance log modal ─────────────────────────────
+  async function _openAddMaintenanceLog(equipmentId) {
+    // Remove existing if open
+    document.getElementById('maintenance-log-modal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'maintenance-log-modal';
+    modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.6);
+      z-index:1100;display:flex;align-items:center;justify-content:center;padding:24px;`;
+    modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+    modal.innerHTML = `
+      <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:520px;
+        border:1px solid var(--border);overflow:hidden;">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+          display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:16px;font-weight:700;color:var(--text);">Log Service</div>
+          <button onclick="document.getElementById('maintenance-log-modal').remove()"
+            style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3);">×</button>
+        </div>
+        <div style="padding:24px;display:flex;flex-direction:column;gap:14px;">
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Type</label>
+              <select id="ml-type" class="form-input">
+                <option value="ROUTINE">Routine Maintenance</option>
+                <option value="REPAIR">Repair</option>
+                <option value="REPLACEMENT">Part Replacement</option>
+                <option value="INSPECTION">Inspection</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Service Date</label>
+              <input type="date" id="ml-date" class="form-input"
+                value="${new Date().toISOString().split('T')[0]}">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea id="ml-description" class="form-input" rows="3"
+              placeholder="What was done? Be specific…"></textarea>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Performed By</label>
+              <input type="text" id="ml-performed-by" class="form-input"
+                placeholder="Technician or company name">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cost (GHS)</label>
+              <input type="number" id="ml-cost" class="form-input"
+                placeholder="0.00" step="0.01" min="0">
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Condition After</label>
+              <select id="ml-condition" class="form-input">
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="NEEDS_SERVICE">Needs Service</option>
+                <option value="OUT_OF_SERVICE">Out of Service</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Next Due</label>
+              <input type="date" id="ml-next-due" class="form-input">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Parts Replaced <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+            <input type="text" id="ml-parts" class="form-input"
+              placeholder="e.g. Drum unit, fuser kit">
+          </div>
+
+          <div id="ml-error" style="display:none;font-size:12px;color:var(--red-text);"></div>
+
+          <button id="ml-save-btn"
+            onclick="Dashboard._saveMaintenanceLog(${equipmentId})"
+            style="padding:10px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;">
+            Save Log
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+    document.getElementById('ml-performed-by')?.focus();
+  }
+
+  async function _saveMaintenanceLog(equipmentId) {
+    const btn         = document.getElementById('ml-save-btn');
+    const errEl       = document.getElementById('ml-error');
+    const description = document.getElementById('ml-description')?.value.trim();
+    const performedBy = document.getElementById('ml-performed-by')?.value.trim();
+    const serviceDate = document.getElementById('ml-date')?.value;
+
+    errEl.style.display = 'none';
+
+    if (!description) { errEl.textContent = 'Description is required.'; errEl.style.display = 'block'; return; }
+    if (!performedBy) { errEl.textContent = 'Performed by is required.'; errEl.style.display = 'block'; return; }
+    if (!serviceDate) { errEl.textContent = 'Service date is required.'; errEl.style.display = 'block'; return; }
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      const cost    = document.getElementById('ml-cost')?.value;
+      const nextDue = document.getElementById('ml-next-due')?.value;
+
+      const res = await Auth.fetch(`/api/v1/inventory/equipment/${equipmentId}/maintenance/`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          log_type        : document.getElementById('ml-type')?.value,
+          service_date    : serviceDate,
+          description,
+          performed_by    : performedBy,
+          cost            : cost ? parseFloat(cost) : null,
+          next_due        : nextDue || null,
+          condition_after : document.getElementById('ml-condition')?.value,
+          parts_replaced  : document.getElementById('ml-parts')?.value.trim() || '',
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        errEl.textContent   = err.detail || 'Failed to save log.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      document.getElementById('maintenance-log-modal')?.remove();
+      document.getElementById('equipment-modal-overlay')?.remove();
+      _toast('Maintenance log saved.', 'success');
+      // Reopen the equipment modal to show the new log
+      await _openEquipmentModal(equipmentId);
+
+    } catch {
+      errEl.textContent   = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save Log';
+    }
+  }
+
+  // ── Print QR code ─────────────────────────────────────────
+  function _printEquipmentQR(id, assetCode) {
+    const win = window.open('', '_blank', 'width=300,height=400');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html>
+<html><head><title>Asset Tag — ${assetCode}</title>
+<style>
+  body { font-family: monospace; text-align: center; padding: 20px; }
+  img  { width: 200px; height: 200px; display: block; margin: 0 auto 12px; }
+  h2   { font-size: 18px; margin: 0 0 4px; }
+  p    { font-size: 12px; color: #555; margin: 0; }
+  @media print { @page { margin: 8mm; } }
+</style></head>
+<body>
+  <img src="/api/v1/inventory/equipment/${id}/qr/" alt="QR Code"
+    onload="window.print()" onerror="this.alt='QR unavailable'">
+  <h2>${assetCode}</h2>
+  <p>Farhat Printing Press</p>
+  <p>Westland Branch</p>
+</body></html>`);
+    win.document.close();
+  }
+
+  // ── Add equipment modal ───────────────────────────────────
+  function _openAddEquipment() {
+    document.getElementById('add-equipment-modal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'add-equipment-modal';
+    modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.5);
+      z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;`;
+    modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+    modal.innerHTML = `
+      <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:520px;
+        border:1px solid var(--border);overflow:hidden;">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+          display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-size:16px;font-weight:700;color:var(--text);">Add Equipment</div>
+          <button onclick="document.getElementById('add-equipment-modal').remove()"
+            style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3);">×</button>
+        </div>
+        <div style="padding:24px;display:flex;flex-direction:column;gap:14px;
+          max-height:70vh;overflow-y:auto;">
+
+          <div class="form-group">
+            <label class="form-label">Equipment Name</label>
+            <input type="text" id="ae-name" class="form-input"
+              placeholder="e.g. Canon iR-ADV 5531i Printer">
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Quantity</label>
+              <input type="number" id="ae-quantity" class="form-input" value="1" min="1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Condition</label>
+              <select id="ae-condition" class="form-input">
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="NEEDS_SERVICE">Needs Service</option>
+                <option value="OUT_OF_SERVICE">Out of Service</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Manufacturer</label>
+              <input type="text" id="ae-manufacturer" class="form-input" placeholder="e.g. Canon">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Model Number</label>
+              <input type="text" id="ae-model" class="form-input" placeholder="e.g. iR-ADV 5531i">
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Serial Number</label>
+              <input type="text" id="ae-serial" class="form-input" placeholder="Optional">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Location</label>
+              <input type="text" id="ae-location" class="form-input"
+                placeholder="e.g. Front Desk">
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Purchase Date</label>
+              <input type="date" id="ae-purchase-date" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Purchase Price (GHS)</label>
+              <input type="number" id="ae-purchase-price" class="form-input"
+                placeholder="0.00" step="0.01" min="0">
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Warranty Expiry</label>
+              <input type="date" id="ae-warranty" class="form-input">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <textarea id="ae-notes" class="form-input" rows="2"
+              placeholder="Any additional notes…"></textarea>
+          </div>
+
+          <div id="ae-error" style="display:none;font-size:12px;color:var(--red-text);"></div>
+
+          <button id="ae-save-btn" onclick="Dashboard._saveEquipment()"
+            style="padding:10px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;">
+            Add Equipment
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+    document.getElementById('ae-name')?.focus();
+  }
+
+  async function _saveEquipment() {
+    const btn    = document.getElementById('ae-save-btn');
+    const errEl  = document.getElementById('ae-error');
+    const name   = document.getElementById('ae-name')?.value.trim();
+
+    errEl.style.display = 'none';
+    if (!name) { errEl.textContent = 'Equipment name is required.'; errEl.style.display = 'block'; return; }
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      const purchasePrice = document.getElementById('ae-purchase-price')?.value;
+      const res = await Auth.fetch('/api/v1/inventory/equipment/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          name            : name,
+          quantity        : parseInt(document.getElementById('ae-quantity')?.value || 1),
+          condition       : document.getElementById('ae-condition')?.value,
+          manufacturer    : document.getElementById('ae-manufacturer')?.value.trim() || '',
+          model_number    : document.getElementById('ae-model')?.value.trim() || '',
+          serial_number   : document.getElementById('ae-serial')?.value.trim() || '',
+          location        : document.getElementById('ae-location')?.value.trim() || '',
+          purchase_date   : document.getElementById('ae-purchase-date')?.value || null,
+          purchase_price  : purchasePrice ? parseFloat(purchasePrice) : null,
+          warranty_expiry : document.getElementById('ae-warranty')?.value || null,
+          notes           : document.getElementById('ae-notes')?.value.trim() || '',
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        errEl.textContent   = err.detail || 'Failed to add equipment.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      document.getElementById('add-equipment-modal')?.remove();
+      _toast('Equipment added successfully.', 'success');
+      await switchInventoryTab('equipment');
+
+    } catch {
+      errEl.textContent   = 'Network error. Please try again.';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Add Equipment';
+    }
   }
 
   async function _renderStockLevels(container) {
@@ -2804,7 +3383,7 @@ win.document.write(`<!DOCTYPE html>
       _toast(`Stock received successfully.`, 'success');
 
       // Reload inventory tab to reflect new balance
-      switchInventoryTab(document.querySelector('.inv-tab.active')?.dataset.tab || 'stock');
+      switchInventoryTab(document.querySelector('.inv-tab.active')?.dataset.tab || 'consumables');
 
     } catch {
       err.textContent   = 'Network error. Please try again.';
@@ -4751,6 +5330,12 @@ return {
     weeklyDownloadPDF,
     setServicesPeriod,
     switchInventoryTab,
+    _openEquipmentModal,
+    _openAddEquipment,
+    _openAddMaintenanceLog,
+    _saveMaintenanceLog,
+    _saveEquipment,
+    _printEquipmentQR,
     openReceiveStock,
     _validateFloatInput,
     openAddServiceModal,
