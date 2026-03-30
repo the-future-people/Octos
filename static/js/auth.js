@@ -51,7 +51,7 @@ const Auth = {
     BRANCH_MANAGER           : '/portal/dashboard/',
     CASHIER                  : '/portal/cashier/',
     ATTENDANT                : '/portal/attendant/',
-    REGIONAL_MANAGER         : '/portal/dashboard/',
+    REGIONAL_MANAGER         : '/portal/regional-manager/',
     REGIONAL_HR_COORDINATOR  : '/portal/dashboard/',
     BELT_MANAGER             : '/portal/dashboard/',
     HQ_FACTORY_MANAGER       : '/portal/dashboard/',

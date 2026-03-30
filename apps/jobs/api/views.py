@@ -1317,41 +1317,257 @@ class ServicePerformanceView(APIView):
 class JobStatsView(APIView):
     """
     GET /api/v1/jobs/stats/?daily_sheet=<id>
-    Returns aggregated stats for the sheet — never paginated.
+    Returns aggregated branch stats + personal attendant stats.
+    Personal stats require the requesting user to have jobs on the sheet.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Sum, Count
+        from django.db.models import Sum, Count, Q
+        from django.utils import timezone
+        from datetime import timedelta, date
 
         user   = request.user
         branch = getattr(user, 'branch', None)
         if not branch:
             return Response({'detail': 'No branch assigned.'}, status=400)
 
-        qs = Job.objects.filter(branch=branch)
-
         sheet_id = request.query_params.get('daily_sheet')
+
+        # ── Branch-wide stats ─────────────────────────────────
+        qs = Job.objects.filter(branch=branch)
         if sheet_id:
             qs = qs.filter(daily_sheet_id=sheet_id)
 
         totals = qs.aggregate(
-            total        = Count('id'),
-            complete     = Count('id', filter=models.Q(status='COMPLETE')),
-            in_progress  = Count('id', filter=models.Q(status='IN_PROGRESS')),
-            pending      = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
-            routed       = Count('id', filter=models.Q(is_routed=True)),
-            revenue      = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
+            total       = Count('id'),
+            complete    = Count('id', filter=models.Q(status='COMPLETE')),
+            in_progress = Count('id', filter=models.Q(status='IN_PROGRESS')),
+            pending     = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
+            routed      = Count('id', filter=models.Q(is_routed=True)),
+            revenue     = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
         )
 
-        return Response({
+        # ── Personal stats ────────────────────────────────────
+        personal = {}
+        try:
+            personal = self._personal_stats(request, user, branch, sheet_id)
+        except Exception:
+            pass  # never let personal stats break the branch stats
+
+        response = {
             'total'       : totals['total']       or 0,
             'complete'    : totals['complete']     or 0,
             'in_progress' : totals['in_progress']  or 0,
             'pending'     : totals['pending']      or 0,
             'routed'      : totals['routed']       or 0,
             'revenue'     : str(totals['revenue']  or 0),
-        })
+            'personal'    : personal,
+        }
+        return Response(response)
+
+    # ─────────────────────────────────────────────────────────
+    def _personal_stats(self, request, user, branch, sheet_id):
+        from django.db.models import Sum, Count, Q
+        from django.utils import timezone
+        from datetime import timedelta, date
+        from apps.finance.models import DailySalesSheet
+
+        today = timezone.localdate()
+        now   = timezone.now()
+
+        # ── My jobs on this sheet ─────────────────────────────
+        my_qs = Job.objects.filter(branch=branch, intake_by=user)
+        if sheet_id:
+            my_qs = my_qs.filter(daily_sheet_id=sheet_id)
+
+        my_agg = my_qs.aggregate(
+            total     = Count('id'),
+            confirmed = Count('id', filter=Q(status='COMPLETE')),
+            my_value  = Sum('estimated_cost'),
+        )
+        my_total     = my_agg['total']     or 0
+        my_confirmed = my_agg['confirmed'] or 0
+        my_value     = float(my_agg['my_value'] or 0)
+        my_rate      = round(my_confirmed / my_total * 100) if my_total else 0
+
+        # ── Sheet open time → jobs per hour ───────────────────
+        jobs_per_hour = None
+        sheet_number  = None
+        try:
+            sheet = DailySalesSheet.objects.get(pk=sheet_id) if sheet_id else \
+                    DailySalesSheet.objects.get(branch=branch, date=today)
+            sheet_number = sheet.id  # use sheet pk as number
+
+            if sheet.created_at:
+                hours_elapsed = max(
+                    (now - sheet.created_at).total_seconds() / 3600, 0.25
+                )
+                jobs_per_hour = round(my_total / hours_elapsed, 1)
+        except Exception:
+            pass
+
+        # ── Yesterday's completion rate ───────────────────────
+        yesterday_rate = None
+        try:
+            yesterday = today - timedelta(days=1)
+            ysheet    = DailySalesSheet.objects.get(branch=branch, date=yesterday)
+            y_qs      = Job.objects.filter(
+                branch=branch, intake_by=user, daily_sheet=ysheet
+            )
+            y_agg     = y_qs.aggregate(
+                total     = Count('id'),
+                confirmed = Count('id', filter=Q(status='COMPLETE')),
+            )
+            if y_agg['total']:
+                yesterday_rate = round(
+                    (y_agg['confirmed'] or 0) / y_agg['total'] * 100
+                )
+        except Exception:
+            pass
+
+        # ── Personal best (all time) ──────────────────────────
+        personal_best       = None
+        personal_best_date  = None
+        try:
+            from django.db.models.functions import TruncDate
+            daily_counts = (
+                Job.objects
+                .filter(branch=branch, intake_by=user)
+                .annotate(day=TruncDate('created_at'))
+                .values('day')
+                .annotate(count=Count('id'))
+                .order_by('-count')
+                .first()
+            )
+            if daily_counts:
+                personal_best      = daily_counts['count']
+                personal_best_date = daily_counts['day'].strftime('%-d %b')
+        except Exception:
+            pass
+
+        # ── Top service this week ─────────────────────────────
+        top_service       = None
+        top_service_count = None
+        try:
+            week_start = today - timedelta(days=today.weekday())
+            from apps.jobs.models import JobLineItem
+            top = (
+                JobLineItem.objects
+                .filter(
+                    job__branch=branch,
+                    job__intake_by=user,
+                    job__created_at__date__gte=week_start,
+                )
+                .values('service__name')
+                .annotate(cnt=Count('id'))
+                .order_by('-cnt')
+                .first()
+            )
+            if top:
+                top_service       = top['service__name']
+                top_service_count = top['cnt']
+        except Exception:
+            pass
+
+        # ── Week daily counts (Mon–today) ─────────────────────
+        week_daily_counts = []
+        try:
+            week_start = today - timedelta(days=today.weekday())
+            day_names  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+            for i in range(6):  # Mon=0 … Sat=5
+                d     = week_start + timedelta(days=i)
+                count = Job.objects.filter(
+                    branch=branch, intake_by=user,
+                    created_at__date=d,
+                ).count()
+                week_daily_counts.append({
+                    'day'     : day_names[i],
+                    'date'    : d.isoformat(),
+                    'count'   : count,
+                    'is_today': d == today,
+                    'is_future': d > today,
+                })
+        except Exception:
+            pass
+
+        # ── Streak — consecutive 100% completion days ─────────
+        streak       = 0
+        streak_days  = []
+        try:
+            day_names_short = ['M', 'T', 'W', 'T', 'F', 'S']
+            week_start      = today - timedelta(days=today.weekday())
+
+            for i in range(6):
+                d = week_start + timedelta(days=i)
+                if d > today:
+                    streak_days.append({'label': day_names_short[i], 'state': 'future'})
+                    continue
+
+                d_qs  = Job.objects.filter(
+                    branch=branch, intake_by=user, created_at__date=d
+                )
+                d_agg = d_qs.aggregate(
+                    total     = Count('id'),
+                    confirmed = Count('id', filter=Q(status='COMPLETE')),
+                )
+                d_total = d_agg['total'] or 0
+                d_conf  = d_agg['confirmed'] or 0
+                hit     = d_total > 0 and d_conf == d_total
+
+                streak_days.append({
+                    'label'   : day_names_short[i],
+                    'state'   : 'hit' if hit else ('miss' if d_total > 0 else 'empty'),
+                    'is_today': d == today,
+                })
+
+            # Count backwards from today
+            for i in range(today.weekday(), -1, -1):
+                day_entry = streak_days[i]
+                if day_entry['state'] == 'hit' or (day_entry['is_today'] and my_rate == 100):
+                    streak += 1
+                else:
+                    break
+        except Exception:
+            pass
+
+        # ── Daily target — rolling 7-day average ─────────────
+        daily_target = 10  # fallback
+        try:
+            seven_days_ago = today - timedelta(days=7)
+            past_counts    = (
+                Job.objects
+                .filter(
+                    branch=branch, intake_by=user,
+                    created_at__date__gte=seven_days_ago,
+                    created_at__date__lt=today,
+                )
+                .values('created_at__date')
+                .annotate(count=Count('id'))
+            )
+            if past_counts:
+                avg = sum(d['count'] for d in past_counts) / len(past_counts)
+                daily_target = max(int(round(avg)), 5)  # floor at 5
+        except Exception:
+            pass
+
+        return {
+            'my_total'          : my_total,
+            'my_confirmed'      : my_confirmed,
+            'my_value'          : round(my_value, 2),
+            'my_rate'           : my_rate,
+            'jobs_per_hour'     : jobs_per_hour,
+            'yesterday_rate'    : yesterday_rate,
+            'personal_best'     : personal_best,
+            'personal_best_date': personal_best_date,
+            'top_service'       : top_service,
+            'top_service_count' : top_service_count,
+            'week_daily_counts' : week_daily_counts,
+            'streak'            : streak,
+            'streak_days'       : streak_days,
+            'daily_target'      : daily_target,
+            'sheet_number'      : sheet_number,
+        }
 
 class JobHistoryView(APIView):
     """

@@ -1,7 +1,6 @@
 from django.shortcuts import render
 
 
-
 def login_view(request):
     return render(request, 'branch_manager/login.html')
 
@@ -25,3 +24,6 @@ def attendant_view(request):
 
 def belt_manager_view(request):
     return render(request, 'portals/belt_manager.html')
+
+def regional_manager_view(request):
+    return render(request, 'portals/regional_manager.html')

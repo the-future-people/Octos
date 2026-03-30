@@ -1,0 +1,224 @@
+/*
+ * Octos — Regional Manager Portal
+ * regional_manager.css
+ */
+
+/* ── Refresh label ─────────────────────────────────────── */
+.rm-refresh-label {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ── Summary strip — 4 cards ───────────────────────────── */
+.rm-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.rm-summary-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  border-top: 2px solid var(--border);
+}
+
+.rm-summary-green { border-top-color: #1D9E75; }
+.rm-summary-amber { border-top-color: #EF9F27; }
+.rm-summary-red   { border-top-color: var(--border); }
+
+.rm-summary-red-active {
+  border-top-color: #E24B4A !important;
+}
+
+.rm-summary-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.rm-summary-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.rm-summary-sub {
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+/* ── Branch grid ───────────────────────────────────────── */
+.rm-branch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.rm-branch-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.rm-branch-card:hover {
+  border-color: var(--border-dark);
+}
+
+.rm-branch-card-alert {
+  border-left: 3px solid #E24B4A;
+}
+
+.rm-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rm-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rm-card-code {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 2px;
+}
+
+/* ── Card stats row ────────────────────────────────────── */
+.rm-card-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.rm-card-stat {
+  text-align: center;
+}
+
+.rm-card-stat-val {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1;
+}
+
+.rm-card-stat-label {
+  font-size: 9.5px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 3px;
+}
+
+/* ── Sparkline ─────────────────────────────────────────── */
+.rm-sparkline-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rm-sparkline-label {
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ── Alert rows ────────────────────────────────────────── */
+.rm-alerts-block {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.rm-alert-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+}
+
+.rm-alert-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rm-alert-danger  .rm-alert-dot { background: #E24B4A; }
+.rm-alert-warning .rm-alert-dot { background: #EF9F27; }
+.rm-alert-info    .rm-alert-dot { background: #378ADD; }
+
+.rm-alert-msg {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+.rm-alert-danger  .rm-alert-msg { color: #A32D2D; }
+.rm-alert-warning .rm-alert-msg { color: #854F0B; }
+.rm-alert-info    .rm-alert-msg { color: #185FA5; }
+
+/* ── Alert badge in sidebar ────────────────────────────── */
+.rm-alert-badge {
+  background: #E24B4A !important;
+  color: #fff !important;
+}
+
+/* ── Pills ─────────────────────────────────────────────── */
+.rm-pill {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.rm-pill-green  { background: #EAF3DE; color: #3B6D11; }
+.rm-pill-amber  { background: #FAEEDA; color: #854F0B; }
+.rm-pill-muted  { background: var(--bg); color: var(--text-3); border: 1px solid var(--border); }
+.rm-pill-purple { background: #EEEDFE; color: #534AB7; }
+.rm-pill-blue   { background: #E6F1FB; color: #185FA5; }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .rm-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .rm-branch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rm-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

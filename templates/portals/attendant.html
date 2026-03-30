@@ -14,7 +14,7 @@
 
 <div class="app-shell" id="app-shell">
 
-<!-- ── Topbar ──────────────────────────────────────────── -->
+  <!-- ── Topbar ──────────────────────────────────────────── -->
   <header class="topbar">
     <div class="topbar-inner">
 
@@ -65,7 +65,7 @@
           </div>
         </div>
 
-        <!-- Profile chip with dropdown -->
+        <!-- Profile chip -->
         <div style="position:relative;">
           <button id="at-profile-btn" onclick="AtProfile.toggle()"
             style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
@@ -117,11 +117,12 @@
       </div>
     </div>
   </header>
+
   <!-- ── Body ────────────────────────────────────────────── -->
   <div class="body-layout">
 
     <!-- Sidebar -->
-<aside class="sidebar">
+    <aside class="sidebar">
       <div class="sidebar-inner">
 
         <div class="sidebar-section">Workspace</div>
@@ -174,6 +175,8 @@
           <span class="sidebar-badge" id="sidebar-badge-drafts" style="display:none;">0</span>
         </div>
 
+        <div class="sidebar-section">Branch</div>
+
         <div class="sidebar-item" data-pane="inbox" data-label="Inbox"
           onclick="Attendant.switchPane('inbox', 'Inbox')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -181,12 +184,22 @@
           <span class="sidebar-badge" id="sidebar-badge-inbox" style="display:none;">0</span>
         </div>
 
-        <div class="sidebar-section">Branch</div>
-
         <div class="sidebar-item" data-pane="services" data-label="Services"
           onclick="Attendant.switchPane('services', 'Services')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
           <span class="sidebar-label">Services</span>
+        </div>
+
+        <!-- ── Streak widget ── -->
+        <div class="sidebar-streak" id="sidebar-streak" style="display:none;">
+          <div class="streak-header">
+            <span class="streak-flame">🔥</span>
+            <div>
+              <div class="streak-count" id="streak-count">0-day streak</div>
+              <div class="streak-sub">100% completion</div>
+            </div>
+          </div>
+          <div class="streak-days" id="streak-days"></div>
         </div>
 
       </div>
@@ -206,11 +219,11 @@
           <span class="info-val" id="at-meta-date">—</span>
         </div>
         <div class="info-item">
-          <span class="info-key">Active Services</span>
-          <span class="info-val" id="at-meta-services">—</span>
+          <span class="info-key">Sheet</span>
+          <span class="info-val" id="at-meta-sheet">—</span>
         </div>
         <div class="info-item">
-          <span class="info-key">Shift Ends</span>
+          <span class="info-key">Shift ends</span>
           <span class="info-val" id="at-meta-shift-end">—</span>
         </div>
       </div>
@@ -221,44 +234,100 @@
         <!-- ── OVERVIEW ──────────────────────────────────── -->
         <div class="pane active" id="pane-overview">
 
-          <!-- Stats strip -->
-          <div class="stats-strip">
-            <div class="stats-card recorded">
-              <div class="stats-label">Jobs Recorded</div>
-              <div class="stats-amount" id="strip-recorded">0</div>
-              <div class="stats-sub">today on this sheet</div>
+          <!-- Stats strip — 5 cards -->
+          <div class="at-stats-strip">
+
+            <div class="at-stat-card at-stat-blue">
+              <div class="at-stat-label">My jobs today</div>
+              <div class="at-stat-value" id="stat-my-total">—</div>
+              <div class="at-stat-sub">on this sheet</div>
             </div>
-            <div class="stats-card value">
-              <div class="stats-label">Value Queued</div>
-              <div class="stats-amount" id="strip-value">GHS 0.00</div>
-              <div class="stats-sub">sent to cashier</div>
+
+            <div class="at-stat-card at-stat-amber">
+              <div class="at-stat-label">My value</div>
+              <div class="at-stat-value at-stat-value-sm" id="stat-my-value">GHS —</div>
+              <div class="at-stat-sub">recorded today</div>
             </div>
-            <div class="stats-card confirmed">
-              <div class="stats-label">Confirmed</div>
-              <div class="stats-amount" id="strip-confirmed">0</div>
-              <div class="stats-sub">paid by cashier</div>
+
+            <div class="at-stat-card at-stat-green">
+              <div class="at-stat-label">Confirmed paid</div>
+              <div class="at-stat-value" id="stat-my-confirmed">—</div>
+              <div class="at-stat-sub" id="stat-confirmed-sub">by cashier</div>
             </div>
-            <div class="stats-card rate">
-              <div class="stats-label">Completion Rate</div>
-              <div class="stats-amount" id="strip-rate">—</div>
-              <div class="stats-sub" id="strip-rate-sub">no jobs yet</div>
+
+            <div class="at-stat-card at-stat-purple">
+              <div class="at-stat-label">Completion rate</div>
+              <div class="at-stat-value" id="stat-my-rate">—</div>
+              <div class="at-stat-delta" id="stat-rate-delta"></div>
+            </div>
+
+            <div class="at-stat-card at-stat-teal">
+              <div class="at-stat-label">Avg per hour</div>
+              <div class="at-stat-value" id="stat-per-hour">—</div>
+              <div class="at-stat-sub">jobs / hr</div>
+            </div>
+
+          </div>
+
+          <!-- Daily target progress bar -->
+          <div class="at-progress-wrap" id="at-progress-wrap">
+            <div class="at-progress-head">
+              <span class="at-progress-title" id="at-progress-title">Daily target — —</span>
+              <span class="at-progress-meta" id="at-progress-meta"></span>
+            </div>
+            <div class="at-progress-bg">
+              <div class="at-progress-fill" id="at-progress-fill" style="width:0%"></div>
+            </div>
+            <div class="at-progress-foot">
+              <span class="at-progress-foot-label" id="at-progress-foot-label"></span>
+              <span class="at-pb-badge" id="at-pb-badge" style="display:none;"></span>
             </div>
           </div>
 
-          <div class="hero-actions">
-            <button class="hero-btn hero-btn-primary" onclick="NJ.open()">
-              <div class="hero-btn-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <!-- Action + Insights row -->
+          <div class="at-action-insights">
+
+            <!-- Actions -->
+            <div class="at-actions">
+              <button class="at-btn-new-job" onclick="NJ.open()">
+                <div class="hero-btn-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </div>
+                <span class="at-btn-new-job-label">New Job</span>
+              </button>
+              <button class="at-btn-services"
+                onclick="Attendant.switchPane('services', 'Services')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+                Browse Services
+              </button>
+            </div>
+
+            <!-- Insights panel -->
+            <div class="at-insights-panel">
+              <div class="at-insight-row" id="insight-top-service">
+                <div class="at-insight-icon at-insight-purple">★</div>
+                <div class="at-insight-text">
+                  <div class="at-insight-title">Top service this week</div>
+                  <div class="at-insight-sub" id="insight-top-service-val">Loading…</div>
+                </div>
               </div>
-              <div class="hero-btn-label">
-                <span class="hero-btn-title">New Job</span>
-                <span class="hero-btn-sub">Create an instant, production or design job</span>
+              <div class="at-insight-divider"></div>
+              <div class="at-insight-row">
+                <div class="at-insight-icon at-insight-amber">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                </div>
+                <div class="at-insight-text">
+                  <div class="at-insight-title">This week so far</div>
+                  <div class="at-insight-sub" id="insight-week-counts">Loading…</div>
+                </div>
               </div>
-            </button>
+            </div>
+
           </div>
 
+          <!-- Recent jobs -->
           <div class="section-head">
-            <span class="section-title">My Recent Jobs</span>
+            <span class="section-title">My recent jobs</span>
             <span class="section-link" style="cursor:pointer;"
               onclick="Attendant.toggleMyJobs()">View all →</span>
           </div>
@@ -300,14 +369,13 @@
         <div class="pane" id="pane-inbox">
           <div class="loading-cell"><span class="spin"></span> Loading…</div>
         </div>
+
         <!-- ── SEARCH ─────────────────────────────────────── -->
         <div class="pane" id="pane-search">
           <div class="section-head">
             <span class="section-title">Job Search</span>
             <span style="font-size:12px;color:var(--text-3);">Last 7 days · Branch-wide</span>
           </div>
-
-          <!-- Search input -->
           <div style="position:relative;margin-bottom:20px;">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
               fill="none" stroke="currentColor" stroke-width="2"
@@ -326,8 +394,6 @@
               onfocus="this.style.borderColor='var(--border-dark)'"
               onblur="this.style.borderColor='var(--border)'">
           </div>
-
-          <!-- Results -->
           <div id="search-results">
             <div style="text-align:center;padding:48px;color:var(--text-3);">
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
@@ -356,14 +422,7 @@
   </div>
 </div>
 
-
-<!-- ═══════════════════════════════════════
-     NEW JOB MODAL
-═══════════════════════════════════════ -->
 {% include "partials/new_job_modal.html" %}
-<!-- ═══════════════════════════════════════
-     JOB DETAIL MODAL
-═══════════════════════════════════════ -->
 {% include "partials/job_detail_modal.html" %}
 
 <div id="toast-container"></div>
@@ -383,7 +442,7 @@
   function closeDetailModal() {
     document.getElementById('job-detail-modal').classList.remove('open');
   }
-  // ── Attendant profile dropdown ──────────────────────────
+
   const AtProfile = (() => {
     let open = false;
     function toggle() { open ? close() : _open(); }
