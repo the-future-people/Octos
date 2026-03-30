@@ -115,6 +115,9 @@ class JobLineItemCreateSerializer(serializers.Serializer):
         default=JobLineItem.NA,
     )
     position       = serializers.IntegerField(default=0, min_value=0)
+    output_mode    = serializers.CharField(required=False, allow_null=True, default=None)
+    ring_size      = serializers.IntegerField(required=False, allow_null=True, default=None)
+    delivery       = serializers.CharField(required=False, allow_null=True, default=None)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -343,23 +346,31 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 sets  = item_data.get('sets', 1)
                 color = item_data.get('is_color', False)
 
+                condition_params = {}
+                if item_data.get('output_mode'):
+                    condition_params['output_mode'] = item_data['output_mode']
+                if item_data.get('ring_size'):
+                    condition_params['ring_size'] = item_data['ring_size']
+
                 pricing    = PricingEngine.get_price(
-                    service  = svc,
-                    branch   = branch,
-                    quantity = sets,
-                    is_color = color,
-                    pages    = pg,
+                    service          = svc,
+                    branch           = branch,
+                    quantity         = sets,
+                    is_color         = color,
+                    pages            = pg,
+                    condition_params = condition_params or None,
                 )
                 unit_price = float(pricing.get('base_price', pricing.get('total', 0))) if pricing['success'] else 0
                 line_total = float(pricing['total']) if pricing['success'] else 0
                 total     += line_total
 
                 priced_items.append({
-                    **item_data,
+                    **{k: v for k, v in item_data.items()
+                       if k not in ('output_mode', 'ring_size', 'delivery')},
                     'unit_price': unit_price,
                     'line_total': line_total,
                 })
-
+                
             # Auto-generate title from services
             names = [i['service'].name for i in priced_items]
             if len(names) == 1:

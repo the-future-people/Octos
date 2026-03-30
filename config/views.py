@@ -22,3 +22,6 @@ def cashier_view(request):
 
 def attendant_view(request):
     return render(request, 'portals/attendant.html')
+
+def belt_manager_view(request):
+    return render(request, 'portals/belt_manager.html')

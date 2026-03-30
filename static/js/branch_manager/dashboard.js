@@ -3409,6 +3409,8 @@ async function _loadReportsPane() {
           onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
         <button class="reports-tab" data-tab="filing"
           onclick="Dashboard.switchReportsTab('filing')">Weekly Filing</button>
+        <button class="reports-tab" data-tab="monthly"
+          onclick="Dashboard.switchReportsTab('monthly')">Monthly Close</button>
       </div>
 
       <div id="reports-content">
@@ -3436,6 +3438,7 @@ async function _loadReportsPane() {
 
     if (tab === 'history') await _renderHistoryReport(content);
     if (tab === 'filing')  await _renderWeeklyFiling(content);
+    if (tab === 'monthly') await _renderMonthlyClose(content);
   }
 
   // ── Sheets Archive ────────────────────────────────────────────
@@ -3670,6 +3673,255 @@ async function _loadReportsPane() {
       btn.classList.toggle('active', btn.dataset.period === period);
     });
     await _fetchServicesReport();
+  }
+
+  // ── Monthly Close ─────────────────────────────────────────
+  async function _renderMonthlyClose(container) {
+    if (!container) return;
+
+    const now   = new Date();
+    const month = now.getMonth() + 1;
+    const year  = now.getFullYear();
+
+    container.innerHTML = `<div class="loading-cell"><span class="spin"></span> Loading…</div>`;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/monthly-close/?month=${month}&year=${year}`
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      _renderMonthlyCloseDetail(container, data);
+    } catch {
+      container.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
+        Could not load monthly close.</div>`;
+    }
+  }
+
+  function _renderMonthlyCloseDetail(container, data) {
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const monthName  = monthNames[(data.month || 1) - 1];
+
+    const statusMap = {
+      OPEN      : { bg: 'var(--bg)',       text: 'var(--text-3)',     label: 'Open' },
+      SUBMITTED : { bg: 'var(--amber-bg)', text: 'var(--amber-text)', label: 'Awaiting Endorsement' },
+      ENDORSED  : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: 'Endorsed & Finalized' },
+      REJECTED  : { bg: 'var(--red-bg)',   text: 'var(--red-text)',   label: 'Rejected' },
+    };
+    const s = statusMap[data.status] || statusMap.OPEN;
+
+    const integrity  = data.integrity || {};
+    const checks     = integrity.checks || {};
+    const canSubmit  = data.can_submit && integrity.can_submit;
+
+    const checkRow = (check) => {
+      if (!check) return '';
+      const icon  = check.pass ? '✓' : '✗';
+      const color = check.pass ? 'var(--green-text)' : 'var(--red-text)';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+          border-bottom:1px solid var(--border);">
+          <span style="font-size:13px;font-weight:700;color:${color};min-width:16px;">
+            ${icon}</span>
+          <div>
+            <div style="font-size:13px;font-weight:500;color:var(--text);">
+              ${check.label}</div>
+            <div style="font-size:11px;color:var(--text-3);">${check.detail}</div>
+          </div>
+        </div>`;
+    };
+
+    const snap    = data.summary_snapshot || {};
+    const revenue = snap.revenue || {};
+    const jobs    = snap.jobs    || {};
+
+    container.innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+        padding:16px 20px;margin-bottom:16px;">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--text);">
+            ${monthName} ${data.year} Monthly Close
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:3px;">
+            End-of-month operations closure and Belt Manager endorsement
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;
+            background:${s.bg};color:${s.text};">${s.label}</span>
+          ${data.status === 'SUBMITTED' || data.status === 'ENDORSED' ? `
+            <button onclick="Dashboard._downloadMonthlyPDF(${data.id})"
+              style="padding:7px 14px;background:var(--text);color:#fff;border:none;
+                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                cursor:pointer;font-family:inherit;">
+              ↓ Download PDF
+            </button>` : ''}
+        </div>
+      </div>
+
+      ${data.status === 'REJECTED' ? `
+        <div style="background:var(--red-bg);border:1px solid var(--red-border);
+          border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;">
+          <div style="font-size:12px;font-weight:700;color:var(--red-text);margin-bottom:4px;">
+            Rejected by ${data.rejected_by || '—'}
+          </div>
+          <div style="font-size:13px;color:var(--red-text);">
+            ${data.rejection_reason || '—'}
+          </div>
+        </div>` : ''}
+
+      <!-- Integrity checks -->
+      ${data.can_submit ? `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">
+            Submission Requirements
+          </div>
+          ${checkRow(checks.last_day_of_month)}
+          ${checkRow(checks.all_sheets_closed)}
+          ${checkRow(checks.all_weekly_filed)}
+          ${checkRow(checks.no_pending_payments)}
+          ${checkRow(checks.no_unsigned_floats)}
+        </div>` : ''}
+
+      <!-- Summary snapshot (if submitted) -->
+      ${snap.revenue ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:14px 16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+              Total Collected</div>
+            <div style="font-size:20px;font-weight:800;color:var(--text);
+              font-family:'JetBrains Mono',monospace;">
+              ${_fmt(revenue.total_collected || 0)}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
+              Cash ${revenue.cash_pct || 0}% · MoMo ${revenue.momo_pct || 0}%
+            </div>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:14px 16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+              Total Jobs</div>
+            <div style="font-size:20px;font-weight:800;color:var(--text);">
+              ${jobs.total || 0}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
+              ${jobs.completion_rate || 0}% completion rate
+            </div>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:14px 16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+              Status</div>
+            <div style="font-size:14px;font-weight:700;color:${s.text};">${s.label}</div>
+            ${data.submitted_at ? `
+              <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
+                Submitted ${new Date(data.submitted_at).toLocaleDateString('en-GB',
+                  {day:'numeric',month:'short',year:'numeric'})}
+              </div>` : ''}
+          </div>
+        </div>` : ''}
+
+      <!-- BM Notes + Submit -->
+      ${data.can_submit ? `
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
+            Branch Manager Notes (optional)
+          </div>
+          <textarea id="monthly-bm-notes" rows="3"
+            placeholder="Add any observations or notes for this month…"
+            style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;resize:vertical;box-sizing:border-box;
+              font-family:'DM Sans',sans-serif;">${data.bm_notes || ''}</textarea>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button id="monthly-submit-btn"
+            onclick="Dashboard._submitMonthlyClose(${data.month}, ${data.year})"
+            ${!canSubmit ? 'disabled' : ''}
+            style="padding:10px 28px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;
+              ${!canSubmit ? 'opacity:0.4;cursor:not-allowed;' : ''}">
+            Submit for Endorsement
+          </button>
+        </div>
+        ${!canSubmit ? `
+          <div style="text-align:right;font-size:12px;color:var(--text-3);margin-top:6px;">
+            All requirements above must be met before you can submit.
+          </div>` : ''}` : ''}
+
+      ${data.status === 'ENDORSED' ? `
+        <div style="background:var(--green-bg);border:1px solid var(--green-border);
+          border-radius:var(--radius);padding:14px 16px;display:flex;
+          align-items:center;gap:10px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+            viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--green-text);">
+              Endorsed by ${data.endorsed_by || '—'}</div>
+            ${data.belt_notes ? `<div style="font-size:12px;color:var(--green-text);
+              margin-top:2px;">"${data.belt_notes}"</div>` : ''}
+          </div>
+        </div>` : ''}`;
+  }
+
+  async function _submitMonthlyClose(month, year) {
+    const btn   = document.getElementById('monthly-submit-btn');
+    const notes = document.getElementById('monthly-bm-notes')?.value.trim() || '';
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/monthly-close/submit/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ month, year, bm_notes: notes }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = Array.isArray(err.detail) ? err.detail.join(' ') : (err.detail || 'Submission failed.');
+        _toast(msg, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit for Endorsement'; }
+        return;
+      }
+
+      _toast('Monthly close submitted. Awaiting Belt Manager endorsement.', 'success');
+      const content = document.getElementById('reports-content');
+      if (content) await _renderMonthlyClose(content);
+
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit for Endorsement'; }
+    }
+  }
+
+  async function _downloadMonthlyPDF(id) {
+    try {
+      const res = await Auth.fetch(`/api/v1/finance/monthly-close/${id}/pdf/`);
+      if (!res.ok) { _toast('Could not generate PDF.', 'error'); return; }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `monthly_close_${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      _toast('Download failed.', 'error');
+    }
   }
 
  async function _renderWeeklyFiling(container) {
@@ -5328,6 +5580,9 @@ return {
     weeklyPrepare,
     weeklySubmit,
     weeklyDownloadPDF,
+    _renderMonthlyClose,
+    _submitMonthlyClose,
+    _downloadMonthlyPDF,
     setServicesPeriod,
     switchInventoryTab,
     _openEquipmentModal,

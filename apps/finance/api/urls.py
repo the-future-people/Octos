@@ -39,6 +39,12 @@ from .views import (
     WeeklyReportNotesView,
     WeeklyReportSubmitView,
     WeeklyReportPDFView,
+    MonthlyCloseStatusView,
+    MonthlyCloseSubmitView,
+    MonthlyCloseEndorseView,
+    MonthlyCloseRejectView,
+    MonthlyClosePDFView,
+    MonthlyClosePendingView,
 )
 
 
@@ -101,4 +107,12 @@ urlpatterns = [
     path('weekly/<int:pk>/notes/',              WeeklyReportNotesView.as_view(),              name='weekly-notes'),
     path('weekly/<int:pk>/submit/',             WeeklyReportSubmitView.as_view(),             name='weekly-submit'),
     path('weekly/<int:pk>/pdf/',                WeeklyReportPDFView.as_view(),                name='weekly-pdf'),
+
+    # ── Monthly Close ─────────────────────────────────────────────────────
+    path('monthly-close/',                      MonthlyCloseStatusView.as_view(),   name='monthly-close-status'),
+    path('monthly-close/submit/',               MonthlyCloseSubmitView.as_view(),   name='monthly-close-submit'),
+    path('monthly-close/pending/',              MonthlyClosePendingView.as_view(),  name='monthly-close-pending'),
+    path('monthly-close/<int:pk>/endorse/',     MonthlyCloseEndorseView.as_view(),  name='monthly-close-endorse'),
+    path('monthly-close/<int:pk>/reject/',      MonthlyCloseRejectView.as_view(),   name='monthly-close-reject'),
+    path('monthly-close/<int:pk>/pdf/',         MonthlyClosePDFView.as_view(),      name='monthly-close-pdf'),
 ]

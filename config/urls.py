@@ -3,7 +3,7 @@ from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
-from config.views import login_view, dashboard_view, inbox_view, jobs_view, cashier_view, attendant_view
+from config.views import login_view, dashboard_view, inbox_view, jobs_view, cashier_view, attendant_view, belt_manager_view
 urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/v1/analytics/',     include('apps.analytics.urls')),
     path('portal/cashier/', cashier_view, name='cashier'),
     path('portal/attendant/', attendant_view, name='attendant'),
+    path('portal/belt-manager/', belt_manager_view, name='belt-manager'),
     path('api/v1/inventory/', include('apps.inventory.api.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

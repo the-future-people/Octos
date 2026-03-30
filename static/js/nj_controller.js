@@ -1016,6 +1016,9 @@ function _resetConfigurator() {
             file_source    : item.file_source,
             specifications : item.specifications,
             position       : i,
+            output_mode    : item.output_mode  || null,
+            ring_size      : item.ring_size    || null,
+            delivery       : item.delivery     || null,
           })),
         };
         if (customer) body.customer = parseInt(customer);
