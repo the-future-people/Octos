@@ -2,7 +2,6 @@
  * Octos — Attendant Portal
  *
  * Panes: Overview, My Jobs, Branch Jobs, Drafts, Inbox, Services
- * No financial data — attendant creates jobs, cashier handles payment
  */
 
 'use strict';
@@ -25,7 +24,9 @@ const Attendant = (() => {
   // ── Boot ───────────────────────────────────────────────────
   async function init() {
     await Auth.guard(['ATTENDANT', 'BRANCH_MANAGER', 'SUPER_ADMIN']);
-    _setDate();
+    _set('at-meta-date', new Date().toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    }));
     await Promise.all([
       _loadContext(),
       _loadServicesAndCustomers(),
@@ -35,10 +36,11 @@ const Attendant = (() => {
       _loadStats(),
       _loadRecentJobs(),
       _loadDraftCount(),
+      _loadShift(),
     ]);
-  AtNotifications.startPolling();
-      WeekGreeter.init();
-    }
+    AtNotifications.startPolling();
+    WeekGreeter.init();
+  }
 
   // ── Context ────────────────────────────────────────────────
   async function _loadContext() {
@@ -57,9 +59,9 @@ const Attendant = (() => {
       if (user.branch_detail) {
         const b = user.branch_detail;
         State.branchId = b.id;
-        _set('at-branch-name', b.name || '—');
-        _set('at-branch-pill', b.name || '—');
-        _set('meta-branch',    b.name || '—');
+        _set('at-branch-name',      b.name || '—');
+        _set('at-branch-name-left', b.name || '—');
+        _set('at-meta-branch',      b.name || '—');
       }
     } catch { /* silent */ }
   }
@@ -74,32 +76,212 @@ const Attendant = (() => {
     } catch { /* silent */ }
   }
 
-  // ── Stats ──────────────────────────────────────────────────
+  // ── Shift ──────────────────────────────────────────────────
+  async function _loadShift() {
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/cashier/shift-status/');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (!data.has_shift) {
+        _set('at-meta-shift-end', 'No shift');
+        return;
+      }
+
+      const end = data.overtime_until || data.shift_end;
+      if (!end) return;
+
+      const endTime  = new Date(end);
+      const now      = new Date();
+      const diffMs   = endTime - now;
+
+      const timeStr  = endTime.toLocaleTimeString('en-GH', {
+        hour: '2-digit', minute: '2-digit', hour12: true,
+      });
+
+      // Build remaining time pill
+      let remainingHtml = '';
+      if (diffMs > 0) {
+        const totalMins = Math.floor(diffMs / 60000);
+        const hrs       = Math.floor(totalMins / 60);
+        const mins      = totalMins % 60;
+        const label     = hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
+        const pillClass = diffMs < 3600000 ? 'at-shift-pill at-shift-pill-warn' : 'at-shift-pill';
+        remainingHtml   = ` <span class="${pillClass}">${label}</span>`;
+      }
+
+      const label = data.is_overtime ? `${timeStr} (OT)` : timeStr;
+      const el    = document.getElementById('at-meta-shift-end');
+      if (el) el.innerHTML = _esc(label) + remainingHtml;
+
+    } catch { /* silent */ }
+  }
+
+  // ── Stats — single server call ─────────────────────────────
   async function _loadStats() {
     if (!_sheetId) return;
     try {
-      const res  = await Auth.fetch(
-        `/api/v1/jobs/?daily_sheet=${_sheetId}&intake_by=me&page_size=200`
-      );
+      const res  = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${_sheetId}`);
       if (!res.ok) return;
       const data = await res.json();
-      const jobs = Array.isArray(data) ? data : (data.results || []);
+      const p    = data.personal || {};
 
-      const total    = jobs.length;
-      const pending  = jobs.filter(j => j.status === 'PENDING_PAYMENT').length;
-      const complete = jobs.filter(j => j.status === 'COMPLETE').length;
+      _renderStatsStrip(p);
+      _renderProgressBar(p);
+      _renderInsightsPanel(p);
+      _renderStreakWidget(p);
+      _renderSheetNumber(p);
 
-      _set('stat-my-total',    total);
-      _set('stat-my-pending',  pending);
-      _set('stat-my-complete', complete);
-      _set('meta-my-jobs',     total);
-
+      // Sidebar my-jobs badge
       const badge = document.getElementById('sidebar-badge-myjobs');
       if (badge) {
-        badge.textContent   = total;
-        badge.style.display = total > 0 ? 'flex' : 'none';
+        const total             = p.my_total || 0;
+        badge.textContent       = total;
+        badge.style.display     = total > 0 ? 'flex' : 'none';
       }
+
     } catch { /* silent */ }
+  }
+
+  // ── Render: stats strip ────────────────────────────────────
+  function _renderStatsStrip(p) {
+    _set('stat-my-total',     p.my_total     ?? '—');
+    _set('stat-my-confirmed', p.my_confirmed ?? '—');
+    _set('stat-per-hour',     p.jobs_per_hour != null ? p.jobs_per_hour : '—');
+
+    // My value — GHS formatted
+    const valEl = document.getElementById('stat-my-value');
+    if (valEl) {
+      valEl.textContent = p.my_value != null
+        ? 'GHS ' + Number(p.my_value).toLocaleString('en-GH', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+          })
+        : 'GHS —';
+    }
+
+    // Completion rate + delta
+    _set('stat-my-rate', p.my_rate != null ? p.my_rate + '%' : '—');
+    const deltaEl = document.getElementById('stat-rate-delta');
+    if (deltaEl) {
+      if (p.yesterday_rate != null && p.my_rate != null) {
+        const diff = p.my_rate - p.yesterday_rate;
+        if (diff > 0) {
+          deltaEl.textContent  = `↑ vs ${p.yesterday_rate}% yesterday`;
+          deltaEl.className    = 'at-stat-delta at-delta-up';
+        } else if (diff < 0) {
+          deltaEl.textContent  = `↓ vs ${p.yesterday_rate}% yesterday`;
+          deltaEl.className    = 'at-stat-delta at-delta-down';
+        } else {
+          deltaEl.textContent  = `= ${p.yesterday_rate}% yesterday`;
+          deltaEl.className    = 'at-stat-delta';
+        }
+      } else {
+        deltaEl.textContent = 'no data yet';
+        deltaEl.className   = 'at-stat-delta';
+      }
+    }
+
+    // Confirmed sub label
+    const subEl = document.getElementById('stat-confirmed-sub');
+    if (subEl && p.my_total > 0) {
+      const pending = p.my_total - (p.my_confirmed || 0);
+      subEl.textContent = pending > 0
+        ? `${pending} pending cashier`
+        : 'all cleared ✓';
+    }
+  }
+
+  // ── Render: progress bar ───────────────────────────────────
+  function _renderProgressBar(p) {
+    const wrap = document.getElementById('at-progress-wrap');
+    if (!wrap) return;
+
+    const total   = p.my_total    || 0;
+    const target  = p.daily_target || 10;
+    const pct     = Math.min(Math.round((total / target) * 100), 100);
+    const done    = total >= target;
+
+    _set('at-progress-title', `Daily target — ${target} jobs`);
+    _set('at-progress-meta',  `${total} of ${target} done`);
+
+    const fill = document.getElementById('at-progress-fill');
+    if (fill) {
+      fill.style.width      = pct + '%';
+      fill.style.background = done ? 'var(--green, #1D9E75)' : '';
+    }
+
+    const footEl = document.getElementById('at-progress-foot-label');
+    if (footEl) {
+      if (done) {
+        footEl.textContent = '🎯 Target reached!';
+      } else {
+        const rem = target - total;
+        footEl.textContent = `${rem} more to hit target`;
+      }
+    }
+
+    // Personal best pill
+    const pbEl = document.getElementById('at-pb-badge');
+    if (pbEl && p.personal_best) {
+      pbEl.textContent    = `Personal best: ${p.personal_best} jobs — ${p.personal_best_date || ''}`;
+      pbEl.style.display  = 'inline-block';
+    }
+  }
+
+  // ── Render: insights panel ─────────────────────────────────
+  function _renderInsightsPanel(p) {
+    // Top service
+    const topEl = document.getElementById('insight-top-service-val');
+    if (topEl) {
+      topEl.textContent = p.top_service
+        ? `${p.top_service} — ${p.top_service_count} job${p.top_service_count !== 1 ? 's' : ''}`
+        : 'No data yet this week';
+    }
+
+    // Week daily counts
+    const weekEl = document.getElementById('insight-week-counts');
+    if (weekEl && p.week_daily_counts && p.week_daily_counts.length) {
+      weekEl.textContent = p.week_daily_counts
+        .filter(d => !d.is_future)
+        .map(d => `${d.day} ${d.count}`)
+        .join(' · ') || 'No jobs this week yet';
+    }
+  }
+
+  // ── Render: streak widget ──────────────────────────────────
+  function _renderStreakWidget(p) {
+    const wrap = document.getElementById('sidebar-streak');
+    if (!wrap) return;
+
+    const streak     = p.streak     || 0;
+    const streakDays = p.streak_days || [];
+
+    // Only show if they've worked at least one day this week
+    const hasActivity = streakDays.some(d => d.state !== 'future' && d.state !== 'empty');
+    if (!hasActivity) return;
+
+    wrap.style.display = 'block';
+    _set('streak-count', streak > 0 ? `${streak}-day streak` : 'Keep going!');
+
+    const daysEl = document.getElementById('streak-days');
+    if (daysEl) {
+      daysEl.innerHTML = streakDays.map(d => {
+        let cls = 'streak-day';
+        if (d.state === 'hit')    cls += ' streak-hit';
+        if (d.state === 'miss')   cls += ' streak-miss';
+        if (d.state === 'empty')  cls += ' streak-empty';
+        if (d.state === 'future') cls += ' streak-future';
+        if (d.is_today)           cls += ' streak-today';
+        return `<div class="${cls}" title="${d.label}">${_esc(d.label)}</div>`;
+      }).join('');
+    }
+  }
+
+  // ── Render: sheet number ───────────────────────────────────
+  function _renderSheetNumber(p) {
+    const el = document.getElementById('at-meta-sheet');
+    if (!el) return;
+    el.textContent = p.sheet_number ? `#${p.sheet_number}` : (_sheetId ? `#${_sheetId}` : '—');
   }
 
   async function _loadDraftCount() {
@@ -109,8 +291,6 @@ const Attendant = (() => {
       const data   = await res.json();
       const drafts = Array.isArray(data) ? data : (data.results || []);
 
-      _set('stat-my-drafts', drafts.length);
-
       const badge = document.getElementById('sidebar-badge-drafts');
       if (badge) {
         badge.textContent   = drafts.length;
@@ -119,7 +299,7 @@ const Attendant = (() => {
     } catch { /* silent */ }
   }
 
-  // ── Recent jobs (overview) ─────────────────────────────────
+  // ── Recent jobs (overview table) ───────────────────────────
   async function _loadRecentJobs() {
     const tbody = document.getElementById('recent-jobs-tbody');
     if (!tbody || !_sheetId) return;
@@ -154,17 +334,13 @@ const Attendant = (() => {
   }
 
   // ── Pane switching ─────────────────────────────────────────
-let _myJobsExpanded = false;
+  let _myJobsExpanded = false;
 
   function toggleMyJobs() {
     _myJobsExpanded = !_myJobsExpanded;
     const subnav = document.getElementById('myjobs-subnav');
     if (subnav) subnav.style.display = _myJobsExpanded ? 'block' : 'none';
-
-    // If expanding, auto-navigate to Today's Jobs
-    if (_myJobsExpanded) {
-      switchPane('my-jobs-today', "Today's Jobs");
-    }
+    if (_myJobsExpanded) switchPane('my-jobs-today', "Today's Jobs");
   }
 
   function switchPane(paneId, label) {
@@ -185,6 +361,7 @@ let _myJobsExpanded = false;
       setTimeout(() => document.getElementById('search-input')?.focus(), 50);
     }
   }
+
   // ── My Jobs pane ───────────────────────────────────────────
   async function _loadMyJobsPane() {
     _myJobsLoaded = true;
@@ -200,11 +377,7 @@ let _myJobsExpanded = false;
         <table class="p-table">
           <thead>
             <tr>
-              <th>Job</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Customer</th>
-              <th>Created</th>
+              <th>Job</th><th>Type</th><th>Status</th><th>Customer</th><th>Created</th>
             </tr>
           </thead>
           <tbody id="my-jobs-tbody">
@@ -251,7 +424,7 @@ let _myJobsExpanded = false;
     }
   }
 
-  // ── Branch Jobs pane (status only — no cost/customer) ──────
+  // ── Branch Jobs pane ───────────────────────────────────────
   async function _loadBranchJobsPane() {
     _branchLoaded = true;
     const pane = document.getElementById('pane-branch-jobs');
@@ -267,11 +440,7 @@ let _myJobsExpanded = false;
         <table class="p-table">
           <thead>
             <tr>
-              <th>Job Ref</th>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th>Job Ref</th><th>Title</th><th>Type</th><th>Status</th><th>Created</th>
             </tr>
           </thead>
           <tbody id="branch-jobs-tbody">
@@ -326,12 +495,8 @@ let _myJobsExpanded = false;
     if (!pane) return;
 
     pane.innerHTML = `
-      <div class="section-head">
-        <span class="section-title">Saved Drafts</span>
-      </div>
-      <div id="drafts-list">
-        <div class="loading-cell"><span class="spin"></span> Loading…</div>
-      </div>`;
+      <div class="section-head"><span class="section-title">Saved Drafts</span></div>
+      <div id="drafts-list"><div class="loading-cell"><span class="spin"></span> Loading…</div></div>`;
 
     try {
       const res    = await Auth.fetch('/api/v1/jobs/drafts/');
@@ -344,7 +509,8 @@ let _myJobsExpanded = false;
         el.innerHTML = `
           <div style="text-align:center;padding:48px;color:var(--text-3);">
             <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px;opacity:0.4;">
+              fill="none" stroke="currentColor" stroke-width="1.5"
+              style="margin-bottom:12px;opacity:0.4;">
               <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
             <div style="font-size:13px;">No saved drafts.</div>
@@ -363,7 +529,6 @@ let _myJobsExpanded = false;
             <div style="font-size:12px;color:var(--text-3);">
               ${_esc(d.job_number)} ·
               ${d.line_items?.length || 0} item${d.line_items?.length !== 1 ? 's' : ''} ·
-              GHS ${parseFloat(d.estimated_cost || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })} ·
               Expires ${_timeAgo(d.expires_at)}
             </div>
           </div>
@@ -371,15 +536,11 @@ let _myJobsExpanded = false;
             <button onclick="Attendant.resumeDraft(${d.id})"
               style="padding:7px 16px;background:var(--text);color:#fff;border:none;
                      border-radius:var(--radius-sm);font-size:12px;font-weight:700;
-                     cursor:pointer;font-family:inherit;">
-              Resume
-            </button>
+                     cursor:pointer;font-family:inherit;">Resume</button>
             <button onclick="Attendant.discardDraft(${d.id})"
               style="padding:7px 12px;background:none;border:1px solid var(--border);
                      border-radius:var(--radius-sm);font-size:12px;color:var(--text-3);
-                     cursor:pointer;font-family:inherit;">
-              Discard
-            </button>
+                     cursor:pointer;font-family:inherit;">Discard</button>
           </div>
         </div>`).join('');
     } catch {
@@ -397,11 +558,9 @@ let _myJobsExpanded = false;
         .find(d => d.id === draftId);
       if (!draft) return;
 
-      // Restore cart in NJ controller
       NJ.open();
       NJ.setType('INSTANT');
 
-      // Wait for UI to render then populate cart
       setTimeout(() => {
         if (draft.line_items?.length) {
           draft.line_items.forEach(item => {
@@ -447,9 +606,7 @@ let _myJobsExpanded = false;
     if (!pane) return;
 
     pane.innerHTML = `
-      <div class="section-head">
-        <span class="section-title">Inbox</span>
-      </div>
+      <div class="section-head"><span class="section-title">Inbox</span></div>
       <div class="reports-tabs" id="inbox-channel-tabs">
         <button class="reports-tab active" data-channel="WHATSAPP"
           onclick="Attendant.switchInboxChannel('WHATSAPP')">
@@ -673,7 +830,6 @@ let _myJobsExpanded = false;
       if (svcRes.ok) {
         const data = await svcRes.json();
         _services = Array.isArray(data) ? data : (data.results || []);
-        _set('meta-services', _services.length);
         if (typeof State !== 'undefined') State.services = _services;
       }
       if (custRes.ok) {
@@ -794,6 +950,94 @@ let _myJobsExpanded = false;
     Promise.all([_loadStats(), _loadRecentJobs(), _loadDraftCount()]);
   }
 
+  // ── Job Search ─────────────────────────────────────────────
+  let _searchTimer = null;
+
+  function onSearchInput(query) {
+    clearTimeout(_searchTimer);
+    const results = document.getElementById('search-results');
+
+    if (!query.trim()) {
+      results.innerHTML = `
+        <div style="text-align:center;padding:48px;color:var(--text-3);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="1.5"
+            style="margin-bottom:12px;opacity:0.3;">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <div style="font-size:13px;">Type to search jobs from the last 7 days</div>
+        </div>`;
+      return;
+    }
+
+    results.innerHTML = `<div class="loading-cell"><span class="spin"></span> Searching…</div>`;
+    _searchTimer = setTimeout(() => _runSearch(query.trim()), 350);
+  }
+
+  async function _runSearch(query) {
+    const results = document.getElementById('search-results');
+    try {
+      const res  = await Auth.fetch(
+        `/api/v1/jobs/?period=week&search=${encodeURIComponent(query)}&page_size=50`
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const jobs = Array.isArray(data) ? data : (data.results || []);
+
+      if (!jobs.length) {
+        results.innerHTML = `
+          <div style="text-align:center;padding:48px;color:var(--text-3);">
+            <div style="font-size:24px;margin-bottom:8px;">🔍</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-2);">
+              No jobs found for "${_esc(query)}"
+            </div>
+            <div style="font-size:12px;margin-top:4px;">
+              Try a different job number, title or customer name
+            </div>
+          </div>`;
+        return;
+      }
+
+      results.innerHTML = `
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:12px;">
+          ${jobs.length} result${jobs.length !== 1 ? 's' : ''} for
+          "<strong style="color:var(--text-2);">${_esc(query)}</strong>"
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th>Job</th><th>Type</th><th>Status</th><th>Recorded By</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${jobs.map(j => `
+                <tr onclick="Attendant.openDetail(${j.id})" style="cursor:pointer;">
+                  <td>
+                    <div class="td-job-title">${_esc(j.title || '—')}</div>
+                    <div class="td-job-ref">${_esc(j.job_number || '#' + j.id)}</div>
+                  </td>
+                  <td>${_typeBadge(j.job_type)}</td>
+                  <td>${_statusBadge(j.status)}</td>
+                  <td style="font-size:12px;color:var(--text-3);">${_esc(j.intake_by_name || '—')}</td>
+                  <td style="font-size:12px;color:var(--text-3);">
+                    ${j.created_at ? new Date(j.created_at).toLocaleDateString('en-GB', {
+                      day:'numeric', month:'short', year:'numeric'
+                    }) : '—'}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch {
+      results.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Search failed. Please try again.
+        </div>`;
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────
   function _set(id, val) {
     const el = document.getElementById(id);
@@ -813,12 +1057,6 @@ let _myJobsExpanded = false;
   function _initials(name) {
     return String(name).split(' ').slice(0,2)
       .map(w => w[0]?.toUpperCase() || '').join('') || '?';
-  }
-
-  function _setDate() {
-    _set('meta-date', new Date().toLocaleDateString('en-GB', {
-      day:'numeric', month:'short', year:'numeric',
-    }));
   }
 
   function _timeAgo(iso) {
@@ -862,103 +1100,9 @@ let _myJobsExpanded = false;
     container.appendChild(el);
     setTimeout(() => el.remove(), 3500);
   }
-  // ── Job Search ─────────────────────────────────────────────
-  let _searchTimer = null;
-
-  function onSearchInput(query) {
-    clearTimeout(_searchTimer);
-    const results = document.getElementById('search-results');
-
-    if (!query.trim()) {
-      results.innerHTML = `
-        <div style="text-align:center;padding:48px;color:var(--text-3);">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="1.5"
-            style="margin-bottom:12px;opacity:0.3;">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <div style="font-size:13px;">Type to search jobs from the last 7 days</div>
-        </div>`;
-      return;
-    }
-
-    results.innerHTML = `<div class="loading-cell"><span class="spin"></span> Searching…</div>`;
-
-    _searchTimer = setTimeout(() => _runSearch(query.trim()), 350);
-  }
-
-  async function _runSearch(query) {
-    const results = document.getElementById('search-results');
-    try {
-      const res  = await Auth.fetch(
-        `/api/v1/jobs/?period=week&search=${encodeURIComponent(query)}&page_size=50`
-      );
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      const jobs = Array.isArray(data) ? data : (data.results || []);
-
-      if (!jobs.length) {
-        results.innerHTML = `
-          <div style="text-align:center;padding:48px;color:var(--text-3);">
-            <div style="font-size:24px;margin-bottom:8px;">🔍</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text-2);">
-              No jobs found for "${_esc(query)}"
-            </div>
-            <div style="font-size:12px;margin-top:4px;">
-              Try a different job number, title or customer name
-            </div>
-          </div>`;
-        return;
-      }
-
-      results.innerHTML = `
-        <div style="font-size:12px;color:var(--text-3);margin-bottom:12px;">
-          ${jobs.length} result${jobs.length !== 1 ? 's' : ''} for
-          "<strong style="color:var(--text-2);">${_esc(query)}</strong>"
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Recorded By</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${jobs.map(j => `
-                <tr onclick="Attendant.openDetail(${j.id})" style="cursor:pointer;">
-                  <td>
-                    <div class="td-job-title">${_esc(j.title || '—')}</div>
-                    <div class="td-job-ref">${_esc(j.job_number || '#' + j.id)}</div>
-                  </td>
-                  <td>${_typeBadge(j.job_type)}</td>
-                  <td>${_statusBadge(j.status)}</td>
-                  <td style="font-size:12px;color:var(--text-3);">
-                    ${_esc(j.intake_by_name || '—')}
-                  </td>
-                  <td style="font-size:12px;color:var(--text-3);">
-                    ${j.created_at ? new Date(j.created_at).toLocaleDateString('en-GB', {
-                      day:'numeric', month:'short', year:'numeric'
-                    }) : '—'}
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch {
-      results.innerHTML = `
-        <div class="loading-cell" style="color:var(--red-text);">
-          Search failed. Please try again.
-        </div>`;
-    }
-  }
 
   // ── Public API ─────────────────────────────────────────────
-return {
+  return {
     init,
     switchPane,
     toggleMyJobs,
@@ -1008,6 +1152,12 @@ const AtNotifications = (() => {
     } catch {
       list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>';
     }
+  }
+
+  function _esc(str) {
+    return String(str ?? '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   async function loadCount() {
@@ -1060,12 +1210,6 @@ const AtNotifications = (() => {
   function startPolling(ms = 30000) {
     loadCount();
     setInterval(loadCount, ms);
-  }
-
-  function _esc(str) {
-    return String(str ?? '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   return { toggle, close, markRead, markAllRead, loadCount, startPolling };

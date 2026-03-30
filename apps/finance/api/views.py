@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
 
 from apps.finance.models import (
     DailySalesSheet,
@@ -20,6 +21,8 @@ from apps.finance.models.invoice import Invoice
 from apps.finance.sheet_engine import SheetEngine
 from apps.finance.receipt_engine import ReceiptEngine
 from apps.finance.credit_engine import CreditEngine
+from apps.finance.models import MonthlyClose
+from apps.finance.monthly_close_engine import MonthlyCloseEngine
 
 from .serializers import (
     DailySalesSheetListSerializer,
@@ -860,7 +863,9 @@ class ReceiptDetailView(generics.RetrieveAPIView):
     """
     serializer_class   = ReceiptSerializer
     permission_classes = [IsAuthenticated]
-    queryset           = Receipt.objects.select_related('job', 'cashier')
+    queryset = Receipt.objects.select_related(
+        'job', 'job__intake_by', 'cashier'
+    ).prefetch_related('job__line_items__service')
 
 
 class ReceiptSendWhatsAppView(APIView):
@@ -914,6 +919,45 @@ class ReceiptThermalView(APIView):
         text   = engine.format_thermal(receipt)
 
         return Response({'text': text})
+
+class ReceiptListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/receipts/
+    Branch-scoped receipt list. Optional ?period=day|week|month filter.
+    """
+    serializer_class   = ReceiptSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.finance.models import Receipt
+
+        branch = getattr(self.request.user, 'branch', None)
+        if not branch:
+            return Receipt.objects.none()
+
+        qs = Receipt.objects.select_related(
+            'job', 'job__intake_by', 'cashier', 'daily_sheet'
+        ).prefetch_related(
+            'job__line_items__service'
+        ).filter(
+            daily_sheet__branch=branch
+        ).order_by('-created_at')
+
+        period = self.request.query_params.get('period')
+        now    = timezone.now()
+        since  = {
+            'day'  : now - timedelta(days=1),
+            'week' : now - timedelta(weeks=1),
+            'month': now - timedelta(days=30),
+        }.get(period)
+
+        if since:
+            qs = qs.filter(created_at__gte=since)
+
+        return qs
+
 
 class CashierReceiptListView(generics.ListAPIView):
     """
@@ -2761,3 +2805,207 @@ class WeeklyReportPDFView(APIView):
             f'attachment; filename="weekly_{report.branch.code}_W{report.week_number}_{report.year}.pdf"'
         )
         return response
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Monthly Close
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MonthlyCloseStatusView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/?month=3&year=2026
+    Returns the monthly close record + integrity check status.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            month = int(request.query_params.get('month', timezone.localdate().month))
+            year  = int(request.query_params.get('year',  timezone.localdate().year))
+        except ValueError:
+            return Response({'detail': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine    = MonthlyCloseEngine(branch, month, year)
+        close, _  = engine.get_or_create()
+        integrity = engine.check_integrity()
+
+        return Response({
+            'id'               : close.pk,
+            'month'            : close.month,
+            'year'             : close.year,
+            'month_name'       : close.month_name,
+            'status'           : close.status,
+            'can_submit'       : close.can_submit,
+            'can_endorse'      : close.can_endorse,
+            'can_reject'       : close.can_reject,
+            'is_locked'        : close.is_locked,
+            'integrity'        : integrity,
+            'submitted_by'     : close.submitted_by.full_name if close.submitted_by else None,
+            'submitted_at'     : close.submitted_at.isoformat() if close.submitted_at else None,
+            'endorsed_by'      : close.endorsed_by.full_name if close.endorsed_by else None,
+            'endorsed_at'      : close.endorsed_at.isoformat() if close.endorsed_at else None,
+            'rejected_by'      : close.rejected_by.full_name if close.rejected_by else None,
+            'rejected_at'      : close.rejected_at.isoformat() if close.rejected_at else None,
+            'rejection_reason' : close.rejection_reason,
+            'bm_notes'         : close.bm_notes,
+            'belt_notes'       : close.belt_notes,
+            'summary_snapshot' : close.summary_snapshot,
+        })
+
+
+class MonthlyCloseSubmitView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/submit/
+    BM submits the monthly close.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.utils import timezone
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        today = timezone.localdate()
+        month = request.data.get('month', today.month)
+        year  = request.data.get('year',  today.year)
+        notes = request.data.get('bm_notes', '')
+
+        engine = MonthlyCloseEngine(branch, int(month), int(year))
+        close, errors = engine.submit(request.user, notes)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'          : close.pk,
+            'status'      : close.status,
+            'submitted_at': close.submitted_at.isoformat(),
+            'message'     : f"{close.month_name} {close.year} submitted successfully. Awaiting Belt Manager endorsement.",
+        })
+
+
+class MonthlyCloseEndorseView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/endorse/
+    Belt Manager endorses the monthly close.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        notes  = request.data.get('belt_notes', '')
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.endorse(request.user, notes)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'         : close.pk,
+            'status'     : close.status,
+            'endorsed_at': close.endorsed_at.isoformat(),
+            'message'    : f"{close.month_name} {close.year} endorsed and finalized.",
+        })
+
+
+class MonthlyCloseRejectView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/reject/
+    Belt Manager rejects the monthly close.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({'detail': 'Rejection reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.reject(request.user, reason)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'         : close.pk,
+            'status'     : close.status,
+            'rejected_at': close.rejected_at.isoformat(),
+            'message'    : 'Monthly close rejected. BM has been notified.',
+        })
+
+
+class MonthlyClosePDFView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/<id>/pdf/
+    Generate and download the monthly close PDF.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not close.summary_snapshot:
+            return Response(
+                {'detail': 'No snapshot available — monthly close has not been submitted yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.http import HttpResponse
+        engine   = MonthlyCloseEngine(close.branch, close.month, close.year)
+        pdf_bytes = engine.generate_pdf(close)
+
+        import calendar
+        filename = f"monthly_close_{close.branch.code}_{calendar.month_name[close.month]}_{close.year}.pdf"
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+class MonthlyClosePendingView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/pending/
+    Belt Manager: list all monthly closes awaiting endorsement.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        pending = MonthlyClose.objects.filter(
+            status = MonthlyClose.Status.SUBMITTED,
+        ).select_related('branch', 'submitted_by').order_by('-year', '-month')
+
+        data = [
+            {
+                'id'          : c.pk,
+                'branch'      : c.branch.name,
+                'branch_code' : c.branch.code,
+                'month'       : c.month,
+                'year'        : c.year,
+                'month_name'  : c.month_name,
+                'submitted_by': c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at': c.submitted_at.isoformat() if c.submitted_at else None,
+                'bm_notes'    : c.bm_notes,
+                'total_collected': str(
+                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
+                ),
+                'total_jobs'  : c.summary_snapshot.get('jobs', {}).get('total', 0),
+            }
+            for c in pending
+        ]
+        return Response(data)

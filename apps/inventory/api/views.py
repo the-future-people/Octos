@@ -3,6 +3,17 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from apps.inventory.models import (
+    ConsumableItem, BranchStock, StockMovement, WasteIncident,
+    BranchEquipment, MaintenanceLog,
+)
+from .serializers import (
+    BranchStockSerializer, StockMovementSerializer,
+    WasteIncidentSerializer, ReceiveStockSerializer,
+    WasteIncidentCreateSerializer,
+    BranchEquipmentSerializer, BranchEquipmentCreateSerializer,
+    MaintenanceLogSerializer, MaintenanceLogCreateSerializer,
+)
 
 from apps.inventory.models import (
     ConsumableItem, BranchStock, StockMovement, WasteIncident,
@@ -26,6 +37,8 @@ class BranchStockListView(generics.ListAPIView):
             return BranchStock.objects.none()
         return BranchStock.objects.filter(
             branch = branch,
+        ).exclude(
+            consumable__category__name = 'Machinery',
         ).select_related(
             'consumable', 'consumable__category'
         ).order_by('consumable__category__name', 'consumable__paper_size', 'consumable__name')
@@ -152,3 +165,191 @@ class WasteIncidentCreateView(APIView):
             WasteIncidentSerializer(incident).data,
             status=status.HTTP_201_CREATED,
         )
+
+class BranchEquipmentListView(APIView):
+    """GET /api/v1/inventory/equipment/ — list all equipment for branch"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response([], status=status.HTTP_200_OK)
+        equipment = BranchEquipment.objects.filter(
+            branch    = branch,
+            is_active = True,
+        ).prefetch_related('maintenance_logs').order_by('name')
+        return Response(BranchEquipmentSerializer(equipment, many=True).data)
+
+    def post(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = BranchEquipmentCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d = serializer.validated_data
+        equipment = BranchEquipment.objects.create(
+            branch          = branch,
+            name            = d['name'],
+            quantity        = d.get('quantity', 1),
+            condition       = d.get('condition', 'GOOD'),
+            serial_number   = d.get('serial_number', ''),
+            model_number    = d.get('model_number', ''),
+            manufacturer    = d.get('manufacturer', ''),
+            purchase_date   = d.get('purchase_date'),
+            purchase_price  = d.get('purchase_price'),
+            warranty_expiry = d.get('warranty_expiry'),
+            location        = d.get('location', ''),
+            notes           = d.get('notes', ''),
+        )
+        return Response(
+            BranchEquipmentSerializer(equipment).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BranchEquipmentDetailView(APIView):
+    """GET/PATCH /api/v1/inventory/equipment/<id>/"""
+    permission_classes = [IsAuthenticated]
+
+    def _get_equipment(self, pk, branch):
+        try:
+            return BranchEquipment.objects.prefetch_related(
+                'maintenance_logs'
+            ).get(pk=pk, branch=branch)
+        except BranchEquipment.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        branch = getattr(request.user, 'branch', None)
+        equipment = self._get_equipment(pk, branch)
+        if not equipment:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(BranchEquipmentSerializer(equipment).data)
+
+    def patch(self, request, pk):
+        branch = getattr(request.user, 'branch', None)
+        equipment = self._get_equipment(pk, branch)
+        if not equipment:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        allowed = ['condition', 'quantity', 'location', 'notes',
+                   'serial_number', 'model_number', 'manufacturer',
+                   'purchase_date', 'purchase_price', 'warranty_expiry',
+                   'next_service_due', 'is_active']
+        for field in allowed:
+            if field in request.data:
+                setattr(equipment, field, request.data[field])
+        equipment.save()
+        return Response(BranchEquipmentSerializer(equipment).data)
+
+
+class MaintenanceLogListView(APIView):
+    """
+    GET  /api/v1/inventory/equipment/<id>/maintenance/ — list logs
+    POST /api/v1/inventory/equipment/<id>/maintenance/ — add log
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_equipment(self, pk, branch):
+        try:
+            return BranchEquipment.objects.get(pk=pk, branch=branch)
+        except BranchEquipment.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        branch = getattr(request.user, 'branch', None)
+        equipment = self._get_equipment(pk, branch)
+        if not equipment:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        logs = equipment.maintenance_logs.select_related('logged_by').all()
+        return Response(MaintenanceLogSerializer(logs, many=True).data)
+
+    def post(self, request, pk):
+        branch = getattr(request.user, 'branch', None)
+        equipment = self._get_equipment(pk, branch)
+        if not equipment:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = MaintenanceLogCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d = serializer.validated_data
+        log = MaintenanceLog.objects.create(
+            equipment       = equipment,
+            log_type        = d['log_type'],
+            service_date    = d['service_date'],
+            description     = d['description'],
+            performed_by    = d['performed_by'],
+            cost            = d.get('cost'),
+            parts_replaced  = d.get('parts_replaced', ''),
+            next_due        = d.get('next_due'),
+            condition_after = d['condition_after'],
+            logged_by       = request.user,
+            notes           = d.get('notes', ''),
+        )
+        return Response(
+            MaintenanceLogSerializer(log).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class EquipmentQRView(APIView):
+    """
+    GET /api/v1/inventory/equipment/<id>/qr/
+    Returns a QR code PNG for the equipment asset tag.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        branch = getattr(request.user, 'branch', None)
+        try:
+            equipment = BranchEquipment.objects.get(pk=pk, branch=branch)
+        except BranchEquipment.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            import qrcode
+            import io
+            from django.http import HttpResponse
+
+            # QR encodes the asset code + name for scanning
+            qr_data = (
+                f"FARHAT PRINTING PRESS\n"
+                f"Asset: {equipment.asset_code}\n"
+                f"Name: {equipment.name}\n"
+                f"Branch: {equipment.branch.name}"
+            )
+
+            qr = qrcode.QRCode(
+                version           = 1,
+                error_correction  = qrcode.constants.ERROR_CORRECT_H,
+                box_size          = 10,
+                border            = 4,
+            )
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color='black', back_color='white')
+
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+
+            response = HttpResponse(buf.read(), content_type='image/png')
+            response['Content-Disposition'] = (
+                f'attachment; filename="{equipment.asset_code}.png"'
+            )
+            return response
+
+        except ImportError:
+            return Response(
+                {
+                    'detail': 'QR generation not available — install qrcode library.',
+                    'asset_code': equipment.asset_code,
+                    'qr_data': qr_data,
+                },
+                status=status.HTTP_200_OK,
+            )

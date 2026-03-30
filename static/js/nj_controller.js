@@ -99,6 +99,51 @@ const NJ = (() => {
   // INSTANT — POS CART UI
   // ══════════════════════════════════════════════════════════
 
+  // ── Service categories for grouped chip display ─────────────
+  const SERVICE_GROUPS = [
+    { label: 'Printing',       match: s => /print/i.test(s.name) && !/photo/i.test(s.name) },
+    { label: 'Photocopying',   match: s => /photocopy|copy/i.test(s.name) },
+    { label: 'Finishing',      match: s => /binding|lamination/i.test(s.name) },
+    { label: 'Scanning',       match: s => /scan/i.test(s.name) },
+    { label: 'Photography',    match: s => /passport|photo/i.test(s.name) },
+    { label: 'Typing & Forms', match: s => /typing|forms|filing/i.test(s.name) },
+    { label: 'Stationery',     match: s => /envelope|flyer/i.test(s.name) },
+  ];
+
+  function _groupServices(services) {
+    const grouped = [];
+    const used    = new Set();
+    SERVICE_GROUPS.forEach(group => {
+      const items = services.filter(s => group.match(s) && !used.has(s.id));
+      if (items.length) {
+        items.forEach(s => used.add(s.id));
+        grouped.push({ label: group.label, items });
+      }
+    });
+    // Catch-all for anything not matched
+    const rest = services.filter(s => !used.has(s.id));
+    if (rest.length) grouped.push({ label: 'Other', items: rest });
+    return grouped;
+  }
+
+  function _renderChipGrid(services) {
+    const groups = _groupServices(services);
+    return groups.map(g => `
+      <div class="nj-chip-group" data-group="${_esc(g.label)}">
+        <div class="nj-chip-group-label">${_esc(g.label)}</div>
+        <div class="nj-chip-row">
+          ${g.items.map(s => `
+            <button class="nj-service-chip"
+              type="button"
+              data-id="${s.id}"
+              data-name="${_esc(s.name.toLowerCase())}"
+              onclick="NJ._selectServiceChip(${s.id})">
+              ${_esc(s.name)}
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+  }
+
   function _showInstantUI() {
     const body = document.getElementById('nj-modal-body');
     if (!body) return;
@@ -108,286 +153,405 @@ const NJ = (() => {
     body.innerHTML = `
       <div class="nj-pos-layout">
 
-        <!-- Left: service picker + configurator -->
+        <!-- ── Left panel ── -->
         <div class="nj-pos-left">
 
-          <!-- Customer + channel row -->
-          <div class="form-row-2" style="margin-bottom:14px;">
-            <div class="form-group">
-              <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;">
-                Customer
-                <button type="button" onclick="NJ._openAddCustomer()"
-                  style="font-size:11px;font-weight:700;color:var(--text);background:none;
-                    border:1px solid var(--border);border-radius:var(--radius-sm);
-                    padding:2px 8px;cursor:pointer;font-family:inherit;
-                    transition:all 0.15s;"
-                  onmouseover="this.style.borderColor='var(--border-dark)'"
-                  onmouseout="this.style.borderColor='var(--border)'">
-                  + New
-                </button>
-              </label>
-              <select id="nj-customer" class="form-input">
-                <option value="">Walk-in / Unknown</option>
-                ${State.customers.map(c =>
-                  `<option value="${c.id}">${_esc(c.display_name || c.full_name || c.phone)}</option>`
-                ).join('')}
-              </select>
-              <!-- Inline add customer form -->
-              <div id="nj-add-customer-form" style="display:none;margin-top:10px;
-                padding:12px 14px;background:var(--bg);border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);">
-                <div style="font-size:11px;font-weight:700;color:var(--text-3);
-                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
-                  New Customer
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-                  <input type="text" id="nc-first-name" placeholder="First name"
-                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-                  <input type="text" id="nc-last-name" placeholder="Last name"
-                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-                  <input type="tel" id="nc-phone" placeholder="Phone (required)"
-                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-                  <input type="text" id="nc-company" placeholder="Company (optional)"
-                    style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                      background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-                </div>
-                <div id="nc-error" style="display:none;font-size:11px;color:var(--red-text);margin-bottom:8px;"></div>
-                <div style="display:flex;gap:8px;justify-content:flex-end;">
-                  <button type="button" onclick="NJ._closeAddCustomer()"
-                    style="padding:5px 12px;font-size:12px;font-weight:600;background:none;
-                      border:1px solid var(--border);border-radius:var(--radius-sm);
-                      cursor:pointer;color:var(--text-2);font-family:inherit;">
-                    Cancel
-                  </button>
-                  <button type="button" id="nc-save-btn" onclick="NJ._saveNewCustomer()"
-                    style="padding:5px 12px;font-size:12px;font-weight:700;background:var(--text);
-                      color:#fff;border:none;border-radius:var(--radius-sm);
-                      cursor:pointer;font-family:inherit;">
-                    Save Customer
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Intake Channel</label>
-              <select id="nj-channel" class="form-input">
-                <option value="WALK_IN">Walk-in</option>
-                <option value="WHATSAPP">WhatsApp</option>
-                <option value="EMAIL">Email</option>
-                <option value="PHONE">Phone</option>
-              </select>
-            </div>
-          </div>
-
-<!-- Service grid -->
-          <div class="form-group" style="margin-bottom:12px;">
-            <label class="form-label">Select Service</label>
-            <div style="position:relative;margin-bottom:8px;">
+          <!-- 1. Customer row -->
+          <div class="nj-customer-row">
+            <div class="nj-customer-display" id="nj-customer-display">
               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="2"
-                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none;">
-                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3);">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
               </svg>
-              <input type="text" id="nj-service-search"
-                placeholder="Search services…"
-                oninput="NJ._filterServiceChips(this.value)"
-                onkeydown="NJ._serviceSearchKeydown(event)"
-                autocomplete="off"
-                style="width:100%;padding:8px 12px 8px 32px;
-                       border:1.5px solid var(--border);border-radius:var(--radius-sm);
-                       background:var(--bg);color:var(--text);font-size:13px;
-                       font-family:inherit;outline:none;box-sizing:border-box;
-                       transition:border-color var(--transition);"
-                onfocus="this.style.borderColor='var(--border-dark)'"
-                onblur="this.style.borderColor='var(--border)'">
+              <span id="nj-customer-label" style="flex:1;font-size:13px;color:var(--text-2);">
+                Walk-in / Unknown
+              </span>
+              <input type="hidden" id="nj-customer" value="">
             </div>
-            <div class="nj-service-grid" id="nj-service-grid">
-              ${services.map(s => `
-                <button class="nj-service-chip"
-                  data-id="${s.id}"
-                  data-name="${_esc(s.name.toLowerCase())}"
-                  onclick="NJ._selectServiceChip(${s.id})">
-                  ${_esc(s.name)}
-                </button>`).join('')}
-            </div>
-            <div id="nj-service-no-results" style="display:none;padding:12px;
-              text-align:center;font-size:12.5px;color:var(--text-3);">
-              No services match
+            <button type="button" class="nj-customer-action-btn" onclick="NJ._toggleCustomerSearch()"
+              id="nj-customer-search-btn">Search</button>
+            <button type="button" class="nj-customer-action-btn nj-customer-action-btn--primary"
+              onclick="NJ._openAddCustomer()">+ New</button>
+          </div>
+
+          <!-- Customer search dropdown -->
+          <div id="nj-customer-search-area" style="display:none;margin-bottom:10px;">
+            <input type="text" id="nj-customer-search-input"
+              placeholder="Search by name or phone…"
+              oninput="NJ._filterCustomers(this.value)"
+              style="width:100%;padding:8px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;"
+              onfocus="this.style.borderColor='var(--border-dark)'"
+              onblur="this.style.borderColor='var(--border)'">
+            <div id="nj-customer-results"
+              style="max-height:160px;overflow-y:auto;border:1px solid var(--border);
+                border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                background:var(--panel);">
             </div>
           </div>
 
-          <!-- Configurator — shown after service selected -->
-          <div id="nj-configurator" style="display:none;">
+          <!-- Inline add customer form -->
+          <div id="nj-add-customer-form" style="display:none;margin-bottom:12px;
+            padding:12px 14px;background:var(--bg);border:1.5px solid var(--border);
+            border-radius:var(--radius-sm);">
+            <div style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
+              New Customer
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+              <input type="text" id="nc-first-name" placeholder="First name"
+                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+              <input type="text" id="nc-last-name" placeholder="Last name"
+                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+              <input type="tel" id="nc-phone" placeholder="Phone (required)"
+                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+              <input type="text" id="nc-company" placeholder="Company (optional)"
+                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
+            </div>
+            <div id="nc-error" style="display:none;font-size:11px;color:var(--red-text);margin-bottom:8px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button type="button" onclick="NJ._closeAddCustomer()"
+                style="padding:5px 12px;font-size:12px;font-weight:600;background:none;
+                  border:1px solid var(--border);border-radius:var(--radius-sm);
+                  cursor:pointer;color:var(--text-2);font-family:inherit;">Cancel</button>
+              <button type="button" id="nc-save-btn" onclick="NJ._saveNewCustomer()"
+                style="padding:5px 12px;font-size:12px;font-weight:700;background:var(--text);
+                  color:#fff;border:none;border-radius:var(--radius-sm);
+                  cursor:pointer;font-family:inherit;">Save Customer</button>
+            </div>
+          </div>
+
+          <div class="nj-divider"></div>
+
+          <!-- 2. Service search + grouped chips -->
+          <div style="position:relative;margin-bottom:10px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2"
+              style="position:absolute;left:10px;top:50%;transform:translateY(-50%);
+                color:var(--text-3);pointer-events:none;">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" id="nj-service-search"
+              placeholder="Search services…"
+              oninput="NJ._filterServiceChips(this.value)"
+              onkeydown="NJ._serviceSearchKeydown(event)"
+              autocomplete="off"
+              style="width:100%;padding:7px 12px 7px 32px;
+                border:1.5px solid var(--border);border-radius:var(--radius-sm);
+                background:var(--bg);color:var(--text);font-size:13px;
+                font-family:inherit;outline:none;box-sizing:border-box;"
+              onfocus="this.style.borderColor='var(--border-dark)'"
+              onblur="this.style.borderColor='var(--border)'">
+          </div>
+
+          <div class="nj-service-grid" id="nj-service-grid">
+            ${_renderChipGrid(services)}
+          </div>
+          <div id="nj-service-no-results" style="display:none;padding:12px;
+            text-align:center;font-size:12.5px;color:var(--text-3);">
+            No services match
+          </div>
+
+          <!-- 3. Configurator — shown after service selected -->
+          <div id="nj-configurator" style="display:none;margin-top:12px;
+            padding-top:12px;border-top:1px solid var(--border);">
             <div class="nj-configurator-head" id="nj-configurator-title">Configure</div>
-            <!-- Just two questions -->
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">Sheets</label>
-                <input type="number" id="nj-pages" class="form-input"
-                  value="1" min="1" oninput="NJ._triggerLinePrice()"
-                  placeholder="How many sheets?">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Copies</label>
-                <input type="number" id="nj-sets" class="form-input"
-                  value="1" min="1" oninput="NJ._triggerLinePrice()"
-                  placeholder="How many copies?">
-              </div>
-            </div>
-
-            <!-- Advanced toggle -->
-            <div style="margin-bottom:10px;">
-              <button type="button" onclick="NJ._toggleAdvanced()" style="
-                font-size:11.5px;color:var(--text-3);background:none;border:none;
-                cursor:pointer;padding:0;font-family:inherit;display:flex;
-                align-items:center;gap:4px;
-              ">
-                <span id="nj-advanced-arrow">▶</span>
-                <span>Advanced options</span>
-              </button>
-            </div>
-
-            <!-- Advanced fields — hidden by default -->
-            <div id="nj-advanced-fields" style="display:none;">
-              <div class="form-row-2">
-                <div class="form-group">
-                  <label class="form-label">Paper Size</label>
-                  <select id="nj-paper-size" class="form-input" onchange="NJ._triggerLinePrice()">
-                    <option value="A4">A4</option>
-                    <option value="A3">A3</option>
-                    <option value="A5">A5</option>
-                    <option value="A2">A2</option>
-                    <option value="NA">N/A</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Colour Mode</label>
-                  <select id="nj-color-mode" class="form-input" onchange="NJ._triggerLinePrice()">
-                    <option value="BW">Black &amp; White</option>
-                    <option value="COLOR">Colour</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row-2">
-                <div class="form-group">
-                  <label class="form-label">Sides</label>
-                  <select id="nj-sides" class="form-input" onchange="NJ._triggerLinePrice()">
-                    <option value="SINGLE">Single-sided</option>
-                    <option value="DOUBLE">Double-sided</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">File Source</label>
-                  <select id="nj-file-source" class="form-input">
-                    <option value="HARDCOPY">Walk-in Hardcopy</option>
-                    <option value="WHATSAPP">WhatsApp</option>
-                    <option value="EMAIL">Email</option>
-                    <option value="USB">USB</option>
-                    <option value="TYPING">Typing Request</option>
-                    <option value="NA">N/A</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <!-- Dynamic spec fields from spec_template -->
-            <div id="nj-spec-fields"></div>
+            <div id="nj-configurator-fields"></div>
 
             <!-- Line price preview -->
             <div class="nj-line-price-box" id="nj-line-price-box" style="display:none;">
               <span style="font-size:12px;color:var(--green-text);font-weight:600;">LINE TOTAL</span>
-              <span id="nj-line-price" style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--green-text);">—</span>
+              <span id="nj-line-price"
+                style="font-family:'JetBrains Mono',monospace;font-size:16px;
+                  font-weight:700;color:var(--green-text);">—</span>
             </div>
 
-            <button class="nj-add-btn" onclick="NJ._addToCart()">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <button class="nj-add-btn" type="button" onclick="NJ._addToCart()">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
               Add to Cart
             </button>
           </div>
 
-        </div>
-
-        <!-- Right: cart -->
-        <div class="nj-pos-right">
-          <div class="nj-cart-head">
-            <span style="font-size:12px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Cart</span>
-            <span class="nj-cart-count" id="nj-cart-count">0 items</span>
+          <!-- 4. Channel — subtle, bottom -->
+          <div class="nj-channel-row">
+            <span style="font-size:11px;color:var(--text-3);">Channel</span>
+            <select id="nj-channel"
+              style="font-size:11px;color:var(--text-2);background:none;
+                border:0.5px solid var(--border);border-radius:20px;
+                padding:2px 8px;cursor:pointer;font-family:inherit;outline:none;">
+              <option value="WALK_IN">Walk-in</option>
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="EMAIL">Email</option>
+              <option value="PHONE">Phone</option>
+            </select>
           </div>
 
+        </div>
+
+        <!-- ── Right panel: cart ── -->
+        <div class="nj-pos-right">
+          <div class="nj-cart-head">
+            <span style="font-size:12px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;">Cart</span>
+            <span class="nj-cart-count" id="nj-cart-count">0 items</span>
+          </div>
           <div class="nj-cart-list" id="nj-cart-list">
             <div class="nj-cart-empty">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+              </svg>
               <div>No items yet</div>
               <div style="font-size:11px;margin-top:2px;">Select a service to begin</div>
             </div>
           </div>
-
           <div class="nj-cart-total" id="nj-cart-total" style="display:none;">
             <span>Total</span>
-            <span id="nj-total-amount" style="font-family:'JetBrains Mono',monospace;font-weight:700;">GHS 0.00</span>
+            <span id="nj-total-amount"
+              style="font-family:'JetBrains Mono',monospace;font-weight:700;">GHS 0.00</span>
           </div>
         </div>
 
       </div>`;
   }
 
+
   // ── Service chip selection ─────────────────────────────────
-  function _selectServiceChip(serviceId) {
+function _selectServiceChip(serviceId) {
     currentService = State.services.find(s => s.id === serviceId) || null;
     if (!currentService) return;
 
-    // Highlight selected chip
     document.querySelectorAll('.nj-service-chip').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.id) === serviceId);
     });
 
-    // Show configurator
     const cfg = document.getElementById('nj-configurator');
     if (cfg) cfg.style.display = 'block';
 
     const title = document.getElementById('nj-configurator-title');
     if (title) title.textContent = currentService.name;
 
-    // Apply smart defaults silently
-    const d = currentService.smart_defaults || {};
-
-    // Pages defaults to 1 always
-    const pagesEl = document.getElementById('nj-pages');
-    if (pagesEl) pagesEl.value = d.pages || 1;
-
-    const setsEl = document.getElementById('nj-sets');
-    if (setsEl) setsEl.value = d.sets || 1;
-
-    // Pre-fill advanced fields from smart_defaults (hidden but set)
-    const paperEl = document.getElementById('nj-paper-size');
-    if (paperEl) paperEl.value = d.paper_size || 'A4';
-
-    const colorEl = document.getElementById('nj-color-mode');
-    if (colorEl) colorEl.value = d.is_color ? 'COLOR' : 'BW';
-
-    const sidesEl = document.getElementById('nj-sides');
-    if (sidesEl) sidesEl.value = d.sides || 'SINGLE';
-
-    // Reset advanced panel to closed
-    const adv = document.getElementById('nj-advanced-fields');
-    const arr = document.getElementById('nj-advanced-arrow');
-    if (adv) adv.style.display = 'none';
-    if (arr) arr.textContent = '▶';
-
-    // Render any extra spec_template fields
-    // Instant uses smart_defaults only — no spec_template fields needed
-    if (currentType !== 'INSTANT') {
-      _renderSpecFields();
-    } else {
-      const specFields = document.getElementById('nj-spec-fields');
-      if (specFields) specFields.innerHTML = '';
-    }
+    _renderContextFields();
     _triggerLinePrice();
   }
+
+  // ── Context-aware configurator fields ─────────────────────
+  function _renderContextFields() {
+    const container = document.getElementById('nj-configurator-fields');
+    if (!container || !currentService) return;
+
+    const name    = currentService.name.toLowerCase();
+    const isBinding  = name.includes('binding');
+    const isPassport = name.includes('passport');
+    const isScanning = name.includes('scan');
+    const isTyping   = name.includes('typing');
+    const isForms    = name.includes('form');
+    const isEnvelope = name.includes('envelope');
+
+    let html = '';
+
+    if (isBinding) {
+      // Ring size grid + documents count
+      html = `
+        <div style="margin-bottom:12px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+            Ring Size (mm)
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;"
+            id="nj-ring-options">
+            ${[6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36].map(mm => `
+              <button type="button" data-ring="${mm}"
+                onclick="NJ._selectRing(${mm}, this)"
+                style="padding:5px 10px;border-radius:var(--radius-sm);
+                  font-size:12px;font-weight:600;cursor:pointer;
+                  border:1.5px solid var(--border);background:var(--bg);
+                  color:var(--text-2);font-family:inherit;transition:all 0.12s;"
+                onmouseover="if(!this.classList.contains('nj-ring-active'))this.style.borderColor='var(--border-dark)'"
+                onmouseout="if(!this.classList.contains('nj-ring-active'))this.style.borderColor='var(--border)'">
+                ${mm}mm
+              </button>`).join('')}
+          </div>
+          <input type="hidden" id="nj-ring-size" value="">
+          <div id="nj-ring-error" style="display:none;font-size:11px;
+            color:var(--red-text);margin-top:4px;">Please select a ring size.</div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Documents</label>
+            <input type="number" id="nj-sets" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+        </div>`;
+
+    } else if (isPassport) {
+      // Count + output mode + delivery
+      html = `
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Count</label>
+            <input type="number" id="nj-sets" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Output</label>
+            <select id="nj-output-mode" class="form-input"
+              onchange="NJ._onOutputModeChange(); NJ._triggerLinePrice();">
+              <option value="PRINT">Print only</option>
+              <option value="PRINT_DIGITAL">Print + Digital</option>
+              <option value="DIGITAL">Digital only</option>
+            </select>
+          </div>
+        </div>
+        <div id="nj-delivery-row" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">Delivery</label>
+            <select id="nj-delivery" class="form-input">
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="EMAIL">Email</option>
+              <option value="FLASH">Flash Drive</option>
+            </select>
+          </div>
+        </div>`;
+
+    } else if (isScanning) {
+      // Sheets + delivery
+      html = `
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Sheets</label>
+            <input type="number" id="nj-pages" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Delivery</label>
+            <select id="nj-delivery" class="form-input">
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="EMAIL">Email</option>
+              <option value="FLASH">Flash Drive</option>
+            </select>
+          </div>
+        </div>`;
+
+    } else if (isTyping) {
+      // Sheets + sides + output + delivery
+      html = `
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Sheets</label>
+            <input type="number" id="nj-pages" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sides</label>
+            <select id="nj-sides" class="form-input">
+              <option value="SINGLE">1-sided</option>
+              <option value="DOUBLE">2-sided</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Output</label>
+            <select id="nj-output-mode" class="form-input"
+              onchange="NJ._onOutputModeChange()">
+              <option value="PRINT">Print only</option>
+              <option value="PRINT_DIGITAL">Print + Digital</option>
+              <option value="DIGITAL">Digital only</option>
+            </select>
+          </div>
+          <div id="nj-delivery-col" class="form-group" style="display:none;">
+            <label class="form-label">Delivery</label>
+            <select id="nj-delivery" class="form-input">
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="EMAIL">Email</option>
+              <option value="FLASH">Flash Drive</option>
+            </select>
+          </div>
+        </div>`;
+
+    } else if (isForms) {
+      // No fields — flat GHS 40, just show price
+      html = `
+        <div style="padding:10px 0;font-size:13px;color:var(--text-3);">
+          Flat rate service — GHS 40.00 per form filled.
+        </div>`;
+
+    } else if (isEnvelope) {
+      // Quantity only
+      html = `
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Quantity</label>
+            <input type="number" id="nj-sets" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+        </div>`;
+
+    } else {
+      // Default: sheets + copies (all printing, photocopying, lamination, flyers)
+      html = `
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Sheets</label>
+            <input type="number" id="nj-pages" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Copies</label>
+            <input type="number" id="nj-sets" class="form-input"
+              value="1" min="1" oninput="NJ._triggerLinePrice()">
+          </div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  function _onOutputModeChange() {
+    const mode        = document.getElementById('nj-output-mode')?.value;
+    const needsDelivery = mode === 'PRINT_DIGITAL' || mode === 'DIGITAL';
+    // Passport uses nj-delivery-row, Typing uses nj-delivery-col
+    const deliveryRow = document.getElementById('nj-delivery-row');
+    const deliveryCol = document.getElementById('nj-delivery-col');
+    if (deliveryRow) deliveryRow.style.display = needsDelivery ? 'block' : 'none';
+    if (deliveryCol) deliveryCol.style.display = needsDelivery ? '' : 'none';
+  }
+
+
+  // ── Ring size selection ────────────────────────────────────
+function _selectRing(mm, btn) {
+    document.querySelectorAll('#nj-ring-options button').forEach(b => {
+      b.classList.remove('nj-ring-active');
+      b.style.borderColor = 'var(--border)';
+      b.style.background  = 'var(--bg)';
+      b.style.color       = 'var(--text-2)';
+    });
+    btn.classList.add('nj-ring-active');
+    btn.style.borderColor = 'var(--text)';
+    btn.style.background  = 'var(--text)';
+    btn.style.color       = '#fff';
+    const input = document.getElementById('nj-ring-size');
+    if (input) input.value = mm;
+    const err = document.getElementById('nj-ring-error');
+    if (err) err.style.display = 'none';
+    _triggerLinePrice();
+  }
+
+
   // ── Line price calculation (per item being configured) ─────
   function _triggerLinePrice() {
     clearTimeout(priceTimer);
@@ -400,18 +564,38 @@ const NJ = (() => {
       return;
     }
 
-    const pages    = parseInt(document.getElementById('nj-pages')?.value  || 1);
-    const sets     = parseInt(document.getElementById('nj-sets')?.value   || 1);
-    const is_color = document.getElementById('nj-color-mode')?.value === 'COLOR';
-    const quantity   = sets;
+    const name       = currentService.name.toLowerCase();
+    const isBinding  = name.includes('binding');
+    const isPassport = name.includes('passport');
+
+    const pages    = parseInt(document.getElementById('nj-pages')?.value || 1);
+    const sets     = parseInt(document.getElementById('nj-sets')?.value  || 1);
+    const quantity = sets || 1;
+
+    const params = new URLSearchParams({
+      service  : currentService.id,
+      branch   : State.branchId,
+      quantity,
+      pages,
+      is_color : 'false',
+    });
+
+    // Suppress price for binding until ring is selected
+    if (isBinding) {
+      const ringSize = document.getElementById('nj-ring-size')?.value;
+      if (!ringSize) {
+        const box = document.getElementById('nj-line-price-box');
+        if (box) box.style.display = 'none';
+        return;
+      }
+      params.set('ring_size', ringSize);
+    }
+    if (isPassport) {
+      const outputMode = document.getElementById('nj-output-mode')?.value || 'PRINT';
+      params.set('output_mode', outputMode);
+    }
+
     try {
-      const params = new URLSearchParams({
-        service  : currentService.id,
-        branch   : State.branchId,
-        quantity,
-        pages,
-        is_color : is_color ? 'true' : 'false',
-      });
       const res  = await Auth.fetch(`/api/v1/jobs/price/calculate/?${params}`);
       if (!res.ok) return;
       const data  = await res.json();
@@ -420,7 +604,7 @@ const NJ = (() => {
       const box = document.getElementById('nj-line-price-box');
       const el  = document.getElementById('nj-line-price');
       if (box && el) {
-        el.textContent  = _fmt(total);
+        el.textContent    = _fmt(total);
         box.style.display = 'flex';
       }
     } catch { /* silent */ }
@@ -431,16 +615,30 @@ const NJ = (() => {
     if (!currentService) { _toast('Select a service first.', 'error'); return; }
     const service = currentService;
 
-    const pages      = parseInt(document.getElementById('nj-pages')?.value      || 1);
-    const sets       = parseInt(document.getElementById('nj-sets')?.value       || 1);
-    const is_color   = document.getElementById('nj-color-mode')?.value === 'COLOR';
-    const paper_size = document.getElementById('nj-paper-size')?.value  || 'A4';
-    const sides      = document.getElementById('nj-sides')?.value       || 'SINGLE';
-    const file_src   = document.getElementById('nj-file-source')?.value || 'NA';
-    const specs      = _collectSpecs();
-    const quantity   = sets || 1;
+    const name       = currentService.name.toLowerCase();
+    const isBinding  = name.includes('binding');
+    const isPassport = name.includes('passport');
+    const isScanning = name.includes('scan');
+    const isTyping   = name.includes('typing');
+    const isEnvelope = name.includes('envelope');
 
-    // Get price
+    const ringSize   = document.getElementById('nj-ring-size')?.value || '';
+    const outputMode = document.getElementById('nj-output-mode')?.value || 'PRINT';
+    const delivery   = document.getElementById('nj-delivery')?.value   || '';
+    const sides      = document.getElementById('nj-sides')?.value      || 'SINGLE';
+
+    // Validate ring size for binding
+    if (isBinding && !ringSize) {
+      const err = document.getElementById('nj-ring-error');
+      if (err) err.style.display = 'block';
+      return;
+    }
+
+    const pages    = parseInt(document.getElementById('nj-pages')?.value || 1);
+    const sets     = parseInt(document.getElementById('nj-sets')?.value  || 1);
+    const quantity = sets || 1;
+
+    // Get price with condition params
     let unit_price = 0;
     let line_total = 0;
     try {
@@ -449,15 +647,18 @@ const NJ = (() => {
         branch   : State.branchId,
         quantity,
         pages,
-        is_color : is_color ? 'true' : 'false',
+        is_color : 'false',
       });
+      if (isBinding  && ringSize)   params.set('ring_size',   ringSize);
+      if (isPassport)               params.set('output_mode', outputMode);
+
       const res = await Auth.fetch(`/api/v1/jobs/price/calculate/?${params}`);
       if (res.ok) {
         const data = await res.json();
         unit_price = parseFloat(data.base_price || 0);
         line_total = parseFloat(data.total      || 0);
       }
-    } catch { /* silent — add with 0 price */ }
+    } catch { /* silent */ }
 
     cart.push({
       serviceId   : currentService.id,
@@ -465,13 +666,16 @@ const NJ = (() => {
       pages,
       sets,
       quantity,
-      is_color,
-      paper_size,
+      is_color    : false,
+      paper_size  : 'A4',
       sides,
-      file_source : file_src,
-      specifications: specs,
+      file_source : 'NA',
+      specifications: {},
       unit_price,
       line_total,
+      ring_size   : ringSize ? parseInt(ringSize) : null,
+      output_mode : outputMode,
+      delivery,
     });
 
     _renderCart();
@@ -812,6 +1016,9 @@ function _resetConfigurator() {
             file_source    : item.file_source,
             specifications : item.specifications,
             position       : i,
+            output_mode    : item.output_mode  || null,
+            ring_size      : item.ring_size    || null,
+            delivery       : item.delivery     || null,
           })),
         };
         if (customer) body.customer = parseInt(customer);
@@ -1004,6 +1211,13 @@ function _resetConfigurator() {
     });
 
     if (noMatch) noMatch.style.display = visible === 0 ? 'block' : 'none';
+
+    // Hide group labels when all chips in a group are hidden
+    document.querySelectorAll('.nj-chip-group').forEach(group => {
+      const anyVisible = [...group.querySelectorAll('.nj-service-chip')]
+        .some(c => c.style.display !== 'none');
+      group.style.display = anyVisible ? '' : 'none';
+    });
   }
 
   function _serviceSearchKeydown(e) {
@@ -1025,12 +1239,68 @@ function _resetConfigurator() {
   }
 
   // ── Inline add customer ───────────────────────────────────
+  function _toggleCustomerSearch() {
+    const area = document.getElementById('nj-customer-search-area');
+    if (!area) return;
+    const isOpen = area.style.display !== 'none';
+    area.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      document.getElementById('nj-customer-search-input')?.focus();
+      _filterCustomers('');
+    }
+  }
+
+  function _filterCustomers(query) {
+    const q       = query.trim().toLowerCase();
+    const results = document.getElementById('nj-customer-results');
+    if (!results) return;
+
+    const filtered = State.customers.filter(c => {
+      const name  = (c.display_name || c.full_name || '').toLowerCase();
+      const phone = (c.contact_phone || c.phone || '').toLowerCase();
+      return !q || name.includes(q) || phone.includes(q);
+    });
+
+    if (!filtered.length) {
+      results.innerHTML = `<div style="padding:10px 14px;font-size:12px;
+        color:var(--text-3);">No customers found</div>`;
+      return;
+    }
+
+    results.innerHTML = filtered.slice(0, 8).map(c => `
+      <div onclick="NJ._selectCustomer(${c.id}, '${_esc(c.display_name || c.full_name || c.contact_phone || 'Customer')}')"
+        style="padding:9px 14px;font-size:13px;cursor:pointer;
+          border-bottom:1px solid var(--border);transition:background 0.1s;"
+        onmouseover="this.style.background='var(--bg)'"
+        onmouseout="this.style.background=''">
+        <div style="font-weight:600;color:var(--text);">
+          ${_esc(c.display_name || c.full_name || '—')}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);">
+          ${_esc(c.contact_phone || c.phone || '')}
+        </div>
+      </div>`).join('');
+  }
+
+  function _selectCustomer(id, name) {
+    const input = document.getElementById('nj-customer');
+    const label = document.getElementById('nj-customer-label');
+    if (input) input.value = id;
+    if (label) label.textContent = name;
+    document.getElementById('nj-customer-search-area').style.display = 'none';
+  }
+
   function _openAddCustomer() {
     const form = document.getElementById('nj-add-customer-form');
-    if (form) {
+    if (!form) return;
+    const isOpen = form.style.display !== 'none';
+    if (isOpen) {
+      form.style.display = 'none';
+    } else {
       form.style.display = 'block';
       document.getElementById('nc-first-name')?.focus();
-      document.getElementById('nc-error').style.display = 'none';
+      const err = document.getElementById('nc-error');
+      if (err) err.style.display = 'none';
     }
   }
 
@@ -1079,17 +1349,10 @@ function _resetConfigurator() {
         return;
       }
 
-      // Add to State.customers and dropdown
+      // Add to State.customers and select the new customer
       State.customers.push(data);
-      const sel = document.getElementById('nj-customer');
-      if (sel) {
-        const opt       = document.createElement('option');
-        opt.value       = data.id;
-        opt.textContent = data.display_name || data.full_name || data.phone;
-        sel.appendChild(opt);
-        sel.value = data.id;
-      }
-
+      const displayName = data.display_name || data.full_name || phone;
+      _selectCustomer(data.id, displayName);
       _closeAddCustomer();
       _toast(`${data.display_name || data.full_name || phone} added.`, 'success');
 
@@ -1120,6 +1383,11 @@ return {
     _openAddCustomer,
     _closeAddCustomer,
     _saveNewCustomer,
+    _selectRing,
+    _toggleCustomerSearch,
+    _filterCustomers,
+    _selectCustomer,
+    _onOutputModeChange,
   };
 
 })();

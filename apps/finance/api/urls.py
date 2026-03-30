@@ -15,6 +15,7 @@ from .views import (
     PettyCashCreateView,
     POSTransactionListView,
     POSTransactionSettleView,
+    ReceiptListView,
     ReceiptDetailView,
     ReceiptSendWhatsAppView,
     ReceiptThermalView,
@@ -38,6 +39,12 @@ from .views import (
     WeeklyReportNotesView,
     WeeklyReportSubmitView,
     WeeklyReportPDFView,
+    MonthlyCloseStatusView,
+    MonthlyCloseSubmitView,
+    MonthlyCloseEndorseView,
+    MonthlyCloseRejectView,
+    MonthlyClosePDFView,
+    MonthlyClosePendingView,
 )
 
 
@@ -67,6 +74,8 @@ urlpatterns = [
 
     # ── Receipts ──────────────────────────────────────────────────────────
     path('receipts/<int:pk>/',                   ReceiptDetailView.as_view(),                 name='receipt-detail'),
+    path('receipts/',                       ReceiptListView.as_view(),                        name='receipt-list'),
+    path('receipts/<int:pk>/',              ReceiptDetailView.as_view(),                      name='receipt-detail'),
     path('receipts/<int:pk>/send-whatsapp/',     ReceiptSendWhatsAppView.as_view(),           name='receipt-whatsapp'),
     path('receipts/<int:pk>/thermal/',           ReceiptThermalView.as_view(),                name='receipt-thermal'),
 
@@ -90,12 +99,20 @@ urlpatterns = [
     path('invoices/<int:pk>/',                   InvoiceDetailView.as_view(),                 name='invoice-detail'),
     path('invoices/<int:pk>/send/',              InvoiceSendView.as_view(),                   name='invoice-send'),
     path('invoices/<int:pk>/pdf/',               InvoicePDFView.as_view(),                    name='invoice-pdf'),
-    path('cashier/receipts/',                CashierReceiptListView.as_view(),            name='cashier-receipts'),
+    path('cashier/receipts/',                   CashierReceiptListView.as_view(),             name='cashier-receipts'),
     # ── Weekly Report ─────────────────────────────────────────────────────
-    path('weekly/',                    WeeklyReportListView.as_view(),    name='weekly-list'),
-    path('weekly/prepare/',            WeeklyReportPrepareView.as_view(), name='weekly-prepare'),
-    path('weekly/<int:pk>/',           WeeklyReportDetailView.as_view(),  name='weekly-detail'),
-    path('weekly/<int:pk>/notes/',     WeeklyReportNotesView.as_view(),   name='weekly-notes'),
-    path('weekly/<int:pk>/submit/',    WeeklyReportSubmitView.as_view(),  name='weekly-submit'),
-    path('weekly/<int:pk>/pdf/',       WeeklyReportPDFView.as_view(),     name='weekly-pdf'),
+    path('weekly/',                             WeeklyReportListView.as_view(),               name='weekly-list'),
+    path('weekly/prepare/',                     WeeklyReportPrepareView.as_view(),            name='weekly-prepare'),
+    path('weekly/<int:pk>/',                    WeeklyReportDetailView.as_view(),             name='weekly-detail'),
+    path('weekly/<int:pk>/notes/',              WeeklyReportNotesView.as_view(),              name='weekly-notes'),
+    path('weekly/<int:pk>/submit/',             WeeklyReportSubmitView.as_view(),             name='weekly-submit'),
+    path('weekly/<int:pk>/pdf/',                WeeklyReportPDFView.as_view(),                name='weekly-pdf'),
+
+    # ── Monthly Close ─────────────────────────────────────────────────────
+    path('monthly-close/',                      MonthlyCloseStatusView.as_view(),   name='monthly-close-status'),
+    path('monthly-close/submit/',               MonthlyCloseSubmitView.as_view(),   name='monthly-close-submit'),
+    path('monthly-close/pending/',              MonthlyClosePendingView.as_view(),  name='monthly-close-pending'),
+    path('monthly-close/<int:pk>/endorse/',     MonthlyCloseEndorseView.as_view(),  name='monthly-close-endorse'),
+    path('monthly-close/<int:pk>/reject/',      MonthlyCloseRejectView.as_view(),   name='monthly-close-reject'),
+    path('monthly-close/<int:pk>/pdf/',         MonthlyClosePDFView.as_view(),      name='monthly-close-pdf'),
 ]

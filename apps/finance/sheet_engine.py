@@ -267,11 +267,27 @@ class SheetEngine:
             },
         }
 
+    def has_unsigned_floats(self, sheet) -> bool:
+        """
+        Check if any cashier floats for this sheet are unsigned.
+        Unsigned floats mean the cashier hasn't verified their cash count.
+        Auto-close must not proceed until all floats are signed off.
+        """
+        from apps.finance.models import CashierFloat
+        return CashierFloat.objects.filter(
+            daily_sheet=sheet,
+            is_signed_off=False,
+        ).exists()
+
+    def get_unsigned_float_count(self, sheet) -> int:
+        """Count of unsigned cashier floats on this sheet."""
+        from apps.finance.models import CashierFloat
+        return CashierFloat.objects.filter(
+            daily_sheet=sheet,
+            is_signed_off=False,
+        ).count()
+
     def has_pending_payments(self, sheet) -> bool:
-        """
-        Check if the sheet has any jobs still in PENDING_PAYMENT
-        that are not legitimate carryovers (credit or cross-branch).
-        """
         from apps.jobs.models import Job
 
         return Job.objects.filter(
@@ -334,6 +350,18 @@ class SheetEngine:
                     f"Sheet cannot be closed until {self.branch.closing_time.strftime('%H:%M')}. "
                     f"{mins_remaining} minute(s) remaining."
                 )
+
+        # Block auto-close if any cashier floats are unsigned
+        if auto and self.has_unsigned_floats(sheet):
+            count = self.get_unsigned_float_count(sheet)
+            logger.warning(
+                'SheetEngine: auto-close blocked for sheet %s — '
+                '%d cashier float(s) unsigned. BM notified.',
+                sheet.pk,
+                count,
+            )
+            self._notify_bm_unsigned_floats(sheet, count)
+            return sheet
 
         # Block auto-close if non-carryover pending payments exist
         if auto and self.has_pending_payments(sheet):
@@ -508,6 +536,39 @@ class SheetEngine:
         return result or 0
 
     # ── Notifications ─────────────────────────────────────────────
+
+    def _notify_bm_unsigned_floats(self, sheet, count: int) -> None:
+        """
+        Notify the BM that auto-close was blocked because cashier
+        float(s) have not been signed off.
+        """
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            bm = CustomUser.objects.filter(
+                branch=self.branch,
+                role__name='BRANCH_MANAGER',
+                is_active=True,
+            ).first()
+
+            if bm:
+                notify(
+                    recipient=bm,
+                    verb='SHEET_CLOSE_BLOCKED',
+                    message=(
+                        f"Sheet cannot auto-close — {count} cashier float(s) "
+                        f"have not been signed off. Cashier must complete their "
+                        f"end-of-day count before the sheet can close."
+                    ),
+                    link='/portal/finance/sheet/',
+                )
+        except Exception:
+            logger.exception(
+                'SheetEngine: failed to notify BM of unsigned floats for sheet %s',
+                sheet.pk,
+            )
+
 
     def _notify_bm_pending_payments(self, sheet, count: int) -> None:
         try:

@@ -3,7 +3,7 @@ from apps.finance.models import (
     DailySalesSheet, CashierFloat, PettyCash,
     POSTransaction, Receipt,
     CreditAccount, CreditPayment, BranchTransferCredit,
-    Invoice, InvoiceLineItem,
+    Invoice, InvoiceLineItem,MonthlyClose
 )
 
 
@@ -44,3 +44,17 @@ class InvoiceLineItemAdmin(admin.ModelAdmin):
     list_display  = ['invoice', 'label', 'quantity', 'pages', 'sets', 'unit_price', 'line_total']
     list_filter   = ['is_color', 'paper_size']
     readonly_fields = ['line_total', 'created_at', 'updated_at']
+
+
+@admin.register(MonthlyClose)
+class MonthlyCloseAdmin(admin.ModelAdmin):
+    list_display  = ['branch', 'month', 'year', 'status', 'submitted_by', 'submitted_at', 'endorsed_by']
+    list_filter   = ['status', 'branch', 'year']
+    search_fields = ['branch__name', 'branch__code']
+    readonly_fields = [
+        'submitted_by', 'submitted_at', 'endorsed_by', 'endorsed_at',
+        'rejected_by', 'rejected_at', 'summary_snapshot', 'pdf_path',
+    ]
+
+    def has_delete_permission(self, request, obj=None):
+        return False

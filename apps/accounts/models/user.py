@@ -23,8 +23,9 @@ class CustomUserManager(BaseUserManager):
 class CustomUser(AbstractBaseUser, AuditModel):
     """
     The central user model for all Octos staff.
-    Every user must belong to a branch and have a role.
-    No personal contact details are ever used for business.
+    Operational staff (BM, cashier, attendant) have branch set.
+    Regional Managers have region set, branch null.
+    Belt Managers and above have both null.
     """
     employee_id = models.CharField(max_length=20, unique=True, blank=True)
     first_name  = models.CharField(max_length=100)
@@ -35,6 +36,12 @@ class CustomUser(AbstractBaseUser, AuditModel):
 
     branch = models.ForeignKey(
         'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='user_accounts',
+        null=True, blank=True,
+    )
+    region = models.ForeignKey(
+        'organization.Region',
         on_delete=models.PROTECT,
         related_name='user_accounts',
         null=True, blank=True,

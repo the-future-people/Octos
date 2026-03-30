@@ -1,0 +1,406 @@
+/*
+ * Octos — Attendant Portal
+ * attendant.css
+ */
+
+/* ── Stats strip (legacy — kept for fallback) ──────────── */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stats-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+
+.stats-card.recorded::before  { background: #3355cc; }
+.stats-card.value::before     { background: #e8c84a; }
+.stats-card.confirmed::before { background: #22c98a; }
+.stats-card.rate::before      { background: var(--text); }
+
+.stats-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.stats-amount {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stats-card.recorded  .stats-amount { color: #1a3599; }
+.stats-card.value     .stats-amount { color: #7a5c00; }
+.stats-card.confirmed .stats-amount { color: #1a6640; }
+
+.stats-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* ── New stats strip — 5 cards ─────────────────────────── */
+.at-stats-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.at-stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  border-top-width: 2px;
+}
+
+.at-stat-blue   { border-top-color: #378ADD; }
+.at-stat-amber  { border-top-color: #EF9F27; }
+.at-stat-green  { border-top-color: #1D9E75; }
+.at-stat-purple { border-top-color: #7F77DD; }
+.at-stat-teal   { border-top-color: #1D9E75; }
+
+.at-stat-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.at-stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.at-stat-value-sm {
+  font-size: 15px;
+  padding-top: 3px;
+}
+
+.at-stat-sub {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+.at-stat-delta {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+.at-delta-up   { color: #3B6D11; }
+.at-delta-down { color: #A32D2D; }
+
+/* ── Daily target progress bar ─────────────────────────── */
+.at-progress-wrap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.at-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.at-progress-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.at-progress-meta {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.at-progress-bg {
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.at-progress-fill {
+  height: 100%;
+  background: #378ADD;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.at-progress-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+}
+
+.at-progress-foot-label {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.at-pb-badge {
+  font-size: 10px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: #EEEDFE;
+  color: #534AB7;
+  font-weight: 600;
+}
+
+/* ── Action + Insights row ─────────────────────────────── */
+.at-action-insights {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.at-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.at-btn-new-job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  background: var(--text);
+  color: var(--panel);
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+
+.at-btn-new-job:hover { opacity: 0.88; }
+
+.at-btn-new-job .hero-btn-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.at-btn-new-job-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.at-btn-services {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.at-btn-services:hover {
+  border-color: var(--border-dark);
+  background: var(--bg);
+}
+
+/* ── Insights panel ────────────────────────────────────── */
+.at-insights-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.at-insight-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.at-insight-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm, 6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.at-insight-purple { background: #EEEDFE; color: #534AB7; }
+.at-insight-amber  { background: #FAEEDA; color: #854F0B; }
+
+.at-insight-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.at-insight-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.at-insight-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Streak widget (sidebar footer) ────────────────────── */
+.sidebar-streak {
+  margin-top: auto;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.streak-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.streak-flame { font-size: 16px; }
+
+.streak-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.streak-sub {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.streak-days {
+  display: flex;
+  gap: 4px;
+}
+
+.streak-day {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.streak-hit    { background: #EAF3DE; color: #3B6D11; border-color: #C0DD97; }
+.streak-miss   { background: #FCEBEB; color: #A32D2D; border-color: #F7C1C1; }
+.streak-empty  { background: var(--bg); color: var(--text-3); }
+.streak-future { background: transparent; color: var(--border); border-color: var(--border); }
+.streak-today  { outline: 2px solid #378ADD; outline-offset: 1px; }
+
+/* ── Shift remaining pill ──────────────────────────────── */
+.at-shift-pill {
+  display: inline-block;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #E6F1FB;
+  color: #185FA5;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.at-shift-pill-warn {
+  background: #FAEEDA;
+  color: #854F0B;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .at-stats-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .at-stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .at-action-insights {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 540px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 16px 16px 0;
+    gap: 8px;
+  }
+
+  .stats-amount {
+    font-size: 18px;
+  }
+
+  .at-stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

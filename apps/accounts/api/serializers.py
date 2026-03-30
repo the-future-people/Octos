@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from apps.accounts.models import CustomUser, Role, Permission
-from apps.organization.models import Branch
+from apps.organization.models import Branch, Region
 
 
 class PermissionSerializer(serializers.ModelSerializer):
@@ -24,17 +24,28 @@ class RoleListSerializer(serializers.ModelSerializer):
         model = Role
         fields = ['id', 'name']
 
+
 class BranchMinimalSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Branch
-        fields = ['id', 'name', 'code', 'region_name', 'belt_name']
     region_name = serializers.CharField(source='region.name', read_only=True)
     belt_name   = serializers.CharField(source='region.belt.name', read_only=True)
 
+    class Meta:
+        model  = Branch
+        fields = ['id', 'name', 'code', 'region_name', 'belt_name']
+
+
+class RegionMinimalSerializer(serializers.ModelSerializer):
+    belt_name = serializers.CharField(source='belt.name', read_only=True)
+
+    class Meta:
+        model  = Region
+        fields = ['id', 'name', 'code', 'belt_name']
+
 
 class UserSerializer(serializers.ModelSerializer):
-    role_detail   = RoleListSerializer(source='role', read_only=True)
+    role_detail   = RoleListSerializer(source='role',   read_only=True)
     branch_detail = BranchMinimalSerializer(source='branch', read_only=True)
+    region_detail = RegionMinimalSerializer(source='region', read_only=True)
     full_name     = serializers.SerializerMethodField()
     role_name     = serializers.SerializerMethodField()
 
@@ -42,12 +53,12 @@ class UserSerializer(serializers.ModelSerializer):
         model  = CustomUser
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'role_name', 'role_detail', 'branch', 'branch_detail',
+            'role', 'role_name', 'role_detail',
+            'branch', 'branch_detail',
+            'region', 'region_detail',
             'phone', 'employee_id', 'is_active', 'created_at',
             'download_pin_set',
         ]
-
-   
 
     def get_role_name(self, obj):
         return obj.role.name if obj.role else None
@@ -63,7 +74,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = [
             'email', 'first_name', 'last_name', 'password',
-            'role', 'branch', 'phone', 'employee_id'
+            'role', 'branch', 'region', 'phone', 'employee_id',
         ]
 
     def create(self, validated_data):

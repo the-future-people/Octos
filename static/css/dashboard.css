@@ -1932,3 +1932,83 @@ textarea.form-input { resize: vertical; min-height: 60px; }
   line-height: 1.5;
   margin-top : 2px;
 }
+
+/* ── NJ Modal — redesigned left panel ───────────────────── */
+.nj-customer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.nj-customer-display {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  min-width: 0;
+}
+
+.nj-customer-action-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.nj-customer-action-btn:hover {
+  border-color: var(--border-dark);
+  color: var(--text);
+}
+
+.nj-customer-action-btn--primary {
+  color: var(--blue-text, #1a3599);
+  border-color: var(--blue-border, #b0c4f8);
+  background: var(--blue-bg, #eef3ff);
+}
+
+.nj-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 0;
+}
+
+.nj-chip-group {
+  margin-bottom: 10px;
+}
+
+.nj-chip-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 5px;
+}
+
+.nj-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.nj-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
