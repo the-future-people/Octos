@@ -36,6 +36,12 @@ const Cashier = (() => {
     await loadQueue();
     _startPolling();
     _startShiftPolling();
+    _startShiftPolling();
+    // Set date immediately without waiting for shift poll
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    });
     WeekGreeter.init();
     if (typeof CashierNotif !== 'undefined') CashierNotif.startPolling();
   }
@@ -132,6 +138,39 @@ const Cashier = (() => {
 
   function _renderQueuePane(container) {
     container.innerHTML = `
+      <div class="cashier-info-strip" id="cashier-info-strip">
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Sheet</span>
+          <span class="cashier-info-val" id="cs-sheet">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Date</span>
+          <span class="cashier-info-val" id="cs-date">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Shift ends</span>
+          <span class="cashier-info-val" id="cs-shift-end">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Opening float</span>
+          <span class="cashier-info-val" id="cs-float">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <div class="cashier-stars">
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-empty">★</span>
+          </div>
+          <div class="cashier-rating-label">Performance rating coming soon</div>
+        </div>
+      </div>
+
       <div class="summary-strip">
         <div class="summary-card cash">
           <div class="summary-label">Cash</div>
@@ -176,6 +215,15 @@ const Cashier = (() => {
           <div class="skel" style="width:110px;height:34px;border-radius:8px;"></div>
         </div>
       </div>`;
+
+    // Re-populate info strip from cached shift status
+    if (_shiftStatus) _renderInfoStrip(_shiftStatus);
+
+    // Re-populate date immediately
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    });
   }
 
   // ── Queue ──────────────────────────────────────────────────
@@ -795,8 +843,55 @@ const Cashier = (() => {
       const res = await Auth.fetch('/api/v1/finance/cashier/shift-status/');
       if (!res.ok) return;
       _shiftStatus = await res.json();
+      _renderInfoStrip(_shiftStatus);
       _handleShiftStatus(_shiftStatus);
     } catch { /* silent */ }
+  }
+
+  // ── Info strip ─────────────────────────────────────────
+  function _renderInfoStrip(s) {
+    // Date
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) {
+      dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+      });
+    }
+
+    // Sheet number
+    const sheetEl = document.getElementById('cs-sheet');
+    if (sheetEl) {
+      sheetEl.textContent = s.sheet_id ? `#${s.sheet_id}` : '—';
+    }
+
+    // Opening float
+    const floatEl = document.getElementById('cs-float');
+    if (floatEl) {
+      floatEl.textContent = s.opening_float
+        ? `GHS ${parseFloat(s.opening_float).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
+        : '—';
+    }
+
+    // Shift end + remaining pill
+    const shiftEndEl = document.getElementById('cs-shift-end');
+    if (shiftEndEl && s.shift_end) {
+      const endTime = _fmtTime(s.shift_end);
+      let pillHtml  = '';
+
+      if (s.minutes_remaining != null && s.minutes_remaining > 0) {
+        const hrs  = Math.floor(s.minutes_remaining / 60);
+        const mins = s.minutes_remaining % 60;
+        const label = hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
+        const cls   = s.minutes_remaining <= 15 ? 'urgent'
+                    : s.minutes_remaining <= 60  ? 'warn'
+                    : '';
+        pillHtml = `<span class="cashier-shift-pill ${cls}">${label}</span>`;
+      }
+
+      shiftEndEl.innerHTML = `${_esc(endTime)}${pillHtml ? ' ' + pillHtml : ''}`;
+    } else if (shiftEndEl) {
+      shiftEndEl.textContent = '—';
+    }
   }
 
   function _handleShiftStatus(s) {

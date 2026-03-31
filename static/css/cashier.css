@@ -945,3 +945,90 @@ html { overflow: hidden; }
   .topbar-branch { display: none; }
 }
 
+/* ── Cashier info strip ────────────────────────────────── */
+.cashier-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.cashier-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cashier-info-key {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+}
+
+.cashier-info-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cashier-info-divider {
+  width: 1px;
+  height: 32px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Shift remaining pill */
+.cashier-shift-pill {
+  display: inline-block;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: #E6F1FB;
+  color: #185FA5;
+}
+
+.cashier-shift-pill.warn {
+  background: #FAEEDA;
+  color: #854F0B;
+}
+
+.cashier-shift-pill.urgent {
+  background: #FCEBEB;
+  color: #A32D2D;
+}
+
+/* Star rating */
+.cashier-stars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cashier-star-filled  { color: #EF9F27; }
+.cashier-star-empty   { color: var(--border-dark); }
+
+.cashier-rating-label {
+  font-size: 9px;
+  color: var(--text-3);
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+/* Spacing fix — strip sits above summary */
+.cashier-info-strip + .summary-strip {
+  margin-top: 0;
+}

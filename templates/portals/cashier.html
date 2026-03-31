@@ -45,11 +45,11 @@
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
             <span id="cashier-notif-badge"
-              style="display:none;position:absolute;top:-3px;right:-3px;
-                width:16px;height:16px;border-radius:50%;
-                background:var(--red-text);color:#fff;
-                font-size:9px;font-weight:700;
-                align-items:center;justify-content:center;">0</span>
+  style="display:none;position:absolute;top:2px;right:2px;
+    width:14px;height:14px;border-radius:50%;
+    background:#e8294a;color:#fff;
+    font-size:8px;font-weight:700;
+    align-items:center;justify-content:center;">0</span>
           </button>
           <!-- Notification dropdown -->
           <div id="cashier-notif-dropdown"
@@ -205,6 +205,40 @@
 
     <!-- ── Main content ─────────────────────────────────────────── -->
     <div class="main-content" id="cashier-main-content">
+
+      <!-- Info strip -->
+      <div class="cashier-info-strip" id="cashier-info-strip">
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Sheet</span>
+          <span class="cashier-info-val" id="cs-sheet">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Date</span>
+          <span class="cashier-info-val" id="cs-date">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Shift ends</span>
+          <span class="cashier-info-val" id="cs-shift-end">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Opening float</span>
+          <span class="cashier-info-val" id="cs-float">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <div class="cashier-stars">
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-empty">★</span>
+          </div>
+          <div class="cashier-rating-label">Performance rating coming soon</div>
+        </div>
+      </div>
 
       <!-- Summary strip -->
       <div class="summary-strip">
