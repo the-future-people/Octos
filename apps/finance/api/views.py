@@ -555,6 +555,7 @@ class CashierShiftStatusView(APIView):
 
         return Response({
             'has_shift'        : True,
+            'float_status'     : 'ACTIVE' if float_record and float_record.morning_acknowledged else 'PENDING_ACK' if float_record else 'NO_FLOAT',
             'shift_end'        : shift_end,
             'minutes_remaining': mins_remaining,
             'should_prompt'    : mins_remaining <= 60,
@@ -562,6 +563,8 @@ class CashierShiftStatusView(APIView):
             'is_signed_off'    : float_record.is_signed_off if float_record else False,
             'float_id'         : float_record.id if float_record else None,
             'sheet_id'         : sheet_id,
+            'opening_float'    : str(float_record.opening_float) if float_record else None,
+            'opening_breakdown': float_record.opening_denomination_breakdown if float_record else None,
             'is_overtime'      : float_record.is_overtime if float_record else False,
             'overtime_until'   : float_record.overtime_until if float_record else None,
             'is_cover'         : float_record.is_cover if float_record else False,
