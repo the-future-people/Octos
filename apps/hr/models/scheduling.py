@@ -115,11 +115,11 @@ class EmployeeShiftSwap(AuditModel):
     """
 
     PENDING   = 'PENDING'
-    ACCEPTED  = 'ACCEPTED'   # B accepted, awaiting BM
-    REJECTED  = 'REJECTED'   # B rejected
-    APPROVED  = 'APPROVED'   # BM approved → overrides created
-    DECLINED  = 'DECLINED'   # BM declined
-    CANCELLED = 'CANCELLED'  # initiator cancelled before approval
+    ACCEPTED  = 'ACCEPTED'
+    REJECTED  = 'REJECTED'
+    APPROVED  = 'APPROVED'
+    DECLINED  = 'DECLINED'
+    CANCELLED = 'CANCELLED'
 
     STATUS_CHOICES = [
         (PENDING,   'Pending Acceptance'),
@@ -130,7 +130,6 @@ class EmployeeShiftSwap(AuditModel):
         (CANCELLED, 'Cancelled'),
     ]
 
-    # ── Parties ───────────────────────────────────────────
     initiated_by  = models.ForeignKey(
         'hr.Employee',
         on_delete=models.PROTECT,
@@ -149,40 +148,35 @@ class EmployeeShiftSwap(AuditModel):
         related_name='swaps_approved',
     )
 
-    # ── Status ────────────────────────────────────────────
     status        = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
         default=PENDING,
     )
-    reason        = models.TextField()  # why A needs the swap (mandatory)
-    bm_notes      = models.TextField(blank=True)  # BM rejection/approval notes
+    reason        = models.TextField()
+    bm_notes      = models.TextField(blank=True)
 
-    # ── The swap: A gives away their shift on initiator_date ─
-    initiator_date  = models.DateField()   # date A needs off
+    initiator_date  = models.DateField()
     initiator_shift = models.ForeignKey(
         EmployeeShift,
         on_delete=models.PROTECT,
         related_name='swaps_as_initiator',
-    )  # A's shift being given away
+    )
 
-    # ── Cover: B covers A's shift on cover_date ───────────
-    cover_date    = models.DateField()     # date B covers A (same as initiator_date usually)
+    cover_date    = models.DateField()
     cover_shift   = models.ForeignKey(
         EmployeeShift,
         on_delete=models.PROTECT,
         related_name='swaps_as_cover',
-    )  # the shift B will work on cover_date
+    )
 
-    # ── Compensation: A covers B's shift on compensation_date
-    compensation_date  = models.DateField()   # date A pays back
+    compensation_date  = models.DateField()
     compensation_shift = models.ForeignKey(
         EmployeeShift,
         on_delete=models.PROTECT,
         related_name='swaps_as_compensation',
-    )  # B's shift that A will cover as payback
+    )
 
-    # ── Timestamps ────────────────────────────────────────
     accepted_at   = models.DateTimeField(null=True, blank=True)
     approved_at   = models.DateTimeField(null=True, blank=True)
 
@@ -196,10 +190,6 @@ class EmployeeShiftSwap(AuditModel):
         )
 
     def approve(self, approved_by):
-        """
-        BM approves the swap. Creates all 4 ShiftOverride records.
-        Call this inside a transaction.
-        """
         from django.utils import timezone
 
         self.status      = self.APPROVED
@@ -207,7 +197,6 @@ class EmployeeShiftSwap(AuditModel):
         self.approved_at = timezone.now()
         self.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
 
-        # 1. A is absent on initiator_date (their original shift)
         ShiftOverride.objects.get_or_create(
             employee       = self.initiated_by,
             date           = self.initiator_date,
@@ -219,7 +208,6 @@ class EmployeeShiftSwap(AuditModel):
             ),
         )
 
-        # 2. B covers A's shift on cover_date
         ShiftOverride.objects.get_or_create(
             employee       = self.accepted_by,
             date           = self.cover_date,
@@ -233,7 +221,6 @@ class EmployeeShiftSwap(AuditModel):
             ),
         )
 
-        # 3. A covers B's shift on compensation_date (payback)
         ShiftOverride.objects.get_or_create(
             employee       = self.initiated_by,
             date           = self.compensation_date,
@@ -247,7 +234,6 @@ class EmployeeShiftSwap(AuditModel):
             ),
         )
 
-        # 4. B is absent during their normal slot on compensation_date
         ShiftOverride.objects.get_or_create(
             employee       = self.accepted_by,
             date           = self.compensation_date,
@@ -259,6 +245,7 @@ class EmployeeShiftSwap(AuditModel):
             ),
         )
 
+
 class BranchShift(AuditModel):
     """
     Branch-level shift template defining operational windows.
@@ -266,8 +253,8 @@ class BranchShift(AuditModel):
     Drives all closing logic — no hardcoded times anywhere.
 
     Examples:
-      WLB Main Shift    — Mon–Fri 07:30–19:30
-      WLB Saturday Shift — Sat   08:30–15:00
+      WLB Main Shift     — Mon–Fri 07:30–19:30
+      WLB Saturday Shift — Sat    08:30–19:30
     """
 
     FULL_DAY  = 'FULL_DAY'
@@ -278,17 +265,6 @@ class BranchShift(AuditModel):
         (FULL_DAY,  'Full Day'),
         (MORNING,   'Morning'),
         (AFTERNOON, 'Afternoon'),
-    ]
-
-    # Days of week as comma-separated integers e.g. "0,1,2,3,4" = Mon–Fri
-    # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat
-    DAYS_CHOICES = [
-        (0, 'Monday'),
-        (1, 'Tuesday'),
-        (2, 'Wednesday'),
-        (3, 'Thursday'),
-        (4, 'Friday'),
-        (5, 'Saturday'),
     ]
 
     branch      = models.ForeignKey(
@@ -317,7 +293,10 @@ class BranchShift(AuditModel):
         verbose_name_plural = 'Branch Shifts'
 
     def __str__(self):
-        return f"{self.branch.code} — {self.name} ({self.start_time.strftime('%H:%M')}–{self.end_time.strftime('%H:%M')})"
+        return (
+            f"{self.branch.code} — {self.name} "
+            f"({self.start_time.strftime('%H:%M')}–{self.end_time.strftime('%H:%M')})"
+        )
 
     @property
     def day_list(self):
@@ -333,17 +312,22 @@ class BranchShift(AuditModel):
 class ShiftRoleConfig(AuditModel):
     """
     Per-role timing configuration within a BranchShift.
-    Defines when each role gets locked out after shift end.
 
-    Buffer times are in minutes after shift end_time:
+    role_start_time / role_end_time:
+      When set, override BranchShift.start_time / end_time for this role.
+      This allows different roles to have different hours within the same
+      branch shift — e.g. BM arrives earlier and leaves later than attendants.
+      Leave blank to inherit from the parent BranchShift.
+
+    Buffer times (minutes after effective end_time):
       job_lock_buffer   — when job creation stops for this role
-      signoff_buffer    — when portal forces sign-off for this role
+      signoff_buffer    — when portal forces sign-off prompt for this role
       autoclose_buffer  — when system auto-closes sheet (BM only)
 
     Example for WLB Main Shift:
-      ATTENDANT     — job_lock=0,  signoff=30,  autoclose=None
-      CASHIER       — job_lock=45, signoff=45,  autoclose=None
-      BRANCH_MANAGER — job_lock=60, signoff=60, autoclose=60
+      BRANCH_MANAGER — start=07:30, end=20:00, job_lock=60, signoff=60, autoclose=60
+      CASHIER        — start=08:00, end=19:30, job_lock=45, signoff=45, autoclose=None
+      ATTENDANT      — start=08:00, end=19:00, job_lock=0,  signoff=30, autoclose=None
     """
 
     ATTENDANT      = 'ATTENDANT'
@@ -362,6 +346,28 @@ class ShiftRoleConfig(AuditModel):
         related_name = 'role_configs',
     )
     role_name          = models.CharField(max_length=20, choices=ROLE_CHOICES)
+
+    # ── Role-specific times (override parent shift when set) ──
+    role_start_time    = models.TimeField(
+        null      = True,
+        blank     = True,
+        help_text = (
+            'Role-specific shift start time. '
+            'Overrides BranchShift.start_time when set. '
+            'Leave blank to inherit from parent shift.'
+        ),
+    )
+    role_end_time      = models.TimeField(
+        null      = True,
+        blank     = True,
+        help_text = (
+            'Role-specific shift end time. '
+            'Overrides BranchShift.end_time when set. '
+            'Leave blank to inherit from parent shift.'
+        ),
+    )
+
+    # ── Buffer times (minutes after effective end_time) ───────
     job_lock_buffer    = models.PositiveIntegerField(
         default   = 0,
         help_text = 'Minutes after shift end when job creation locks for this role',
@@ -384,3 +390,13 @@ class ShiftRoleConfig(AuditModel):
 
     def __str__(self):
         return f"{self.shift} — {self.role_name}"
+
+    @property
+    def effective_start_time(self):
+        """Role start time, falling back to parent shift start."""
+        return self.role_start_time or self.shift.start_time
+
+    @property
+    def effective_end_time(self):
+        """Role end time, falling back to parent shift end."""
+        return self.role_end_time or self.shift.end_time

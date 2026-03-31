@@ -16,22 +16,23 @@ class ShiftEngine:
     Responsibilities:
     - Find the active BranchShift for a branch on a given date
     - Compute role-specific lock times from ShiftRoleConfig
+    - Use role_start_time / role_end_time when set, falling back to BranchShift times
     - Determine if branch is currently in post-closing window
     - Provide shift status for frontend display
 
     Rules:
     - Sunday never has a shift
     - BranchShift.days drives which days a shift applies
-    - ShiftRoleConfig drives per-role buffer times
+    - ShiftRoleConfig drives per-role times and buffer times
     - If no BranchShift found, falls back to safe defaults
     """
 
     # ── Safe fallback constants (used only if no BranchShift is configured) ──
     FALLBACK_START          = '07:30'
     FALLBACK_END            = '19:30'
-    FALLBACK_ATTENDANT_LOCK = 0     # at closing time
-    FALLBACK_CASHIER_LOCK   = 45    # 45min after closing
-    FALLBACK_BM_AUTOCLOSE   = 60    # 60min after closing
+    FALLBACK_ATTENDANT_LOCK = 0
+    FALLBACK_CASHIER_LOCK   = 45
+    FALLBACK_BM_AUTOCLOSE   = 60
 
     def __init__(self, branch) -> None:
         self.branch = branch
@@ -47,7 +48,6 @@ class ShiftEngine:
 
         today = timezone.localdate()
 
-        # Sunday — never open
         if today.weekday() == 6:
             return None
 
@@ -66,25 +66,24 @@ class ShiftEngine:
         """
         Returns the full schedule for a given role today.
 
-        Args:
-            role_name   : 'ATTENDANT' | 'CASHIER' | 'BRANCH_MANAGER'
-            target_date : Date to compute for — defaults to today
+        Uses role_start_time / role_end_time from ShiftRoleConfig when set,
+        falling back to BranchShift.start_time / end_time.
 
         Returns dict with:
             shift_name       : str
-            shift_start      : datetime (aware)
-            shift_end        : datetime (aware)
-            job_lock_at      : datetime (aware)
-            signoff_at       : datetime (aware)
-            autoclose_at     : datetime | None (BM only)
-            is_open          : bool — currently within shift
-            is_post_closing  : bool — past shift_end but within buffers
-            is_locked        : bool — past all buffers
+            shift_start      : datetime ISO (role-effective start)
+            shift_end        : datetime ISO (role-effective end)
+            job_lock_at      : datetime ISO
+            signoff_at       : datetime ISO
+            autoclose_at     : datetime ISO | None (BM only)
+            is_open          : bool
+            is_post_closing  : bool
+            is_locked        : bool
             can_create_jobs  : bool
-            can_signoff      : bool — shift has ended
-            mins_to_end      : int — negative if past
+            can_signoff      : bool
+            mins_to_end      : int
             lock_reason      : str | None
-            using_fallback   : bool — True if no BranchShift configured
+            using_fallback   : bool
         """
         if target_date is None:
             target_date = timezone.localdate()
@@ -94,8 +93,13 @@ class ShiftEngine:
 
         if shift:
             config = self._get_role_config(shift, role_name)
-            start  = self._make_aware(target_date, shift.start_time)
-            end    = self._make_aware(target_date, shift.end_time)
+
+            # Use role-specific times if set, else fall back to shift times
+            effective_start = config['role_start_time'] or shift.start_time
+            effective_end   = config['role_end_time']   or shift.end_time
+
+            start = self._make_aware(target_date, effective_start)
+            end   = self._make_aware(target_date, effective_end)
 
             job_lock_at  = end + timedelta(minutes=config['job_lock_buffer'])
             signoff_at   = end + timedelta(minutes=config['signoff_buffer'])
@@ -104,11 +108,11 @@ class ShiftEngine:
                 if config['autoclose_buffer'] is not None
                 else None
             )
-            shift_name    = shift.name
+            shift_name     = shift.name
             using_fallback = False
         else:
             # Fallback — no shift configured
-            start        = self._make_aware(target_date, self._parse_time(self.FALLBACK_END))
+            start        = self._make_aware(target_date, self._parse_time(self.FALLBACK_START))
             end          = self._make_aware(target_date, self._parse_time(self.FALLBACK_END))
             lock_buffer  = {
                 'ATTENDANT'     : self.FALLBACK_ATTENDANT_LOCK,
@@ -117,8 +121,11 @@ class ShiftEngine:
             }.get(role_name, 0)
             job_lock_at   = end + timedelta(minutes=lock_buffer)
             signoff_at    = end + timedelta(minutes=lock_buffer)
-            autoclose_at  = end + timedelta(minutes=self.FALLBACK_BM_AUTOCLOSE) if role_name == 'BRANCH_MANAGER' else None
-            shift_name    = 'Default'
+            autoclose_at  = (
+                end + timedelta(minutes=self.FALLBACK_BM_AUTOCLOSE)
+                if role_name == 'BRANCH_MANAGER' else None
+            )
+            shift_name     = 'Default'
             using_fallback = True
 
         mins_to_end     = int((end - now).total_seconds() / 60)
@@ -158,7 +165,7 @@ class ShiftEngine:
     def get_branch_status(self) -> dict:
         """
         Returns the overall branch operational status.
-        Used by dashboard info strip and overview.
+        Uses BranchShift times directly (not role-specific).
         """
         today = timezone.localdate()
 
@@ -186,7 +193,6 @@ class ShiftEngine:
         now   = timezone.now()
         start = self._make_aware(today, shift.start_time)
         end   = self._make_aware(today, shift.end_time)
-
         is_open = start <= now < end
 
         return {
@@ -212,7 +218,6 @@ class ShiftEngine:
 
         today = timezone.localdate()
 
-        # Check for override first
         override = ShiftOverride.objects.filter(
             employee    = employee,
             date        = today,
@@ -223,7 +228,6 @@ class ShiftEngine:
         if override and override.override_end:
             return self._make_aware(today, override.override_end)
 
-        # Check base shift
         base = EmployeeShift.objects.filter(
             employee    = employee,
             day_of_week = today.weekday(),
@@ -233,7 +237,6 @@ class ShiftEngine:
         if base:
             return self._make_aware(today, base.end_time)
 
-        # Fall back to branch shift end
         shift = self.get_today_shift()
         if shift:
             return self._make_aware(today, shift.end_time)
@@ -244,8 +247,10 @@ class ShiftEngine:
 
     def _get_role_config(self, shift, role_name: str) -> dict:
         """
-        Returns role config dict for a shift.
-        Falls back to safe defaults if not configured.
+        Returns role config dict for a shift including effective times.
+        Falls back to safe defaults if ShiftRoleConfig not found.
+        role_start_time / role_end_time are None when not set —
+        caller falls back to BranchShift times in that case.
         """
         from apps.hr.models import ShiftRoleConfig
 
@@ -258,12 +263,19 @@ class ShiftEngine:
         try:
             config = ShiftRoleConfig.objects.get(shift=shift, role_name=role_name)
             return {
+                'role_start_time' : config.role_start_time,
+                'role_end_time'   : config.role_end_time,
                 'job_lock_buffer' : config.job_lock_buffer,
                 'signoff_buffer'  : config.signoff_buffer,
                 'autoclose_buffer': config.autoclose_buffer,
             }
         except ShiftRoleConfig.DoesNotExist:
-            return DEFAULTS.get(role_name, DEFAULTS['ATTENDANT'])
+            defaults = DEFAULTS.get(role_name, DEFAULTS['ATTENDANT'])
+            return {
+                'role_start_time' : None,
+                'role_end_time'   : None,
+                **defaults,
+            }
 
     def _make_aware(self, target_date: date, t) -> datetime:
         naive = datetime.combine(target_date, t)
@@ -271,7 +283,6 @@ class ShiftEngine:
 
     @staticmethod
     def _parse_time(time_str: str):
-        """Parse 'HH:MM' string to time object."""
         from datetime import time
         h, m = time_str.split(':')
         return time(int(h), int(m))

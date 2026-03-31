@@ -818,6 +818,372 @@ const Cashier = (() => {
     }
   }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOCK 1: Replace _handleShiftStatus with this version
+// Find: function _handleShiftStatus(s) {
+// Replace the entire function body
+// ─────────────────────────────────────────────────────────────────────────────
+
+  function _handleShiftStatus(s) {
+    if (!s.has_shift) return;
+
+    _signOffFloatId = s.float_id;
+
+    // ── Hard block: no float set for today ─────────────────
+    if (s.float_status === 'NO_FLOAT') {
+      _showNoFloatScreen();
+      return;
+    }
+
+    // ── Hard block: float staged, awaiting acknowledgement ──
+    if (s.float_status === 'PENDING_ACK') {
+      _showFloatAckScreen(s.float_id, parseFloat(s.opening_float || 0));
+      return;
+    }
+
+    // ── Already signed off ─────────────────────────────────
+    if (s.float_status === 'SIGNED_OFF' || s.is_signed_off) {
+      _lockQueue('Your shift has ended. You have signed off.');
+      return;
+    }
+
+    // ── Shift ended, pending sign-off ──────────────────────
+    if (s.float_status === 'PENDING_SIGNOFF' || s.should_lock) {
+      _lockQueue('Your shift has ended. Please complete sign-off.');
+      openSignOffWizard(false);
+      return;
+    }
+
+    // ── End of shift warning ───────────────────────────────
+    if (s.should_prompt) {
+      _showSignOffBanner(s.minutes_remaining, s.shift_end);
+    }
+  }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOCK 2: Add these two new functions after _handleShiftStatus
+// Insert after the closing brace of _handleShiftStatus
+// ─────────────────────────────────────────────────────────────────────────────
+
+  // ── No float screen ────────────────────────────────────────
+  function _showNoFloatScreen() {
+    if (document.getElementById('float-block-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'float-block-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:var(--bg);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:16px;font-family:'DM Sans',sans-serif;padding:24px;text-align:center;`;
+
+    overlay.innerHTML = `
+      <div style="width:64px;height:64px;border-radius:50%;
+        background:var(--amber-bg);border:2px solid var(--amber-border);
+        display:flex;align-items:center;justify-content:center;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+          viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <div style="font-family:'Syne',sans-serif;font-size:22px;
+        font-weight:800;color:var(--text);">No Float Set</div>
+      <div style="font-size:14px;color:var(--text-3);max-width:360px;line-height:1.6;">
+        Your opening float for today has not been set by the Branch Manager.
+        You cannot process payments until your float is confirmed.
+      </div>
+      <div style="font-size:13px;color:var(--text-3);">
+        Please contact your Branch Manager to set your float before starting.
+      </div>
+      <button onclick="Auth.logout()"
+        style="margin-top:8px;padding:10px 28px;background:none;
+          border:1px solid var(--border);border-radius:var(--radius-sm);
+          font-size:13px;font-weight:600;cursor:pointer;color:var(--text-2);
+          font-family:inherit;">
+        Sign Out
+      </button>`;
+
+    document.body.appendChild(overlay);
+  }
+
+  // ── Float acknowledgement screen ───────────────────────────
+  function _showFloatAckScreen(floatId, openingFloat) {
+    if (document.getElementById('float-ack-overlay')) return;
+
+    const DENOMS = [1, 2, 5, 10, 20, 50, 100, 200];
+    const counts = {};
+    DENOMS.forEach(d => counts[d] = 0);
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'float-ack-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:var(--bg);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;padding:16px;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:480px;
+        max-height:92vh;overflow-y:auto;
+        box-shadow:0 20px 60px rgba(0,0,0,0.15);">
+
+        <!-- Header -->
+        <div style="padding:20px 24px 0;">
+          <div style="font-family:'Syne',sans-serif;font-size:19px;
+            font-weight:800;color:var(--text);margin-bottom:4px;">
+            Confirm Your Opening Float
+          </div>
+          <div style="font-size:13px;color:var(--text-3);line-height:1.5;">
+            Count the cash in your float and enter the number of each denomination.
+            Your total must match the staged amount exactly.
+          </div>
+        </div>
+
+        <!-- Expected amount -->
+        <div style="margin:16px 24px 0;padding:12px 16px;
+          background:var(--bg);border:1px solid var(--border);
+          border-radius:var(--radius-sm);
+          display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:12px;color:var(--text-3);">Expected float</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:18px;
+            font-weight:700;color:var(--text);">
+            GHS ${openingFloat.toLocaleString('en-GH', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+
+        <!-- Denomination table -->
+        <div style="padding:16px 24px 0;">
+          <div style="display:grid;grid-template-columns:1fr auto auto auto;
+            gap:0;border:1px solid var(--border);border-radius:var(--radius-sm);
+            overflow:hidden;">
+
+            <!-- Header row -->
+            <div style="padding:8px 12px;background:var(--bg);
+              font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;
+              border-bottom:1px solid var(--border);">Denomination</div>
+            <div style="padding:8px 12px;background:var(--bg);
+              font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;
+              border-bottom:1px solid var(--border);text-align:center;">Count</div>
+            <div style="padding:8px 12px;background:var(--bg);
+              font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;
+              border-bottom:1px solid var(--border);
+              text-align:right;grid-column:3/5;">Subtotal</div>
+
+            ${DENOMS.map(d => `
+              <!-- GHS ${d} row -->
+              <div style="padding:10px 12px;border-bottom:1px solid var(--border);
+                display:flex;align-items:center;gap:6px;">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                  font-weight:600;color:var(--text);">GHS ${d}</span>
+              </div>
+              <div style="padding:6px 8px;border-bottom:1px solid var(--border);
+                display:flex;align-items:center;gap:4px;justify-content:center;">
+                <button onclick="Cashier._floatDenomChange(${d}, -1)"
+                  style="width:26px;height:26px;border-radius:50%;
+                    border:1px solid var(--border);background:var(--bg);
+                    font-size:14px;cursor:pointer;color:var(--text-2);
+                    display:flex;align-items:center;justify-content:center;
+                    line-height:1;font-family:inherit;">−</button>
+                <span id="float-count-${d}"
+                  style="font-family:'JetBrains Mono',monospace;font-size:14px;
+                    font-weight:600;color:var(--text);min-width:28px;
+                    text-align:center;">0</span>
+                <button onclick="Cashier._floatDenomChange(${d}, 1)"
+                  style="width:26px;height:26px;border-radius:50%;
+                    border:1px solid var(--border);background:var(--bg);
+                    font-size:14px;cursor:pointer;color:var(--text-2);
+                    display:flex;align-items:center;justify-content:center;
+                    line-height:1;font-family:inherit;">+</button>
+              </div>
+              <div id="float-sub-${d}"
+                style="padding:10px 12px;border-bottom:1px solid var(--border);
+                  font-family:'JetBrains Mono',monospace;font-size:13px;
+                  color:var(--text-3);text-align:right;
+                  grid-column:3/5;">GHS 0.00</div>
+            `).join('')}
+
+          </div>
+        </div>
+
+        <!-- Running total + mismatch indicator -->
+        <div style="padding:14px 24px 0;">
+          <div style="padding:14px 16px;border-radius:var(--radius-sm);
+            border:1px solid var(--border);background:var(--bg);
+            display:flex;align-items:center;justify-content:space-between;"
+            id="float-total-row">
+            <div>
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">
+                Your count
+              </div>
+              <div style="font-size:11px;" id="float-diff-label"></div>
+            </div>
+            <div id="float-running-total"
+              style="font-family:'JetBrains Mono',monospace;font-size:20px;
+                font-weight:700;color:var(--text);">
+              GHS 0.00
+            </div>
+          </div>
+        </div>
+
+        <!-- Confirm button -->
+        <div style="padding:16px 24px 20px;">
+          <button id="float-ack-btn"
+            onclick="Cashier._submitFloatAck(${floatId}, ${openingFloat})"
+            disabled
+            style="width:100%;padding:13px;background:var(--text);color:#fff;
+              border:none;border-radius:var(--radius-sm);font-size:14px;
+              font-weight:700;cursor:pointer;font-family:inherit;
+              opacity:0.4;transition:opacity 0.15s;">
+            Confirm Float Receipt
+          </button>
+          <div style="text-align:center;margin-top:10px;">
+            <button onclick="Auth.logout()"
+              style="background:none;border:none;font-size:12px;
+                color:var(--text-3);cursor:pointer;font-family:inherit;">
+              Sign out instead
+            </button>
+          </div>
+        </div>
+
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Store counts on window so button handlers can access
+    window._floatDenomCounts = {};
+    DENOMS.forEach(d => window._floatDenomCounts[d] = 0);
+    window._floatExpected = openingFloat;
+  }
+
+  function _floatDenomChange(denom, delta) {
+    if (!window._floatDenomCounts) return;
+    const current = window._floatDenomCounts[denom] || 0;
+    const next    = Math.max(0, current + delta);
+    window._floatDenomCounts[denom] = next;
+
+    // Update count display
+    const countEl = document.getElementById(`float-count-${denom}`);
+    if (countEl) countEl.textContent = next;
+
+    // Update subtotal
+    const subEl = document.getElementById(`float-sub-${denom}`);
+    const sub   = denom * next;
+    if (subEl) {
+      subEl.textContent = `GHS ${sub.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+      subEl.style.color = next > 0 ? 'var(--text)' : 'var(--text-3)';
+    }
+
+    // Update running total
+    const total    = Object.entries(window._floatDenomCounts)
+      .reduce((sum, [d, c]) => sum + parseInt(d) * c, 0);
+    const expected = window._floatExpected || 0;
+    const diff     = total - expected;
+    const fmt      = n => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const totalEl = document.getElementById('float-running-total');
+    const diffEl  = document.getElementById('float-diff-label');
+    const rowEl   = document.getElementById('float-total-row');
+    const btnEl   = document.getElementById('float-ack-btn');
+
+    if (totalEl) {
+      totalEl.textContent = fmt(total);
+      totalEl.style.color = diff === 0
+        ? 'var(--green-text)'
+        : diff > 0 ? 'var(--amber-text)' : 'var(--red-text)';
+    }
+
+    if (rowEl) {
+      rowEl.style.borderColor = diff === 0
+        ? 'var(--green-border)'
+        : diff > 0 ? 'var(--amber-border)' : 'var(--red-border)';
+      rowEl.style.background = diff === 0
+        ? 'var(--green-bg)'
+        : diff > 0 ? 'var(--amber-bg)' : 'var(--red-bg)';
+    }
+
+    if (diffEl) {
+      if (diff === 0) {
+        diffEl.textContent = '✓ Matches expected amount';
+        diffEl.style.color = 'var(--green-text)';
+      } else if (diff > 0) {
+        diffEl.textContent = `Surplus: ${fmt(diff)} over expected`;
+        diffEl.style.color = 'var(--amber-text)';
+      } else {
+        diffEl.textContent = `Short: ${fmt(Math.abs(diff))} under expected`;
+        diffEl.style.color = 'var(--red-text)';
+      }
+    }
+
+    if (btnEl) {
+      const match       = Math.abs(diff) < 0.001;
+      btnEl.disabled    = !match;
+      btnEl.style.opacity = match ? '1' : '0.4';
+    }
+  }
+
+  async function _submitFloatAck(floatId, expectedAmount) {
+    const btn = document.getElementById('float-ack-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+
+    // Build breakdown from window._floatDenomCounts
+    const breakdown = {};
+    Object.entries(window._floatDenomCounts || {}).forEach(([d, c]) => {
+      breakdown[d] = c;
+    });
+
+    // Final validation
+    const total = CashierFloat_denominationTotal(breakdown);
+    if (Math.abs(total - expectedAmount) > 0.001) {
+      _toast('Total does not match. Please recount.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
+      return;
+    }
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/floats/${floatId}/acknowledge/`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ breakdown }),
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Acknowledgement failed.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
+        return;
+      }
+
+      // Remove overlay and start the session
+      document.getElementById('float-ack-overlay')?.remove();
+      window._floatDenomCounts = null;
+      _toast(`Float of GHS ${expectedAmount.toFixed(2)} confirmed. Have a great shift!`, 'success');
+
+      // Re-poll shift status to update state
+      await _pollShiftStatus();
+
+    } catch {
+      _toast('Network error. Please try again.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
+    }
+  }
+
+  // Helper — mirrors backend denomination_total classmethod
+  function CashierFloat_denominationTotal(breakdown) {
+    return Object.entries(breakdown || {})
+      .reduce((sum, [d, c]) => sum + parseInt(d) * parseInt(c), 0);
+  }
+  
+
 function _showSignOffBanner(minsRemaining, shiftEnd) {
     // Only show once per session
     if (document.getElementById('signoff-banner') ||
@@ -2714,6 +3080,8 @@ function _renderCreditPane(container) {
     _creditFilter,
     _renderCreditGrid,
     _updatePartialCredit,
+    _floatDenomChange,
+    _submitFloatAck,
   };
 })();
 

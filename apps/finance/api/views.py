@@ -463,13 +463,20 @@ class CashierShiftStatusView(APIView):
     GET /api/v1/finance/cashier/shift-status/
     Returns current shift state for the logged-in cashier.
     Polled every 60s by the cashier portal.
+
+    float_status values:
+      NO_FLOAT        — no float record exists for today
+      PENDING_ACK     — float staged but cashier hasn't confirmed receipt
+      ACTIVE          — acknowledged, working normally
+      PENDING_SIGNOFF — shift ended, must count and submit
+      SIGNED_OFF      — fully signed off for the day
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from django.utils import timezone
-        from datetime import datetime, timedelta, time as dt_time
-        from apps.hr.models import EmployeeShift, ShiftOverride
+        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from datetime import datetime as dt
 
         user   = request.user
         branch = getattr(user, 'branch', None)
@@ -480,93 +487,282 @@ class CashierShiftStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get today's float
         today = timezone.localdate()
+        now   = timezone.now()
+
+        # ── Step 1: find float record ─────────────────────────
+        # First try: linked to today's open sheet
+        float_record = None
         try:
-            float_record = CashierFloat.objects.get(
+            float_record = CashierFloat.objects.select_related(
+                'daily_sheet'
+            ).get(
                 cashier             = user,
                 daily_sheet__date   = today,
                 daily_sheet__branch = branch,
             )
         except CashierFloat.DoesNotExist:
-            float_record = None
+            pass
 
-        # If already signed off
-        if float_record and float_record.is_signed_off:
+        # Second try: staged (daily_sheet=None, scheduled_date=today)
+        if float_record is None:
+            try:
+                staged = CashierFloat.objects.get(
+                    cashier        = user,
+                    daily_sheet    = None,
+                    scheduled_date = today,
+                )
+                # Auto-link to today's open sheet if one exists
+                try:
+                    open_sheet = DailySalesSheet.objects.get(
+                        branch = branch,
+                        date   = today,
+                        status = DailySalesSheet.Status.OPEN,
+                    )
+                    # Check unique_together won't be violated
+                    already_linked = CashierFloat.objects.filter(
+                        daily_sheet = open_sheet,
+                        cashier     = user,
+                    ).exclude(pk=staged.pk).exists()
+
+                    if not already_linked:
+                        staged.daily_sheet    = open_sheet
+                        staged.scheduled_date = None
+                        staged.save(update_fields=['daily_sheet', 'scheduled_date', 'updated_at'])
+
+                except DailySalesSheet.DoesNotExist:
+                    pass  # Sheet not open yet — float stays staged
+
+                float_record = staged
+
+            except CashierFloat.DoesNotExist:
+                pass
+
+        # ── Step 2: no float at all ───────────────────────────
+        if float_record is None:
             return Response({
-                'has_shift'        : True,
+                'has_shift'        : False,
+                'float_status'     : 'NO_FLOAT',
+                'float_id'         : None,
+                'sheet_id'         : None,
+                'opening_float'    : None,
+                'opening_breakdown': None,
                 'shift_end'        : None,
-                'minutes_remaining': 0,
+                'minutes_remaining': None,
                 'should_prompt'    : False,
-                'should_lock'      : True,
-                'is_signed_off'    : True,
-                'float_id'         : float_record.id,
-                'sheet_id'         : float_record.daily_sheet_id,
+                'should_lock'      : False,
+                'is_signed_off'    : False,
                 'is_overtime'      : False,
                 'overtime_until'   : None,
                 'is_cover'         : False,
                 'cover_until'      : None,
             })
 
-        # If overtime active — use overtime_until instead of shift end
-        if float_record and float_record.is_overtime and float_record.overtime_until:
-            now            = timezone.now()
+        # ── Step 3: resolve sheet_id ──────────────────────────
+        sheet_id = float_record.daily_sheet_id
+        if not sheet_id:
+            try:
+                open_sheet = DailySalesSheet.objects.get(
+                    branch = branch,
+                    date   = today,
+                    status = DailySalesSheet.Status.OPEN,
+                )
+                sheet_id = open_sheet.pk
+            except DailySalesSheet.DoesNotExist:
+                pass
+
+        # ── Step 4: already fully signed off ──────────────────
+        if float_record.is_signed_off:
+            return Response({
+                'has_shift'        : True,
+                'float_status'     : 'SIGNED_OFF',
+                'float_id'         : float_record.id,
+                'sheet_id'         : sheet_id,
+                'opening_float'    : str(float_record.opening_float),
+                'opening_breakdown': float_record.opening_denomination_breakdown,
+                'shift_end'        : None,
+                'minutes_remaining': 0,
+                'should_prompt'    : False,
+                'should_lock'      : True,
+                'is_signed_off'    : True,
+                'is_overtime'      : False,
+                'overtime_until'   : None,
+                'is_cover'         : float_record.is_cover,
+                'cover_until'      : float_record.cover_until,
+            })
+
+        # ── Step 5: pending morning acknowledgement ───────────
+        if not float_record.morning_acknowledged:
+            return Response({
+                'has_shift'        : True,
+                'float_status'     : 'PENDING_ACK',
+                'float_id'         : float_record.id,
+                'sheet_id'         : sheet_id,
+                'opening_float'    : str(float_record.opening_float),
+                'opening_breakdown': float_record.opening_denomination_breakdown,
+                'shift_end'        : None,
+                'minutes_remaining': None,
+                'should_prompt'    : False,
+                'should_lock'      : False,
+                'is_signed_off'    : False,
+                'is_overtime'      : False,
+                'overtime_until'   : None,
+                'is_cover'         : float_record.is_cover,
+                'cover_until'      : float_record.cover_until,
+            })
+
+        # ── Step 6: overtime active ───────────────────────────
+        if float_record.is_overtime and float_record.overtime_until:
             delta          = float_record.overtime_until - now
             mins_remaining = max(0, int(delta.total_seconds() / 60))
             return Response({
                 'has_shift'        : True,
-                'shift_end'        : float_record.overtime_until.time(),
+                'float_status'     : 'SIGNED_OFF' if float_record.is_signed_off else 'ACTIVE',
+                'float_id'         : float_record.id,
+                'sheet_id'         : sheet_id,
+                'opening_float'    : str(float_record.opening_float),
+                'opening_breakdown': float_record.opening_denomination_breakdown,
+                'shift_end'        : float_record.overtime_until,
                 'minutes_remaining': mins_remaining,
                 'should_prompt'    : mins_remaining <= 60,
                 'should_lock'      : mins_remaining <= 0,
-                'is_signed_off'    : False,
-                'float_id'         : float_record.id,
-                'sheet_id'         : float_record.daily_sheet_id,
+                'is_signed_off'    : float_record.is_signed_off,
                 'is_overtime'      : True,
                 'overtime_until'   : float_record.overtime_until,
                 'is_cover'         : float_record.is_cover,
                 'cover_until'      : float_record.cover_until,
             })
 
-        # Resolve shift end via ShiftEngine
-        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
-        from datetime import datetime as dt
-
+        # ── Step 7: normal active shift ───────────────────────
         cash_schedule  = HRShiftEngine(branch).get_role_schedule('CASHIER', target_date=today)
         signoff_dt     = dt.fromisoformat(cash_schedule['signoff_at'])
-        now            = timezone.now()
         delta          = signoff_dt - now
         mins_remaining = max(0, int(delta.total_seconds() / 60))
         shift_end      = dt.fromisoformat(cash_schedule['shift_end']).time()
 
-        # Resolve sheet_id — from float if available, else today's open sheet
-        sheet_id = None
-        if float_record:
-            sheet_id = float_record.daily_sheet_id
-        else:
-            try:
-                from apps.finance.models import DailySalesSheet
-                open_sheet = DailySalesSheet.objects.get(
-                    branch=branch, date=today, status='OPEN'
-                )
-                sheet_id = open_sheet.pk
-            except DailySalesSheet.DoesNotExist:
-                pass
+        float_status = 'ACTIVE'
+        if mins_remaining <= 0 and not float_record.is_signed_off:
+            float_status = 'PENDING_SIGNOFF'
 
         return Response({
             'has_shift'        : True,
+            'float_status'     : float_status,
+            'float_id'         : float_record.id,
+            'sheet_id'         : sheet_id,
+            'opening_float'    : str(float_record.opening_float),
+            'opening_breakdown': float_record.opening_denomination_breakdown,
             'shift_end'        : shift_end,
             'minutes_remaining': mins_remaining,
             'should_prompt'    : mins_remaining <= 60,
             'should_lock'      : mins_remaining <= 0,
-            'is_signed_off'    : float_record.is_signed_off if float_record else False,
-            'float_id'         : float_record.id if float_record else None,
-            'sheet_id'         : sheet_id,
-            'is_overtime'      : float_record.is_overtime if float_record else False,
-            'overtime_until'   : float_record.overtime_until if float_record else None,
-            'is_cover'         : float_record.is_cover if float_record else False,
-            'cover_until'      : float_record.cover_until if float_record else None,
+            'is_signed_off'    : float_record.is_signed_off,
+            'is_overtime'      : float_record.is_overtime,
+            'overtime_until'   : float_record.overtime_until,
+            'is_cover'         : float_record.is_cover,
+            'cover_until'      : float_record.cover_until,
         })
+
+
+class FloatAcknowledgeView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/acknowledge/
+    Cashier confirms receipt of opening float with denomination breakdown.
+
+    Body:
+    {
+        "breakdown": {"1":0,"2":0,"5":2,"10":0,"20":2,"50":0,"100":0,"200":0}
+    }
+
+    Validates that denomination total matches opening_float exactly.
+    Sets morning_acknowledged = True.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+        from decimal import Decimal
+
+        try:
+            float_record = CashierFloat.objects.get(
+                pk      = pk,
+                cashier = request.user,
+            )
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        breakdown = request.data.get('breakdown')
+        if not breakdown or not isinstance(breakdown, dict):
+            return Response(
+                {'detail': 'Denomination breakdown is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate denomination keys
+        valid_denoms = {'1', '2', '5', '10', '20', '50', '100', '200'}
+        if not set(str(k) for k in breakdown.keys()).issubset(valid_denoms):
+            return Response(
+                {'detail': 'Invalid denomination. Must be one of: 1, 2, 5, 10, 20, 50, 100, 200.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate all counts are non-negative integers
+        for denom, count in breakdown.items():
+            try:
+                if int(count) < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                return Response(
+                    {'detail': f'Invalid count for GHS {denom}. Must be a non-negative integer.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Validate total matches opening float
+        counted_total = CashierFloat.denomination_total(breakdown)
+        expected      = float(float_record.opening_float)
+
+        if abs(counted_total - expected) > 0.001:
+            return Response(
+                {
+                    'detail'       : f'Denomination total GHS {counted_total:.2f} does not match '
+                                     f'staged float GHS {expected:.2f}. Please recount.',
+                    'counted_total': counted_total,
+                    'expected'     : expected,
+                    'difference'   : round(counted_total - expected, 2),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Save acknowledgement
+        float_record.morning_acknowledged              = True
+        float_record.morning_acknowledged_at           = timezone.now()
+        float_record.opening_denomination_breakdown    = {
+            str(k): int(v) for k, v in breakdown.items()
+        }
+        float_record.save(update_fields=[
+            'morning_acknowledged',
+            'morning_acknowledged_at',
+            'opening_denomination_breakdown',
+            'updated_at',
+        ])
+
+        return Response({
+            'detail'              : 'Float acknowledged. Have a great shift!',
+            'float_id'            : float_record.id,
+            'opening_float'       : str(float_record.opening_float),
+            'counted_total'       : counted_total,
+            'morning_acknowledged': True,
+            'acknowledged_at'     : float_record.morning_acknowledged_at.isoformat(),
+        })
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # Petty Cash
 # ─────────────────────────────────────────────────────────────────────────────

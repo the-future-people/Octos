@@ -11,6 +11,7 @@ from .views import (
     CashierSignOffView,
     CashierShiftStatusView,
     CashierHistoryView,
+    FloatAcknowledgeView,
     EODSummaryView,
     PettyCashCreateView,
     POSTransactionListView,
@@ -63,19 +64,20 @@ urlpatterns = [
     # ── Cashier Float ─────────────────────────────────────────────────────
     path('floats/<int:pk>/close/',               CashierFloatCloseView.as_view(),             name='float-close'),
     path('floats/<int:pk>/sign-off/',            CashierSignOffView.as_view(),                name='float-sign-off'),
+    path('floats/<int:pk>/acknowledge/',         FloatAcknowledgeView.as_view(),              name='float-acknowledge'),
 
     # ── Cashier ───────────────────────────────────────────────────────────
     path('cashier/shift-status/',                CashierShiftStatusView.as_view(),            name='cashier-shift-status'),
     path('cashier/history/',                     CashierHistoryView.as_view(),                name='cashier-history'),
+    path('cashier/receipts/',                    CashierReceiptListView.as_view(),            name='cashier-receipts'),
 
     # ── POS Transactions ──────────────────────────────────────────────────
     path('pos/',                                 POSTransactionListView.as_view(),            name='pos-list'),
     path('pos/<int:pk>/settle/',                 POSTransactionSettleView.as_view(),          name='pos-settle'),
 
     # ── Receipts ──────────────────────────────────────────────────────────
+    path('receipts/',                            ReceiptListView.as_view(),                   name='receipt-list'),
     path('receipts/<int:pk>/',                   ReceiptDetailView.as_view(),                 name='receipt-detail'),
-    path('receipts/',                       ReceiptListView.as_view(),                        name='receipt-list'),
-    path('receipts/<int:pk>/',              ReceiptDetailView.as_view(),                      name='receipt-detail'),
     path('receipts/<int:pk>/send-whatsapp/',     ReceiptSendWhatsAppView.as_view(),           name='receipt-whatsapp'),
     path('receipts/<int:pk>/thermal/',           ReceiptThermalView.as_view(),                name='receipt-thermal'),
 
@@ -99,20 +101,20 @@ urlpatterns = [
     path('invoices/<int:pk>/',                   InvoiceDetailView.as_view(),                 name='invoice-detail'),
     path('invoices/<int:pk>/send/',              InvoiceSendView.as_view(),                   name='invoice-send'),
     path('invoices/<int:pk>/pdf/',               InvoicePDFView.as_view(),                    name='invoice-pdf'),
-    path('cashier/receipts/',                   CashierReceiptListView.as_view(),             name='cashier-receipts'),
+
     # ── Weekly Report ─────────────────────────────────────────────────────
-    path('weekly/',                             WeeklyReportListView.as_view(),               name='weekly-list'),
-    path('weekly/prepare/',                     WeeklyReportPrepareView.as_view(),            name='weekly-prepare'),
-    path('weekly/<int:pk>/',                    WeeklyReportDetailView.as_view(),             name='weekly-detail'),
-    path('weekly/<int:pk>/notes/',              WeeklyReportNotesView.as_view(),              name='weekly-notes'),
-    path('weekly/<int:pk>/submit/',             WeeklyReportSubmitView.as_view(),             name='weekly-submit'),
-    path('weekly/<int:pk>/pdf/',                WeeklyReportPDFView.as_view(),                name='weekly-pdf'),
+    path('weekly/',                              WeeklyReportListView.as_view(),              name='weekly-list'),
+    path('weekly/prepare/',                      WeeklyReportPrepareView.as_view(),           name='weekly-prepare'),
+    path('weekly/<int:pk>/',                     WeeklyReportDetailView.as_view(),            name='weekly-detail'),
+    path('weekly/<int:pk>/notes/',               WeeklyReportNotesView.as_view(),             name='weekly-notes'),
+    path('weekly/<int:pk>/submit/',              WeeklyReportSubmitView.as_view(),            name='weekly-submit'),
+    path('weekly/<int:pk>/pdf/',                 WeeklyReportPDFView.as_view(),               name='weekly-pdf'),
 
     # ── Monthly Close ─────────────────────────────────────────────────────
-    path('monthly-close/',                      MonthlyCloseStatusView.as_view(),   name='monthly-close-status'),
-    path('monthly-close/submit/',               MonthlyCloseSubmitView.as_view(),   name='monthly-close-submit'),
-    path('monthly-close/pending/',              MonthlyClosePendingView.as_view(),  name='monthly-close-pending'),
-    path('monthly-close/<int:pk>/endorse/',     MonthlyCloseEndorseView.as_view(),  name='monthly-close-endorse'),
-    path('monthly-close/<int:pk>/reject/',      MonthlyCloseRejectView.as_view(),   name='monthly-close-reject'),
-    path('monthly-close/<int:pk>/pdf/',         MonthlyClosePDFView.as_view(),      name='monthly-close-pdf'),
+    path('monthly-close/',                       MonthlyCloseStatusView.as_view(),            name='monthly-close-status'),
+    path('monthly-close/submit/',                MonthlyCloseSubmitView.as_view(),            name='monthly-close-submit'),
+    path('monthly-close/pending/',               MonthlyClosePendingView.as_view(),           name='monthly-close-pending'),
+    path('monthly-close/<int:pk>/endorse/',      MonthlyCloseEndorseView.as_view(),           name='monthly-close-endorse'),
+    path('monthly-close/<int:pk>/reject/',       MonthlyCloseRejectView.as_view(),            name='monthly-close-reject'),
+    path('monthly-close/<int:pk>/pdf/',          MonthlyClosePDFView.as_view(),               name='monthly-close-pdf'),
 ]
