@@ -77,6 +77,7 @@ const Attendant = (() => {
   }
 
   // ── Shift ──────────────────────────────────────────────────
+// ── Shift ──────────────────────────────────────────────────
   async function _loadShift() {
     try {
       const res  = await Auth.fetch('/api/v1/finance/cashier/shift-status/');
@@ -91,15 +92,22 @@ const Attendant = (() => {
       const end = data.overtime_until || data.shift_end;
       if (!end) return;
 
-      const endTime  = new Date(end);
-      const now      = new Date();
-      const diffMs   = endTime - now;
+      // shift_end may be "HH:MM:SS" or full ISO datetime
+      let endTime;
+      if (String(end).includes('T')) {
+        endTime = new Date(end);
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        endTime     = new Date(`${today}T${end}`);
+      }
 
-      const timeStr  = endTime.toLocaleTimeString('en-GH', {
+      const now    = new Date();
+      const diffMs = endTime - now;
+
+      const timeStr = endTime.toLocaleTimeString('en-GH', {
         hour: '2-digit', minute: '2-digit', hour12: true,
       });
 
-      // Build remaining time pill
       let remainingHtml = '';
       if (diffMs > 0) {
         const totalMins = Math.floor(diffMs / 60000);
