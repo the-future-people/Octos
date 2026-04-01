@@ -2899,6 +2899,13 @@ class MonthlyCloseEndorseView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only a Regional Manager can endorse monthly closes.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             close = MonthlyClose.objects.get(pk=pk)
         except MonthlyClose.DoesNotExist:
@@ -3012,3 +3019,127 @@ class MonthlyClosePendingView(APIView):
             for c in pending
         ]
         return Response(data)
+
+class FloatAcknowledgeView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/acknowledge/
+    Cashier confirms receipt of opening float with denomination breakdown.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        try:
+            float_record = CashierFloat.objects.get(
+                pk      = pk,
+                cashier = request.user,
+            )
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        breakdown = request.data.get('breakdown')
+        if not breakdown or not isinstance(breakdown, dict):
+            return Response(
+                {'detail': 'Denomination breakdown is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        valid_denoms = {'1', '2', '5', '10', '20', '50', '100', '200'}
+        if not set(str(k) for k in breakdown.keys()).issubset(valid_denoms):
+            return Response(
+                {'detail': 'Invalid denomination. Must be one of: 1, 2, 5, 10, 20, 50, 100, 200.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for denom, count in breakdown.items():
+            try:
+                if int(count) < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                return Response(
+                    {'detail': f'Invalid count for GHS {denom}. Must be a non-negative integer.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        counted_total = CashierFloat.denomination_total(breakdown)
+        expected      = float(float_record.opening_float)
+
+        if abs(counted_total - expected) > 0.001:
+            return Response(
+                {
+                    'detail'       : f'Denomination total GHS {counted_total:.2f} does not match '
+                                     f'staged float GHS {expected:.2f}. Please recount.',
+                    'counted_total': counted_total,
+                    'expected'     : expected,
+                    'difference'   : round(counted_total - expected, 2),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        float_record.morning_acknowledged           = True
+        float_record.morning_acknowledged_at        = timezone.now()
+        float_record.opening_denomination_breakdown = {
+            str(k): int(v) for k, v in breakdown.items()
+        }
+        float_record.save(update_fields=[
+            'morning_acknowledged',
+            'morning_acknowledged_at',
+            'opening_denomination_breakdown',
+            'updated_at',
+        ])
+
+        return Response({
+            'detail'              : 'Float acknowledged. Have a great shift!',
+            'float_id'            : float_record.id,
+            'opening_float'       : str(float_record.opening_float),
+            'counted_total'       : counted_total,
+            'morning_acknowledged': True,
+            'acknowledged_at'     : float_record.morning_acknowledged_at.isoformat(),
+        })
+
+        
+class MonthlyCloseDetailView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/<pk>/
+    Returns full monthly close detail including summary_snapshot.
+    Used by RM review panel.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            close = MonthlyClose.objects.select_related(
+                'branch', 'submitted_by', 'endorsed_by', 'rejected_by'
+            ).get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            'id'              : close.pk,
+            'branch'          : close.branch.name,
+            'branch_code'     : close.branch.code,
+            'month'           : close.month,
+            'year'            : close.year,
+            'month_name'      : close.month_name,
+            'status'          : close.status,
+            'submitted_by'    : close.submitted_by.full_name if close.submitted_by else '—',
+            'submitted_at'    : close.submitted_at.isoformat() if close.submitted_at else None,
+            'endorsed_by'     : close.endorsed_by.full_name if close.endorsed_by else None,
+            'endorsed_at'     : close.endorsed_at.isoformat() if close.endorsed_at else None,
+            'rejected_by'     : close.rejected_by.full_name if close.rejected_by else None,
+            'rejected_at'     : close.rejected_at.isoformat() if close.rejected_at else None,
+            'rejection_reason': close.rejection_reason,
+            'bm_notes'        : close.bm_notes,
+            'summary_snapshot': close.summary_snapshot,
+        })
+

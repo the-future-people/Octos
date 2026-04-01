@@ -45,6 +45,9 @@ from .views import (
     MonthlyCloseRejectView,
     MonthlyClosePDFView,
     MonthlyClosePendingView,
+    MonthlyCloseDetailView,
+    FloatAcknowledgeView,
+    MonthlyCloseDetailView,
 )
 
 
@@ -115,4 +118,7 @@ urlpatterns = [
     path('monthly-close/<int:pk>/endorse/',     MonthlyCloseEndorseView.as_view(),  name='monthly-close-endorse'),
     path('monthly-close/<int:pk>/reject/',      MonthlyCloseRejectView.as_view(),   name='monthly-close-reject'),
     path('monthly-close/<int:pk>/pdf/',         MonthlyClosePDFView.as_view(),      name='monthly-close-pdf'),
+    path('monthly-close/<int:pk>/',             MonthlyCloseDetailView.as_view(),   name='monthly-close-detail'),
+    path('floats/<int:pk>/acknowledge/',         FloatAcknowledgeView.as_view(),     name='float-acknowledge'),
+    path('monthly-close/<int:pk>/',             MonthlyCloseDetailView.as_view(),   name='monthly-close-detail'),
 ]

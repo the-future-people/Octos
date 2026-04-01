@@ -245,7 +245,8 @@ class MonthlyCloseEngine:
             created_at__date__lte = last_day,
             intake_by__isnull     = False,
         ).values(
-            'intake_by__full_name'
+            'intake_by__first_name',
+            'intake_by__last_name',
         ).annotate(
             jobs_recorded = Count('id'),
             revenue       = Sum('amount_paid'),
@@ -253,7 +254,8 @@ class MonthlyCloseEngine:
 
         staff_stats = [
             {
-                'name'         : r['intake_by__full_name'],
+                'intake_by__first_name': r['intake_by__first_name'],
+                'intake_by__last_name': r['intake_by__last_name'],
                 'jobs_recorded': r['jobs_recorded'],
                 'revenue'      : str(r['revenue'] or 0),
             }
@@ -721,7 +723,11 @@ class MonthlyCloseEngine:
             story.append(divider())
             staff_data = [['Staff Member', 'Jobs Recorded', 'Revenue Generated']]
             for s in staff:
-                staff_data.append([s['name'], str(s['jobs_recorded']), fmt(s['revenue'])])
+                staff_data.append([
+                    f"{s.get('first_name','')} {s.get('last_name','')}".strip() or s.get('name','—'),
+                    str(s['jobs_recorded']),
+                    fmt(s['revenue'])
+                ])
             staff_table = Table(staff_data, colWidths=[80*mm, 40*mm, 45*mm])
             staff_table.setStyle(TableStyle([
                 ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),

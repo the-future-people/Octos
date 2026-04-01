@@ -394,10 +394,14 @@ const RM = (() => {
   }
 
   // ── Monthly close pane ─────────────────────────────────────
-  async function _loadMonthlyClosePane() {
+ async function _loadMonthlyClosePane() {
     _closeLoaded = true;
     const el = document.getElementById('rm-close-list');
     if (!el) return;
+    if (!_data) await _loadDashboard();
+
+    // Ensure dashboard data is loaded — needed for branch ID filtering
+    if (!_data) await _loadDashboard();
 
     try {
       const res  = await Auth.fetch('/api/v1/finance/monthly-close/pending/');
@@ -406,8 +410,10 @@ const RM = (() => {
       const list = Array.isArray(data) ? data : (data.results || []);
 
       // Filter to branches in this region only
-      const regionBranchIds = new Set((_data?.branches || []).map(b => b.id));
-      const regional = list.filter(c => regionBranchIds.has(c.branch));
+      const regionBranchCodes = new Set((_data?.branches || []).map(b => b.code));
+      const regional = regionBranchCodes.size > 0
+        ? list.filter(c => regionBranchCodes.has(c.branch_code))
+        : list;
 
       // Update sidebar badge
       const badge = document.getElementById('sidebar-badge-close');
@@ -432,7 +438,7 @@ const RM = (() => {
           display:flex;align-items:center;justify-content:space-between;gap:16px;">
           <div>
             <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              ${_esc(c.branch_name || 'Branch')} — ${_esc(c.period_label || c.month || '—')}
+              ${_esc(c.branch_name || 'Branch')} — ${_esc(c.period_label || c.month_name || c.month || '—')}
             </div>
             <div style="font-size:12px;color:var(--text-3);">
               Submitted by ${_esc(c.submitted_by_name || '—')} ·
@@ -455,12 +461,13 @@ const RM = (() => {
           </div>
         </div>`).join('');
 
-    } catch {
+    } catch (e) {
+      console.error('Monthly close pane error:', e);
       el.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
         Could not load monthly closes.</div>`;
     }
   }
-
+  
   async function endorseClose(closeId) {
     if (!confirm('Endorse this monthly close? This will forward it to the Belt Manager.')) return;
     try {
