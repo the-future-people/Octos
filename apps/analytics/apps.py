@@ -1,5 +1,7 @@
 from django.apps import AppConfig
 
+from apps.analytics.signals.handlers import on_weekly_report_saved
+
 
 class AnalyticsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
@@ -66,3 +68,10 @@ class AnalyticsConfig(AppConfig):
             sender    = MonthlyClose,
             dispatch_uid = 'analytics_monthly_close_saved',
         )
+        from apps.finance.models import WeeklyReport
+        post_save.connect(
+            on_weekly_report_saved,
+            sender       = WeeklyReport,
+            dispatch_uid = 'analytics_weekly_report_saved',
+        )
+        

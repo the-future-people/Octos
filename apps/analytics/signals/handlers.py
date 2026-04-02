@@ -495,3 +495,18 @@ def _get_ip(request):
     if x_forwarded:
         return x_forwarded.split(',')[0].strip()
     return request.META.get('REMOTE_ADDR')
+
+def on_weekly_report_saved(sender, instance, created, **kwargs):
+    """Fires on WeeklyReport save. Triggers weekly risk on LOCKED."""
+    if created:
+        return
+    try:
+        update_fields = list(kwargs.get('update_fields') or [])
+        if 'status' not in (update_fields or []) and update_fields:
+            return
+        if instance.status == 'LOCKED':
+            from apps.analytics.tasks.weekly import compute_weekly_risk
+            compute_weekly_risk.delay(instance.pk)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error('on_weekly_report_saved failed: %s', e, exc_info=True)

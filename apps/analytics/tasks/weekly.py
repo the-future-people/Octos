@@ -1,6 +1,6 @@
 """
 Weekly risk scoring Celery task.
-Full implementation in Session 3.
+Triggered by WeeklyReport status → LOCKED signal.
 """
 
 import logging
@@ -13,10 +13,31 @@ logger = logging.getLogger(__name__)
 def compute_weekly_risk(self, weekly_report_id):
     """
     Compute risk score for a weekly filing.
-    Full implementation: Session 3 — Weekly Risk Engine.
+    Creates WeeklyRiskScore and WeeklyRiskFlag records.
+    Assigns Finance reviewer if score >= 50 or any CRITICAL flag.
     """
     try:
-        logger.info('compute_weekly_risk: report_id=%s (stub — Session 3)', weekly_report_id)
+        from apps.finance.models import WeeklyReport
+        from apps.analytics.engines.weekly_risk_engine import WeeklyRiskEngine
+
+        report = WeeklyReport.objects.select_related('branch').get(pk=weekly_report_id)
+        engine = WeeklyRiskEngine(report)
+        score  = engine.analyse()
+
+        logger.info(
+            'compute_weekly_risk complete: report=%s score=%s requires_finance=%s',
+            weekly_report_id, score.risk_score, score.requires_finance_review,
+        )
+        return {
+            'report_id'        : weekly_report_id,
+            'risk_score'       : score.risk_score,
+            'requires_finance' : score.requires_finance_review,
+        }
+
+    except WeeklyReport.DoesNotExist:
+        logger.error('compute_weekly_risk: report %s not found', weekly_report_id)
+        return None
+
     except Exception as e:
-        logger.error('compute_weekly_risk failed for report %s: %s', weekly_report_id, e)
+        logger.error('compute_weekly_risk failed for report %s: %s', weekly_report_id, e, exc_info=True)
         raise self.retry(exc=e)
