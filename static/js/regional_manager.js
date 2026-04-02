@@ -435,29 +435,24 @@ const RM = (() => {
       el.innerHTML = regional.map(c => `
         <div style="background:var(--panel);border:1px solid var(--border);
           border-radius:var(--radius);padding:16px 20px;margin-bottom:10px;
-          display:flex;align-items:center;justify-content:space-between;gap:16px;">
+          display:flex;align-items:center;justify-content:space-between;gap:16px;
+          cursor:pointer;transition:border-color 0.15s;"
+          onclick="RM.openCloseReview(${c.id})"
+          onmouseover="this.style.borderColor='var(--border-dark)'"
+          onmouseout="this.style.borderColor='var(--border)'">
           <div>
             <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              ${_esc(c.branch_name || 'Branch')} — ${_esc(c.period_label || c.month_name || c.month || '—')}
+              ${_esc(c.branch_name || c.branch || 'Branch')} — ${_esc(c.month_name || '—')} ${c.year || ''}
             </div>
             <div style="font-size:12px;color:var(--text-3);">
-              Submitted by ${_esc(c.submitted_by_name || '—')} ·
-              ${c.submitted_at ? _timeAgo(c.submitted_at) : '—'}
+              Submitted by ${_esc(c.submitted_by || '—')} ·
+              ${c.submitted_at ? _timeAgo(c.submitted_at) : '—'} ·
+              GHS ${parseFloat(c.total_collected || 0).toLocaleString('en-GH', {minimumFractionDigits:2})} collected ·
+              ${c.total_jobs || 0} jobs
             </div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0;">
-            <button onclick="RM.endorseClose(${c.id})"
-              style="padding:7px 16px;background:var(--text);color:#fff;border:none;
-                border-radius:var(--radius-sm);font-size:12px;font-weight:700;
-                cursor:pointer;font-family:inherit;">
-              Endorse
-            </button>
-            <button onclick="RM.rejectClose(${c.id})"
-              style="padding:7px 12px;background:none;border:1px solid var(--border);
-                border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);
-                cursor:pointer;font-family:inherit;">
-              Reject
-            </button>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:11px;color:var(--text-3);">Click to review →</span>
           </div>
         </div>`).join('');
 
@@ -468,44 +463,93 @@ const RM = (() => {
     }
   }
   
-  async function endorseClose(closeId) {
-    if (!confirm('Endorse this monthly close? This will forward it to the Belt Manager.')) return;
+async function endorseClose(closeId) {
+    // Compile all section notes
+    const sections = ['revenue','jobs','weekly','services','staff','bmnotes','overall'];
+    const notes = sections
+      .map(s => {
+        const val = document.getElementById(`note-${s}`)?.value?.trim();
+        if (!val) return null;
+        const label = {
+          revenue:'Revenue', jobs:'Jobs', weekly:'Weekly Breakdown',
+          services:'Top Services', staff:'Staff Performance',
+          bmnotes:'BM Notes', overall:'Overall'
+        }[s];
+        return `[${label}] ${val}`;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+ 
+    const btn = document.querySelector('#close-review-overlay button[onclick*="endorseClose"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Endorsing…'; }
+ 
     try {
       const res = await Auth.fetch(`/api/v1/finance/monthly-close/${closeId}/endorse/`, {
-        method: 'POST',
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ belt_notes: notes }),
       });
       if (res?.ok) {
-        _toast('Monthly close endorsed.', 'success');
+        document.getElementById('close-review-overlay')?.remove();
+        _toast('Monthly close endorsed and filed.', 'success');
         _closeLoaded = false;
         _loadMonthlyClosePane();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         _toast(err.detail || 'Could not endorse.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Endorse & File'; }
       }
     } catch {
       _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Endorse & File'; }
     }
   }
+ 
 
-  async function rejectClose(closeId) {
-    const reason = prompt('Reason for rejection (required):');
-    if (!reason?.trim()) return;
+async function rejectClose(closeId) {
+    // Compile notes as the rejection reason
+    const sections = ['revenue','jobs','weekly','services','staff','bmnotes','overall'];
+    const notes = sections
+      .map(s => {
+        const val = document.getElementById(`note-${s}`)?.value?.trim();
+        if (!val) return null;
+        const label = {
+          revenue:'Revenue', jobs:'Jobs', weekly:'Weekly Breakdown',
+          services:'Top Services', staff:'Staff Performance',
+          bmnotes:'BM Notes', overall:'Overall'
+        }[s];
+        return `[${label}] ${val}`;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+ 
+    if (!notes) {
+      _toast('Please add at least one objection note before rejecting.', 'error');
+      return;
+    }
+ 
+    const btn = document.querySelector('#close-review-overlay button[onclick*="rejectClose"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Rejecting…'; }
+ 
     try {
       const res = await Auth.fetch(`/api/v1/finance/monthly-close/${closeId}/reject/`, {
         method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ reason }),
+        body   : JSON.stringify({ reason: notes }),
       });
       if (res?.ok) {
-        _toast('Monthly close rejected.', 'info');
+        document.getElementById('close-review-overlay')?.remove();
+        _toast('Monthly close rejected. BM has been notified.', 'info');
         _closeLoaded = false;
         _loadMonthlyClosePane();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         _toast(err.detail || 'Could not reject.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Reject'; }
       }
     } catch {
       _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Reject'; }
     }
   }
 
@@ -559,6 +603,244 @@ const RM = (() => {
     setTimeout(() => el.remove(), 3500);
   }
 
+    async function openCloseReview(closeId) {
+    // Fetch full detail
+    const overlay = document.createElement('div');
+    overlay.id    = 'close-review-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9000;
+      background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);
+      display:flex;align-items:flex-start;justify-content:center;
+      padding:20px;overflow-y:auto;font-family:'DM Sans',sans-serif;`;
+ 
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:780px;
+        box-shadow:0 24px 64px rgba(0,0,0,0.2);margin:auto;">
+        <div style="padding:24px 28px;border-bottom:1px solid var(--border);
+          display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:20px;
+              font-weight:800;color:var(--text);">Monthly Close Review</div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:3px;"
+              id="review-subtitle">Loading…</div>
+          </div>
+          <button onclick="document.getElementById('close-review-overlay').remove()"
+            style="width:32px;height:32px;border-radius:50%;border:1px solid var(--border);
+              background:var(--bg);display:flex;align-items:center;justify-content:center;
+              cursor:pointer;font-size:18px;color:var(--text-2);">×</button>
+        </div>
+        <div id="review-body" style="padding:28px;">
+          <div style="text-align:center;padding:60px;color:var(--text-3);">
+            <span class="spin"></span> Loading document…
+          </div>
+        </div>
+      </div>`;
+ 
+    document.body.appendChild(overlay);
+ 
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/monthly-close/${closeId}/`);
+      if (!res?.ok) throw new Error();
+      const c    = await res.json();
+      const snap = c.summary_snapshot || {};
+ 
+      document.getElementById('review-subtitle').textContent =
+        `${c.branch} — ${c.month_name} ${c.year} · Submitted by ${c.submitted_by} · ${c.submitted_at ? _timeAgo(c.submitted_at) : '—'}`;
+ 
+      const fmt  = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH', {minimumFractionDigits:2})}`;
+      const rev  = snap.revenue || {};
+      const jobs = snap.jobs    || {};
+ 
+      const sectionHtml = (id, title, content) => `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);margin-bottom:16px;overflow:hidden;">
+          <div style="padding:14px 18px;background:var(--bg);
+            border-bottom:1px solid var(--border);
+            display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:12px;font-weight:700;color:var(--text);
+              text-transform:uppercase;letter-spacing:0.5px;">${title}</span>
+          </div>
+          <div style="padding:16px 18px;">${content}</div>
+          <div style="padding:0 18px 16px;">
+            <div style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+              Add Note / Raise Objection
+            </div>
+            <textarea id="note-${id}" rows="2"
+              placeholder="Optional — flag a concern or ask a question about this section…"
+              style="width:100%;padding:9px 12px;border:1px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:12px;resize:vertical;box-sizing:border-box;
+                font-family:'DM Sans',sans-serif;"></textarea>
+          </div>
+        </div>`;
+ 
+      const row = (label, val, mono=false) => `
+        <div style="display:flex;justify-content:space-between;padding:7px 0;
+          border-bottom:1px solid var(--border);">
+          <span style="font-size:13px;color:var(--text-3);">${label}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text);
+            ${mono ? "font-family:'JetBrains Mono',monospace;" : ''}">${val}</span>
+        </div>`;
+ 
+      // ── Section 1: Revenue ────────────────────────────────
+      const revenueContent = `
+        ${row('Total Collected', fmt(rev.total_collected), true)}
+        ${row('Cash', `${fmt(rev.total_cash)} (${rev.cash_pct||0}%)`)}
+        ${row('Mobile Money', `${fmt(rev.total_momo)} (${rev.momo_pct||0}%)`)}
+        ${row('POS', `${fmt(rev.total_pos)} (${rev.pos_pct||0}%)`)}
+        ${row('Credit Issued', fmt(rev.total_credit_issued))}
+        ${row('Credit Settled', fmt(rev.total_credit_settled))}
+        ${row('Petty Cash Out', fmt(rev.total_petty_cash_out))}`;
+ 
+      // ── Section 2: Jobs ───────────────────────────────────
+      const jobsContent = `
+        ${row('Total Jobs', jobs.total || 0)}
+        ${row('Completed', jobs.complete || 0)}
+        ${row('Cancelled', jobs.cancelled || 0)}
+        ${row('Completion Rate', `${jobs.completion_rate || 0}%`)}
+        ${row('Pending (carry forward)', jobs.pending || 0)}`;
+ 
+      // ── Section 3: Weekly Breakdown ───────────────────────
+      const weeks = snap.weekly_breakdown || [];
+      const weeklyContent = weeks.length ? weeks.map(w => `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-size:13px;font-weight:600;color:var(--text);">
+              Week ${w.week_number}
+              <span style="font-size:11px;color:var(--text-3);font-weight:400;">
+                (${w.date_from} – ${w.date_to})
+              </span>
+            </span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--text);">${fmt(w.total)}</span>
+          </div>
+          <div style="display:flex;gap:16px;">
+            <span style="font-size:11px;color:var(--cash-text);">Cash: ${fmt(w.cash)}</span>
+            <span style="font-size:11px;color:var(--momo-text);">MoMo: ${fmt(w.momo)}</span>
+            <span style="font-size:11px;color:var(--pos-text);">POS: ${fmt(w.pos)}</span>
+            <span style="font-size:11px;color:var(--text-3);">${w.jobs} jobs</span>
+            <span style="font-size:11px;font-weight:700;
+              color:${w.status==='LOCKED'?'var(--green-text)':'var(--amber-text)'};">
+              ${w.status}
+            </span>
+          </div>
+        </div>`).join('') : '<div style="color:var(--text-3);font-size:13px;">No weekly data.</div>';
+ 
+      // ── Section 4: Top Services ───────────────────────────
+      const services = snap.top_services || [];
+      const servicesContent = services.length ? `
+        <table style="width:100%;border-collapse:collapse;">
+          ${services.map((s,i) => `
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:7px 0;font-size:13px;color:var(--text-3);">${i+1}.</td>
+              <td style="padding:7px 8px;font-size:13px;color:var(--text);">${_esc(s.service)}</td>
+              <td style="padding:7px 0;font-size:12px;color:var(--text-3);text-align:right;">
+                ${s.job_count} jobs
+              </td>
+              <td style="padding:7px 0;font-family:'JetBrains Mono',monospace;
+                font-size:13px;font-weight:700;color:var(--text);text-align:right;
+                padding-left:16px;">${fmt(s.revenue)}</td>
+            </tr>`).join('')}
+        </table>` : '<div style="color:var(--text-3);font-size:13px;">No service data.</div>';
+ 
+      // ── Section 5: Staff Performance ──────────────────────
+      const staff = snap.staff_performance || [];
+      const staffContent = staff.length ? `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:var(--bg);">
+              <th style="padding:8px;text-align:left;font-size:10.5px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                border-bottom:2px solid var(--border);">Staff Member</th>
+              <th style="padding:8px;text-align:right;font-size:10.5px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                border-bottom:2px solid var(--border);">Jobs</th>
+              <th style="padding:8px;text-align:right;font-size:10.5px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                border-bottom:2px solid var(--border);">Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${staff.map(s => {
+              const name = s.name ||
+                `${s.intake_by__first_name||''} ${s.intake_by__last_name||''}`.trim() || '—';
+              return `
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:10px 8px;font-size:13px;color:var(--text);">${_esc(name)}</td>
+                  <td style="padding:10px 8px;font-size:13px;color:var(--text-2);
+                    text-align:right;">${s.jobs_recorded}</td>
+                  <td style="padding:10px 8px;font-family:'JetBrains Mono',monospace;
+                    font-size:13px;font-weight:700;color:var(--text);
+                    text-align:right;">${fmt(s.revenue)}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>` : '<div style="color:var(--text-3);font-size:13px;">No staff data.</div>';
+ 
+      // ── Section 6: BM Notes ───────────────────────────────
+      const bmNotesContent = `
+        <div style="font-size:13px;color:var(--text-2);line-height:1.6;
+          min-height:40px;white-space:pre-wrap;">
+          ${_esc(c.bm_notes || '—')}
+        </div>`;
+ 
+      // ── Assemble body ─────────────────────────────────────
+      document.getElementById('review-body').innerHTML = `
+ 
+        ${sectionHtml('revenue',  'Revenue Summary',    revenueContent)}
+        ${sectionHtml('jobs',     'Jobs Summary',       jobsContent)}
+        ${sectionHtml('weekly',   'Weekly Breakdown',   weeklyContent)}
+        ${sectionHtml('services', 'Top Services',       servicesContent)}
+        ${sectionHtml('staff',    'Staff Performance',  staffContent)}
+        ${sectionHtml('bmnotes',  'Branch Manager Notes', bmNotesContent)}
+ 
+        <!-- Overall RM notes -->
+        <div style="margin-bottom:20px;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+            Overall RM Notes (Optional)
+          </div>
+          <textarea id="note-overall" rows="3"
+            placeholder="Add overall comments or observations before endorsing or rejecting…"
+            style="width:100%;padding:10px 14px;border:1px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;resize:vertical;box-sizing:border-box;
+              font-family:'DM Sans',sans-serif;"></textarea>
+        </div>
+ 
+        <!-- Action buttons -->
+        <div style="display:flex;gap:10px;justify-content:flex-end;
+          padding-top:16px;border-top:1px solid var(--border);">
+          <button onclick="document.getElementById('close-review-overlay').remove()"
+            style="padding:10px 24px;background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;">
+            Cancel
+          </button>
+          <button onclick="RM.rejectClose(${closeId})"
+            style="padding:10px 24px;background:none;border:1px solid var(--red-border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;color:var(--red-text);font-family:inherit;">
+            Reject
+          </button>
+          <button onclick="RM.endorseClose(${closeId})"
+            style="padding:10px 28px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;">
+            Endorse & File
+          </button>
+        </div>`;
+ 
+    } catch {
+      document.getElementById('review-body').innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--red-text);font-size:13px;">
+          Could not load monthly close document.
+        </div>`;
+    }
+  }
+
   // ── Public API ─────────────────────────────────────────────
   return {
     init,
@@ -568,6 +850,7 @@ const RM = (() => {
     openBranchDetail,
     endorseClose,
     rejectClose,
+    openCloseReview,
   };
 
 })();
