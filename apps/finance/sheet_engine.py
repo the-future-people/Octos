@@ -146,45 +146,15 @@ class SheetEngine:
                 user.pk,
             )
 
-    def _link_staged_floats(self, sheet) -> int:
+    def _link_staged_floats(self, sheet) -> dict:
         """
         Link any pre-staged cashier floats to the newly opened sheet.
-        Called automatically when a sheet is created.
-
-        Staged floats are created by the BM at EOD the previous evening
-        with daily_sheet=None and scheduled_date=tomorrow.
-        This method links them to the sheet when it opens.
-
-        Returns count of floats linked.
+        Delegates entirely to FloatEngine — SheetEngine never touches
+        CashierFloat directly.
         """
-        from apps.finance.models import CashierFloat
-
-        staged = CashierFloat.objects.filter(
-            daily_sheet    = None,
-            scheduled_date = sheet.date,
-            cashier__branch = self.branch,
-        )
-
-        count = staged.count()
-        if count:
-            staged.update(daily_sheet=sheet)
-            logger.info(
-                'SheetEngine: linked %d staged float(s) to sheet %s for branch %s',
-                count,
-                sheet.pk,
-                self.branch.code,
-            )
-        else:
-            logger.warning(
-                'SheetEngine: no staged floats found for sheet %s branch %s on %s — '
-                'BM may not have set tomorrow\'s float at EOD.',
-                sheet.pk,
-                self.branch.code,
-                sheet.date,
-            )
-
-        return count
-    
+        from apps.finance.float_engine import FloatEngine
+        return FloatEngine.link_staged_floats(sheet)
+        
     # ── Close sequence ────────────────────────────────────────────
 
     def get_branch_lock_status(self, sheet=None, role_name: str = 'ATTENDANT') -> dict:
