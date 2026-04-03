@@ -7,6 +7,7 @@ from django.conf.urls.static import static
 from config.views import (
     login_view, dashboard_view, inbox_view, jobs_view,
     cashier_view, attendant_view, belt_manager_view, regional_manager_view,
+    finance_portal_view,
 )
 
 urlpatterns = [
@@ -39,5 +40,6 @@ urlpatterns = [
     path('portal/belt-manager/',     belt_manager_view,     name='belt-manager'),
     path('portal/regional-manager/', regional_manager_view, name='regional-manager'),
     path('api/v1/analytics/', include('apps.analytics.api.urls')),
+    path('portal/finance/', finance_portal_view, name='finance-portal'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

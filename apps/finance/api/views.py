@@ -2028,8 +2028,8 @@ def _generate_invoice_pdf(invoice):
             detail += f" · {li.pages}pp × {li.sets} sets"
         table_data.append([
             [
-                Paragraph(li.label, sm_bold),
-                Paragraph(detail, sm),
+            Paragraph(li.label, sm_bold),
+            Paragraph(detail, sm),
             ],
             Paragraph(str(li.quantity), ParagraphStyle('c', fontSize=9,
                 fontName='Helvetica', alignment=TA_CENTER,
@@ -2938,9 +2938,15 @@ class MonthlyCloseStatusView(APIView):
             'rejected_by'      : close.rejected_by.full_name if close.rejected_by else None,
             'rejected_at'      : close.rejected_at.isoformat() if close.rejected_at else None,
             'rejection_reason' : close.rejection_reason,
-            'bm_notes'         : close.bm_notes,
-            'belt_notes'       : close.belt_notes,
-            'summary_snapshot' : close.summary_snapshot,
+            # NEW
+            'bm_notes'                 : close.bm_notes,
+            'finance_reviewer'         : close.finance_reviewer.full_name if close.finance_reviewer else None,
+            'finance_cleared_at'       : close.finance_cleared_at.isoformat() if close.finance_cleared_at else None,
+            'clarification_request'    : close.clarification_request,
+            'clarification_response'   : close.clarification_response,
+            'clarification_due_at'     : close.clarification_due_at.isoformat() if close.clarification_due_at else None,
+            'rm_notes'                 : close.rm_notes,
+            'summary_snapshot'         : close.summary_snapshot,
         })
 
 
@@ -2972,7 +2978,7 @@ class MonthlyCloseSubmitView(APIView):
             'id'          : close.pk,
             'status'      : close.status,
             'submitted_at': close.submitted_at.isoformat(),
-            'message'     : f"{close.month_name} {close.year} submitted successfully. Awaiting Belt Manager endorsement.",
+            'message'     : f"{close.month_name} {close.year} submitted successfully. Assigned to Finance for review.",
         })
 
 
@@ -2985,7 +2991,7 @@ class MonthlyCloseEndorseView(APIView):
 
     def post(self, request, pk):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'):
+        if role not in ('REGIONAL_MANAGER', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Only a Regional Manager can endorse monthly closes.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -2996,7 +3002,7 @@ class MonthlyCloseEndorseView(APIView):
         except MonthlyClose.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        notes  = request.data.get('belt_notes', '')
+        notes  = request.data.get('rm_notes', '')
         engine = MonthlyCloseEngine(close.branch, close.month, close.year)
         close, errors = engine.endorse(request.user, notes)
 
@@ -3007,7 +3013,7 @@ class MonthlyCloseEndorseView(APIView):
             'id'         : close.pk,
             'status'     : close.status,
             'endorsed_at': close.endorsed_at.isoformat(),
-            'message'    : f"{close.month_name} {close.year} endorsed and finalized.",
+            'message'    : f"{close.month_name} {close.year} endorsed. Awaiting lock on PDF download.",
         })
 
 
@@ -3081,25 +3087,31 @@ class MonthlyClosePendingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        """RM sees closes that Finance has cleared — ready for endorsement."""
         pending = MonthlyClose.objects.filter(
-            status = MonthlyClose.Status.SUBMITTED,
-        ).select_related('branch', 'submitted_by').order_by('-year', '-month')
+            status=MonthlyClose.Status.FINANCE_CLEARED,
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('-year', '-month')
 
         data = [
             {
-                'id'          : c.pk,
-                'branch'      : c.branch.name,
-                'branch_code' : c.branch.code,
-                'month'       : c.month,
-                'year'        : c.year,
-                'month_name'  : c.month_name,
-                'submitted_by': c.submitted_by.full_name if c.submitted_by else '—',
-                'submitted_at': c.submitted_at.isoformat() if c.submitted_at else None,
-                'bm_notes'    : c.bm_notes,
-                'total_collected': str(
+                'id'                 : c.pk,
+                'branch'             : c.branch.name,
+                'branch_code'        : c.branch.code,
+                'month'              : c.month,
+                'year'               : c.year,
+                'month_name'         : c.month_name,
+                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
+                'finance_reviewer'   : c.finance_reviewer.full_name if c.finance_reviewer else '—',
+                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                'bm_notes'           : c.bm_notes,
+                'finance_notes'      : c.finance_notes,
+                'total_collected'    : str(
                     c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
                 ),
-                'total_jobs'  : c.summary_snapshot.get('jobs', {}).get('total', 0),
+                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
             }
             for c in pending
         ]
@@ -3188,3 +3200,205 @@ class MonthlyCloseDetailView(APIView):
             'summary_snapshot': close.summary_snapshot,
         })
 
+class MonthlyCloseMyQueueView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-queue/
+    Finance: list closes assigned to the current user in FINANCE_REVIEWING or RESUBMITTED.
+    Ordered by risk score descending (highest risk first).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.analytics.models import MonthlyCloseSummary
+
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+            status__in=[
+                MonthlyClose.Status.FINANCE_REVIEWING,
+                MonthlyClose.Status.RESUBMITTED,
+            ],
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('-year', '-month')
+
+        # Attach risk scores where available
+        data = []
+        for c in closes:
+            risk_score = None
+            try:
+                summary    = MonthlyCloseSummary.objects.filter(
+                    monthly_close=c
+                ).first()
+                if summary:
+                    risk_score = summary.risk_score
+            except Exception:
+                pass
+
+            data.append({
+                'id'                    : c.pk,
+                'branch'                : c.branch.name,
+                'branch_code'           : c.branch.code,
+                'month'                 : c.month,
+                'year'                  : c.year,
+                'month_name'            : c.month_name,
+                'status'                : c.status,
+                'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
+                'bm_notes'              : c.bm_notes,
+                'clarification_request' : c.clarification_request,
+                'clarification_response': c.clarification_response,
+                'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
+                'risk_score'            : risk_score,
+                'total_collected'       : str(
+                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
+                ),
+                'total_jobs'            : c.summary_snapshot.get('jobs', {}).get('total', 0),
+            })
+
+        # Sort highest risk first
+        data.sort(key=lambda x: (x['risk_score'] or 0), reverse=True)
+        return Response(data)
+
+
+class MonthlyCloseMyHistoryView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-history/
+    Finance: list closes this user has cleared (FINANCE_CLEARED, ENDORSED, LOCKED).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+            status__in=[
+                MonthlyClose.Status.FINANCE_CLEARED,
+                MonthlyClose.Status.ENDORSED,
+                MonthlyClose.Status.LOCKED,
+            ],
+        ).select_related(
+            'branch', 'submitted_by'
+        ).order_by('-year', '-month')
+
+        data = [
+            {
+                'id'                 : c.pk,
+                'branch'             : c.branch.name,
+                'branch_code'        : c.branch.code,
+                'month'              : c.month,
+                'year'               : c.year,
+                'month_name'         : c.month_name,
+                'status'             : c.status,
+                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
+                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                'total_collected'    : str(
+                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
+                ),
+                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
+            }
+            for c in closes
+        ]
+        return Response(data)
+
+
+class MonthlyCloseClearView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/clear/
+    Finance clears the monthly close. Notifies RM.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only Finance reviewers can clear monthly closes.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure this Finance user is the assigned reviewer
+        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'This close is not assigned to you.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        notes  = request.data.get('finance_notes', '')
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.clear(request.user, notes)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'                 : close.pk,
+            'status'             : close.status,
+            'finance_cleared_at' : close.finance_cleared_at.isoformat(),
+            'message'            : f"{close.month_name} {close.year} cleared. Regional Manager notified.",
+        })
+
+
+class MonthlyCloseRequestClarificationView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/request-clarification/
+    Finance flags items requiring BM clarification. BM has 24 hours.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only Finance reviewers can request clarification.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'This close is not assigned to you.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        clarification = request.data.get('clarification', '').strip()
+        if not clarification:
+            return Response(
+                {'detail': 'Clarification request cannot be empty.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.request_clarification(request.user, clarification)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'                   : close.pk,
+            'status'               : close.status,
+            'clarification_due_at' : close.clarification_due_at.isoformat(),
+            'message'              : 'Clarification requested. Branch Manager has 24 hours to respond.',
+        })

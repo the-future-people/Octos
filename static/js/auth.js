@@ -47,17 +47,19 @@ const Auth = {
   },
 
   // Map role → portal URL
+  // NEW
   ROLE_PORTALS: {
     BRANCH_MANAGER           : '/portal/dashboard/',
     CASHIER                  : '/portal/cashier/',
     ATTENDANT                : '/portal/attendant/',
     REGIONAL_MANAGER         : '/portal/regional-manager/',
     REGIONAL_HR_COORDINATOR  : '/portal/dashboard/',
-    BELT_MANAGER             : '/portal/dashboard/',
+    BELT_MANAGER             : '/portal/belt-manager/',
     HQ_FACTORY_MANAGER       : '/portal/dashboard/',
     HQ_HR_MANAGER            : '/portal/dashboard/',
     SUPER_ADMIN              : '/portal/dashboard/',
     DESIGNER                 : '/portal/attendant/',
+    FINANCE                  : '/portal/finance/',
   },
 
   redirectToPortal() {

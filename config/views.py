@@ -27,3 +27,6 @@ def belt_manager_view(request):
 
 def regional_manager_view(request):
     return render(request, 'portals/regional_manager.html')
+
+def finance_portal_view(request):
+    return render(request, 'portals/finance_portal.html')

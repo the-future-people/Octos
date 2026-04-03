@@ -48,6 +48,10 @@ from .views import (
     MonthlyCloseDetailView,
     FloatAcknowledgeView,
     MonthlyCloseDetailView,
+    MonthlyCloseMyQueueView,
+    MonthlyCloseMyHistoryView,
+    MonthlyCloseClearView,
+    MonthlyCloseRequestClarificationView,
 )
 
 
@@ -121,4 +125,9 @@ urlpatterns = [
     path('monthly-close/<int:pk>/',             MonthlyCloseDetailView.as_view(),   name='monthly-close-detail'),
     path('floats/<int:pk>/acknowledge/',         FloatAcknowledgeView.as_view(),     name='float-acknowledge'),
     path('monthly-close/<int:pk>/',             MonthlyCloseDetailView.as_view(),   name='monthly-close-detail'),
+
+    path('monthly-close/my-queue/',                       MonthlyCloseMyQueueView.as_view(),                  name='monthly-close-my-queue'),
+    path('monthly-close/my-history/',                     MonthlyCloseMyHistoryView.as_view(),                name='monthly-close-my-history'),
+    path('monthly-close/<int:pk>/clear/',                 MonthlyCloseClearView.as_view(),                    name='monthly-close-clear'),
+    path('monthly-close/<int:pk>/request-clarification/', MonthlyCloseRequestClarificationView.as_view(),     name='monthly-close-request-clarification'),
 ]
