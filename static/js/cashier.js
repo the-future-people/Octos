@@ -831,6 +831,7 @@ const Cashier = (() => {
   let _shiftStatus    = null;
   let _signOffStep    = 1;
   let _signOffFloatId = null;
+  let _wizardCache    = {};
   const SHIFT_POLL_MS = 60000;
 
   function _startShiftPolling() {
@@ -1334,7 +1335,8 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
   // ── Sign-off wizard ────────────────────────────────────────
   function openSignOffWizard(dismissible = true, floatId = null) {
     if (floatId) _signOffFloatId = floatId;
-    _signOffStep = 1;
+    _signOffStep  = 1;
+    _wizardCache  = {};
     document.getElementById('signoff-wizard')?.remove();
 
     const overlay = document.createElement('div');
@@ -1355,7 +1357,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
       <div style="
         background:var(--panel);border:1px solid var(--border);
         border-radius:var(--radius);width:100%;max-width:540px;
-        max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
 
         <div style="padding:20px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;">
           <div>
@@ -1381,7 +1383,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
             </div>`).join('')}
         </div>
 
-        <div id="wizard-body" style="padding:24px;"></div>
+        <div id="wizard-body" style="padding:20px 24px;overflow-y:auto;flex:1;"></div>
 
         <div style="padding:16px 24px 20px;border-top:1px solid var(--border);
           display:flex;justify-content:space-between;align-items:center;">
@@ -1420,7 +1422,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     if (label)   label.textContent        = `Step ${step} of 5`;
     if (backBtn) backBtn.style.display     = step > 1 ? 'block' : 'none';
     if (nextBtn) nextBtn.textContent       = step === 5 ? 'Sign Off Shift' : 'Continue →';
-    if (nextBtn) nextBtn.style.background  = step === 5 ? 'var(--red-text)' : 'var(--text)';
+    if (nextBtn) nextBtn.style.background  = step === 5 ? '#e8294a' : 'var(--text)';
 
     const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
@@ -1504,7 +1506,9 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
         </div>`,
 
       // ── Step 4: Float handover ──────────────────────────────
-      4: () => `
+      4: () => {
+        const closingCash = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
+        return `
         <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Float Handover</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Physically hand over your cash float to the Branch Manager before confirming.
@@ -1513,14 +1517,16 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
           border-radius:var(--radius);margin-bottom:20px;">
           <div style="font-size:12px;color:var(--text-3);margin-bottom:4px;">Amount to hand over</div>
           <div style="font-size:24px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text);">
-            ${fmt(totals.CASH)}
+            ${fmt(closingCash)}
           </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Total cash collected today</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Physical cash counted in till</div>
         </div>
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text-2);">
           <input type="checkbox" id="wizard-float-ack" style="margin-top:2px;accent-color:var(--text);">
           <span>I confirm I have physically handed over the cash float to the Branch Manager.</span>
-        </label>`,
+        </label>`;
+      },
+        
 
       // ── Step 5: Shift notes + overtime ─────────────────────
       5: () => `
@@ -1591,9 +1597,10 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
   }
 
   function _updateVariancePreview() {
-    const closing  = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
-    const expected = totals.CASH;
-    const variance = closing - expected;
+    const closing      = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
+    const openingFloat = parseFloat(_shiftStatus?.opening_float || 0);
+    const expected     = openingFloat + totals.CASH;
+    const variance     = closing - expected;
     const el       = document.getElementById('variance-preview');
     if (!el) return;
     if (!closing && closing !== 0) { el.style.display = 'none'; return; }
@@ -1640,6 +1647,9 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
       if (!notes) {
         _toast('Variance notes are required.', 'error'); return;
       }
+      // Cache before DOM is replaced
+      _wizardCache.closingCash    = cash;
+      _wizardCache.varianceNotes  = notes;
     }
     if (_signOffStep === 4) {
       if (!document.getElementById('wizard-float-ack')?.checked) {
@@ -1660,11 +1670,10 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     }
 
     const isOvertime = document.getElementById('wizard-is-overtime')?.checked || false;
-
     const body = {
-      closing_cash   : parseFloat(document.getElementById('wizard-closing-cash')?.value || 0),
-      variance_notes : document.getElementById('wizard-variance-notes')?.value.trim() || '',
-      shift_notes    : document.getElementById('wizard-shift-notes')?.value.trim()    || '',
+      closing_cash   : parseFloat(_wizardCache.closingCash || 0),
+      variance_notes : _wizardCache.varianceNotes || '',
+      shift_notes    : document.getElementById('wizard-shift-notes')?.value.trim() || '',
       is_overtime    : isOvertime,
       is_cover       : false,
     };

@@ -47,7 +47,6 @@ const Auth = {
   },
 
   // Map role → portal URL
-  // NEW
   ROLE_PORTALS: {
     BRANCH_MANAGER           : '/portal/dashboard/',
     CASHIER                  : '/portal/cashier/',
