@@ -26,11 +26,12 @@ const FinancePortal = (() => {
 
   // ── Pane switching ────────────────────────────────────────
   function switchPane(pane) {
-    document.querySelectorAll('.fin-sidebar-item').forEach(el => {
+    document.querySelectorAll('.sidebar-item').forEach(el => {
       el.classList.toggle('active', el.dataset.pane === pane);
     });
-    document.getElementById('pane-queue').style.display   = pane === 'queue'   ? '' : 'none';
-    document.getElementById('pane-history').style.display = pane === 'history' ? '' : 'none';
+    document.querySelectorAll('.pane').forEach(el => {
+      el.classList.toggle('active', el.id === `pane-${pane}`);
+    });
 
     if (pane === 'queue')   _loadQueue();
     if (pane === 'history') _loadHistory();

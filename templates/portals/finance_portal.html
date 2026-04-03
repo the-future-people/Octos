@@ -6,500 +6,274 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Octos — Finance</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-
-    /* ── Topbar ── */
-    .fin-topbar {
-      height: 56px;
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      padding: 0 24px;
-      gap: 16px;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .fin-topbar-logo {
-      font-family: 'Syne', sans-serif;
-      font-size: 16px;
-      font-weight: 800;
-      color: var(--text);
-      letter-spacing: -0.3px;
-    }
-
-    .fin-topbar-divider {
-      width: 1px;
-      height: 20px;
-      background: var(--border);
-    }
-
-    .fin-topbar-role {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .fin-topbar-spacer { flex: 1; }
-
-    .fin-topbar-user {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-2);
-    }
-
-    .fin-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: var(--text);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 700;
-      font-family: 'Syne', sans-serif;
-    }
-
-    /* ── Layout ── */
-    .fin-layout {
-      display: flex;
-      min-height: calc(100vh - 56px);
-    }
-
-    .fin-sidebar {
-      width: 220px;
-      flex-shrink: 0;
-      background: var(--panel);
-      border-right: 1px solid var(--border);
-      padding: 20px 0;
-    }
-
-    .fin-sidebar-section {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      padding: 0 20px;
-      margin-bottom: 6px;
-      margin-top: 16px;
-    }
-
-    .fin-sidebar-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 20px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-2);
-      cursor: pointer;
-      transition: all 0.12s;
-      border-left: 3px solid transparent;
-    }
-
-    .fin-sidebar-item:hover {
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .fin-sidebar-item.active {
-      background: var(--bg);
-      color: var(--text);
-      font-weight: 700;
-      border-left-color: var(--text);
-    }
-
-    .fin-sidebar-badge {
-      margin-left: auto;
-      background: var(--text);
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 7px;
-      border-radius: 20px;
-      min-width: 18px;
-      text-align: center;
-    }
-
-    /* ── Main ── */
-    .fin-main {
-      flex: 1;
-      padding: 28px 32px;
-      overflow-y: auto;
-    }
-
-    .fin-page-title {
-      font-family: 'Syne', sans-serif;
-      font-size: 22px;
-      font-weight: 800;
-      color: var(--text);
-      margin-bottom: 4px;
-      letter-spacing: -0.3px;
-    }
-
-    .fin-page-sub {
-      font-size: 13px;
-      color: var(--text-3);
-      margin-bottom: 24px;
-    }
-
-    /* ── Close item ── */
-    .close-item {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      margin-bottom: 16px;
-      transition: box-shadow 0.15s;
-    }
-
-    .close-item:hover {
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-    }
-
-    .close-item-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 18px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .close-item-body {
-      padding: 16px 18px;
-      background: var(--panel);
-    }
-
-    .close-item-actions {
-      display: flex;
-      gap: 8px;
-      padding: 12px 18px;
-      border-top: 1px solid var(--border);
-      background: var(--bg);
-      flex-direction: column;
-    }
-
-    .close-item-action-row {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-    }
-
-    /* ── Risk badge ── */
-    .risk-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-
-    .risk-badge.low      { background: var(--green-bg);  color: var(--green-text); }
-    .risk-badge.medium   { background: var(--amber-bg);  color: var(--amber-text); }
-    .risk-badge.high     { background: var(--red-bg);    color: var(--red-text);   }
-    .risk-badge.critical { background: var(--red-text);  color: #fff;              }
-
-    /* ── Stat grid ── */
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .stat-cell .stat-label {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 3px;
-    }
-
-    .stat-cell .stat-value {
-      font-size: 16px;
-      font-weight: 800;
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    /* ── Notes box ── */
-    .notes-box {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 10px 14px;
-      font-size: 13px;
-      color: var(--text-2);
-      margin-bottom: 10px;
-    }
-
-    .notes-box-label {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-
-    /* ── Resubmitted banner ── */
-    .resubmitted-banner {
-      background: var(--amber-bg);
-      border: 1px solid var(--amber-border, var(--border));
-      border-radius: var(--radius-sm);
-      padding: 10px 14px;
-      margin-bottom: 12px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--amber-text);
-    }
-
-    /* ── Buttons ── */
-    .btn-clear {
-      padding: 8px 20px;
-      background: var(--text);
-      color: #fff;
-      border: none;
-      border-radius: var(--radius-sm);
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      font-family: inherit;
-      transition: opacity 0.15s;
-    }
-
-    .btn-clear:hover { opacity: 0.85; }
-    .btn-clear:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-clarify {
-      padding: 8px 20px;
-      background: none;
-      color: var(--amber-text);
-      border: 1px solid var(--amber-text);
-      border-radius: var(--radius-sm);
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      font-family: inherit;
-      transition: all 0.15s;
-    }
-
-    .btn-clarify:hover { background: var(--amber-bg); }
-    .btn-clarify:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    /* ── History item ── */
-    .history-item {
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 14px 18px;
-      margin-bottom: 10px;
-      background: var(--panel);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    /* ── Toast ── */
-    #toast-container {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-  </style>
+  <link rel="stylesheet" href="{% static 'css/regional_manager.css' %}">
 </head>
 <body>
 
-  <!-- Topbar -->
-  <div class="fin-topbar">
-    <div class="fin-topbar-logo">Octos</div>
-    <div class="fin-topbar-divider"></div>
-    <div class="fin-topbar-role">Finance</div>
-    <div class="fin-topbar-spacer"></div>
-    <div class="fin-topbar-user">
-      <div class="fin-avatar" id="fin-avatar">—</div>
-      <span id="fin-user-name">Loading…</span>
-    </div>
-  </div>
+<div class="app-shell" id="app-shell">
 
-  <!-- Layout -->
-  <div class="fin-layout">
+  <!-- ── Topbar ── -->
+  <header class="topbar">
+    <div class="topbar-inner">
+
+      <div class="topbar-toggle">
+        <span class="brand-logo">Octos</span>
+        <span class="brand-divider"></span>
+        <div style="display:flex;flex-direction:column;line-height:1.1;">
+          <span class="brand-role">Finance</span>
+        </div>
+      </div>
+
+      <div class="topbar-center"></div>
+
+      <div class="topbar-right">
+        <div style="position:relative;">
+          <button id="fin-profile-btn" onclick="FinProfile.toggle()"
+            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+              background:none;border:1px solid var(--border);border-radius:20px;
+              cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <div class="user-avatar" id="fin-avatar">—</div>
+            <span style="font-size:13px;font-weight:600;color:var(--text);"
+              id="fin-user-name">—</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              id="fin-profile-arrow"
+              style="color:var(--text-3);transition:transform 0.2s;">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div id="fin-profile-dropdown"
+            style="display:none;position:absolute;top:46px;right:0;width:200px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-size:13px;font-weight:700;color:var(--text);"
+                id="fin-profile-name">—</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Finance</div>
+            </div>
+            <div style="padding:6px 0;">
+              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+              <button onclick="Auth.logout()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;border:none;
+                  cursor:pointer;font-size:13px;color:var(--red-text);font-family:inherit;
+                  display:flex;align-items:center;gap:10px;transition:background 0.12s;"
+                onmouseover="this.style.background='var(--red-bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ── Body ── -->
+  <div class="body-layout">
 
     <!-- Sidebar -->
-    <div class="fin-sidebar">
-      <div class="fin-sidebar-section">Reviews</div>
+    <aside class="sidebar">
+      <div class="sidebar-inner">
 
-      <div class="fin-sidebar-item active" data-pane="queue"
-        onclick="FinancePortal.switchPane('queue')">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
-        </svg>
-        My Queue
-        <span class="fin-sidebar-badge" id="queue-badge" style="display:none;">0</span>
-      </div>
+        <div class="sidebar-section">Reviews</div>
 
-      <div class="fin-sidebar-item" data-pane="history"
-        onclick="FinancePortal.switchPane('history')">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="12 8 12 12 14 14"/>
-          <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
-        </svg>
-        History
+        <div class="sidebar-item active" data-pane="queue" data-label="My Queue"
+          onclick="FinancePortal.switchPane('queue')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span class="sidebar-label">My Queue</span>
+          <span class="sidebar-badge" id="queue-badge" style="display:none;">0</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="history" data-label="History"
+          onclick="FinancePortal.switchPane('history')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="12 8 12 12 14 14"/>
+            <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
+          </svg>
+          <span class="sidebar-label">History</span>
+        </div>
+
       </div>
-    </div>
+    </aside>
 
     <!-- Main -->
-    <div class="fin-main">
+    <div class="main-content">
+      <div class="pane-area">
 
-      <!-- Queue pane -->
-      <div id="pane-queue">
-        <div class="fin-page-title">My Review Queue</div>
-        <div class="fin-page-sub">
-          Monthly closes assigned to you for review. Clear when satisfied or request clarification from the Branch Manager.
+        <!-- Queue pane -->
+        <div class="pane active" id="pane-queue">
+          <div class="section-head">
+            <span class="section-title">My Review Queue</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+            Monthly closes assigned to you for review. Clear when satisfied or
+            request clarification from the Branch Manager.
+          </p>
+          <div id="queue-content">
+            <div class="loading-cell"><span class="spin"></span> Loading…</div>
+          </div>
         </div>
-        <div id="queue-content">
-          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+
+        <!-- History pane -->
+        <div class="pane" id="pane-history">
+          <div class="section-head">
+            <span class="section-title">Cleared History</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+            Monthly closes you have reviewed and cleared.
+          </p>
+          <div id="history-content">
+            <div class="loading-cell"><span class="spin"></span> Loading…</div>
+          </div>
         </div>
+
       </div>
-
-      <!-- History pane -->
-      <div id="pane-history" style="display:none;">
-        <div class="fin-page-title">Cleared History</div>
-        <div class="fin-page-sub">Monthly closes you have reviewed and cleared.</div>
-        <div id="history-content">
-          <div class="loading-cell"><span class="spin"></span> Loading…</div>
-        </div>
-      </div>
-
     </div>
   </div>
+</div>
 
-  <!-- Clarification modal -->
-  <div id="clarify-modal-overlay" style="display:none;position:fixed;inset:0;
-    background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-    <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-      max-width:480px;border:1px solid var(--border);overflow:hidden;">
-      <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-        display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-size:16px;font-weight:700;color:var(--text);">
-          Request Clarification
-        </div>
+<!-- Clarification modal -->
+<div id="clarify-modal-overlay" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
+    max-width:480px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+      display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);">
+        Request Clarification
+      </div>
+      <button onclick="FinancePortal.closeClarifyModal()"
+        style="background:none;border:none;font-size:20px;cursor:pointer;
+          color:var(--text-3);">×</button>
+    </div>
+    <div style="padding:24px;">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
+        Describe what the Branch Manager needs to clarify. They will have
+        <strong>24 hours</strong> to respond before the case escalates to the
+        Regional Manager.
+      </div>
+      <textarea id="clarify-text" rows="4"
+        placeholder="Describe the items that require clarification…"
+        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+          font-size:13px;resize:vertical;box-sizing:border-box;
+          font-family:'DM Sans',sans-serif;"></textarea>
+      <div id="clarify-error" style="display:none;font-size:12px;
+        color:var(--red-text);margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
         <button onclick="FinancePortal.closeClarifyModal()"
-          style="background:none;border:none;font-size:20px;cursor:pointer;
-            color:var(--text-3);">×</button>
-      </div>
-      <div style="padding:24px;">
-        <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
-          Describe what the Branch Manager needs to clarify. They will have
-          <strong>24 hours</strong> to respond before the case escalates to the
-          Regional Manager.
-        </div>
-        <textarea id="clarify-text" rows="4"
-          placeholder="Describe the items that require clarification…"
-          style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-            font-size:13px;resize:vertical;box-sizing:border-box;
-            font-family:'DM Sans',sans-serif;"></textarea>
-        <div id="clarify-error" style="display:none;font-size:12px;
-          color:var(--red-text);margin-top:8px;"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-          <button onclick="FinancePortal.closeClarifyModal()"
-            style="padding:8px 18px;border:1px solid var(--border);
-              border-radius:var(--radius-sm);background:none;color:var(--text-2);
-              font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-            Cancel
-          </button>
-          <button onclick="FinancePortal.confirmClarify()"
-            style="padding:8px 18px;background:var(--amber-text);color:#fff;
-              border:none;border-radius:var(--radius-sm);font-size:13px;
-              font-weight:700;cursor:pointer;font-family:inherit;">
-            Send Request
-          </button>
-        </div>
+          style="padding:8px 18px;border:1px solid var(--border);
+            border-radius:var(--radius-sm);background:none;color:var(--text-2);
+            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="FinancePortal.confirmClarify()"
+          style="padding:8px 18px;background:var(--amber-text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:inherit;">
+          Send Request
+        </button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Clear modal -->
-  <div id="clear-modal-overlay" style="display:none;position:fixed;inset:0;
-    background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-    <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-      max-width:460px;border:1px solid var(--border);overflow:hidden;">
-      <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-        display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-size:16px;font-weight:700;color:var(--text);">
-          Clear Monthly Close
-        </div>
+<!-- Clear modal -->
+<div id="clear-modal-overlay" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
+    max-width:460px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+      display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);">
+        Clear Monthly Close
+      </div>
+      <button onclick="FinancePortal.closeClearModal()"
+        style="background:none;border:none;font-size:20px;cursor:pointer;
+          color:var(--text-3);">×</button>
+    </div>
+    <div style="padding:24px;">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
+        Clearing this close will mark it as <strong>Finance Cleared</strong> and
+        notify the Regional Manager to endorse. Add any notes for the record.
+      </div>
+      <textarea id="clear-notes" rows="3"
+        placeholder="Finance notes (optional)…"
+        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+          font-size:13px;resize:vertical;box-sizing:border-box;
+          font-family:'DM Sans',sans-serif;"></textarea>
+      <div id="clear-error" style="display:none;font-size:12px;
+        color:var(--red-text);margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
         <button onclick="FinancePortal.closeClearModal()"
-          style="background:none;border:none;font-size:20px;cursor:pointer;
-            color:var(--text-3);">×</button>
-      </div>
-      <div style="padding:24px;">
-        <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
-          Clearing this close will mark it as <strong>Finance Cleared</strong> and
-          notify the Regional Manager to endorse. Add any notes for the record.
-        </div>
-        <textarea id="clear-notes" rows="3"
-          placeholder="Finance notes (optional)…"
-          style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-            font-size:13px;resize:vertical;box-sizing:border-box;
-            font-family:'DM Sans',sans-serif;"></textarea>
-        <div id="clear-error" style="display:none;font-size:12px;
-          color:var(--red-text);margin-top:8px;"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-          <button onclick="FinancePortal.closeClearModal()"
-            style="padding:8px 18px;border:1px solid var(--border);
-              border-radius:var(--radius-sm);background:none;color:var(--text-2);
-              font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-            Cancel
-          </button>
-          <button onclick="FinancePortal.confirmClear()"
-            style="padding:8px 18px;background:var(--text);color:#fff;
-              border:none;border-radius:var(--radius-sm);font-size:13px;
-              font-weight:700;cursor:pointer;font-family:inherit;">
-            ✓ Confirm Clear
-          </button>
-        </div>
+          style="padding:8px 18px;border:1px solid var(--border);
+            border-radius:var(--radius-sm);background:none;color:var(--text-2);
+            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="FinancePortal.confirmClear()"
+          style="padding:8px 18px;background:var(--text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:inherit;">
+          ✓ Confirm Clear
+        </button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Toast -->
-  <div id="toast-container"></div>
+<!-- Toast -->
+<div id="toast-container"></div>
 
-  <script src="{% static 'js/auth.js' %}"></script>
-  <script src="{% static 'js/finance_portal.js' %}"></script>
+<script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/finance_portal.js' %}"></script>
+<script>
+  const FinProfile = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd    = document.getElementById('fin-profile-dropdown');
+      const arrow = document.getElementById('fin-profile-arrow');
+      if (dd)    dd.style.display      = 'block';
+      if (arrow) arrow.style.transform = 'rotate(180deg)';
+      const name = document.getElementById('fin-profile-name');
+      if (name)  name.textContent =
+        document.getElementById('fin-user-name')?.textContent || '—';
+    }
+    function close() {
+      open = false;
+      const dd    = document.getElementById('fin-profile-dropdown');
+      const arrow = document.getElementById('fin-profile-arrow');
+      if (dd)    dd.style.display      = 'none';
+      if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+    document.addEventListener('click', e => {
+      if (open && !e.target.closest('#fin-profile-btn') &&
+          !e.target.closest('#fin-profile-dropdown')) close();
+    });
+    return { toggle, close };
+  })();
+</script>
 </body>
 </html>
