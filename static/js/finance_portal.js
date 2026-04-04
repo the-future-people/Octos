@@ -9,7 +9,7 @@ const FinancePortal = (() => {
   async function init() {
     await Auth.guard(['FINANCE', 'SUPER_ADMIN']);
     await _loadContext();
-    await _loadQueue();
+    await _loadBranches();
   }
 
   async function _loadContext() {
@@ -33,25 +33,28 @@ const FinancePortal = (() => {
       el.classList.toggle('active', el.id === `pane-${pane}`);
     });
 
-    if (pane === 'queue')   _loadQueue();
+    if (pane === 'queue')   _loadBranches();
     if (pane === 'history') _loadHistory();
   }
 
   // ── Queue ─────────────────────────────────────────────────
-  async function _loadQueue() {
+  // NEW
+  async function _loadBranches() {
     const container = document.getElementById('queue-content');
     if (!container) return;
     container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
     try {
-      const res  = await Auth.fetch('/api/v1/finance/monthly-close/my-queue/');
+      const res  = await Auth.fetch('/api/v1/finance/monthly-close/my-branches/');
       if (!res.ok) throw new Error();
       const data = await res.json();
 
+      // Badge = number of branches with active close
+      const activeCount = data.filter(b => b.active).length;
       const badge = document.getElementById('queue-badge');
       if (badge) {
-        badge.textContent   = data.length;
-        badge.style.display = data.length ? 'flex' : 'none';
+        badge.textContent   = activeCount;
+        badge.style.display = activeCount ? 'flex' : 'none';
       }
 
       if (!data.length) {
@@ -65,13 +68,13 @@ const FinancePortal = (() => {
               <polyline points="22 4 12 14.01 9 11.01"/>
             </svg>
             <div style="font-size:14px;font-weight:600;color:var(--text);
-              margin-bottom:4px;">All caught up</div>
-            <div style="font-size:13px;">No monthly closes in your queue.</div>
+              margin-bottom:4px;">No branches assigned</div>
+            <div style="font-size:13px;">No monthly closes have been assigned to you yet.</div>
           </div>`;
         return;
       }
 
-      container.innerHTML = data.map(c => _renderQueueItem(c)).join('');
+      container.innerHTML = data.map(b => _renderBranchCard(b)).join('');
 
     } catch {
       container.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
@@ -79,52 +82,466 @@ const FinancePortal = (() => {
     }
   }
 
-  function _renderQueueItem(c) {
+function _renderBranchCard(b) {
+    const activeHtml  = b.active  ? _renderActiveClose(b.active, b.branch, b.branch_code)  : `
+      <div style="padding:20px 24px;background:var(--bg);border-radius:var(--radius-sm);
+        font-size:13px;color:var(--text-3);text-align:center;">
+        No active review — all closes cleared ✓
+      </div>`;
+
+    const historyHtml = b.history?.length ? _renderBranchHistory(b.history) : '';
+
+    return `
+      <div style="border:1px solid var(--border);border-radius:var(--radius);
+        overflow:hidden;margin-bottom:24px;">
+
+        <!-- Branch header -->
+        <div style="padding:14px 20px;background:var(--text);
+          display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-family:'Syne',sans-serif;font-size:15px;
+              font-weight:800;color:#fff;">${_esc(b.branch)}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;
+              color:rgba(255,255,255,0.6);">${_esc(b.branch_code)}</span>
+          </div>
+          ${b.active ? `
+            <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+              font-weight:700;background:rgba(255,255,255,0.15);color:#fff;">
+              ${b.active.status === 'RESUBMITTED' ? '⚠ Resubmitted' : '● Active Review'}
+            </span>` : `
+            <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+              font-weight:700;background:rgba(255,255,255,0.15);color:#fff;">
+              ✓ Clear
+            </span>`}
+        </div>
+
+        <!-- Active close -->
+        <div style="padding:20px;">
+          ${activeHtml}
+        </div>
+
+        <!-- History -->
+        ${historyHtml}
+
+      </div>`;
+  }
+
+  function _renderBranchHistory(history) {
     const monthNames = ['January','February','March','April','May','June',
       'July','August','September','October','November','December'];
-    const monthName    = monthNames[(c.month || 1) - 1];
-    const submittedAt  = c.submitted_at
+
+    const rows = history.map(h => {
+      const monthName  = monthNames[(h.month || 1) - 1];
+      const clearedAt  = h.finance_cleared_at
+        ? new Date(h.finance_cleared_at).toLocaleDateString('en-GB',
+            {day:'numeric', month:'short', year:'numeric'})
+        : '—';
+      const statusColor = h.status === 'LOCKED' ? 'var(--text-3)'
+        : h.status === 'ENDORSED' ? 'var(--green-text)' : 'var(--green-text)';
+      const statusBg = h.status === 'LOCKED' ? 'var(--bg)'
+        : 'var(--green-bg)';
+
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:10px 20px;border-top:1px solid var(--border);">
+          <div>
+            <span style="font-size:13px;font-weight:600;color:var(--text);">
+              ${monthName} ${h.year}
+            </span>
+            <span style="font-size:11px;color:var(--text-3);margin-left:8px;">
+              Cleared ${clearedAt}
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+              color:var(--text-2);">
+              GHS ${parseFloat(h.total_collected||0).toLocaleString('en-GH',
+                {minimumFractionDigits:2})}
+            </span>
+            <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+              font-weight:700;background:${statusBg};color:${statusColor};">
+              ${h.status}
+            </span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="border-top:2px solid var(--border);">
+        <div style="padding:8px 20px;background:var(--bg);">
+          <span style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;">Previous Reviews</span>
+        </div>
+        ${rows}
+      </div>`;
+  }
+
+  function _renderActiveClose(c, branchName, branchCode) {
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const monthName   = monthNames[(c.month || 1) - 1];
+    const submittedAt = c.submitted_at
       ? new Date(c.submitted_at).toLocaleDateString('en-GB',
           {day:'numeric', month:'short', year:'numeric',
            hour:'2-digit', minute:'2-digit'})
       : '—';
 
     const isResubmitted = c.status === 'RESUBMITTED';
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const pct = n => `${parseFloat(n||0).toFixed(1)}%`;
+
+    // Weekly breakdown rows
+    const weeklyRows = (c.weekly_breakdown || []).map(w => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          font-size:12px;color:var(--text-3);">
+          W${w.week_number}
+          <span style="font-size:11px;margin-left:4px;">${w.date_from} – ${w.date_to}</span>
+        </td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;">
+          ${fmt(w.cash)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;">
+          ${fmt(w.momo)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;
+          font-weight:700;color:var(--text);">${fmt(w.total)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-size:12px;color:var(--text-3);">${w.jobs}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;">
+          <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+            font-weight:700;background:var(--green-bg);color:var(--green-text);">
+            ${w.status}
+          </span>
+        </td>
+      </tr>`).join('');
+
+    // Top services
+    const serviceRows = (c.top_services || []).map((s, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:8px 0;${i < (c.top_services.length-1) ? 'border-bottom:1px solid var(--border);' : ''}">
+        <div style="font-size:12px;color:var(--text-2);flex:1;">${_esc(s.service)}</div>
+        <div style="font-size:11px;color:var(--text-3);margin:0 12px;">${s.job_count} jobs</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
+          font-weight:700;color:var(--text);">${fmt(s.revenue)}</div>
+      </div>`).join('');
+
+    // Clarification thread
+    const clarifyThread = isResubmitted && (c.clarification_request || c.clarification_response) ? `
+      <div style="margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--amber-text);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+          ⚠ Clarification Thread
+        </div>
+        ${c.clarification_request ? `
+          <div style="background:var(--amber-bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:6px;">
+            <div style="font-size:10px;font-weight:700;color:var(--amber-text);
+              margin-bottom:4px;">Your Request</div>
+            <div style="font-size:13px;color:var(--text-2);">
+              ${_esc(c.clarification_request)}</div>
+          </div>` : ''}
+        ${c.clarification_response ? `
+          <div style="background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:10px 14px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              margin-bottom:4px;">BM Response</div>
+            <div style="font-size:13px;color:var(--text-2);">
+              ${_esc(c.clarification_response)}</div>
+          </div>` : ''}
+      </div>` : '';
+
+    return `
+      <!-- Period header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:16px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text);">
+            ${monthName} ${c.year} Monthly Close
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+            Submitted by ${_esc(c.submitted_by)} · ${submittedAt}
+          </div>
+        </div>
+        <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+          background:${isResubmitted ? 'var(--amber-bg)' : '#dbeafe'};
+          color:${isResubmitted ? 'var(--amber-text)' : '#1e40af'};">
+          ${isResubmitted ? 'Resubmitted' : 'Reviewing'}
+        </span>
+      </div>
+
+      ${clarifyThread}
+
+      <!-- Revenue -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+          Revenue Summary
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);
+          border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px;
+          display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:12px;color:var(--text-3);">Total Collected</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+            font-weight:700;color:var(--text);">${fmt(c.total_collected)}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div style="padding:10px 12px;background:var(--cash-bg);
+            border:1px solid var(--cash-border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--cash-text);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Cash</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--cash-strong);">${fmt(c.total_cash)}</div>
+            <div style="font-size:10px;color:var(--cash-text);margin-top:2px;">
+              ${pct(c.cash_pct)} of total</div>
+          </div>
+          <div style="padding:10px 12px;background:var(--momo-bg);
+            border:1px solid var(--momo-border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--momo-text);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">MoMo</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--momo-strong);">${fmt(c.total_momo)}</div>
+            <div style="font-size:10px;color:var(--momo-text);margin-top:2px;">
+              ${pct(c.momo_pct)} of total</div>
+          </div>
+          <div style="padding:10px 12px;background:var(--pos-bg);
+            border:1px solid var(--pos-border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--pos-text);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">POS</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+              font-weight:700;color:var(--pos-strong);">${fmt(c.total_pos)}</div>
+            <div style="font-size:10px;color:var(--pos-text);margin-top:2px;">
+              ${pct(c.pos_pct)} of total</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);display:flex;justify-content:space-between;">
+            <span style="font-size:11px;color:var(--text-3);">Petty Cash Out</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+              font-weight:600;color:var(--text);">${fmt(c.total_petty_cash_out)}</span>
+          </div>
+          <div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);display:flex;justify-content:space-between;">
+            <span style="font-size:11px;color:var(--text-3);">Credit Settled</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+              font-weight:600;color:var(--text);">${fmt(c.total_credit_settled)}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Jobs -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+          Jobs Summary
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+          <div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:800;color:var(--text);">${c.total_jobs}</div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:2px;">Total</div>
+          </div>
+          <div style="padding:10px 12px;background:var(--green-bg);
+            border:1px solid var(--green-border);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:800;color:var(--green-text);">
+              ${c.jobs_complete}</div>
+            <div style="font-size:10px;color:var(--green-text);margin-top:2px;">Complete</div>
+          </div>
+          <div style="padding:10px 12px;background:var(--red-bg);
+            border:1px solid var(--red-border);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:800;color:var(--red-text);">
+              ${c.jobs_cancelled}</div>
+            <div style="font-size:10px;color:var(--red-text);margin-top:2px;">Cancelled</div>
+          </div>
+          <div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:800;color:var(--text);">
+              ${c.completion_rate}%</div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:2px;">Rate</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top services -->
+      ${serviceRows ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+            Top Services
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:4px 14px;">
+            ${serviceRows}
+          </div>
+        </div>` : ''}
+
+      <!-- Weekly breakdown -->
+      ${weeklyRows ? `
+        <div style="margin-bottom:20px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+            Weekly Breakdown
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);overflow:hidden;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="background:var(--panel);">
+                  <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">Week</th>
+                  <th style="padding:8px 12px;text-align:right;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">Cash</th>
+                  <th style="padding:8px 12px;text-align:right;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">MoMo</th>
+                  <th style="padding:8px 12px;text-align:right;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">Total</th>
+                  <th style="padding:8px 12px;text-align:right;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">Jobs</th>
+                  <th style="padding:8px 12px;text-align:right;font-size:10px;font-weight:700;
+                    color:var(--text-3);text-transform:uppercase;
+                    border-bottom:1px solid var(--border);">Status</th>
+                </tr>
+              </thead>
+              <tbody>${weeklyRows}</tbody>
+            </table>
+          </div>
+        </div>` : ''}
+
+      <!-- BM Notes -->
+      ${c.bm_notes ? `
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Branch Manager Notes
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;
+            color:var(--text-2);">${_esc(c.bm_notes)}</div>
+        </div>` : ''}
+
+      <!-- Actions -->
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
+        <textarea id="fin-notes-${c.id}" rows="2"
+          placeholder="Finance notes (optional — saved on clear)…"
+          style="width:100%;padding:8px 12px;border:1px solid var(--border);
+            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+            font-size:12px;resize:none;box-sizing:border-box;margin-bottom:10px;
+            font-family:'DM Sans',sans-serif;"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn-clarify"
+            onclick="FinancePortal.openClarifyModal(${c.id})">
+            Request Clarification
+          </button>
+          <button class="btn-clear"
+            onclick="FinancePortal.openClearModal(${c.id})">
+            ✓ Clear
+          </button>
+        </div>
+      </div>`;
+  }
+
+
+function _renderQueueItem(c) {
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const monthName   = monthNames[(c.month || 1) - 1];
+    const submittedAt = c.submitted_at
+      ? new Date(c.submitted_at).toLocaleDateString('en-GB',
+          {day:'numeric', month:'short', year:'numeric',
+           hour:'2-digit', minute:'2-digit'})
+      : '—';
+
+    const isResubmitted = c.status === 'RESUBMITTED';
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const pct = n => `${parseFloat(n||0).toFixed(1)}%`;
 
     // Risk badge
     const score     = c.risk_score ?? null;
-    const riskBadge = score === null ? '' : (() => {
-      let cls   = 'low';
-      let label = `Risk ${score}`;
-      if (score >= 40) cls = 'critical';
-      else if (score >= 25) cls = 'high';
-      else if (score >= 10) cls = 'medium';
-      return `<span class="risk-badge ${cls}">${label}</span>`;
+    const riskBadge = score === null ? `
+      <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;
+        background:var(--bg);color:var(--text-3);border:1px solid var(--border);">
+        Risk not scored
+      </span>` : (() => {
+      let bg = 'var(--green-bg)'; let color = 'var(--green-text)';
+      if (score >= 40) { bg = '#e8294a'; color = '#fff'; }
+      else if (score >= 25) { bg = 'var(--red-bg)'; color = 'var(--red-text)'; }
+      else if (score >= 10) { bg = 'var(--amber-bg)'; color = 'var(--amber-text)'; }
+      return `<span style="padding:3px 10px;border-radius:20px;font-size:11px;
+        font-weight:700;background:${bg};color:${color};">Risk ${score}</span>`;
     })();
 
     // Status pill
-    const statusLabel = isResubmitted
-      ? '<span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;background:var(--amber-bg);color:var(--amber-text);">Resubmitted</span>'
-      : '<span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;background:var(--blue-bg,#dbeafe);color:var(--blue-text,#1e40af);">Reviewing</span>';
+    const statusPill = isResubmitted
+      ? `<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+          background:var(--amber-bg);color:var(--amber-text);">Resubmitted</span>`
+      : `<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+          background:#dbeafe;color:#1e40af;">Reviewing</span>`;
 
-    // Resubmitted banner + clarification thread
-    const resubBanner = isResubmitted ? `
-      <div class="resubmitted-banner">
-        ⚠ Branch Manager has responded to your clarification request.
-      </div>
-      ${c.clarification_request ? `
-        <div class="notes-box" style="margin-bottom:8px;">
-          <div class="notes-box-label">Your Clarification Request</div>
-          ${_esc(c.clarification_request)}
-        </div>` : ''}
-      ${c.clarification_response ? `
-        <div class="notes-box" style="border-color:var(--amber-text);margin-bottom:8px;">
-          <div class="notes-box-label" style="color:var(--amber-text);">
-            BM Response
-          </div>
-          ${_esc(c.clarification_response)}
-        </div>` : ''}
-    ` : '';
+    // Weekly breakdown rows
+    const weeklyRows = (c.weekly_breakdown || []).map(w => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          font-size:12px;color:var(--text-3);">
+          W${w.week_number} &nbsp;
+          <span style="font-size:11px;">${w.date_from} – ${w.date_to}</span>
+        </td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;
+          color:var(--text);">${fmt(w.cash)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;
+          color:var(--text);">${fmt(w.momo)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;
+          color:var(--text);">${fmt(w.total)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);
+          text-align:right;font-size:12px;color:var(--text-3);">${w.jobs}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;">
+          <span style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;
+            background:var(--green-bg);color:var(--green-text);">${w.status}</span>
+        </td>
+      </tr>`).join('');
+
+    // Top services rows
+    const serviceRows = (c.top_services || []).map((s, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:8px 0;${i < c.top_services.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+        <div style="font-size:12px;color:var(--text-2);flex:1;">${_esc(s.service)}</div>
+        <div style="font-size:11px;color:var(--text-3);margin:0 12px;">${s.job_count} jobs</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
+          font-weight:700;color:var(--text);">${fmt(s.revenue)}</div>
+      </div>`).join('');
+
+    // Resubmitted clarification thread
+    const clarifyThread = isResubmitted ? `
+      <div style="margin-bottom:16px;">
+        ${c.clarification_request ? `
+          <div style="background:var(--amber-bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;color:var(--amber-text);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Your Clarification Request
+            </div>
+            <div style="font-size:13px;color:var(--text-2);">${_esc(c.clarification_request)}</div>
+          </div>` : ''}
+        ${c.clarification_response ? `
+          <div style="background:var(--bg);border:1px solid var(--border);
+            border-radius:var(--radius-sm);padding:10px 14px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              BM Response
+            </div>
+            <div style="font-size:13px;color:var(--text-2);">${_esc(c.clarification_response)}</div>
+          </div>` : ''}
+      </div>` : '';
 
     return `
       <div class="close-item">
@@ -132,44 +549,190 @@ const FinancePortal = (() => {
         <!-- Header -->
         <div class="close-item-header">
           <div>
-            <div style="font-size:15px;font-weight:700;color:var(--text);">
+            <div style="font-size:16px;font-weight:700;color:var(--text);
+              font-family:'Syne',sans-serif;">
               ${_esc(c.branch)} — ${monthName} ${c.year}
             </div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
               Submitted by ${_esc(c.submitted_by)} · ${submittedAt}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             ${riskBadge}
-            ${statusLabel}
+            ${statusPill}
           </div>
         </div>
 
         <!-- Body -->
         <div class="close-item-body">
 
-          ${resubBanner}
+          ${clarifyThread}
 
-          <div class="stat-grid">
-            <div class="stat-cell">
-              <div class="stat-label">Total Collected</div>
-              <div class="stat-value">GHS ${parseFloat(c.total_collected || 0)
-                .toLocaleString('en-GH', {minimumFractionDigits:2})}</div>
+          <!-- Revenue section -->
+          <div style="margin-bottom:20px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+              Revenue Summary
             </div>
-            <div class="stat-cell">
-              <div class="stat-label">Total Jobs</div>
-              <div class="stat-value" style="font-family:inherit;">${c.total_jobs}</div>
+
+            <!-- Total collected hero -->
+            <div style="background:var(--bg);border:1px solid var(--border);
+              border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px;
+              display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-size:12px;color:var(--text-3);">Total Collected</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+                font-weight:700;color:var(--text);">${fmt(c.total_collected)}</div>
             </div>
-            <div class="stat-cell">
-              <div class="stat-label">Branch Code</div>
-              <div class="stat-value">${_esc(c.branch_code)}</div>
+
+            <!-- Method breakdown -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;
+              margin-bottom:10px;">
+              <div style="padding:10px 12px;background:var(--cash-bg);
+                border:1px solid var(--cash-border);border-radius:var(--radius-sm);">
+                <div style="font-size:10px;font-weight:700;color:var(--cash-text);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Cash</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                  font-weight:700;color:var(--cash-strong);">${fmt(c.total_cash)}</div>
+                <div style="font-size:10px;color:var(--cash-text);margin-top:2px;">
+                  ${pct(c.cash_pct)} of total</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--momo-bg);
+                border:1px solid var(--momo-border);border-radius:var(--radius-sm);">
+                <div style="font-size:10px;font-weight:700;color:var(--momo-text);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">MoMo</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                  font-weight:700;color:var(--momo-strong);">${fmt(c.total_momo)}</div>
+                <div style="font-size:10px;color:var(--momo-text);margin-top:2px;">
+                  ${pct(c.momo_pct)} of total</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--pos-bg);
+                border:1px solid var(--pos-border);border-radius:var(--radius-sm);">
+                <div style="font-size:10px;font-weight:700;color:var(--pos-text);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">POS</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                  font-weight:700;color:var(--pos-strong);">${fmt(c.total_pos)}</div>
+                <div style="font-size:10px;color:var(--pos-text);margin-top:2px;">
+                  ${pct(c.pos_pct)} of total</div>
+              </div>
+            </div>
+
+            <!-- Secondary metrics -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div style="padding:8px 12px;background:var(--bg);
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:11px;color:var(--text-3);">Petty Cash Out</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                  font-weight:600;color:var(--text);">${fmt(c.total_petty_cash_out)}</span>
+              </div>
+              <div style="padding:8px 12px;background:var(--bg);
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:11px;color:var(--text-3);">Credit Settled</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                  font-weight:600;color:var(--text);">${fmt(c.total_credit_settled)}</span>
+              </div>
             </div>
           </div>
 
+          <!-- Jobs section -->
+          <div style="margin-bottom:20px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+              Jobs Summary
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+              <div style="padding:10px 12px;background:var(--bg);
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                text-align:center;">
+                <div style="font-size:20px;font-weight:800;color:var(--text);">
+                  ${c.total_jobs}</div>
+                <div style="font-size:10px;color:var(--text-3);margin-top:2px;">Total</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--green-bg);
+                border:1px solid var(--green-border);border-radius:var(--radius-sm);
+                text-align:center;">
+                <div style="font-size:20px;font-weight:800;color:var(--green-text);">
+                  ${c.jobs_complete}</div>
+                <div style="font-size:10px;color:var(--green-text);margin-top:2px;">Complete</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--red-bg);
+                border:1px solid var(--red-border);border-radius:var(--radius-sm);
+                text-align:center;">
+                <div style="font-size:20px;font-weight:800;color:var(--red-text);">
+                  ${c.jobs_cancelled}</div>
+                <div style="font-size:10px;color:var(--red-text);margin-top:2px;">Cancelled</div>
+              </div>
+              <div style="padding:10px 12px;background:var(--bg);
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                text-align:center;">
+                <div style="font-size:20px;font-weight:800;color:var(--text);">
+                  ${c.completion_rate}%</div>
+                <div style="font-size:10px;color:var(--text-3);margin-top:2px;">Rate</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top services -->
+          ${c.top_services?.length ? `
+            <div style="margin-bottom:20px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+                Top Services
+              </div>
+              <div style="background:var(--bg);border:1px solid var(--border);
+                border-radius:var(--radius-sm);padding:4px 14px;">
+                ${serviceRows}
+              </div>
+            </div>` : ''}
+
+          <!-- Weekly breakdown -->
+          ${weeklyRows ? `
+            <div style="margin-bottom:20px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+                Weekly Breakdown
+              </div>
+              <div style="background:var(--bg);border:1px solid var(--border);
+                border-radius:var(--radius-sm);overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;">
+                  <thead>
+                    <tr style="background:var(--panel);">
+                      <th style="padding:8px 12px;text-align:left;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">Week</th>
+                      <th style="padding:8px 12px;text-align:right;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">Cash</th>
+                      <th style="padding:8px 12px;text-align:right;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">MoMo</th>
+                      <th style="padding:8px 12px;text-align:right;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">Total</th>
+                      <th style="padding:8px 12px;text-align:right;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">Jobs</th>
+                      <th style="padding:8px 12px;text-align:right;font-size:10px;
+                        font-weight:700;color:var(--text-3);text-transform:uppercase;
+                        letter-spacing:0.5px;border-bottom:1px solid var(--border);">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>${weeklyRows}</tbody>
+                </table>
+              </div>
+            </div>` : ''}
+
+          <!-- BM Notes -->
           ${c.bm_notes ? `
-            <div class="notes-box">
-              <div class="notes-box-label">BM Notes</div>
-              ${_esc(c.bm_notes)}
+            <div style="margin-bottom:16px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                Branch Manager Notes
+              </div>
+              <div style="background:var(--bg);border:1px solid var(--border);
+                border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;
+                color:var(--text-2);">${_esc(c.bm_notes)}</div>
             </div>` : ''}
 
         </div>
@@ -240,7 +803,7 @@ const FinancePortal = (() => {
 
       closeClarifyModal();
       _toast('Clarification requested. Branch Manager has 24 hours to respond.', 'success');
-      await _loadQueue();
+      await _loadBranches();
 
     } catch {
       errorEl.textContent   = 'Network error. Please try again.';
@@ -286,7 +849,7 @@ const FinancePortal = (() => {
 
       closeClearModal();
       _toast('Monthly close cleared. Regional Manager notified.', 'success');
-      await _loadQueue();
+      await _loadBranches();
 
     } catch {
       errorEl.textContent   = 'Network error. Please try again.';

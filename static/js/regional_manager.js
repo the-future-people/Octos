@@ -431,30 +431,57 @@ const RM = (() => {
           </div>`;
         return;
       }
-
-      el.innerHTML = regional.map(c => `
+      el.innerHTML = regional.map(c => {
+        const clearedAt = c.finance_cleared_at
+          ? new Date(c.finance_cleared_at).toLocaleDateString('en-GB',
+              {day:'numeric', month:'short', year:'numeric'})
+          : null;
+        return `
         <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:16px 20px;margin-bottom:10px;
-          display:flex;align-items:center;justify-content:space-between;gap:16px;
+          border-radius:var(--radius);overflow:hidden;margin-bottom:10px;
           cursor:pointer;transition:border-color 0.15s;"
           onclick="RM.openCloseReview(${c.id})"
           onmouseover="this.style.borderColor='var(--border-dark)'"
           onmouseout="this.style.borderColor='var(--border)'">
-          <div>
-            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              ${_esc(c.branch_name || c.branch || 'Branch')} — ${_esc(c.month_name || '—')} ${c.year || ''}
+
+          <!-- Finance cleared banner -->
+          <div style="padding:8px 20px;background:var(--green-bg);
+            border-bottom:1px solid var(--green-border);
+            display:flex;align-items:center;gap:8px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+              viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="2.5">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span style="font-size:11px;font-weight:700;color:var(--green-text);">
+              Finance Cleared${clearedAt ? ' · ' + clearedAt : ''}
+              ${c.finance_reviewer ? ' by ' + _esc(c.finance_reviewer) : ''}
+            </span>
+          </div>
+
+          <!-- Main content -->
+          <div style="padding:16px 20px;display:flex;align-items:center;
+            justify-content:space-between;gap:16px;">
+            <div>
+              <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+                ${_esc(c.branch_name || c.branch || 'Branch')} — ${_esc(c.month_name || '—')} ${c.year || ''}
+              </div>
+              <div style="font-size:12px;color:var(--text-3);">
+                Submitted by ${_esc(c.submitted_by || '—')} ·
+                ${c.submitted_at ? _timeAgo(c.submitted_at) : '—'} ·
+                GHS ${parseFloat(c.total_collected || 0).toLocaleString('en-GH',
+                  {minimumFractionDigits:2})} collected ·
+                ${c.total_jobs || 0} jobs
+              </div>
             </div>
-            <div style="font-size:12px;color:var(--text-3);">
-              Submitted by ${_esc(c.submitted_by || '—')} ·
-              ${c.submitted_at ? _timeAgo(c.submitted_at) : '—'} ·
-              GHS ${parseFloat(c.total_collected || 0).toLocaleString('en-GH', {minimumFractionDigits:2})} collected ·
-              ${c.total_jobs || 0} jobs
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                font-weight:700;background:var(--green-bg);color:var(--green-text);">
+                Ready to Endorse
+              </span>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-            <span style="font-size:11px;color:var(--text-3);">Click to review →</span>
-          </div>
-        </div>`).join('');
+
+        </div>`; }).join('');
 
     } catch (e) {
       console.error('Monthly close pane error:', e);
@@ -487,7 +514,7 @@ async function endorseClose(closeId) {
       const res = await Auth.fetch(`/api/v1/finance/monthly-close/${closeId}/endorse/`, {
         method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ belt_notes: notes }),
+        body   : JSON.stringify({ rm_notes: notes }),
       });
       if (res?.ok) {
         document.getElementById('close-review-overlay')?.remove();

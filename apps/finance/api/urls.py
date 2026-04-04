@@ -52,6 +52,7 @@ from .views import (
     MonthlyCloseMyHistoryView,
     MonthlyCloseClearView,
     MonthlyCloseRequestClarificationView,
+    MonthlyCloseMyBranchesView
 )
 
 
@@ -130,4 +131,5 @@ urlpatterns = [
     path('monthly-close/my-history/',                     MonthlyCloseMyHistoryView.as_view(),                name='monthly-close-my-history'),
     path('monthly-close/<int:pk>/clear/',                 MonthlyCloseClearView.as_view(),                    name='monthly-close-clear'),
     path('monthly-close/<int:pk>/request-clarification/', MonthlyCloseRequestClarificationView.as_view(),     name='monthly-close-request-clarification'),
+    path('monthly-close/my-branches/', MonthlyCloseMyBranchesView.as_view(), name='monthly-close-my-branches'),
 ]

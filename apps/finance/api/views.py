@@ -3249,6 +3249,10 @@ class MonthlyCloseMyQueueView(APIView):
             except Exception:
                 pass
 
+            snap    = c.summary_snapshot or {}
+            revenue = snap.get('revenue', {})
+            jobs    = snap.get('jobs', {})
+
             data.append({
                 'id'                    : c.pk,
                 'branch'                : c.branch.name,
@@ -3264,10 +3268,26 @@ class MonthlyCloseMyQueueView(APIView):
                 'clarification_response': c.clarification_response,
                 'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
                 'risk_score'            : risk_score,
-                'total_collected'       : str(
-                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
-                ),
-                'total_jobs'            : c.summary_snapshot.get('jobs', {}).get('total', 0),
+                # Revenue
+                'total_collected'       : revenue.get('total_collected', '0'),
+                'total_cash'            : revenue.get('total_cash', '0'),
+                'total_momo'            : revenue.get('total_momo', '0'),
+                'total_pos'             : revenue.get('total_pos', '0'),
+                'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
+                'total_credit_issued'   : revenue.get('total_credit_issued', '0'),
+                'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
+                'cash_pct'              : revenue.get('cash_pct', 0),
+                'momo_pct'              : revenue.get('momo_pct', 0),
+                'pos_pct'               : revenue.get('pos_pct', 0),
+                # Jobs
+                'total_jobs'            : jobs.get('total', 0),
+                'jobs_complete'         : jobs.get('complete', 0),
+                'jobs_cancelled'        : jobs.get('cancelled', 0),
+                'completion_rate'       : jobs.get('completion_rate', 0),
+                # Top services
+                'top_services'          : snap.get('top_services', [])[:3],
+                # Weekly breakdown
+                'weekly_breakdown'      : snap.get('weekly_breakdown', []),
             })
 
         # Sort highest risk first
@@ -3322,7 +3342,113 @@ class MonthlyCloseMyHistoryView(APIView):
         ]
         return Response(data)
 
+class MonthlyCloseMyBranchesView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-branches/
+    Finance: all closes assigned to this user, grouped by branch.
+    Active close (FINANCE_REVIEWING/RESUBMITTED) is expanded.
+    History (FINANCE_CLEARED/ENDORSED/LOCKED) is compact.
+    """
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        all_closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('branch__name', '-year', '-month')
+
+        # Group by branch
+        from collections import defaultdict
+        branches = defaultdict(lambda: {'active': None, 'history': []})
+
+        active_statuses = {
+            MonthlyClose.Status.FINANCE_REVIEWING,
+            MonthlyClose.Status.RESUBMITTED,
+            MonthlyClose.Status.NEEDS_CLARIFICATION,
+        }
+        history_statuses = {
+            MonthlyClose.Status.FINANCE_CLEARED,
+            MonthlyClose.Status.ENDORSED,
+            MonthlyClose.Status.LOCKED,
+        }
+
+        for c in all_closes:
+            key = c.branch.code
+            snap    = c.summary_snapshot or {}
+            revenue = snap.get('revenue', {})
+            jobs    = snap.get('jobs', {})
+
+            if c.status in active_statuses:
+                branches[key]['branch']      = c.branch.name
+                branches[key]['branch_code'] = c.branch.code
+                branches[key]['active'] = {
+                    'id'                    : c.pk,
+                    'month'                 : c.month,
+                    'year'                  : c.year,
+                    'month_name'            : c.month_name,
+                    'status'                : c.status,
+                    'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
+                    'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
+                    'bm_notes'              : c.bm_notes,
+                    'clarification_request' : c.clarification_request,
+                    'clarification_response': c.clarification_response,
+                    'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
+                    'total_collected'       : revenue.get('total_collected', '0'),
+                    'total_cash'            : revenue.get('total_cash', '0'),
+                    'total_momo'            : revenue.get('total_momo', '0'),
+                    'total_pos'             : revenue.get('total_pos', '0'),
+                    'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
+                    'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
+                    'cash_pct'              : revenue.get('cash_pct', 0),
+                    'momo_pct'              : revenue.get('momo_pct', 0),
+                    'pos_pct'               : revenue.get('pos_pct', 0),
+                    'total_jobs'            : jobs.get('total', 0),
+                    'jobs_complete'         : jobs.get('complete', 0),
+                    'jobs_cancelled'        : jobs.get('cancelled', 0),
+                    'completion_rate'       : jobs.get('completion_rate', 0),
+                    'top_services'          : snap.get('top_services', [])[:3],
+                    'weekly_breakdown'      : snap.get('weekly_breakdown', []),
+                }
+            elif c.status in history_statuses:
+                if 'branch' not in branches[key]:
+                    branches[key]['branch']      = c.branch.name
+                    branches[key]['branch_code'] = c.branch.code
+                branches[key]['history'].append({
+                    'id'                : c.pk,
+                    'month'             : c.month,
+                    'year'              : c.year,
+                    'month_name'        : c.month_name,
+                    'status'            : c.status,
+                    'total_collected'   : revenue.get('total_collected', '0'),
+                    'finance_cleared_at': c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                })
+
+        # Build ordered list — branches with active close first
+        result = []
+        for key, data in branches.items():
+            if 'branch' not in data:
+                continue
+            result.append({
+                'branch'      : data['branch'],
+                'branch_code' : data['branch_code'],
+                'active'      : data['active'],
+                'history'     : data['history'],
+            })
+
+        # Sort: branches with active close first, then alphabetically
+        result.sort(key=lambda x: (0 if x['active'] else 1, x['branch']))
+
+        return Response(result)
+    
+    
 class MonthlyCloseClearView(APIView):
     """
     POST /api/v1/finance/monthly-close/<id>/clear/

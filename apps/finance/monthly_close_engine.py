@@ -370,8 +370,17 @@ class MonthlyCloseEngine:
             close.status             = MonthlyClose.Status.FINANCE_REVIEWING
             close.save(update_fields=['finance_reviewer', 'finance_assigned_at', 'status'])
             self._notify_finance_reviewer(close)
+
+        # Assign Finance reviewer immediately
+        reviewer = self._assign_finance_reviewer(close)
+        if reviewer:
+            close.finance_reviewer    = reviewer
+            close.finance_assigned_at = timezone.now()
+            close.status              = MonthlyClose.Status.FINANCE_REVIEWING
+            close.save(update_fields=['finance_reviewer', 'finance_assigned_at', 'status'])
+            self._notify_finance_reviewer(close)
+            self._notify_bm_finance_assigned(close)
         else:
-            # No Finance user configured yet — notify RM to handle manually
             logger.warning(
                 'MonthlyCloseEngine: no Finance reviewer available for %s/%s — notifying RM',
                 self.month, self.year,
