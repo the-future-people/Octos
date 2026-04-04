@@ -2662,36 +2662,44 @@ class WeeklyReportPrepareView(APIView):
             )
 
         # ── Resolve current week Mon–Sat ──────────────────────────────
+        # NEW
+        import calendar
         today     = timezone.localdate()
-        monday    = today - timedelta(days=today.weekday())  # weekday() 0=Mon
+        monday    = today - timedelta(days=today.weekday())
         saturday  = monday + timedelta(days=5)
 
-        # ISO week number
+        # Cap at month boundaries — weeks cannot cross month lines
+        first_day_of_month = today.replace(day=1)
+        last_day_of_month  = today.replace(
+            day=calendar.monthrange(today.year, today.month)[1]
+        )
+        effective_from = max(monday,   first_day_of_month)
+        effective_to   = min(saturday, last_day_of_month)
+
         week_number = today.isocalendar()[1]
         year        = today.isocalendar()[0]
 
         # ── Get or create the report ──────────────────────────────────
+        # NEW
         report, created = WeeklyReport.objects.get_or_create(
             branch      = branch,
             week_number = week_number,
             year        = year,
             defaults    = {
-                'date_from' : monday,
-                'date_to'   : saturday,
+                'date_from' : effective_from,
+                'date_to'   : effective_to,
                 'status'    : WeeklyReport.Status.DRAFT,
             }
         )
-
-        if report.is_locked:
-            return Response(
-                {'detail': 'This weekly report is already locked.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # ── Find all sheets for this week ─────────────────────────────
         sheets = DailySalesSheet.objects.filter(
             branch = branch,
-            date__range = [monday, saturday],
+            date__range = [effective_from, effective_to],
+        )
+        report.date_from = effective_from
+        report.date_to   = effective_to
+        week_jobs = Job.objects.filter(
+            branch      = branch,
+            created_at__date__range = [effective_from, effective_to],
         )
 
         # ── Link sheets ───────────────────────────────────────────────
@@ -2719,8 +2727,8 @@ class WeeklyReportPrepareView(APIView):
         report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
         report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
 
-        report.date_from = monday
-        report.date_to   = saturday
+        report.date_from = effective_from
+        report.date_to   = effective_to
 
         # ── Inventory snapshot ────────────────────────────────────────
         try:
