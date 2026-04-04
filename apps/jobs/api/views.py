@@ -1914,27 +1914,35 @@ class JobHistoryView(APIView):
 
     def _day_level(self, request, base_qs, branch, year, month, week):
         from datetime import date, timedelta
+        import calendar as cal
         from apps.finance.models import DailySalesSheet
 
         weeks  = self._week_ranges(year, month)
-        # Find the matching week
         target = next((w for w in weeks if w[0] == week), None)
         if not target:
             return Response({'detail': 'Week not found.'}, status=400)
 
         _, week_start, week_end = target
 
+        # Cap at month boundaries — same rule as weekly report
+        first_day_of_month = date(year, month, 1)
+        last_day_of_month  = date(year, month, cal.monthrange(year, month)[1])
+        effective_start    = max(week_start, first_day_of_month)
+        effective_end      = min(week_end,   last_day_of_month)
+
         cur_qs  = base_qs.filter(
-            created_at__date__gte=week_start,
-            created_at__date__lte=week_end,
+            created_at__date__gte=effective_start,
+            created_at__date__lte=effective_end,
         )
-        # Previous week
-        prev_start = week_start - timedelta(days=7)
-        prev_end   = week_end   - timedelta(days=7)
+
+        # Previous week — same boundary logic
+        prev_start = effective_start - timedelta(days=7)
+        prev_end   = effective_end   - timedelta(days=7)
         prev_qs    = base_qs.filter(
             created_at__date__gte=prev_start,
             created_at__date__lte=prev_end,
         )
+
         cur  = self._agg(cur_qs)
         prev = self._agg(prev_qs)
 
@@ -1959,19 +1967,18 @@ class JobHistoryView(APIView):
         ]
 
         # Bar — jobs per day of week
-        day_names  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
         bar_labels = []
         bar_data   = []
-        current    = week_start
-        while current <= week_end:
+        current    = effective_start
+        while current <= effective_end:
             bar_labels.append(current.strftime('%a %d'))
             bar_data.append(cur_qs.filter(created_at__date=current).count())
             current += timedelta(days=1)
 
         # Heatmap — jobs per hour per day
         heatmap = []
-        current = week_start
-        while current <= week_end:
+        current = effective_start
+        while current <= effective_end:
             day_row = []
             for h in range(8, 20):
                 count = cur_qs.filter(
@@ -1984,12 +1991,11 @@ class JobHistoryView(APIView):
 
         # Drill-down items — days with sheet info
         items = []
-        current = week_start
-        while current <= week_end:
+        current = effective_start
+        while current <= effective_end:
             dqs = cur_qs.filter(created_at__date=current)
             agg = self._agg(dqs)
 
-            # Get daily sheet for PDF link
             try:
                 sheet = DailySalesSheet.objects.get(branch=branch, date=current)
                 sheet_id     = sheet.id
@@ -2016,8 +2022,8 @@ class JobHistoryView(APIView):
             'year'      : year,
             'month'     : month,
             'week'      : week,
-            'week_start': week_start.isoformat(),
-            'week_end'  : week_end.isoformat(),
+            'week_start': effective_start.isoformat(),
+            'week_end'  : effective_end.isoformat(),
             'kpis'      : kpis,
             'trend'     : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
             'bar'       : { 'labels': bar_labels,   'data': bar_data },

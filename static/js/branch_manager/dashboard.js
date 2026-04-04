@@ -1005,6 +1005,8 @@ win.document.write(`<!DOCTYPE html>
           onclick="Dashboard.switchPerformanceTab('metrics')">Branch Metrics</button>
         <button class="reports-tab" data-tab="services"
           onclick="Dashboard.switchPerformanceTab('services')">Service Performance</button>
+        <button class="reports-tab" data-tab="archive"
+          onclick="Dashboard.switchPerformanceTab('archive')">Jobs Archive</button>
       </div>
       <div id="performance-tab-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
@@ -1050,6 +1052,46 @@ win.document.write(`<!DOCTYPE html>
     }
   }
 
+function switchPerformanceTab(tab) {
+    _performanceTab = tab;
+    document.querySelectorAll('#performance-tab-bar .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    const content = document.getElementById('performance-tab-content');
+    if (!content) return;
+
+    if (tab === 'metrics') {
+      content.innerHTML = `
+        <div class="section-head" style="margin-top:16px;">
+          <span></span>
+          <div class="period-tabs">
+            <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
+            <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
+            <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
+          </div>
+        </div>
+        <div class="metrics-section">
+          <div class="metrics-grid" id="metrics-grid">
+            <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+              <span class="spin"></span> Loading metrics…
+            </div>
+          </div>
+        </div>`;
+      _renderMetrics(currentPeriod);
+    }
+
+    if (tab === 'services') {
+      content.innerHTML = `
+        <div id="services-report-content" style="margin-top:16px;">
+          <div class="loading-cell"><span class="spin"></span> Loading…</div>
+        </div>`;
+      _renderServicesReport(content);
+    }
+
+    if (tab === 'archive') {
+      _renderHistoryReport(content);
+    }
+  }
 
   // ── Finance pane ───────────────────────────────────────────
  async function _loadFinancePane() {
@@ -3405,41 +3447,51 @@ async function _loadReportsPane() {
       </div>
 
       <div class="reports-tabs">
-        <button class="reports-tab active" data-tab="history"
-          onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
+        <button class="reports-tab active" data-tab="daily"
+          onclick="Dashboard.switchReportsTab('daily')">Daily</button>
         <button class="reports-tab" data-tab="filing"
-          onclick="Dashboard.switchReportsTab('filing')">Weekly Filing</button>
+          onclick="Dashboard.switchReportsTab('filing')">Weekly</button>
         <button class="reports-tab" data-tab="monthly"
-          onclick="Dashboard.switchReportsTab('monthly')">Monthly Close</button>
+          onclick="Dashboard.switchReportsTab('monthly')">Monthly</button>
+        <button class="reports-tab" data-tab="yearly"
+          onclick="Dashboard.switchReportsTab('yearly')">Yearly</button>
+        <button class="reports-tab" data-tab="ledger"
+          onclick="Dashboard.switchReportsTab('ledger')">Job Ledger</button>
       </div>
 
       <div id="reports-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
 
-    await _loadReportsTab('history');
+    await _loadReportsTab('daily');
   }
+
+
+
   async function setReportsPeriod(period) {
     const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'history';
     await _loadReportsTab(activeTab);
   }
 
-  async function switchReportsTab(tab) {
-    document.querySelectorAll('.reports-tab').forEach(btn => {
+async function switchReportsTab(tab) {
+    document.querySelectorAll('#pane-reports .reports-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tab);
     });
     await _loadReportsTab(tab);
   }
 
-  async function _loadReportsTab(tab) {
+async function _loadReportsTab(tab) {
     const content = document.getElementById('reports-content');
     if (!content) return;
     content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
-    if (tab === 'history') await _renderHistoryReport(content);
+    if (tab === 'daily')   await _renderDailySheets(content);
     if (tab === 'filing')  await _renderWeeklyFiling(content);
     if (tab === 'monthly') await _renderMonthlyClose(content);
+    if (tab === 'yearly')  await _renderYearlySummary(content);
+    if (tab === 'ledger')  _renderHistoryReport(content);
   }
+
 
   // ── Sheets Archive ────────────────────────────────────────────
   async function _renderSheetsReport(container) {
@@ -3698,183 +3750,220 @@ async function _loadReportsPane() {
     }
   }
 
-  function _renderMonthlyCloseDetail(container, data) {
-    const monthNames = ['January','February','March','April','May','June',
-      'July','August','September','October','November','December'];
-    const monthName  = monthNames[(data.month || 1) - 1];
+ async function _renderMonthlyClose(container) {
+    if (!container) return;
 
-    const statusMap = {
-      OPEN      : { bg: 'var(--bg)',       text: 'var(--text-3)',     label: 'Open' },
-      SUBMITTED : { bg: 'var(--amber-bg)', text: 'var(--amber-text)', label: 'Awaiting Endorsement' },
-      ENDORSED  : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: 'Endorsed & Finalized' },
-      REJECTED  : { bg: 'var(--red-bg)',   text: 'var(--red-text)',   label: 'Rejected' },
-    };
-    const s = statusMap[data.status] || statusMap.OPEN;
-
-    const integrity  = data.integrity || {};
-    const checks     = integrity.checks || {};
-    const canSubmit  = data.can_submit && integrity.can_submit;
-
-    const checkRow = (check) => {
-      if (!check) return '';
-      const icon  = check.pass ? '✓' : '✗';
-      const color = check.pass ? 'var(--green-text)' : 'var(--red-text)';
-      return `
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
-          border-bottom:1px solid var(--border);">
-          <span style="font-size:13px;font-weight:700;color:${color};min-width:16px;">
-            ${icon}</span>
-          <div>
-            <div style="font-size:13px;font-weight:500;color:var(--text);">
-              ${check.label}</div>
-            <div style="font-size:11px;color:var(--text-3);">${check.detail}</div>
-          </div>
-        </div>`;
-    };
-
-    const snap    = data.summary_snapshot || {};
-    const revenue = snap.revenue || {};
-    const jobs    = snap.jobs    || {};
+    const now   = new Date();
+    const month = now.getMonth() + 1;
+    const year  = now.getFullYear();
 
     container.innerHTML = `
-      <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;
-        background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-        padding:16px 20px;margin-bottom:16px;">
+        margin-bottom:20px;">
         <div>
-          <div style="font-size:18px;font-weight:700;color:var(--text);">
-            ${monthName} ${data.year} Monthly Close
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">Monthly Close</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            End-of-month operations closure and Finance review
           </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:3px;">
-            End-of-month operations closure and Belt Manager endorsement
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;
-            background:${s.bg};color:${s.text};">${s.label}</span>
-          ${data.status === 'SUBMITTED' || data.status === 'ENDORSED' ? `
-            <button onclick="Dashboard._downloadMonthlyPDF(${data.id})"
-              style="padding:7px 14px;background:var(--text);color:#fff;border:none;
-                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                cursor:pointer;font-family:inherit;">
-              ↓ Download PDF
-            </button>` : ''}
         </div>
       </div>
+      <div id="monthly-current-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>
+      <div id="monthly-history" style="margin-top:24px;"></div>`;
 
-      ${data.status === 'REJECTED' ? `
-        <div style="background:var(--red-bg);border:1px solid var(--red-border);
-          border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:700;color:var(--red-text);margin-bottom:4px;">
-            Rejected by ${data.rejected_by || '—'}
-          </div>
-          <div style="font-size:13px;color:var(--red-text);">
-            ${data.rejection_reason || '—'}
-          </div>
-        </div>` : ''}
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/monthly-close/?month=${month}&year=${year}`
+      );
+      const content = document.getElementById('monthly-current-content');
+      if (!content) return;
 
-      <!-- Integrity checks -->
-      ${data.can_submit ? `
+      if (!res.ok) {
+        const monthName = ['January','February','March','April','May','June',
+          'July','August','September','October','November','December'][month - 1];
+        content.innerHTML = `
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:24px 20px;text-align:center;
+            color:var(--text-3);">
+            <div style="font-size:14px;font-weight:600;color:var(--text);
+              margin-bottom:6px;">${monthName} ${year}</div>
+            <div style="font-size:13px;">
+              No monthly close record yet. Submit at month end when all
+              integrity gates are met.
+            </div>
+          </div>`;
+        return;
+      }
+
+      const data = await res.json();
+      _renderMonthlyCloseDetail(content, data);
+    } catch {
+      const content = document.getElementById('monthly-current-content');
+      if (content) content.innerHTML = `
         <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
-          <div style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">
-            Submission Requirements
-          </div>
-          ${checkRow(checks.last_day_of_month)}
-          ${checkRow(checks.all_sheets_closed)}
-          ${checkRow(checks.all_weekly_filed)}
-          ${checkRow(checks.no_pending_payments)}
-          ${checkRow(checks.no_unsigned_floats)}
-        </div>` : ''}
+          border-radius:var(--radius);padding:24px 20px;text-align:center;
+          color:var(--text-3);font-size:13px;">
+          Monthly close not yet initiated for this month.
+        </div>`;
+    }
 
-      <!-- Summary snapshot (if submitted) -->
-      ${snap.revenue ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Total Collected</div>
-            <div style="font-size:20px;font-weight:800;color:var(--text);
-              font-family:'JetBrains Mono',monospace;">
-              ${_fmt(revenue.total_collected || 0)}</div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-              Cash ${revenue.cash_pct || 0}% · MoMo ${revenue.momo_pct || 0}%
-            </div>
-          </div>
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Total Jobs</div>
-            <div style="font-size:20px;font-weight:800;color:var(--text);">
-              ${jobs.total || 0}</div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-              ${jobs.completion_rate || 0}% completion rate
-            </div>
-          </div>
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Status</div>
-            <div style="font-size:14px;font-weight:700;color:${s.text};">${s.label}</div>
-            ${data.submitted_at ? `
-              <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-                Submitted ${new Date(data.submitted_at).toLocaleDateString('en-GB',
-                  {day:'numeric',month:'short',year:'numeric'})}
-              </div>` : ''}
-          </div>
-        </div>` : ''}
+    await _loadMonthlyHistory();
+  }
 
-      <!-- BM Notes + Submit -->
-      ${data.can_submit ? `
-        <div style="margin-bottom:16px;">
-          <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
-            Branch Manager Notes (optional)
-          </div>
-          <textarea id="monthly-bm-notes" rows="3"
-            placeholder="Add any observations or notes for this month…"
-            style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;resize:vertical;box-sizing:border-box;
-              font-family:'DM Sans',sans-serif;">${data.bm_notes || ''}</textarea>
+  async function _loadMonthlyHistory() {
+    const container = document.getElementById('monthly-history');
+    if (!container) return;
+
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+
+    try {
+      // Fetch all closes for this branch — we use the weekly list endpoint trick
+      // by fetching each previous month close
+      const now   = new Date();
+      const year  = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+
+      // Fetch closes for all previous months this year
+      const fetches = [];
+      for (let m = 1; m < currentMonth; m++) {
+        fetches.push(
+          Auth.fetch(`/api/v1/finance/monthly-close/?month=${m}&year=${year}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+        );
+      }
+
+      const results = await Promise.all(fetches);
+      const closes  = results
+        .filter(r => r && r.status && r.status !== 'OPEN')
+        .sort((a, b) => b.month - a.month);
+
+      if (!closes.length) return;
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      const statusConfig = {
+        SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
+        FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
+        NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
+        RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
+        FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
+        ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ✓' },
+        LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ✓' },
+        REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
+      };
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Previous Monthly Closes
         </div>
+        ${closes.map(c => {
+          const snap    = c.summary_snapshot || {};
+          const revenue = snap.revenue || {};
+          const jobs    = snap.jobs    || {};
+          const sc      = statusConfig[c.status] || { bg:'var(--bg)', text:'var(--text-3)', label: c.status };
+          const canDownload = ['ENDORSED','LOCKED'].includes(c.status);
 
-        <div style="display:flex;justify-content:flex-end;">
-          <button id="monthly-submit-btn"
-            onclick="Dashboard._submitMonthlyClose(${data.month}, ${data.year})"
-            ${!canSubmit ? 'disabled' : ''}
-            style="padding:10px 28px;background:var(--text);color:#fff;border:none;
-              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-              cursor:pointer;font-family:inherit;
-              ${!canSubmit ? 'opacity:0.4;cursor:not-allowed;' : ''}">
-            Submit for Endorsement
-          </button>
-        </div>
-        ${!canSubmit ? `
-          <div style="text-align:right;font-size:12px;color:var(--text-3);margin-top:6px;">
-            All requirements above must be met before you can submit.
-          </div>` : ''}` : ''}
+          return `
+            <div style="border:1px solid var(--border);border-radius:var(--radius);
+              overflow:hidden;margin-bottom:10px;">
 
-      ${data.status === 'ENDORSED' ? `
-        <div style="background:var(--green-bg);border:1px solid var(--green-border);
-          border-radius:var(--radius);padding:14px 16px;display:flex;
-          align-items:center;gap:10px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-            viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--green-text);">
-              Endorsed by ${data.endorsed_by || '—'}</div>
-            ${data.belt_notes ? `<div style="font-size:12px;color:var(--green-text);
-              margin-top:2px;">"${data.belt_notes}"</div>` : ''}
-          </div>
-        </div>` : ''}`;
+              <!-- Header -->
+              <div style="padding:16px 20px;background:var(--panel);
+                border-bottom:1px solid var(--border);">
+                <div style="display:flex;align-items:center;
+                  justify-content:space-between;margin-bottom:10px;">
+                  <div>
+                    <div style="font-size:15px;font-weight:700;color:var(--text);">
+                      ${monthNames[(c.month||1)-1]} ${c.year}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                      Submitted by ${c.submitted_by || '—'}
+                      ${c.submitted_at ? ' · ' + new Date(c.submitted_at)
+                        .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+                      font-weight:700;background:${sc.bg};color:${sc.text};">
+                      ${sc.label}
+                    </span>
+                    ${canDownload ? `
+                      <button onclick="Dashboard._downloadMonthlyPDF(${c.id})"
+                        style="display:inline-flex;align-items:center;gap:5px;
+                          padding:6px 14px;background:var(--text);color:#fff;
+                          border:none;border-radius:var(--radius-sm);font-size:12px;
+                          font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        PDF
+                      </button>` : ''}
+                  </div>
+                </div>
+
+                <!-- Revenue + jobs strip -->
+                ${snap.revenue ? `
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                    ${[
+                      ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
+                      ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong)'],
+                      ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong)'],
+                      ['Jobs',            jobs.total || 0,                   'var(--text)'],
+                    ].map(([label, val, color]) => `
+                      <div style="padding:8px 12px;background:var(--bg);
+                        border:1px solid var(--border);border-radius:var(--radius-sm);">
+                        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                          ${label}</div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                          font-weight:700;color:${color};">${val}</div>
+                      </div>`).join('')}
+                  </div>` : ''}
+              </div>
+
+              <!-- Audit trail -->
+              <div style="padding:12px 20px;background:var(--bg);">
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+                  Audit Trail
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  ${[
+                    ['Submitted',       c.submitted_by,        c.submitted_at,        '#3355cc'],
+                    ['Finance Cleared', c.finance_reviewer,    c.finance_cleared_at,  '#22c98a'],
+                    ['Endorsed',        c.endorsed_by,         c.endorsed_at,         '#9b59b6'],
+                    ['Locked',          c.locked_at ? 'System' : null, c.locked_at,  '#666'],
+                  ].filter(([,actor]) => actor).map(([label, actor, ts, color]) => `
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div style="width:6px;height:6px;border-radius:50%;
+                        background:${color};flex-shrink:0;"></div>
+                      <span style="font-size:12px;font-weight:600;color:var(--text);
+                        min-width:120px;">${label}</span>
+                      <span style="font-size:12px;color:var(--text-2);">${actor || '—'}</span>
+                      ${ts ? `<span style="font-size:11px;color:var(--text-3);margin-left:auto;">
+                        ${new Date(ts).toLocaleDateString('en-GB',
+                          {day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
+                    </div>`).join('')}
+                </div>
+                ${c.rejection_reason ? `
+                  <div style="margin-top:10px;padding:8px 12px;
+                    background:var(--red-bg);border:1px solid var(--red-border);
+                    border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);">
+                    <strong>Rejection reason:</strong> ${c.rejection_reason}
+                  </div>` : ''}
+              </div>
+
+            </div>`;
+        }).join('')}`;
+
+    } catch { /* silent */ }
   }
 
   async function _submitMonthlyClose(month, year) {
@@ -3924,11 +4013,409 @@ async function _loadReportsPane() {
     }
   }
 
- async function _renderWeeklyFiling(container) {
+async function _renderYearlySummary(container) {
+    if (!container) return;
+
+    const year = new Date().getFullYear();
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">${year} Annual Overview</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            Month-by-month summary for the current year
+          </div>
+        </div>
+      </div>
+      <div id="yearly-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/jobs/history/?level=month&year=${year}`
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      const content = document.getElementById('yearly-content');
+      if (!content) return;
+
+      const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+      const kpis    = data.kpis || {};
+      const items   = data.items || [];
+
+      // ── KPI strip ─────────────────────────────────────────
+      const kpiHtml = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);
+          gap:10px;margin-bottom:24px;">
+          ${[
+            { label:'Total Jobs',   value: kpis.total?.value   || 0, fmt: v => v,       color:'#3355cc' },
+            { label:'Revenue',      value: kpis.revenue?.value || 0, fmt: v => fmt(v),  color:'#22c98a' },
+            { label:'Pending',      value: kpis.pending?.value || 0, fmt: v => v,       color:'#e8a820' },
+            { label:'Completion',   value: kpis.rate?.value    || 0, fmt: v => v + '%', color:'#9b59b6' },
+          ].map(k => {
+            const change = kpis[Object.keys(kpis).find(key =>
+              kpis[key].value === k.value
+            )]?.change;
+            return `
+              <div style="background:var(--panel);border:1px solid var(--border);
+                border-top:3px solid ${k.color};border-radius:var(--radius);
+                padding:14px 16px;">
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+                  ${k.label}</div>
+                <div style="font-size:20px;font-weight:800;color:${k.color};
+                  font-family:'Outfit',sans-serif;">${k.fmt(k.value)}</div>
+              </div>`;
+          }).join('')}
+        </div>`;
+
+      // ── Monthly breakdown table ────────────────────────────
+      const maxRevenue = Math.max(...items.map(i => i.revenue || 0), 1);
+
+      const tableHtml = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;margin-bottom:20px;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Month</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Jobs</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Revenue</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Rate</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Trend</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Close</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${monthNames.map((name, i) => {
+                const m      = i + 1;
+                const item   = items.find(it => it.month === m);
+                const now    = new Date();
+                const isPast = m < now.getMonth() + 1;
+                const isCurr = m === now.getMonth() + 1;
+                const isFuture = m > now.getMonth() + 1;
+
+                if (isFuture) {
+                  return `
+                    <tr style="border-bottom:1px solid var(--border);opacity:0.3;">
+                      <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                        color:var(--text-3);">${name}</td>
+                      <td colspan="5" style="padding:12px 16px;font-size:12px;
+                        color:var(--text-3);text-align:center;">—</td>
+                    </tr>`;
+                }
+
+                const total   = item?.total   || 0;
+                const revenue = item?.revenue  || 0;
+                const rate    = item?.rate     || 0;
+                const barPct  = maxRevenue > 0 ? (revenue / maxRevenue * 100) : 0;
+
+                return `
+                  <tr style="border-bottom:1px solid var(--border);
+                    ${isCurr ? 'background:var(--bg);' : ''}
+                    transition:background 0.12s;"
+                    onmouseover="this.style.background='var(--bg)'"
+                    onmouseout="this.style.background='${isCurr ? 'var(--bg)' : ''}'">
+                    <td style="padding:12px 16px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text);">
+                          ${name}</span>
+                        ${isCurr ? `<span style="padding:2px 8px;border-radius:20px;
+                          font-size:10px;font-weight:700;background:var(--amber-bg);
+                          color:var(--amber-text);">Current</span>` : ''}
+                      </div>
+                    </td>
+                    <td style="padding:12px 16px;text-align:right;font-size:13px;
+                      font-weight:600;color:var(--text);">${total}</td>
+                    <td style="padding:12px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:var(--text);">${fmt(revenue)}</td>
+                    <td style="padding:12px 16px;text-align:right;font-size:13px;
+                      font-weight:600;color:${rate >= 95 ? 'var(--green-text)' :
+                        rate >= 80 ? 'var(--amber-text)' : 'var(--red-text)'};">
+                      ${rate}%</td>
+                    <td style="padding:12px 16px;">
+                      <div style="height:6px;background:var(--border);
+                        border-radius:3px;width:120px;overflow:hidden;">
+                        <div style="height:100%;width:${barPct.toFixed(1)}%;
+                          background:var(--text);border-radius:3px;
+                          transition:width 0.4s ease;"></div>
+                      </div>
+                    </td>
+                    <td style="padding:12px 16px;text-align:center;">
+                      ${isPast || isCurr ? `
+                        <button onclick="Dashboard.switchReportsTab('monthly')"
+                          style="padding:4px 12px;background:none;
+                            border:1px solid var(--border);border-radius:var(--radius-sm);
+                            font-size:11px;font-weight:600;cursor:pointer;
+                            color:var(--text-2);font-family:'DM Sans',sans-serif;">
+                          View
+                        </button>` : '—'}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      content.innerHTML = kpiHtml + tableHtml;
+
+    } catch {
+      const content = document.getElementById('yearly-content');
+      if (content) content.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load yearly summary.</div>`;
+    }
+  }
+
+async function _renderDailySheets(container) {
+    if (!container) return;
+
+    const now   = new Date();
+    const month = now.getMonth() + 1;
+    const year  = now.getFullYear();
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">Daily Sheets</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            Closed sheets for ${now.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}
+             — read-only records
+          </div>
+        </div>
+      </div>
+      <div id="daily-sheets-list">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/sheets/?period=month&page_size=31`
+      );
+      if (!res.ok) throw new Error();
+      const data   = await res.json();
+      const sheets = (Array.isArray(data) ? data : (data.results || []))
+        .filter(s => s.status !== 'OPEN')
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      const list = document.getElementById('daily-sheets-list');
+      if (!list) return;
+
+      if (!sheets.length) {
+        list.innerHTML = `
+          <div style="text-align:center;padding:48px;color:var(--text-3);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No closed sheets this month</div>
+            <div style="font-size:13px;">Sheets appear here once closed by the Branch Manager.</div>
+          </div>`;
+        return;
+      }
+
+      list.innerHTML = sheets.map(s => {
+        const total    = parseFloat(s.total_cash||0) + parseFloat(s.total_momo||0) + parseFloat(s.total_pos||0);
+        const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+        const dateObj  = new Date(s.date);
+        const dayName  = dateObj.toLocaleDateString('en-GB',{weekday:'long'});
+        const dateStr  = dateObj.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+        const isAuto   = s.status === 'AUTO_CLOSED';
+
+        return `
+          <div style="border:1px solid var(--border);border-radius:var(--radius);
+            overflow:hidden;margin-bottom:10px;">
+
+            <!-- Sheet header — always visible, click to expand -->
+            <div onclick="Dashboard._toggleDailySheet(${s.id})"
+              style="display:flex;align-items:center;justify-content:space-between;
+                padding:14px 20px;background:var(--panel);cursor:pointer;
+                transition:background 0.12s;"
+              onmouseover="this.style.background='var(--bg)'"
+              onmouseout="this.style.background='var(--panel)'">
+
+              <div style="display:flex;align-items:center;gap:14px;">
+                <!-- Date block -->
+                <div style="text-align:center;min-width:44px;">
+                  <div style="font-size:11px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;">${dateObj.toLocaleDateString('en-GB',{month:'short'})}</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--text);
+                    font-family:'Syne',sans-serif;line-height:1;">${dateObj.getDate()}</div>
+                  <div style="font-size:10px;color:var(--text-3);">${dateObj.toLocaleDateString('en-GB',{weekday:'short'})}</div>
+                </div>
+
+                <!-- Divider -->
+                <div style="width:1px;height:40px;background:var(--border);"></div>
+
+                <!-- Stats -->
+                <div>
+                  <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
+                    ${dayName} · ${dateStr}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:16px;">
+                    <span style="font-size:12px;color:var(--text-3);">
+                      ${s.total_jobs_created || 0} jobs
+                    </span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:var(--text);">${fmt(total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;">
+                ${isAuto ? `
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--amber-bg);color:var(--amber-text);">
+                    Auto-closed
+                  </span>` : `
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
+                    Closed
+                  </span>`}
+                <svg id="daily-chevron-${s.id}" xmlns="http://www.w3.org/2000/svg"
+                  width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2"
+                  style="color:var(--text-3);transition:transform 0.2s;">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Expandable detail -->
+            <div id="daily-detail-${s.id}" style="display:none;">
+              <div style="padding:16px 20px;border-top:1px solid var(--border);
+                background:var(--bg);">
+
+                <!-- Revenue strip -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);
+                  gap:8px;margin-bottom:14px;">
+                  ${[
+                    ['Cash',           s.total_cash,          'cash'],
+                    ['MoMo',           s.total_momo,          'momo'],
+                    ['POS',            s.total_pos,           'pos'],
+                    ['Net Cash in Till', s.net_cash_in_till,  'green'],
+                  ].map(([label, val, theme]) => `
+                    <div style="padding:10px 12px;
+                      background:var(--${theme}-bg, var(--bg));
+                      border:1px solid var(--${theme}-border, var(--border));
+                      border-radius:var(--radius-sm);">
+                      <div style="font-size:10px;font-weight:700;
+                        color:var(--${theme}-text, var(--text-3));
+                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                        ${label}</div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:700;color:var(--${theme}-strong, var(--text));">
+                        ${fmt(val)}</div>
+                    </div>`).join('')}
+                </div>
+
+                <!-- Secondary metrics -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);
+                  gap:8px;margin-bottom:14px;">
+                  ${[
+                    ['Jobs Created',   s.total_jobs_created || 0, false],
+                    ['Petty Cash Out', s.total_petty_cash_out,    true],
+                    ['Credit Issued',  s.total_credit_issued,     true],
+                    ['Credit Settled', s.total_credit_settled,    true],
+                  ].map(([label, val, isMoney]) => `
+                    <div style="padding:10px 12px;background:var(--panel);
+                      border:1px solid var(--border);border-radius:var(--radius-sm);">
+                      <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                        ${label}</div>
+                      <div style="font-size:15px;font-weight:700;color:var(--text);">
+                        ${isMoney ? fmt(val) : val}</div>
+                    </div>`).join('')}
+                </div>
+
+                <!-- Actions -->
+                <div style="display:flex;justify-content:flex-end;gap:8px;">
+                  ${s.status !== 'OPEN' ? `
+                    <button onclick="Dashboard.initiateSheetDownload(${s.id}, '${s.date}')"
+                      style="display:inline-flex;align-items:center;gap:6px;
+                        padding:7px 16px;background:var(--text);color:#fff;border:none;
+                        border-radius:var(--radius-sm);font-size:12px;font-weight:700;
+                        cursor:pointer;font-family:'DM Sans',sans-serif;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                      Download PDF
+                    </button>` : ''}
+                </div>
+
+              </div>
+            </div>
+
+          </div>`;
+      }).join('');
+
+    } catch {
+      const list = document.getElementById('daily-sheets-list');
+      if (list) list.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load daily sheets.</div>`;
+    }
+  }
+
+  let _openDailySheet = null;
+
+  function _toggleDailySheet(sheetId) {
+    const detail  = document.getElementById(`daily-detail-${sheetId}`);
+    const chevron = document.getElementById(`daily-chevron-${sheetId}`);
+    const isOpen  = detail.style.display !== 'none';
+
+    // Close any open sheet
+    if (_openDailySheet && _openDailySheet !== sheetId) {
+      const prev         = document.getElementById(`daily-detail-${_openDailySheet}`);
+      const prevChevron  = document.getElementById(`daily-chevron-${_openDailySheet}`);
+      if (prev)        prev.style.display        = 'none';
+      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
+    }
+
+    if (isOpen) {
+      detail.style.display    = 'none';
+      chevron.style.transform = 'rotate(0deg)';
+      _openDailySheet         = null;
+    } else {
+      detail.style.display    = 'block';
+      chevron.style.transform = 'rotate(180deg)';
+      _openDailySheet         = sheetId;
+    }
+  }
+
+
+async function _renderWeeklyFiling(container) {
     if (!container) return;
 
     container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
         <div>
           <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
             color:var(--text);letter-spacing:-0.3px;">Weekly Filing</div>
@@ -3945,9 +4432,106 @@ async function _loadReportsPane() {
       </div>
       <div id="weekly-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
-      </div>`;
+      </div>
+      <div id="weekly-history" style="margin-top:24px;"></div>`;
 
     await _loadWeeklyReport();
+    await _loadWeeklyHistory();
+  }
+
+  async function _loadWeeklyHistory() {
+    const container = document.getElementById('weekly-history');
+    if (!container) return;
+
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/weekly/');
+      if (!res.ok) throw new Error();
+      const data    = await res.json();
+      const reports = (Array.isArray(data) ? data : (data.results || []))
+        .filter(r => r.status === 'LOCKED')
+        .sort((a, b) => {
+          if (b.year !== a.year) return b.year - a.year;
+          return b.week_number - a.week_number;
+        });
+
+      if (!reports.length) return;
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Previous Filed Weeks
+        </div>
+        ${reports.map(r => {
+          const total      = parseFloat(r.total_cash||0) + parseFloat(r.total_momo||0) + parseFloat(r.total_pos||0);
+          const dateFrom   = new Date(r.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+          const dateTo     = new Date(r.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+          const submittedAt = r.submitted_at
+            ? new Date(r.submitted_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})
+            : '—';
+
+          return `
+            <div style="border:1px solid var(--border);border-radius:var(--radius);
+              overflow:hidden;margin-bottom:8px;">
+
+              <!-- Header -->
+              <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:14px 20px;background:var(--panel);">
+                <div>
+                  <div style="font-size:14px;font-weight:700;color:var(--text);
+                    margin-bottom:3px;">
+                    Week ${r.week_number}, ${r.year}
+                    <span style="font-size:12px;font-weight:400;color:var(--text-3);
+                      margin-left:8px;">${dateFrom} – ${dateTo}</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-3);">
+                    Filed by ${r.submitted_by_name || '—'} · ${submittedAt}
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
+                    ✓ Locked
+                  </span>
+                  <button onclick="Dashboard.weeklyDownloadPDF(${r.id})"
+                    style="display:inline-flex;align-items:center;gap:5px;
+                      padding:6px 14px;background:var(--text);color:#fff;border:none;
+                      border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                      cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    PDF
+                  </button>
+                </div>
+              </div>
+
+              <!-- Revenue strip -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;
+                gap:0;border-top:1px solid var(--border);">
+                ${[
+                  ['Total',  fmt(total),                       'var(--text)',      'var(--panel)'],
+                  ['Cash',   fmt(r.total_cash),                'var(--cash-strong)','var(--cash-bg)'],
+                  ['MoMo',   fmt(r.total_momo),                'var(--momo-strong)','var(--momo-bg)'],
+                  ['Jobs',   r.total_jobs_created || 0,        'var(--text)',      'var(--panel)'],
+                ].map(([label, val, color, bg]) => `
+                  <div style="padding:10px 16px;background:${bg};
+                    border-right:1px solid var(--border);">
+                    <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                      text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                      ${label}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:${color};">${val}</div>
+                  </div>`).join('')}
+              </div>
+
+            </div>`;
+        }).join('')}`;
+
+    } catch { /* silent — history is supplementary */ }
   }
 
   async function _loadWeeklyReport() {
@@ -4331,7 +4915,7 @@ async function _loadReportsPane() {
   }
 
   async function _fetchAndRenderHistory(container) {
-    if (!container) container = document.getElementById('reports-content');
+    if (!container) container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
     container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
     // Destroy existing charts
@@ -4743,7 +5327,8 @@ const kpiCards = [
       _historyLevel = 'month';
     }
 
-    _fetchAndRenderHistory(document.getElementById('reports-content'));
+    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
+    _fetchAndRenderHistory(container);
   }
 
   function _historyNav(level, year, month, week) {
@@ -4751,7 +5336,8 @@ const kpiCards = [
     _historyYear  = year;
     _historyMonth = month;
     _historyWeek  = week;
-    _fetchAndRenderHistory(document.getElementById('reports-content'));
+    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
+    _fetchAndRenderHistory(container);
   }
   async function downloadSheetPDF(sheetId, sheetDate) {
     try {
@@ -5613,6 +6199,8 @@ return {
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
+    switchPerformanceTab,
+    _toggleDailySheet,
   };
 
 })();
