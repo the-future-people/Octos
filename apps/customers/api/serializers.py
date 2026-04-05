@@ -51,13 +51,19 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate_phone(self, value):
-        value = value.strip()
+        import re
+        # Strip spaces, dashes, parentheses
+        value = re.sub(r'[\s\-().]', '', value.strip())
+        # Normalise +233XXXXXXXXX → 0XXXXXXXXX
+        if value.startswith('+233'):
+            value = '0' + value[4:]
+        elif value.startswith('233') and len(value) >= 12:
+            value = '0' + value[3:]
         if CustomerProfile.objects.filter(phone=value).exists():
             raise serializers.ValidationError(
                 'A customer with this phone number already exists.'
             )
         return value
-
 
 # ── Credit Account serializers ────────────────────────────────────────────────
 
