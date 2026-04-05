@@ -4670,192 +4670,180 @@ function _renderInventoryCards(items, mode = 'snapshot') {
         </div>`;
     }
 
-    // Filter out Machinery
-    const filtered = items.filter(i =>
-      (mode === 'snapshot' ? i.category : i.category) !== 'Machinery'
-    );
+    const filtered = items.filter(i => i.category !== 'Machinery');
 
-    // Category config
     const categoryConfig = {
-      'Paper'      : { bg: '#fdf8f0', border: '#f0e6d0', header: '#8a6a2e', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>` },
-      'Toner'      : { bg: '#f0f4fd', border: '#d0ddf5', header: '#2e4a8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>` },
-      'Binding'    : { bg: '#f5f0fd', border: '#ddd0f5', header: '#5a2e8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>` },
-      'Lamination' : { bg: '#f0fdf4', border: '#c8f0d4', header: '#1a6b3a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>` },
-      'Envelopes'  : { bg: '#fffbeb', border: '#f0e0a0', header: '#8a6a00', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>` },
-      'Photography': { bg: '#fdf0f5', border: '#f0c8d8', header: '#8a1a4a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>` },
+      'Paper'      : { bg: '#fdf8f0', strip: '#e8a820', header: '#8a6a2e', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>` },
+      'Toner'      : { bg: '#f0f4fd', strip: '#3355cc', header: '#2e4a8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>` },
+      'Binding'    : { bg: '#f5f0fd', strip: '#9b59b6', header: '#5a2e8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>` },
+      'Lamination' : { bg: '#f0fdf4', strip: '#22c98a', header: '#1a6b3a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>` },
+      'Envelopes'  : { bg: '#fffbeb', strip: '#f59e0b', header: '#8a6a00', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>` },
+      'Photography': { bg: '#fdf0f5', strip: '#e8294a', header: '#8a1a4a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>` },
     };
 
-    const defaultConfig = { bg: '#f8f8f8', border: '#e0e0e0', header: '#444', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>` };
+    const defaultConfig = { bg: '#f8f8f8', strip: '#888', header: '#444', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>` };
 
-    // Group by category
     const groups = {};
     filtered.forEach(item => {
-      const cat = mode === 'snapshot' ? item.category : (item.category || 'Other');
+      const cat = item.category || 'Other';
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(item);
     });
 
     return Object.entries(groups).map(([cat, catItems]) => {
-      const cfg = categoryConfig[cat] || defaultConfig;
+      const cfg      = categoryConfig[cat] || defaultConfig;
+      const isToner  = cat === 'Toner';
+      const lowCount = catItems.filter(i => i.is_low).length;
 
-      const cards = catItems.map(item => {
-        // Normalise fields for both modes
-        const name       = mode === 'snapshot' ? item.consumable : item.name;
-        const unit       = item.unit || '';
-        const isPercent  = unit === '%';
-        const isLow      = item.is_low;
+      const rows = catItems.map((item, idx) => {
+        const name         = mode === 'snapshot' ? item.consumable : item.name;
+        const unit         = item.unit || item.unit_label || '';
+        const isPercent    = unit === '%';
+        const isLow        = item.is_low;
+        const isCritical   = isLow && (mode === 'snapshot'
+          ? parseFloat(item.closing  || 0) === 0
+          : parseFloat(item.quantity || 0) === 0);
 
-        let closing, received, consumed, reorderPoint;
-
-        if (mode === 'snapshot') {
-          closing      = parseFloat(item.closing  || 0);
-          received     = parseFloat(item.received || 0);
-          consumed     = parseFloat(item.consumed || 0);
-          reorderPoint = parseFloat(item.reorder_point || 0);
-        } else {
-          closing      = parseFloat(item.quantity || 0);
-          received     = 0; // live mode doesn't have period received
-          consumed     = 0;
-          reorderPoint = parseFloat(item.reorder_point || 0);
-        }
+        const closing      = mode === 'snapshot'
+          ? parseFloat(item.closing  || 0)
+          : parseFloat(item.quantity || 0);
+        const received     = mode === 'snapshot' ? parseFloat(item.received || 0) : 0;
+        const consumed     = mode === 'snapshot' ? parseFloat(item.consumed || 0) : 0;
+        const reorderPoint = parseFloat(item.reorder_point || 0);
+        const lastReceived = item.last_received || null;
 
         const fmtQty = n => isPercent
-          ? `${n.toFixed(2)}%`
-          : `${parseFloat(n).toLocaleString('en-GH', {minimumFractionDigits:0})} ${unit}`;
+          ? `${parseFloat(n).toFixed(1)}%`
+          : parseFloat(n).toLocaleString('en-GH', { minimumFractionDigits: 0 });
 
-        // Progress bar — closing vs reorder point
+        const statusColor = isCritical ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+        const statusBg    = isCritical ? '#fee2e2' : isLow ? '#fef3c7' : '#dcfce7';
+        const statusLabel = isCritical ? 'Critical'  : isLow ? 'Low'  : 'OK';
+
+        // Toner progress bar
         const barPct = reorderPoint > 0
-          ? Math.min(100, (closing / (reorderPoint * 3)) * 100)
-          : 50;
-        const barColor = isLow ? '#e8294a' : '#22c98a';
+          ? Math.min(100, (closing / 100) * 100)  // toner is %, so closing IS the pct
+          : Math.min(100, (closing / (reorderPoint * 3 || 1)) * 100);
+        const barColor = isCritical ? '#dc2626' : isLow ? '#d97706' : '#3355cc';
 
-        // Last addition chip
-        const additionChip = received > 0
-          ? `<div style="display:inline-flex;align-items:center;gap:4px;
-              padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;
-              background:#dcfce7;color:#166534;">
-              ↑ +${fmtQty(received)} added
-            </div>`
-          : `<div style="font-size:10px;color:#aaa;">No additions this period</div>`;
-
-        const consumedChip = consumed > 0
-          ? `<div style="display:inline-flex;align-items:center;gap:4px;
-              padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;
-              background:#fee2e2;color:#991b1b;">
-              ↓ -${fmtQty(consumed)} used
-            </div>`
-          : '';
+        // Last received info
+        const lastReceivedHtml = received > 0
+          ? `<div style="font-size:10px;color:#16a34a;margin-top:2px;font-weight:600;">
+               +${fmtQty(received)} ${unit} received
+             </div>`
+          : lastReceived
+            ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">
+                 Last: ${new Date(lastReceived).toLocaleDateString('en-GB',
+                   { day:'numeric', month:'short' })}
+               </div>`
+            : '';
 
         return `
-          <div style="
-            background:#fff;
-            border:1px solid ${isLow ? '#fca5a5' : cfg.border};
-            border-left:4px solid ${isLow ? '#e8294a' : cfg.header};
-            border-radius:10px;
-            padding:16px;
-            display:flex;
-            flex-direction:column;
-            gap:10px;
-            position:relative;
-          ">
-            <!-- Top row: icon + name + status -->
-            <div style="display:flex;align-items:flex-start;gap:10px;">
-              <div style="
-                width:36px;height:36px;border-radius:8px;
-                background:${cfg.bg};border:1px solid ${cfg.border};
-                display:flex;align-items:center;justify-content:center;
-                flex-shrink:0;color:${cfg.header};
-              ">${cfg.icon}</div>
-              <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;font-weight:700;color:#111;
-                  line-height:1.3;margin-bottom:2px;
-                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                  ${name}
-                </div>
-                <div style="font-size:10px;color:#888;text-transform:uppercase;
-                  letter-spacing:0.4px;">${unit}</div>
-              </div>
-              <span style="
-                padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;
-                background:${isLow ? '#fee2e2' : '#dcfce7'};
-                color:${isLow ? '#991b1b' : '#166534'};
-                flex-shrink:0;
-              ">${isLow ? 'Low' : 'OK'}</span>
-            </div>
+          <tr style="border-bottom:1px solid #f3f4f6;
+            background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
 
-            <!-- Closing stock hero -->
-            <div style="text-align:center;padding:8px 0;
-              border-top:1px solid ${cfg.border};border-bottom:1px solid ${cfg.border};">
-              <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
-                font-weight:800;color:${isLow ? '#e8294a' : '#111'};">
-                ${fmtQty(closing)}
-              </div>
-              <div style="font-size:10px;color:#888;margin-top:2px;">Closing Stock</div>
-            </div>
+            <!-- Item name -->
+            <td style="padding:9px 14px;">
+              <div style="font-size:12px;font-weight:600;color:#111;">${name}</div>
+              ${lastReceivedHtml}
+            </td>
 
-            <!-- Progress bar -->
-            <div>
-              <div style="display:flex;justify-content:space-between;
-                margin-bottom:4px;">
-                <span style="font-size:10px;color:#888;">vs reorder point</span>
-                <span style="font-size:10px;font-weight:600;color:#888;">
-                  ${reorderPoint > 0 ? fmtQty(reorderPoint) : '—'}
-                </span>
-              </div>
-              <div style="height:5px;background:#f0f0f0;border-radius:3px;overflow:hidden;">
-                <div style="height:100%;width:${barPct.toFixed(1)}%;
-                  background:${barColor};border-radius:3px;
-                  transition:width 0.4s ease;"></div>
-              </div>
-            </div>
+            <!-- Unit -->
+            <td style="padding:9px 14px;font-size:11px;color:#9ca3af;
+              text-align:center;">${unit}</td>
 
-            <!-- Activity chips -->
-            <div style="display:flex;flex-direction:column;gap:4px;">
-              ${additionChip}
-              ${consumedChip}
-            </div>
+            <!-- In stock — with toner progress bar -->
+            <td style="padding:9px 14px;text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:${statusColor};">${fmtQty(closing)}</div>
+              ${isToner ? `
+                <div style="margin-top:4px;height:3px;background:#e5e7eb;
+                  border-radius:2px;overflow:hidden;width:80px;margin-left:auto;">
+                  <div style="height:100%;width:${barPct.toFixed(1)}%;
+                    background:${barColor};border-radius:2px;"></div>
+                </div>` : ''}
+            </td>
 
-          </div>`;
+            <!-- Reorder at -->
+            <td style="padding:9px 14px;text-align:right;font-size:12px;
+              color:#6b7280;font-family:'JetBrains Mono',monospace;">
+              ${reorderPoint > 0 ? fmtQty(reorderPoint) : '—'}
+            </td>
+
+            <!-- Consumed -->
+            <td style="padding:9px 14px;text-align:right;font-size:12px;
+              font-family:'JetBrains Mono',monospace;
+              color:${consumed > 0 ? '#dc2626' : '#9ca3af'};">
+              ${consumed > 0 ? '-' + fmtQty(consumed) : '—'}
+            </td>
+
+            <!-- Status -->
+            <td style="padding:9px 14px;text-align:center;">
+              <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                font-weight:700;background:${statusBg};color:${statusColor};">
+                ${statusLabel}
+              </span>
+            </td>
+
+          </tr>`;
       }).join('');
 
       return `
-        <div style="margin-bottom:28px;">
+        <div style="margin-bottom:16px;border:1px solid #e5e7eb;
+          border-radius:8px;overflow:hidden;">
 
           <!-- Category header -->
-          <div style="
-            display:flex;align-items:center;gap:10px;
-            padding:10px 16px;
+          <div style="display:flex;align-items:center;gap:8px;
+            padding:8px 14px;
             background:${cfg.bg};
-            border:1px solid ${cfg.border};
-            border-radius:10px 10px 0 0;
-            border-bottom:2px solid ${cfg.header};
-          ">
-            <div style="color:${cfg.header};">${cfg.icon}</div>
-            <span style="font-size:13px;font-weight:800;color:${cfg.header};
+            border-bottom:2px solid ${cfg.strip};">
+            <span style="color:${cfg.header};">${cfg.icon}</span>
+            <span style="font-size:11px;font-weight:800;color:${cfg.header};
               text-transform:uppercase;letter-spacing:0.6px;">${cat}</span>
-            <span style="font-size:11px;color:${cfg.header};opacity:0.6;margin-left:auto;">
-              ${catItems.length} item${catItems.length !== 1 ? 's' : ''}
+            <span style="font-size:10px;color:${cfg.header};opacity:0.5;margin-left:2px;">
+              · ${catItems.length} item${catItems.length !== 1 ? 's' : ''}
             </span>
+            ${lowCount > 0 ? `
+              <span style="margin-left:auto;padding:1px 8px;border-radius:20px;
+                font-size:9px;font-weight:700;background:#fee2e2;color:#dc2626;">
+                ${lowCount} need${lowCount === 1 ? 's' : ''} attention
+              </span>` : `
+              <span style="margin-left:auto;padding:1px 8px;border-radius:20px;
+                font-size:9px;font-weight:700;background:#dcfce7;color:#16a34a;">
+                All good
+              </span>`}
           </div>
 
-          <!-- Cards grid -->
-          <div style="
-            padding:16px;
-            background:${cfg.bg};
-            border:1px solid ${cfg.border};
-            border-top:none;
-            border-radius:0 0 10px 10px;
-            display:grid;
-            grid-template-columns:repeat(3,1fr);
-            gap:12px;
-          ">
-            ${cards}
-          </div>
+          <!-- Table -->
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+                <th style="padding:7px 14px;text-align:left;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Item</th>
+                <th style="padding:7px 14px;text-align:center;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Unit</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">In Stock</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Reorder At</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Consumed</th>
+                <th style="padding:7px 14px;text-align:center;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
 
         </div>`;
     }).join('');
   }
-
 
   function _toggleCurrentWeek() {
     const detail  = document.getElementById('current-week-detail');

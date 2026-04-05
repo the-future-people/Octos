@@ -17,6 +17,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'first_name', 'last_name', 'full_name', 'display_name',
             'phone', 'email', 'company_name', 'address',
+            'customer_type', 'institution_subtype',
             'visit_count', 'tier', 'confidence_score',
             'preferred_branch', 'preferred_branch_name',
             'is_priority', 'is_walkin', 'notes', 'created_at',
@@ -32,6 +33,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
         model  = CustomerProfile
         fields = [
             'id', 'full_name', 'display_name', 'phone',
+            'customer_type', 'institution_subtype',
             'tier', 'is_priority', 'confidence_score',
         ]
 
@@ -43,7 +45,8 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
         model  = CustomerProfile
         fields = [
             'first_name', 'last_name', 'phone', 'email',
-            'company_name', 'address', 'preferred_branch', 'notes',
+            'company_name', 'address', 'customer_type', 'institution_subtype',
+            'preferred_branch', 'notes',
         ]
 
     def validate_phone(self, value):
