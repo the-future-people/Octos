@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.customers.models import CustomerProfile
+from apps.customers.models.customer import CustomerEditLog
 from apps.finance.models import CreditAccount, CreditPayment
 
 
@@ -33,7 +34,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
         model  = CustomerProfile
         fields = [
             'id', 'full_name', 'display_name', 'phone',
-            'customer_type', 'institution_subtype',
+            'company_name', 'customer_type', 'institution_subtype',
             'tier', 'is_priority', 'confidence_score',
         ]
 
@@ -63,6 +64,9 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
 class CreditAccountSerializer(serializers.ModelSerializer):
     customer_name      = serializers.CharField(source='customer.display_name', read_only=True)
     customer_phone     = serializers.CharField(source='customer.phone', read_only=True)
+    customer_address   = serializers.CharField(source='customer.address', read_only=True)
+    customer_company   = serializers.CharField(source='customer.company_name', read_only=True)
+    customer_type      = serializers.CharField(source='customer.customer_type', read_only=True)
     branch_name        = serializers.CharField(source='branch.name', read_only=True)
     nominated_by_name  = serializers.CharField(source='nominated_by.full_name', read_only=True)
     approved_by_name   = serializers.SerializerMethodField()
@@ -73,6 +77,7 @@ class CreditAccountSerializer(serializers.ModelSerializer):
         model  = CreditAccount
         fields = [
             'id', 'customer', 'customer_name', 'customer_phone',
+            'customer_address', 'customer_company', 'customer_type',
             'branch', 'branch_name',
             'account_type', 'status',
             'credit_limit', 'current_balance', 'available_credit',
@@ -168,3 +173,17 @@ class CreditSettleSerializer(serializers.Serializer):
                 {'reference': 'POS approval code is required.'}
             )
         return data
+
+# ── Customer Edit Log serializer ──────────────────────────────────────────────
+
+class CustomerEditLogSerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.CharField(
+        source='changed_by.full_name', read_only=True
+    )
+
+    class Meta:
+        model  = CustomerEditLog
+        fields = [
+            'id', 'field_name', 'old_value', 'new_value',
+            'changed_by_name', 'changed_at',
+        ]

@@ -7,6 +7,8 @@ urlpatterns = [
     path('create/', views.CustomerCreateView.as_view(), name='customer-create'),
     path('lookup/', views.CustomerLookupView.as_view(), name='customer-lookup'),
     path('<int:pk>/', views.CustomerDetailView.as_view(), name='customer-detail'),
+    path('<int:pk>/edit/', views.CustomerEditView.as_view(), name='customer-edit'),
+    path('<int:pk>/edit-log/', views.CustomerEditLogView.as_view(), name='customer-edit-log'),
 
     # ── Credit accounts ───────────────────────────────────────
     path('credit/', views.CreditAccountListView.as_view(), name='credit-list'),

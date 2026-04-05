@@ -295,6 +295,7 @@ async function loadRecentJobs() {
     }
     if (paneId === 'reports')                     _loadReportsPane();
     if (paneId === 'inventory')                   _loadInventoryPane();
+    if (paneId === 'customers')                   _loadCustomersPane();
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
@@ -6156,6 +6157,906 @@ const kpiCards = [
       }
     }, 1000);
   }
+// ── Customers pane ────────────────────────────────────────
+  let _customersTab = 'all';
+
+  async function _loadCustomersPane() {
+    const pane = document.getElementById('pane-customers');
+    if (!pane) return;
+
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Customers</span>
+        <button onclick="Dashboard.openAddCustomerModal()"
+          style="padding:7px 16px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          + Add Customer
+        </button>
+      </div>
+
+      <div class="reports-tabs" id="customers-tab-bar">
+        <button class="reports-tab active" data-tab="all"
+          onclick="Dashboard.switchCustomersTab('all')">All</button>
+        <button class="reports-tab" data-tab="individuals"
+          onclick="Dashboard.switchCustomersTab('individuals')">Individuals</button>
+        <button class="reports-tab" data-tab="businesses"
+          onclick="Dashboard.switchCustomersTab('businesses')">Businesses</button>
+        <button class="reports-tab" data-tab="institutions"
+          onclick="Dashboard.switchCustomersTab('institutions')">Institutions</button>
+        <button class="reports-tab" data-tab="credit"
+          onclick="Dashboard.switchCustomersTab('credit')">Credit Accounts</button>
+      </div>
+
+      <div id="customers-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _loadCustomersTab('all');
+  }
+
+  async function switchCustomersTab(tab) {
+    _customersTab = tab;
+    document.querySelectorAll('#customers-tab-bar .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    await _loadCustomersTab(tab);
+  }
+
+  async function _loadCustomersTab(tab) {
+    const content = document.getElementById('customers-content');
+    if (!content) return;
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
+    if (tab === 'all')          await _renderCustomerList(content, {});
+    if (tab === 'individuals')  await _renderCustomerList(content, { customer_type: 'INDIVIDUAL' });
+    if (tab === 'businesses')   await _renderCustomerList(content, { customer_type: 'BUSINESS' });
+    if (tab === 'institutions') await _renderCustomerList(content, { customer_type: 'INSTITUTION' });
+    if (tab === 'credit')       await _renderCreditCustomers(content);
+  }
+
+  async function _renderCustomerList(container, filters = {}) {
+    try {
+      const params = new URLSearchParams(filters);
+      const res    = await Auth.fetch(`/api/v1/customers/?${params}`);
+      if (!res.ok) throw new Error();
+      const data      = await res.json();
+      const customers = Array.isArray(data) ? data : (data.results || []);
+
+      if (!customers.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-3);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+            </svg>
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No customers found</div>
+            <div style="font-size:13px;">Add your first customer to get started.</div>
+          </div>`;
+        return;
+      }
+
+      const typeConfig = {
+        INDIVIDUAL : { label: 'Individual',   bg: '#f0f4fd', color: '#2e4a8a' },
+        BUSINESS   : { label: 'Business',     bg: '#f0fdf4', color: '#1a6b3a' },
+        INSTITUTION: { label: 'Institution',  bg: '#f5f0fd', color: '#5a2e8a' },
+      };
+
+      const tierConfig = {
+        REGULAR  : { label: 'Regular',   bg: 'var(--bg)',       color: 'var(--text-3)' },
+        PREFERRED: { label: 'Preferred', bg: '#fef3c7',         color: '#d97706'       },
+        VIP      : { label: 'VIP',       bg: '#fdf0f5',         color: '#8a1a4a'       },
+      };
+
+      const subtypeLabel = {
+        SCHOOL: 'School', CHURCH: 'Church', NGO: 'NGO',
+        GOVT: 'Government', OTHER: 'Institution',
+      };
+
+      container.innerHTML = `
+        <!-- Search bar -->
+        <div style="margin-bottom:16px;">
+          <input type="text" id="customers-search"
+            placeholder="Search by name or phone…"
+            oninput="Dashboard._filterCustomerRows(this.value)"
+            style="width:100%;max-width:320px;padding:8px 14px;
+              border:1.5px solid var(--border);border-radius:var(--radius-sm);
+              background:var(--bg);color:var(--text);font-size:13px;
+              font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+        </div>
+
+        <!-- Summary strip -->
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          ${[
+            ['Total', customers.length, 'var(--text)', 'var(--panel)'],
+            ['Individuals',  customers.filter(c => c.customer_type === 'INDIVIDUAL').length,  '#2e4a8a', '#f0f4fd'],
+            ['Businesses',   customers.filter(c => c.customer_type === 'BUSINESS').length,    '#1a6b3a', '#f0fdf4'],
+            ['Institutions', customers.filter(c => c.customer_type === 'INSTITUTION').length, '#5a2e8a', '#f5f0fd'],
+          ].map(([label, count, color, bg]) => `
+            <div style="padding:10px 16px;background:${bg};border:1px solid #e5e7eb;
+              border-radius:8px;text-align:center;min-width:90px;">
+              <div style="font-size:20px;font-weight:800;color:${color};">${count}</div>
+              <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:0.4px;margin-top:2px;">${label}</div>
+            </div>`).join('')}
+        </div>
+
+        <!-- Table -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;" id="customers-table">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Phone</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Type</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Visits</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Tier</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Score</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Since</th>
+                <th style="padding:10px 16px;"></th>
+              </tr>
+            </thead>
+            <tbody id="customers-tbody">
+              ${customers.map((c, idx) => {
+                const tc  = typeConfig[c.customer_type]  || typeConfig.INDIVIDUAL;
+                const trc = tierConfig[c.tier]           || tierConfig.REGULAR;
+                const isIndividual = c.customer_type === 'INDIVIDUAL';
+                const name = isIndividual
+                  ? (c.full_name || c.display_name || '—')
+                  : (c.display_name || '—');
+                const sub = isIndividual
+                  ? ''
+                  : (c.full_name ? `Rep: ${c.full_name}` : '');
+                const sinceDate = c.created_at
+                  ? new Date(c.created_at).toLocaleDateString('en-GB',
+                      { day: 'numeric', month: 'short', year: 'numeric' })
+                  : '—';
+                const scoreColor = c.confidence_score >= 70
+                  ? '#16a34a' : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
+                const typeLabel = c.institution_subtype
+                  ? subtypeLabel[c.institution_subtype] || tc.label
+                  : tc.label;
+
+                return `
+                  <tr data-search="${(name + ' ' + (c.phone||'')).toLowerCase()}"
+                    style="border-bottom:1px solid var(--border);
+                      background:${idx % 2 === 0 ? '#fff' : '#fafafa'};
+                      cursor:pointer;transition:background 0.12s;"
+                    onmouseover="this.style.background='var(--bg)'"
+                    onmouseout="this.style.background='${idx % 2 === 0 ? '#fff' : '#fafafa'}'"
+                    onclick="Dashboard.openCustomerDetail(${c.id})">
+
+                    <!-- Name -->
+                    <td style="padding:11px 16px;">
+                      <div style="font-size:13px;font-weight:700;color:var(--text);">
+                        ${_esc(name)}</div>
+                      ${sub ? `
+                        <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+                          ${_esc(sub)}
+                        </div>` : ''}
+                    </td>
+
+                    <!-- Phone -->
+                    <td style="padding:11px 16px;font-family:'JetBrains Mono',monospace;
+                      font-size:12px;color:var(--text-2);">${_esc(c.phone || '—')}</td>
+
+                    <!-- Type -->
+                    <td style="padding:11px 16px;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${tc.bg};color:${tc.color};">
+                        ${typeLabel}
+                      </span>
+                    </td>
+
+                    <!-- Visits -->
+                    <td style="padding:11px 16px;text-align:center;font-size:13px;
+                      font-weight:600;color:var(--text);">${c.visit_count || 0}</td>
+
+                    <!-- Tier -->
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${trc.bg};color:${trc.color};">
+                        ${trc.label}
+                      </span>
+                    </td>
+
+                    <!-- Score -->
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:700;color:${scoreColor};">${c.confidence_score}</span>
+                    </td>
+
+                    <!-- Since -->
+                    <td style="padding:11px 16px;font-size:12px;color:var(--text-3);">
+                      ${sinceDate}</td>
+
+                    <!-- Action -->
+                    <td style="padding:11px 16px;text-align:right;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" style="color:var(--text-3);">
+                        <polyline points="9 18 15 12 9 6"/>
+                      </svg>
+                    </td>
+
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load customers.</div>`;
+    }
+  }
+
+  async function _renderCreditCustomers(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/customers/credit/');
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const accounts = Array.isArray(data) ? data : (data.results || []);
+
+      if (!accounts.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-3);">
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No credit accounts</div>
+            <div style="font-size:13px;">
+              Nominate a customer for credit from their profile.</div>
+          </div>`;
+        return;
+      }
+
+      const statusConfig = {
+        ACTIVE   : { bg: '#dcfce7', color: '#16a34a', label: 'Active'    },
+        PENDING  : { bg: '#fef3c7', color: '#d97706', label: 'Pending'   },
+        SUSPENDED: { bg: '#fee2e2', color: '#dc2626', label: 'Suspended' },
+        CLOSED   : { bg: '#f3f4f6', color: '#6b7280', label: 'Closed'    },
+      };
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',
+        { minimumFractionDigits: 2 })}`;
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Limit</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Balance</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Available</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Usage</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${accounts.map((a, idx) => {
+                const sc      = statusConfig[a.status] || statusConfig.PENDING;
+                const usagePct = a.utilisation_pct || 0;
+                const usageColor = usagePct >= 90 ? '#dc2626'
+                  : usagePct >= 70 ? '#d97706' : '#16a34a';
+
+                return `
+                  <tr style="border-bottom:1px solid var(--border);
+                    background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
+                    <td style="padding:11px 16px;">
+
+                      <!-- Line 1: Primary name + account type badge -->
+                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text);">
+                          ${_esc(a.customer_name || '—')}
+                        </span>
+                        <span style="font-size:9px;font-weight:700;padding:1px 7px;
+                          border-radius:20px;
+                          background:${a.account_type === 'BUSINESS' ? '#f0fdf4' : '#f0f4fd'};
+                          color:${a.account_type === 'BUSINESS' ? '#1a6b3a' : '#2e4a8a'};">
+                          ${a.account_type === 'BUSINESS' ? 'Business' : 'Individual'}
+                        </span>
+                      </div>
+
+                      <!-- Line 2: Rep (business) or company affiliation (individual) + phone -->
+                      <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">
+                        ${a.account_type === 'BUSINESS'
+                          ? (a.contact_person ? `Rep: ${_esc(a.contact_person)} · ` : '')
+                          : (a.customer_company ? `${_esc(a.customer_company)} · ` : '')}
+                        <span style="font-family:'JetBrains Mono',monospace;">
+                          ${_esc(a.customer_phone || '—')}
+                        </span>
+                      </div>
+
+                      <!-- Line 3: Address if available -->
+                      ${a.customer_address ? `
+                        <div style="font-size:11px;color:var(--text-3);">
+                          ${_esc(a.customer_address)}
+                        </div>` : ''}
+
+                    </td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:600;color:var(--text);">${fmt(a.credit_limit)}</td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:700;color:#dc2626;">${fmt(a.current_balance)}</td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      color:#16a34a;font-weight:600;">${fmt(a.available_credit)}</td>
+                    <td style="padding:11px 16px;text-align:center;">
+                      <div style="display:flex;align-items:center;gap:6px;
+                        justify-content:center;">
+                        <div style="width:60px;height:4px;background:#f3f4f6;
+                          border-radius:2px;overflow:hidden;">
+                          <div style="height:100%;width:${Math.min(100,usagePct).toFixed(1)}%;
+                            background:${usageColor};border-radius:2px;"></div>
+                        </div>
+                        <span style="font-size:11px;font-weight:600;
+                          color:${usageColor};">${usagePct.toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${sc.bg};color:${sc.color};">
+                        ${sc.label}
+                      </span>
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load credit accounts.</div>`;
+    }
+  }
+
+  function _filterCustomerRows(query) {
+    const q    = query.toLowerCase();
+    const rows = document.querySelectorAll('#customers-tbody tr');
+    rows.forEach(row => {
+      const search = row.dataset.search || '';
+      row.style.display = search.includes(q) ? '' : 'none';
+    });
+  }
+
+async function openCustomerDetail(customerId) {
+    const overlay = document.getElementById('customer-profile-overlay');
+    const content = document.getElementById('customer-profile-content');
+    if (!overlay || !content) return;
+
+    overlay.style.display = 'block';
+
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        min-height:100vh;color:var(--text-3);">
+        <span class="spin"></span>
+      </div>`;
+
+    try {
+      const [profileRes, jobsRes, creditRes] = await Promise.all([
+        Auth.fetch(`/api/v1/customers/${customerId}/`),
+        Auth.fetch(`/api/v1/jobs/?customer=${customerId}&page_size=100`),
+        Auth.fetch(`/api/v1/customers/credit/`),
+      ]);
+
+      const customer  = profileRes.ok ? await profileRes.json() : null;
+      if (!customer) throw new Error();
+
+      const jobsData   = jobsRes.ok   ? await jobsRes.json()   : { results: [] };
+      const creditData = creditRes.ok ? await creditRes.json() : { results: [] };
+
+      // Filter jobs that are actually linked to this customer
+      const jobs   = (jobsData.results || []).filter(j => j.customer === customerId);
+
+      // Filter credit account for this customer
+      const credit = (creditData.results || []).find(c => c.customer === customerId) || null;
+
+      _renderCustomerProfile(content, customer, jobs, credit);
+
+    } catch {
+      content.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;
+          min-height:100vh;flex-direction:column;gap:12px;color:var(--red-text);">
+          <div>Could not load customer profile.</div>
+          <button onclick="Dashboard.closeCustomerProfile()"
+            style="padding:8px 20px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;">
+            Close
+          </button>
+        </div>`;
+    }
+  }
+
+  function _renderCustomerProfile(container, c, jobs, credit) {
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const isIndividual = c.customer_type === 'INDIVIDUAL';
+
+    const primaryName = isIndividual
+      ? (c.full_name || '—')
+      : (c.company_name || '—');
+    const secondaryName = isIndividual
+      ? (c.company_name || '')
+      : (c.full_name ? `Rep: ${c.full_name}` : '');
+
+    const typeConfig = {
+      INDIVIDUAL : { label: 'Individual',  bg: '#f0f4fd', color: '#2e4a8a' },
+      BUSINESS   : { label: 'Business',    bg: '#f0fdf4', color: '#1a6b3a' },
+      INSTITUTION: { label: 'Institution', bg: '#f5f0fd', color: '#5a2e8a' },
+    };
+    const tc  = typeConfig[c.customer_type] || typeConfig.INDIVIDUAL;
+
+    const tierConfig = {
+      REGULAR  : { label: 'Regular',   color: '#6b7280' },
+      PREFERRED: { label: 'Preferred', color: '#d97706' },
+      VIP      : { label: 'VIP',       color: '#8a1a4a' },
+    };
+    const trc = tierConfig[c.tier] || tierConfig.REGULAR;
+
+    const sinceDate = c.created_at
+      ? new Date(c.created_at).toLocaleDateString('en-GB',
+          { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+
+    const initials = primaryName.split(' ').slice(0,2)
+      .map(w => w[0]?.toUpperCase() || '').join('');
+
+    const scoreColor = c.confidence_score >= 70 ? '#16a34a'
+      : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
+
+    const totalSpent = jobs.reduce((s, j) => s + parseFloat(j.amount_paid||0), 0);
+    const scoreToCredit = Math.max(0, 50 - c.confidence_score);
+
+    // ── Timeline HTML ─────────────────────────────────────
+    const timelineHtml = !jobs.length ? `
+      <div style="text-align:center;padding:48px 24px;
+        background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;
+          color:var(--text-3);">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">
+          No Job History Available for ${_esc(primaryName)}
+        </div>
+        <div style="font-size:13px;color:var(--text-3);">
+          Jobs linked to this customer will appear here once created.
+        </div>
+      </div>` : `
+      <div style="position:relative;">
+        ${jobs.map((j, idx) => {
+          const dt       = new Date(j.created_at);
+          const dateStr  = dt.toLocaleDateString('en-GB',
+            { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+          const timeStr  = dt.toLocaleTimeString('en-GH',
+            { hour: '2-digit', minute: '2-digit' });
+          const services = (j.line_items || [])
+            .map(li => li.service_name).join(', ') || '—';
+          const isLast   = idx === jobs.length - 1;
+
+          const statusColor = {
+            COMPLETE       : '#16a34a', CANCELLED: '#dc2626',
+            IN_PROGRESS    : '#d97706', PENDING_PAYMENT: '#d97706',
+          }[j.status] || '#6b7280';
+
+          const statusBg = {
+            COMPLETE       : '#dcfce7', CANCELLED: '#fee2e2',
+            IN_PROGRESS    : '#fef3c7', PENDING_PAYMENT: '#fef3c7',
+          }[j.status] || '#f3f4f6';
+
+          const methodColor = {
+            CASH: '#8a6a2e', MOMO: '#1a6b3a', POS: '#2e4a8a', CREDIT: '#8a1a4a',
+          }[j.payment_method] || '#6b7280';
+
+          const methodBg = {
+            CASH: '#fdf8f0', MOMO: '#f0fdf4', POS: '#f0f4fd', CREDIT: '#fdf0f5',
+          }[j.payment_method] || '#f3f4f6';
+
+          return `
+            <div style="display:flex;gap:16px;margin-bottom:${isLast ? '0' : '0'};">
+
+              <!-- Timeline spine -->
+              <div style="display:flex;flex-direction:column;align-items:center;
+                flex-shrink:0;width:32px;">
+                <!-- Node dot -->
+                <div style="width:12px;height:12px;border-radius:50%;
+                  background:${statusColor};border:2px solid #fff;
+                  box-shadow:0 0 0 2px ${statusColor};
+                  flex-shrink:0;margin-top:16px;"></div>
+                <!-- Line -->
+                ${!isLast ? `
+                  <div style="width:2px;flex:1;background:#e5e7eb;
+                    margin-top:4px;min-height:24px;"></div>` : ''}
+              </div>
+
+              <!-- Job card -->
+              <div style="flex:1;background:var(--panel);border:1px solid var(--border);
+                border-radius:var(--radius);overflow:hidden;margin-bottom:12px;">
+
+                <!-- Job header — dark strip -->
+                <div style="padding:10px 16px;background:var(--text);
+                  display:flex;align-items:center;justify-content:space-between;">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                    font-weight:700;color:#fff;letter-spacing:0.3px;">
+                    ${_esc(j.job_number || '—')}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                      font-weight:700;background:rgba(255,255,255,0.15);color:#fff;">
+                      ${j.job_type || '—'}
+                    </span>
+                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                      font-weight:700;background:${statusBg};color:${statusColor};">
+                      ${j.status.replace(/_/g,' ')}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Job body -->
+                <div style="padding:12px 16px;">
+
+                  <!-- Service name -->
+                  <div style="font-size:13px;font-weight:600;color:var(--text);
+                    margin-bottom:10px;">${_esc(services)}</div>
+
+                  <!-- Meta grid -->
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);
+                    gap:8px;margin-bottom:10px;">
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Date & Time</div>
+                      <div style="font-size:11px;color:var(--text-2);">${dateStr}</div>
+                      <div style="font-size:10px;color:var(--text-3);">${timeStr}</div>
+                    </div>
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Attendant</div>
+                      <div style="font-size:11px;color:var(--text-2);">
+                        ${_esc(j.intake_by_name || '—')}</div>
+                    </div>
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Amount</div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:800;color:var(--text);">${fmt(j.amount_paid)}</div>
+                    </div>
+
+                  </div>
+
+                  <!-- Bottom row: payment method + production duration -->
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    ${j.payment_method ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${methodBg};color:${methodColor};">
+                        ${j.payment_method}
+                      </span>` : ''}
+                    ${j.job_type === 'PRODUCTION' && j.deadline ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:#f0f4fd;color:#2e4a8a;">
+                        Due: ${new Date(j.deadline).toLocaleDateString('en-GB',
+                          { day: 'numeric', month: 'short' })}
+                      </span>` : ''}
+                    ${j.is_routed ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:#f5f0fd;color:#5a2e8a;">
+                        → Routed
+                      </span>` : ''}
+                  </div>
+
+                </div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>`;
+
+    // ── Full modal HTML ───────────────────────────────────
+    container.innerHTML = `
+      <!-- Topbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 28px;border-bottom:1px solid var(--border);
+        background:var(--panel);position:sticky;top:0;z-index:10;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button onclick="Dashboard.closeCustomerProfile()"
+            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
+              background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Back
+          </button>
+          <span style="font-size:13px;color:var(--text-3);">Customer Profile</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="Dashboard._editCustomer(${c.id})"
+            style="padding:7px 16px;background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;">
+            Edit Profile
+          </button>
+          ${!credit && c.confidence_score >= 50 ? `
+          <button onclick="Dashboard._nominateCredit(${c.id})"
+            style="padding:7px 16px;background:#16a34a;color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;">
+            Nominate for Credit
+          </button>` : ''}
+        </div>
+      </div>
+
+      <!-- Scrollable body — single column -->
+      <div style="max-height:calc(100vh - 120px);overflow-y:auto;">
+      <div style="max-width:800px;margin:0 auto;padding:32px 28px;">
+
+        <!-- ── Profile header ──────────────────────────── -->
+        <div style="display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;">
+
+          <!-- Avatar with score ring -->
+          <div style="position:relative;flex-shrink:0;">
+            <svg width="80" height="80" viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" fill="none"
+                stroke="#f3f4f6" stroke-width="4"/>
+              <circle cx="40" cy="40" r="34" fill="none"
+                stroke="${scoreColor}" stroke-width="4"
+                stroke-dasharray="${2 * Math.PI * 34}"
+                stroke-dashoffset="${2 * Math.PI * 34 * (1 - c.confidence_score / 100)}"
+                stroke-linecap="round"
+                transform="rotate(-90 40 40)"/>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;
+              align-items:center;justify-content:center;">
+              <div style="width:60px;height:60px;border-radius:50%;
+                background:var(--text);display:flex;align-items:center;
+                justify-content:center;font-family:'Syne',sans-serif;
+                font-size:20px;font-weight:800;color:#fff;">
+                ${initials}
+              </div>
+            </div>
+          </div>
+
+          <!-- Name + badges + meta -->
+          <div style="flex:1;">
+            <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
+              color:var(--text);letter-spacing:-0.4px;margin-bottom:4px;">
+              ${_esc(primaryName)}
+            </div>
+            ${secondaryName ? `
+              <div style="font-size:13px;color:var(--text-3);margin-bottom:8px;">
+                ${_esc(secondaryName)}
+              </div>` : ''}
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+              margin-bottom:12px;">
+              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                font-weight:700;background:${tc.bg};color:${tc.color};">
+                ${tc.label}
+              </span>
+              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                font-weight:700;background:var(--bg);color:${trc.color};
+                border:1px solid var(--border);">
+                ${trc.label}
+              </span>
+              ${c.is_priority ? `
+                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                  font-weight:700;background:#fef3c7;color:#d97706;">
+                  ⭐ Priority
+                </span>` : ''}
+              ${credit ? `
+                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                  font-weight:700;background:#fdf0f5;color:#8a1a4a;">
+                  💳 Credit Account
+                </span>` : ''}
+            </div>
+            <!-- Quick stats -->
+            <div style="display:flex;gap:20px;flex-wrap:wrap;">
+              ${[
+                ['Customer since', sinceDate],
+                ['Total visits',   c.visit_count || 0],
+                ['Jobs on record', jobs.length],
+                ['Lifetime spend', fmt(totalSpent)],
+              ].map(([label, val]) => `
+                <div>
+                  <div style="font-size:10px;color:var(--text-3);margin-bottom:1px;">
+                    ${label}</div>
+                  <div style="font-size:13px;font-weight:700;color:var(--text);">
+                    ${val}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Info sections ───────────────────────────── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;
+          margin-bottom:24px;">
+
+          <!-- Contact -->
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+              Contact Details
+            </div>
+            ${[
+              ['Phone',   c.phone   || '—'],
+              ['Email',   c.email   || '—'],
+              ['Address', c.address || '—'],
+            ].map(([label, val]) => `
+              <div style="display:flex;justify-content:space-between;
+                padding:6px 0;border-bottom:1px solid var(--border);">
+                <span style="font-size:12px;color:var(--text-3);">${label}</span>
+                <span style="font-size:12px;font-weight:500;
+                  color:${val === '—' ? 'var(--text-3)' : 'var(--text)'};">
+                  ${_esc(val)}</span>
+              </div>`).join('')}
+          </div>
+
+          <!-- Credit or eligibility -->
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:16px 18px;">
+            ${credit ? `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+                Credit Account
+              </div>
+              ${[
+                ['Limit',     fmt(credit.credit_limit)],
+                ['Balance',   fmt(credit.current_balance)],
+                ['Available', fmt(credit.available_credit)],
+                ['Terms',     `${credit.payment_terms} days`],
+                ['Status',    credit.status],
+              ].map(([label, val]) => `
+                <div style="display:flex;justify-content:space-between;
+                  padding:6px 0;border-bottom:1px solid var(--border);">
+                  <span style="font-size:12px;color:var(--text-3);">${label}</span>
+                  <span style="font-size:12px;font-weight:600;
+                    color:${label==='Balance' ? '#dc2626'
+                      : label==='Available' ? '#16a34a' : 'var(--text)'};">
+                    ${_esc(String(val))}</span>
+                </div>`).join('')}
+              <!-- Usage bar -->
+              <div style="margin-top:10px;">
+                <div style="height:4px;background:#f3f4f6;border-radius:2px;
+                  overflow:hidden;">
+                  <div style="height:100%;
+                    width:${Math.min(100,credit.utilisation_pct).toFixed(1)}%;
+                    background:${credit.utilisation_pct>=90?'#dc2626'
+                      :credit.utilisation_pct>=70?'#d97706':'#16a34a'};
+                    border-radius:2px;"></div>
+                </div>
+                <div style="font-size:10px;color:var(--text-3);margin-top:3px;
+                  text-align:right;">${credit.utilisation_pct.toFixed(0)}% utilised</div>
+              </div>` : `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+                Credit Eligibility
+              </div>
+              <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;
+                  margin-bottom:6px;">
+                  <span style="font-size:12px;color:var(--text-2);">
+                    Confidence Score</span>
+                  <span style="font-size:13px;font-weight:700;color:${scoreColor};">
+                    ${c.confidence_score} / 100</span>
+                </div>
+                <div style="height:6px;background:#f3f4f6;border-radius:3px;
+                  overflow:hidden;">
+                  <div style="height:100%;width:${c.confidence_score}%;
+                    background:${scoreColor};border-radius:3px;"></div>
+                </div>
+              </div>
+              <div style="font-size:12px;color:var(--text-3);">
+                ${c.confidence_score >= 50
+                  ? '✓ Eligible — use Nominate for Credit button above'
+                  : `Needs <strong style="color:var(--text);">${scoreToCredit} more points</strong> to reach credit threshold`}
+              </div>`}
+          </div>
+
+        </div>
+
+        <!-- ── BM Notes ─────────────────────────────────── -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:16px 18px;margin-bottom:24px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+            Branch Manager Notes
+          </div>
+          <textarea id="customer-notes-${c.id}" rows="3"
+            placeholder="Add notes about this customer…"
+            onblur="Dashboard._saveCustomerNotes(${c.id})"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;resize:vertical;box-sizing:border-box;
+              font-family:'DM Sans',sans-serif;outline:none;">
+${_esc(c.notes || '')}</textarea>
+          <div style="font-size:10px;color:var(--text-3);margin-top:4px;">
+            Auto-saves when you click away
+          </div>
+        </div>
+
+        <!-- ── Job History timeline ────────────────────── -->
+        <div style="margin-bottom:32px;">
+          <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
+            color:var(--text);letter-spacing:-0.2px;margin-bottom:16px;
+            display:flex;align-items:center;gap:10px;">
+            Job History
+            <span style="font-size:12px;font-weight:400;color:var(--text-3);
+              font-family:'DM Sans',sans-serif;">
+              ${jobs.length} job${jobs.length !== 1 ? 's' : ''} on record
+            </span>
+          </div>
+          ${timelineHtml}
+        </div>
+
+      </div>
+      </div>`;
+  }
+
+  function closeCustomerProfile() {
+    const overlay = document.getElementById('customer-profile-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  async function _saveCustomerNotes(customerId) {
+    const textarea = document.getElementById(`customer-notes-${customerId}`);
+    if (!textarea) return;
+    const notes = textarea.value.trim();
+    try {
+      await Auth.fetch(`/api/v1/customers/${customerId}/`, {
+        method : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ notes }),
+      });
+    } catch { /* silent */ }
+  }
+
+  function _editCustomer(customerId) {
+    _toast('Edit profile coming soon.', 'info');
+  }
+
+  function _nominateCredit(customerId) {
+    _toast('Credit nomination coming soon.', 'info');
+  }
+
+  function openAddCustomerModal() {
+    // Placeholder — registration modal coming next
+    _toast('Add customer modal coming soon.', 'info');
+  }
+
   // ── Public API ─────────────────────────────────────────────
 return {
     init,
@@ -6231,6 +7132,14 @@ return {
     _toggleDailySheet,
     _toggleCurrentWeek,
     _toggleHistoryWeek,
+    switchCustomersTab,
+    openCustomerDetail,
+    openAddCustomerModal,
+    _filterCustomerRows,
+    closeCustomerProfile,
+    _saveCustomerNotes,
+    _editCustomer,
+    _nominateCredit,
   };
 
 })();

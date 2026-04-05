@@ -135,6 +135,43 @@ class CustomerProfile(AuditModel):
         """Company name if set, otherwise full name."""
         return self.company_name or self.full_name or self.phone
 
+# ── Customer Edit Audit Log ───────────────────────────────────────────────────
+
+class CustomerEditLog(models.Model):
+    """
+    Immutable audit record of every field change made to a CustomerProfile.
+    Never updated — only created.
+    """
+    customer   = models.ForeignKey(
+        CustomerProfile,
+        on_delete=models.CASCADE,
+        related_name='edit_logs',
+    )
+    changed_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='customer_edits',
+    )
+    field_name  = models.CharField(max_length=100)
+    old_value   = models.TextField(blank=True)
+    new_value   = models.TextField(blank=True)
+    changed_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-changed_at']
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('CustomerEditLog records are immutable.')
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.changed_by} changed {self.field_name} "
+            f"on {self.customer} at {self.changed_at}"
+        )
+
 
 # ── Signal: recompute confidence score after each job completion ──────────────
 @receiver(post_save, sender='jobs.Job')
