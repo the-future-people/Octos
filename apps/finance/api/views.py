@@ -198,85 +198,83 @@ class DailySalesSheetNotesView(APIView):
 class DailySalesSheetCloseView(APIView):
     """
     POST /api/v1/finance/sheets/<id>/close/
-    BM manually closes the sheet.
-    Blocked if non-carryover pending payments exist.
+    BM closes the daily sheet.
+    All gates enforced by FloatEngine before SheetEngine closes.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-            from django.utils import timezone
-            from datetime import timedelta
-            from apps.accounts.models import CustomUser
+        from apps.finance.models import DailySalesSheet
+        from apps.finance.sheet_engine import SheetEngine
+        from apps.finance.float_engine import FloatEngine
 
-            try:
-                sheet = DailySalesSheet.objects.select_related('branch').get(pk=pk)
-            except DailySalesSheet.DoesNotExist:
-                return Response(
-                    {'detail': 'Sheet not found.'},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+        try:
+            sheet = DailySalesSheet.objects.select_related('branch').get(
+                pk     = pk,
+                branch = request.user.branch,
+            )
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-            # ── Validate floats payload ───────────────────────────────
-            floats_data = request.data.get('floats', [])
-            for f in floats_data:
-                amount = float(f.get('opening_float', 0))
-                if amount < 20 or amount > 100 or amount % 5 != 0:
-                    return Response(
-                        {'detail': f"Float amount GHS {amount} is invalid. Must be GHS 20–100 in multiples of GHS 5."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+        if sheet.status != DailySalesSheet.Status.OPEN:
+            return Response(
+                {'detail': f"Sheet is already {sheet.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-            try:
-                notes  = request.data.get('notes', '').strip()
-                engine = SheetEngine(sheet.branch)
-                closed = engine.close_sheet(
-                    sheet,
-                    closed_by = request.user,
-                    auto      = False,
-                )
-                if notes:
-                    closed.notes = notes
-                    closed.save(update_fields=['notes'])
+        errors = []
 
-                # ── Stage tomorrow's floats (no sheet created yet) ────
-                if floats_data:
-                    tomorrow = sheet.date + timedelta(days=1)
+        # ── Gate 1: All cashiers signed off ───────────────────
+        signoff_gate = FloatEngine.validate_signoff_gate(sheet)
+        if not signoff_gate['passed']:
+            errors.extend(signoff_gate['errors'])
 
-                    # Never stage floats for Sunday
-                    if tomorrow.weekday() == 6:
-                        pass  # Sunday — no float, no sheet
-                    else:
-                        for f in floats_data:
-                            try:
-                                cashier = CustomUser.objects.get(pk=f['cashier_id'])
-                                # Remove any existing staged float for this cashier/date
-                                CashierFloat.objects.filter(
-                                    cashier        = cashier,
-                                    scheduled_date = tomorrow,
-                                    daily_sheet    = None,
-                                ).delete()
-                                CashierFloat.objects.create(
-                                    cashier        = cashier,
-                                    daily_sheet    = None,
-                                    scheduled_date = tomorrow,
-                                    opening_float  = float(f['opening_float']),
-                                    float_set_by   = request.user,
-                                    float_set_at   = timezone.now(),
-                                )
-                            except CustomUser.DoesNotExist:
-                                pass  # If cashier not found, skip staging float for them
+        # ── Gate 2: No pending instant payments ───────────────
+        from apps.jobs.models import Job
+        pending = Job.objects.filter(
+            daily_sheet  = sheet,
+            status       = Job.PENDING_PAYMENT,
+            job_type     = 'INSTANT',
+        ).count()
+        if pending:
+            errors.append(
+                f"{pending} instant job(s) still pending payment. "
+                f"Resolve before closing."
+            )
 
-                return Response(
-                    DailySalesSheetDetailSerializer(
-                        closed, context={'request': request}
-                    ).data
-                )
-            except ValueError as e:
-                return Response(
-                    {'detail': str(e)},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        # ── Gate 3: Tomorrow's float set ──────────────────────
+        float_gate = FloatEngine.validate_tomorrow_float_gate(sheet)
+        if not float_gate['passed']:
+            errors.extend(float_gate['errors'])
 
+        if errors:
+            return Response(
+                {
+                    'detail': 'Sheet cannot be closed.',
+                    'errors': errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── All gates passed — close the sheet ────────────────
+        try:
+            engine = SheetEngine(sheet.branch)
+            closed = engine.close_sheet(
+                sheet     = sheet,
+                closed_by = request.user,
+                auto      = False,
+            )
+        except ValueError as e:
+            return Response(
+                {'detail': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.finance.serializers import DailySalesSheetSerializer
+        return Response(DailySalesSheetSerializer(closed).data)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cashier Float
@@ -375,17 +373,18 @@ class CashierFloatCloseView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 # Cashier Sign-Off
 # ─────────────────────────────────────────────────────────────────────────────
-
 class CashierSignOffView(APIView):
     """
     POST /api/v1/finance/floats/<id>/sign-off/
     Cashier submits closing cash, variance notes, shift notes.
-    Marks float as signed off and locks the queue for this cashier.
-    If overtime or cover: extends queue access until specified time.
+    Handles both EOD sign-off and mid-day handover.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from apps.finance.float_engine import FloatEngine
+
         try:
             float_record = CashierFloat.objects.select_related(
                 'cashier', 'daily_sheet'
@@ -402,26 +401,55 @@ class CashierSignOffView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = CashierSignOffSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        is_handover  = request.data.get('is_handover', False)
+        is_overtime  = request.data.get('is_overtime', False)
+        is_cover     = request.data.get('is_cover', False)
 
-        d = serializer.validated_data
-        from django.utils import timezone
+        # ── Mid-day handover ──────────────────────────────────
+        if is_handover:
+            handover_amount = request.data.get('handover_amount', 0)
+            breakdown       = request.data.get('breakdown', {})
+            shift_notes     = request.data.get('shift_notes', '')
 
-        # Overtime or cover — not signing off yet, just extending
-        if d.get('is_overtime') or d.get('is_cover'):
-            float_record.is_overtime     = d.get('is_overtime', False)
-            float_record.overtime_reason = d.get('overtime_reason', '')
-            float_record.overtime_until  = d.get('overtime_until')
-            float_record.is_cover        = d.get('is_cover', False)
-            float_record.cover_until     = d.get('cover_until')
+            result = FloatEngine.mid_day_handover(
+                float_record    = float_record,
+                handover_amount = handover_amount,
+                breakdown       = breakdown,
+                signed_off_by   = request.user,
+                shift_notes     = shift_notes,
+            )
 
-            if d.get('covering_for_id'):
+            if not result['ok']:
+                return Response(
+                    {'detail': result['error']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response({
+                'detail'         : 'Handover recorded. Next cashier float staged.',
+                'is_handover'    : True,
+                'handover_amount': str(result['float'].handover_float),
+                'next_float_id'  : result['next_staged'].pk,
+            })
+
+        # ── Overtime extension ────────────────────────────────
+        if is_overtime or is_cover:
+            overtime_until  = request.data.get('overtime_until')
+            overtime_reason = request.data.get('overtime_reason', '')
+            cover_until     = request.data.get('cover_until')
+
+            from django.utils import timezone
+            float_record.is_overtime     = is_overtime
+            float_record.overtime_reason = overtime_reason
+            float_record.overtime_until  = overtime_until
+            float_record.is_cover        = is_cover
+            float_record.cover_until     = cover_until
+
+            if request.data.get('covering_for_id'):
                 from apps.accounts.models import CustomUser
                 try:
                     float_record.covering_for = CustomUser.objects.get(
-                        pk=d['covering_for_id']
+                        pk=request.data['covering_for_id']
                     )
                 except CustomUser.DoesNotExist:
                     return Response(
@@ -433,29 +461,39 @@ class CashierSignOffView(APIView):
                 'is_overtime', 'overtime_reason', 'overtime_until',
                 'is_cover', 'covering_for', 'cover_until', 'updated_at',
             ])
+
             return Response({
-                'detail'         : 'Shift extended.',
-                'is_overtime'    : float_record.is_overtime,
-                'overtime_until' : float_record.overtime_until,
-                'is_cover'       : float_record.is_cover,
-                'cover_until'    : float_record.cover_until,
+                'detail'        : 'Shift extended.',
+                'is_overtime'   : float_record.is_overtime,
+                'overtime_until': float_record.overtime_until,
+                'is_cover'      : float_record.is_cover,
+                'cover_until'   : float_record.cover_until,
             })
 
-        # Full sign-off
-        float_record.closing_cash   = d['closing_cash']
-        float_record.variance_notes = d['variance_notes']
-        float_record.shift_notes    = d['shift_notes']
-        float_record.signed_off_by  = request.user
-        float_record.signed_off_at  = timezone.now()
-        float_record.is_signed_off  = True
-        float_record.compute_variance()
-        float_record.save(update_fields=[
-            'closing_cash', 'variance_notes', 'shift_notes',
-            'signed_off_by', 'signed_off_at', 'is_signed_off',
-            'variance', 'updated_at',
-        ])
+        # ── EOD sign-off ──────────────────────────────────────
+        closing_cash   = request.data.get('closing_cash', 0)
+        breakdown      = request.data.get('breakdown', {})
+        variance_notes = request.data.get('variance_notes', '')
+        shift_notes    = request.data.get('shift_notes', '')
 
-        return Response(CashierFloatSerializer(float_record).data)
+        result = FloatEngine.sign_off(
+            float_record   = float_record,
+            closing_cash   = closing_cash,
+            breakdown      = breakdown,
+            variance_notes = variance_notes,
+            shift_notes    = shift_notes,
+            signed_off_by  = request.user,
+            is_overtime    = False,
+        )
+
+        if not result['ok']:
+            return Response(
+                {'detail': result['error']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.finance.serializers import CashierFloatSerializer
+        return Response(CashierFloatSerializer(result['float']).data)
 
 
 class CashierShiftStatusView(APIView):
@@ -463,19 +501,13 @@ class CashierShiftStatusView(APIView):
     GET /api/v1/finance/cashier/shift-status/
     Returns current shift state for the logged-in cashier.
     Polled every 60s by the cashier portal.
-
-    float_status values:
-      NO_FLOAT        — no float record exists for today
-      PENDING_ACK     — float staged but cashier hasn't confirmed receipt
-      ACTIVE          — acknowledged, working normally
-      PENDING_SIGNOFF — shift ended, must count and submit
-      SIGNED_OFF      — fully signed off for the day
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from django.utils import timezone
         from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from apps.finance.float_engine import FloatEngine
         from datetime import datetime as dt
 
         user   = request.user
@@ -490,56 +522,35 @@ class CashierShiftStatusView(APIView):
         today = timezone.localdate()
         now   = timezone.now()
 
-        # ── Step 1: find float record ─────────────────────────
-        # First try: linked to today's open sheet
-        float_record = None
-        try:
-            float_record = CashierFloat.objects.select_related(
-                'daily_sheet'
-            ).get(
-                cashier             = user,
-                daily_sheet__date   = today,
-                daily_sheet__branch = branch,
-            )
-        except CashierFloat.DoesNotExist:
-            pass
+        # ── Float status via FloatEngine ──────────────────────
+        float_status = FloatEngine.get_float_status(
+            cashier = user,
+            branch  = branch,
+            date    = today,
+        )
 
-        # Second try: staged (daily_sheet=None, scheduled_date=today)
-        if float_record is None:
-            try:
-                staged = CashierFloat.objects.get(
-                    cashier        = user,
-                    daily_sheet    = None,
-                    scheduled_date = today,
-                )
-                # Auto-link to today's open sheet if one exists
-                try:
-                    open_sheet = DailySalesSheet.objects.get(
-                        branch = branch,
-                        date   = today,
-                        status = DailySalesSheet.Status.OPEN,
-                    )
-                    # Check unique_together won't be violated
-                    already_linked = CashierFloat.objects.filter(
-                        daily_sheet = open_sheet,
-                        cashier     = user,
-                    ).exclude(pk=staged.pk).exists()
+        # ── Signed off — return immediately ───────────────────
+        if float_status['float_status'] == 'SIGNED_OFF':
+            return Response({
+                'has_shift'        : True,
+                'float_status'     : 'SIGNED_OFF',
+                'float_id'         : float_status['float_id'],
+                'sheet_id'         : float_status['sheet_id'],
+                'opening_float'    : float_status['opening_float'],
+                'opening_breakdown': float_status['opening_breakdown'],
+                'shift_end'        : None,
+                'minutes_remaining': 0,
+                'should_prompt'    : False,
+                'should_lock'      : True,
+                'is_signed_off'    : True,
+                'is_overtime'      : False,
+                'overtime_until'   : None,
+                'is_cover'         : False,
+                'cover_until'      : None,
+            })
 
-                    if not already_linked:
-                        staged.daily_sheet    = open_sheet
-                        staged.scheduled_date = None
-                        staged.save(update_fields=['daily_sheet', 'scheduled_date', 'updated_at'])
-
-                except DailySalesSheet.DoesNotExist:
-                    pass  # Sheet not open yet — float stays staged
-
-                float_record = staged
-
-            except CashierFloat.DoesNotExist:
-                pass
-
-        # ── Step 2: no float at all ───────────────────────────
-        if float_record is None:
+        # ── No float — return immediately ─────────────────────
+        if float_status['float_status'] == 'NO_FLOAT':
             return Response({
                 'has_shift'        : False,
                 'float_status'     : 'NO_FLOAT',
@@ -558,48 +569,15 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : None,
             })
 
-        # ── Step 3: resolve sheet_id ──────────────────────────
-        sheet_id = float_record.daily_sheet_id
-        if not sheet_id:
-            try:
-                open_sheet = DailySalesSheet.objects.get(
-                    branch = branch,
-                    date   = today,
-                    status = DailySalesSheet.Status.OPEN,
-                )
-                sheet_id = open_sheet.pk
-            except DailySalesSheet.DoesNotExist:
-                pass
-
-        # ── Step 4: already fully signed off ──────────────────
-        if float_record.is_signed_off:
-            return Response({
-                'has_shift'        : True,
-                'float_status'     : 'SIGNED_OFF',
-                'float_id'         : float_record.id,
-                'sheet_id'         : sheet_id,
-                'opening_float'    : str(float_record.opening_float),
-                'opening_breakdown': float_record.opening_denomination_breakdown,
-                'shift_end'        : None,
-                'minutes_remaining': 0,
-                'should_prompt'    : False,
-                'should_lock'      : True,
-                'is_signed_off'    : True,
-                'is_overtime'      : False,
-                'overtime_until'   : None,
-                'is_cover'         : float_record.is_cover,
-                'cover_until'      : float_record.cover_until,
-            })
-
-        # ── Step 5: pending morning acknowledgement ───────────
-        if not float_record.morning_acknowledged:
+        # ── Pending acknowledgement ───────────────────────────
+        if float_status['float_status'] == 'PENDING_ACK':
             return Response({
                 'has_shift'        : True,
                 'float_status'     : 'PENDING_ACK',
-                'float_id'         : float_record.id,
-                'sheet_id'         : sheet_id,
-                'opening_float'    : str(float_record.opening_float),
-                'opening_breakdown': float_record.opening_denomination_breakdown,
+                'float_id'         : float_status['float_id'],
+                'sheet_id'         : float_status['sheet_id'],
+                'opening_float'    : float_status['opening_float'],
+                'opening_breakdown': float_status['opening_breakdown'],
                 'shift_end'        : None,
                 'minutes_remaining': None,
                 'should_prompt'    : False,
@@ -607,160 +585,74 @@ class CashierShiftStatusView(APIView):
                 'is_signed_off'    : False,
                 'is_overtime'      : False,
                 'overtime_until'   : None,
-                'is_cover'         : float_record.is_cover,
-                'cover_until'      : float_record.cover_until,
+                'is_cover'         : False,
+                'cover_until'      : None,
             })
 
-        # ── Step 6: overtime active ───────────────────────────
-        if float_record.is_overtime and float_record.overtime_until:
+        # ── Active shift — compute timing ─────────────────────
+        from apps.finance.models import CashierFloat
+
+        float_record = None
+        if float_status['float_id']:
+            try:
+                float_record = CashierFloat.objects.get(
+                    pk = float_status['float_id']
+                )
+            except CashierFloat.DoesNotExist:
+                pass
+
+        # Overtime active
+        if (float_record and float_record.is_overtime
+                and float_record.overtime_until):
             delta          = float_record.overtime_until - now
             mins_remaining = max(0, int(delta.total_seconds() / 60))
             return Response({
                 'has_shift'        : True,
-                'float_status'     : 'SIGNED_OFF' if float_record.is_signed_off else 'ACTIVE',
-                'float_id'         : float_record.id,
-                'sheet_id'         : sheet_id,
-                'opening_float'    : str(float_record.opening_float),
-                'opening_breakdown': float_record.opening_denomination_breakdown,
-                'shift_end'        : float_record.overtime_until,
+                'float_status'     : 'ACTIVE',
+                'float_id'         : float_status['float_id'],
+                'sheet_id'         : float_status['sheet_id'],
+                'opening_float'    : float_status['opening_float'],
+                'opening_breakdown': float_status['opening_breakdown'],
+                'shift_end'        : float_record.overtime_until.time(),
                 'minutes_remaining': mins_remaining,
                 'should_prompt'    : mins_remaining <= 60,
                 'should_lock'      : mins_remaining <= 0,
-                'is_signed_off'    : float_record.is_signed_off,
+                'is_signed_off'    : False,
                 'is_overtime'      : True,
                 'overtime_until'   : float_record.overtime_until,
                 'is_cover'         : float_record.is_cover,
                 'cover_until'      : float_record.cover_until,
             })
 
-        # ── Step 7: normal active shift ───────────────────────
-        cash_schedule  = HRShiftEngine(branch).get_role_schedule('CASHIER', target_date=today)
+        # Normal active shift — get role schedule
+        cash_schedule  = HRShiftEngine(branch).get_role_schedule(
+            'CASHIER', target_date=today
+        )
         signoff_dt     = dt.fromisoformat(cash_schedule['signoff_at'])
         delta          = signoff_dt - now
         mins_remaining = max(0, int(delta.total_seconds() / 60))
         shift_end      = dt.fromisoformat(cash_schedule['shift_end']).time()
 
-        float_status = 'ACTIVE'
-        if mins_remaining <= 0 and not float_record.is_signed_off:
-            float_status = 'PENDING_SIGNOFF'
+        float_status_val = float_status['float_status']
+        if mins_remaining <= 0 and float_status_val == 'ACTIVE':
+            float_status_val = 'PENDING_SIGNOFF'
 
         return Response({
             'has_shift'        : True,
-            'float_status'     : float_status,
-            'float_id'         : float_record.id,
-            'sheet_id'         : sheet_id,
-            'opening_float'    : str(float_record.opening_float),
-            'opening_breakdown': float_record.opening_denomination_breakdown,
+            'float_status'     : float_status_val,
+            'float_id'         : float_status['float_id'],
+            'sheet_id'         : float_status['sheet_id'],
+            'opening_float'    : float_status['opening_float'],
+            'opening_breakdown': float_status['opening_breakdown'],
             'shift_end'        : shift_end,
             'minutes_remaining': mins_remaining,
             'should_prompt'    : mins_remaining <= 60,
             'should_lock'      : mins_remaining <= 0,
-            'is_signed_off'    : float_record.is_signed_off,
-            'is_overtime'      : float_record.is_overtime,
-            'overtime_until'   : float_record.overtime_until,
-            'is_cover'         : float_record.is_cover,
-            'cover_until'      : float_record.cover_until,
-        })
-
-
-class FloatAcknowledgeView(APIView):
-    """
-    POST /api/v1/finance/floats/<id>/acknowledge/
-    Cashier confirms receipt of opening float with denomination breakdown.
-
-    Body:
-    {
-        "breakdown": {"1":0,"2":0,"5":2,"10":0,"20":2,"50":0,"100":0,"200":0}
-    }
-
-    Validates that denomination total matches opening_float exactly.
-    Sets morning_acknowledged = True.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        from django.utils import timezone
-        from decimal import Decimal
-
-        try:
-            float_record = CashierFloat.objects.get(
-                pk      = pk,
-                cashier = request.user,
-            )
-        except CashierFloat.DoesNotExist:
-            return Response(
-                {'detail': 'Float record not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if float_record.morning_acknowledged:
-            return Response(
-                {'detail': 'Float already acknowledged.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        breakdown = request.data.get('breakdown')
-        if not breakdown or not isinstance(breakdown, dict):
-            return Response(
-                {'detail': 'Denomination breakdown is required.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Validate denomination keys
-        valid_denoms = {'1', '2', '5', '10', '20', '50', '100', '200'}
-        if not set(str(k) for k in breakdown.keys()).issubset(valid_denoms):
-            return Response(
-                {'detail': 'Invalid denomination. Must be one of: 1, 2, 5, 10, 20, 50, 100, 200.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Validate all counts are non-negative integers
-        for denom, count in breakdown.items():
-            try:
-                if int(count) < 0:
-                    raise ValueError
-            except (ValueError, TypeError):
-                return Response(
-                    {'detail': f'Invalid count for GHS {denom}. Must be a non-negative integer.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        # Validate total matches opening float
-        counted_total = CashierFloat.denomination_total(breakdown)
-        expected      = float(float_record.opening_float)
-
-        if abs(counted_total - expected) > 0.001:
-            return Response(
-                {
-                    'detail'       : f'Denomination total GHS {counted_total:.2f} does not match '
-                                     f'staged float GHS {expected:.2f}. Please recount.',
-                    'counted_total': counted_total,
-                    'expected'     : expected,
-                    'difference'   : round(counted_total - expected, 2),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Save acknowledgement
-        float_record.morning_acknowledged              = True
-        float_record.morning_acknowledged_at           = timezone.now()
-        float_record.opening_denomination_breakdown    = {
-            str(k): int(v) for k, v in breakdown.items()
-        }
-        float_record.save(update_fields=[
-            'morning_acknowledged',
-            'morning_acknowledged_at',
-            'opening_denomination_breakdown',
-            'updated_at',
-        ])
-
-        return Response({
-            'detail'              : 'Float acknowledged. Have a great shift!',
-            'float_id'            : float_record.id,
-            'opening_float'       : str(float_record.opening_float),
-            'counted_total'       : counted_total,
-            'morning_acknowledged': True,
-            'acknowledged_at'     : float_record.morning_acknowledged_at.isoformat(),
+            'is_signed_off'    : False,
+            'is_overtime'      : float_record.is_overtime if float_record else False,
+            'overtime_until'   : float_record.overtime_until if float_record else None,
+            'is_cover'         : float_record.is_cover if float_record else False,
+            'cover_until'      : float_record.cover_until if float_record else None,
         })
     
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2136,8 +2028,8 @@ def _generate_invoice_pdf(invoice):
             detail += f" · {li.pages}pp × {li.sets} sets"
         table_data.append([
             [
-                Paragraph(li.label, sm_bold),
-                Paragraph(detail, sm),
+            Paragraph(li.label, sm_bold),
+            Paragraph(detail, sm),
             ],
             Paragraph(str(li.quantity), ParagraphStyle('c', fontSize=9,
                 fontName='Helvetica', alignment=TA_CENTER,
@@ -2770,36 +2662,44 @@ class WeeklyReportPrepareView(APIView):
             )
 
         # ── Resolve current week Mon–Sat ──────────────────────────────
+        # NEW
+        import calendar
         today     = timezone.localdate()
-        monday    = today - timedelta(days=today.weekday())  # weekday() 0=Mon
+        monday    = today - timedelta(days=today.weekday())
         saturday  = monday + timedelta(days=5)
 
-        # ISO week number
+        # Cap at month boundaries — weeks cannot cross month lines
+        first_day_of_month = today.replace(day=1)
+        last_day_of_month  = today.replace(
+            day=calendar.monthrange(today.year, today.month)[1]
+        )
+        effective_from = max(monday,   first_day_of_month)
+        effective_to   = min(saturday, last_day_of_month)
+
         week_number = today.isocalendar()[1]
         year        = today.isocalendar()[0]
 
         # ── Get or create the report ──────────────────────────────────
+        # NEW
         report, created = WeeklyReport.objects.get_or_create(
             branch      = branch,
             week_number = week_number,
             year        = year,
             defaults    = {
-                'date_from' : monday,
-                'date_to'   : saturday,
+                'date_from' : effective_from,
+                'date_to'   : effective_to,
                 'status'    : WeeklyReport.Status.DRAFT,
             }
         )
-
-        if report.is_locked:
-            return Response(
-                {'detail': 'This weekly report is already locked.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # ── Find all sheets for this week ─────────────────────────────
         sheets = DailySalesSheet.objects.filter(
             branch = branch,
-            date__range = [monday, saturday],
+            date__range = [effective_from, effective_to],
+        )
+        report.date_from = effective_from
+        report.date_to   = effective_to
+        week_jobs = Job.objects.filter(
+            branch      = branch,
+            created_at__date__range = [effective_from, effective_to],
         )
 
         # ── Link sheets ───────────────────────────────────────────────
@@ -2827,8 +2727,8 @@ class WeeklyReportPrepareView(APIView):
         report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
         report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
 
-        report.date_from = monday
-        report.date_to   = saturday
+        report.date_from = effective_from
+        report.date_to   = effective_to
 
         # ── Inventory snapshot ────────────────────────────────────────
         try:
@@ -3046,9 +2946,15 @@ class MonthlyCloseStatusView(APIView):
             'rejected_by'      : close.rejected_by.full_name if close.rejected_by else None,
             'rejected_at'      : close.rejected_at.isoformat() if close.rejected_at else None,
             'rejection_reason' : close.rejection_reason,
-            'bm_notes'         : close.bm_notes,
-            'belt_notes'       : close.belt_notes,
-            'summary_snapshot' : close.summary_snapshot,
+            # NEW
+            'bm_notes'                 : close.bm_notes,
+            'finance_reviewer'         : close.finance_reviewer.full_name if close.finance_reviewer else None,
+            'finance_cleared_at'       : close.finance_cleared_at.isoformat() if close.finance_cleared_at else None,
+            'clarification_request'    : close.clarification_request,
+            'clarification_response'   : close.clarification_response,
+            'clarification_due_at'     : close.clarification_due_at.isoformat() if close.clarification_due_at else None,
+            'rm_notes'                 : close.rm_notes,
+            'summary_snapshot'         : close.summary_snapshot,
         })
 
 
@@ -3080,7 +2986,7 @@ class MonthlyCloseSubmitView(APIView):
             'id'          : close.pk,
             'status'      : close.status,
             'submitted_at': close.submitted_at.isoformat(),
-            'message'     : f"{close.month_name} {close.year} submitted successfully. Awaiting Belt Manager endorsement.",
+            'message'     : f"{close.month_name} {close.year} submitted successfully. Assigned to Finance for review.",
         })
 
 
@@ -3092,12 +2998,19 @@ class MonthlyCloseEndorseView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('REGIONAL_MANAGER', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only a Regional Manager can endorse monthly closes.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             close = MonthlyClose.objects.get(pk=pk)
         except MonthlyClose.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        notes  = request.data.get('belt_notes', '')
+        notes  = request.data.get('rm_notes', '')
         engine = MonthlyCloseEngine(close.branch, close.month, close.year)
         close, errors = engine.endorse(request.user, notes)
 
@@ -3108,7 +3021,7 @@ class MonthlyCloseEndorseView(APIView):
             'id'         : close.pk,
             'status'     : close.status,
             'endorsed_at': close.endorsed_at.isoformat(),
-            'message'    : f"{close.month_name} {close.year} endorsed and finalized.",
+            'message'    : f"{close.month_name} {close.year} endorsed. Awaiting lock on PDF download.",
         })
 
 
@@ -3182,26 +3095,444 @@ class MonthlyClosePendingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        """RM sees closes that Finance has cleared — ready for endorsement."""
         pending = MonthlyClose.objects.filter(
-            status = MonthlyClose.Status.SUBMITTED,
-        ).select_related('branch', 'submitted_by').order_by('-year', '-month')
+            status=MonthlyClose.Status.FINANCE_CLEARED,
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('-year', '-month')
 
         data = [
             {
-                'id'          : c.pk,
-                'branch'      : c.branch.name,
-                'branch_code' : c.branch.code,
-                'month'       : c.month,
-                'year'        : c.year,
-                'month_name'  : c.month_name,
-                'submitted_by': c.submitted_by.full_name if c.submitted_by else '—',
-                'submitted_at': c.submitted_at.isoformat() if c.submitted_at else None,
-                'bm_notes'    : c.bm_notes,
-                'total_collected': str(
+                'id'                 : c.pk,
+                'branch'             : c.branch.name,
+                'branch_code'        : c.branch.code,
+                'month'              : c.month,
+                'year'               : c.year,
+                'month_name'         : c.month_name,
+                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
+                'finance_reviewer'   : c.finance_reviewer.full_name if c.finance_reviewer else '—',
+                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                'bm_notes'           : c.bm_notes,
+                'finance_notes'      : c.finance_notes,
+                'total_collected'    : str(
                     c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
                 ),
-                'total_jobs'  : c.summary_snapshot.get('jobs', {}).get('total', 0),
+                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
             }
             for c in pending
         ]
         return Response(data)
+
+class FloatAcknowledgeView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/acknowledge/
+    Cashier confirms receipt of opening float with denomination breakdown.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from apps.finance.float_engine import FloatEngine
+
+        try:
+            float_record = CashierFloat.objects.get(pk=pk)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        breakdown = request.data.get('breakdown')
+        if not breakdown or not isinstance(breakdown, dict):
+            return Response(
+                {'detail': 'Denomination breakdown is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = FloatEngine.acknowledge(
+            float_record = float_record,
+            breakdown    = breakdown,
+            cashier      = request.user,
+        )
+
+        if not result['ok']:
+            return Response(
+                {'detail': result['error']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        f = result['float']
+        return Response({
+            'detail'              : 'Float acknowledged. Have a great shift!',
+            'float_id'            : f.pk,
+            'opening_float'       : str(f.opening_float),
+            'morning_acknowledged': True,
+            'acknowledged_at'     : f.morning_acknowledged_at.isoformat(),
+        })
+
+        
+class MonthlyCloseDetailView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/<pk>/
+    Returns full monthly close detail including summary_snapshot.
+    Used by RM review panel.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            close = MonthlyClose.objects.select_related(
+                'branch', 'submitted_by', 'endorsed_by', 'rejected_by'
+            ).get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            'id'              : close.pk,
+            'branch'          : close.branch.name,
+            'branch_code'     : close.branch.code,
+            'month'           : close.month,
+            'year'            : close.year,
+            'month_name'      : close.month_name,
+            'status'          : close.status,
+            'submitted_by'    : close.submitted_by.full_name if close.submitted_by else '—',
+            'submitted_at'    : close.submitted_at.isoformat() if close.submitted_at else None,
+            'endorsed_by'     : close.endorsed_by.full_name if close.endorsed_by else None,
+            'endorsed_at'     : close.endorsed_at.isoformat() if close.endorsed_at else None,
+            'rejected_by'     : close.rejected_by.full_name if close.rejected_by else None,
+            'rejected_at'     : close.rejected_at.isoformat() if close.rejected_at else None,
+            'rejection_reason': close.rejection_reason,
+            'bm_notes'        : close.bm_notes,
+            'summary_snapshot': close.summary_snapshot,
+        })
+
+class MonthlyCloseMyQueueView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-queue/
+    Finance: list closes assigned to the current user in FINANCE_REVIEWING or RESUBMITTED.
+    Ordered by risk score descending (highest risk first).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.analytics.models import MonthlyCloseSummary
+
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+            status__in=[
+                MonthlyClose.Status.FINANCE_REVIEWING,
+                MonthlyClose.Status.RESUBMITTED,
+            ],
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('-year', '-month')
+
+        # Attach risk scores where available
+        data = []
+        for c in closes:
+            risk_score = None
+            try:
+                summary    = MonthlyCloseSummary.objects.filter(
+                    monthly_close=c
+                ).first()
+                if summary:
+                    risk_score = summary.risk_score
+            except Exception:
+                pass
+
+            snap    = c.summary_snapshot or {}
+            revenue = snap.get('revenue', {})
+            jobs    = snap.get('jobs', {})
+
+            data.append({
+                'id'                    : c.pk,
+                'branch'                : c.branch.name,
+                'branch_code'           : c.branch.code,
+                'month'                 : c.month,
+                'year'                  : c.year,
+                'month_name'            : c.month_name,
+                'status'                : c.status,
+                'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
+                'bm_notes'              : c.bm_notes,
+                'clarification_request' : c.clarification_request,
+                'clarification_response': c.clarification_response,
+                'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
+                'risk_score'            : risk_score,
+                # Revenue
+                'total_collected'       : revenue.get('total_collected', '0'),
+                'total_cash'            : revenue.get('total_cash', '0'),
+                'total_momo'            : revenue.get('total_momo', '0'),
+                'total_pos'             : revenue.get('total_pos', '0'),
+                'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
+                'total_credit_issued'   : revenue.get('total_credit_issued', '0'),
+                'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
+                'cash_pct'              : revenue.get('cash_pct', 0),
+                'momo_pct'              : revenue.get('momo_pct', 0),
+                'pos_pct'               : revenue.get('pos_pct', 0),
+                # Jobs
+                'total_jobs'            : jobs.get('total', 0),
+                'jobs_complete'         : jobs.get('complete', 0),
+                'jobs_cancelled'        : jobs.get('cancelled', 0),
+                'completion_rate'       : jobs.get('completion_rate', 0),
+                # Top services
+                'top_services'          : snap.get('top_services', [])[:3],
+                # Weekly breakdown
+                'weekly_breakdown'      : snap.get('weekly_breakdown', []),
+            })
+
+        # Sort highest risk first
+        data.sort(key=lambda x: (x['risk_score'] or 0), reverse=True)
+        return Response(data)
+
+
+class MonthlyCloseMyHistoryView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-history/
+    Finance: list closes this user has cleared (FINANCE_CLEARED, ENDORSED, LOCKED).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+            status__in=[
+                MonthlyClose.Status.FINANCE_CLEARED,
+                MonthlyClose.Status.ENDORSED,
+                MonthlyClose.Status.LOCKED,
+            ],
+        ).select_related(
+            'branch', 'submitted_by'
+        ).order_by('-year', '-month')
+
+        data = [
+            {
+                'id'                 : c.pk,
+                'branch'             : c.branch.name,
+                'branch_code'        : c.branch.code,
+                'month'              : c.month,
+                'year'               : c.year,
+                'month_name'         : c.month_name,
+                'status'             : c.status,
+                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
+                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
+                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                'total_collected'    : str(
+                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
+                ),
+                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
+            }
+            for c in closes
+        ]
+        return Response(data)
+
+class MonthlyCloseMyBranchesView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/my-branches/
+    Finance: all closes assigned to this user, grouped by branch.
+    Active close (FINANCE_REVIEWING/RESUBMITTED) is expanded.
+    History (FINANCE_CLEARED/ENDORSED/LOCKED) is compact.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        all_closes = MonthlyClose.objects.filter(
+            finance_reviewer=request.user,
+        ).select_related(
+            'branch', 'submitted_by', 'finance_reviewer'
+        ).order_by('branch__name', '-year', '-month')
+
+        # Group by branch
+        from collections import defaultdict
+        branches = defaultdict(lambda: {'active': None, 'history': []})
+
+        active_statuses = {
+            MonthlyClose.Status.FINANCE_REVIEWING,
+            MonthlyClose.Status.RESUBMITTED,
+            MonthlyClose.Status.NEEDS_CLARIFICATION,
+        }
+        history_statuses = {
+            MonthlyClose.Status.FINANCE_CLEARED,
+            MonthlyClose.Status.ENDORSED,
+            MonthlyClose.Status.LOCKED,
+        }
+
+        for c in all_closes:
+            key = c.branch.code
+            snap    = c.summary_snapshot or {}
+            revenue = snap.get('revenue', {})
+            jobs    = snap.get('jobs', {})
+
+            if c.status in active_statuses:
+                branches[key]['branch']      = c.branch.name
+                branches[key]['branch_code'] = c.branch.code
+                branches[key]['active'] = {
+                    'id'                    : c.pk,
+                    'month'                 : c.month,
+                    'year'                  : c.year,
+                    'month_name'            : c.month_name,
+                    'status'                : c.status,
+                    'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
+                    'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
+                    'bm_notes'              : c.bm_notes,
+                    'clarification_request' : c.clarification_request,
+                    'clarification_response': c.clarification_response,
+                    'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
+                    'total_collected'       : revenue.get('total_collected', '0'),
+                    'total_cash'            : revenue.get('total_cash', '0'),
+                    'total_momo'            : revenue.get('total_momo', '0'),
+                    'total_pos'             : revenue.get('total_pos', '0'),
+                    'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
+                    'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
+                    'cash_pct'              : revenue.get('cash_pct', 0),
+                    'momo_pct'              : revenue.get('momo_pct', 0),
+                    'pos_pct'               : revenue.get('pos_pct', 0),
+                    'total_jobs'            : jobs.get('total', 0),
+                    'jobs_complete'         : jobs.get('complete', 0),
+                    'jobs_cancelled'        : jobs.get('cancelled', 0),
+                    'completion_rate'       : jobs.get('completion_rate', 0),
+                    'top_services'          : snap.get('top_services', [])[:3],
+                    'weekly_breakdown'      : snap.get('weekly_breakdown', []),
+                }
+            elif c.status in history_statuses:
+                if 'branch' not in branches[key]:
+                    branches[key]['branch']      = c.branch.name
+                    branches[key]['branch_code'] = c.branch.code
+                branches[key]['history'].append({
+                    'id'                : c.pk,
+                    'month'             : c.month,
+                    'year'              : c.year,
+                    'month_name'        : c.month_name,
+                    'status'            : c.status,
+                    'total_collected'   : revenue.get('total_collected', '0'),
+                    'finance_cleared_at': c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
+                })
+
+        # Build ordered list — branches with active close first
+        result = []
+        for key, data in branches.items():
+            if 'branch' not in data:
+                continue
+            result.append({
+                'branch'      : data['branch'],
+                'branch_code' : data['branch_code'],
+                'active'      : data['active'],
+                'history'     : data['history'],
+            })
+
+        # Sort: branches with active close first, then alphabetically
+        result.sort(key=lambda x: (0 if x['active'] else 1, x['branch']))
+
+        return Response(result)
+    
+    
+class MonthlyCloseClearView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/clear/
+    Finance clears the monthly close. Notifies RM.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only Finance reviewers can clear monthly closes.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure this Finance user is the assigned reviewer
+        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'This close is not assigned to you.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        notes  = request.data.get('finance_notes', '')
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.clear(request.user, notes)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'                 : close.pk,
+            'status'             : close.status,
+            'finance_cleared_at' : close.finance_cleared_at.isoformat(),
+            'message'            : f"{close.month_name} {close.year} cleared. Regional Manager notified.",
+        })
+
+
+class MonthlyCloseRequestClarificationView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/request-clarification/
+    Finance flags items requiring BM clarification. BM has 24 hours.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('FINANCE', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'Only Finance reviewers can request clarification.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'This close is not assigned to you.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        clarification = request.data.get('clarification', '').strip()
+        if not clarification:
+            return Response(
+                {'detail': 'Clarification request cannot be empty.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.request_clarification(request.user, clarification)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id'                   : close.pk,
+            'status'               : close.status,
+            'clarification_due_at' : close.clarification_due_at.isoformat(),
+            'message'              : 'Clarification requested. Branch Manager has 24 hours to respond.',
+        })

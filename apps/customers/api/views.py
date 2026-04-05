@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 
-from apps.customers.models import CustomerProfile
+from apps.customers.models import CustomerProfile, CustomerEditLog
 from apps.finance.models import CreditAccount, CreditPayment, DailySalesSheet
 from apps.customers.credit_engine import CreditEngine, CreditLimitExceeded, CreditAccountNotActive
 
@@ -12,6 +12,7 @@ from .serializers import (
     CustomerSerializer, CustomerListSerializer, CustomerCreateSerializer,
     CreditAccountSerializer, CreditAccountNominateSerializer,
     CreditPaymentSerializer, CreditSettleSerializer,
+    CustomerEditLogSerializer,
 )
 
 
@@ -25,16 +26,31 @@ class CustomerListView(generics.ListAPIView):
     search_fields      = ['phone', 'first_name', 'last_name', 'email', 'company_name']
 
     def get_queryset(self):
-        qs          = super().get_queryset()
-        tier        = self.request.query_params.get('tier')
-        is_priority = self.request.query_params.get('is_priority')
-        branch      = self.request.query_params.get('branch')
+        qs     = super().get_queryset()
+        params = self.request.query_params
+
+        tier          = params.get('tier')
+        is_priority   = params.get('is_priority')
+        branch        = params.get('branch')
+        customer_type = params.get('customer_type')
+
         if tier:
             qs = qs.filter(tier=tier)
         if is_priority is not None:
             qs = qs.filter(is_priority=is_priority.lower() == 'true')
         if branch:
             qs = qs.filter(branch_id=branch)
+        if customer_type:
+            qs = qs.filter(customer_type=customer_type)
+
+        company_name = params.get('company_name')
+        if company_name:
+            qs = qs.filter(company_name__iexact=company_name)
+
+        phone = params.get('phone')
+        if phone:
+            qs = qs.filter(phone=phone)
+
         return qs
 
 
@@ -306,3 +322,79 @@ class CreditPaymentHistoryView(generics.ListAPIView):
         return CreditPayment.objects.filter(
             credit_account_id=self.kwargs['pk']
         ).select_related('credit_account__customer', 'received_by').order_by('-created_at')
+
+class CustomerEditView(APIView):
+    """
+    PATCH /api/v1/customers/<pk>/edit/
+    BM edits allowed fields on a customer profile.
+    Every change is logged to CustomerEditLog.
+    """
+    permission_classes = [IsAuthenticated]
+
+    EDITABLE_FIELDS = {
+        'INDIVIDUAL'  : ['first_name', 'last_name', 'phone', 'email', 'address'],
+        'BUSINESS'    : ['company_name', 'first_name', 'last_name', 'phone', 'email', 'address'],
+        'INSTITUTION' : ['company_name', 'institution_subtype', 'first_name', 'last_name', 'phone', 'email', 'address'],
+    }
+
+    def patch(self, request, pk):
+        try:
+            customer = CustomerProfile.objects.get(pk=pk)
+        except CustomerProfile.DoesNotExist:
+            return Response(
+                {'detail': 'Customer not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        allowed = self.EDITABLE_FIELDS.get(customer.customer_type, [])
+        errors  = {}
+        changes = []
+
+        for field, new_value in request.data.items():
+            if field not in allowed:
+                errors[field] = f'Field "{field}" is not editable.'
+                continue
+
+            old_value = str(getattr(customer, field, '') or '')
+            new_value = str(new_value or '').strip()
+
+            if old_value == new_value:
+                continue
+
+            # Phone uniqueness check
+            if field == 'phone':
+                if CustomerProfile.objects.filter(phone=new_value).exclude(pk=pk).exists():
+                    errors['phone'] = 'A customer with this phone number already exists.'
+                    continue
+
+            setattr(customer, field, new_value)
+            changes.append(CustomerEditLog(
+                customer   = customer,
+                changed_by = request.user,
+                field_name = field,
+                old_value  = old_value,
+                new_value  = new_value,
+            ))
+
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if changes:
+            customer.save()
+            CustomerEditLog.objects.bulk_create(changes)
+
+        return Response(CustomerSerializer(customer).data)
+
+
+class CustomerEditLogView(generics.ListAPIView):
+    """
+    GET /api/v1/customers/<pk>/edit-log/
+    Returns the full audit trail for a customer profile.
+    """
+    serializer_class   = CustomerEditLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return CustomerEditLog.objects.filter(
+            customer_id=self.kwargs['pk']
+        ).select_related('changed_by')

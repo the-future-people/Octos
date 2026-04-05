@@ -171,8 +171,6 @@ const NJ = (() => {
             </div>
             <button type="button" class="nj-customer-action-btn" onclick="NJ._toggleCustomerSearch()"
               id="nj-customer-search-btn">Search</button>
-            <button type="button" class="nj-customer-action-btn nj-customer-action-btn--primary"
-              onclick="NJ._openAddCustomer()">+ New</button>
           </div>
 
           <!-- Customer search dropdown -->
@@ -189,43 +187,6 @@ const NJ = (() => {
               style="max-height:160px;overflow-y:auto;border:1px solid var(--border);
                 border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);
                 background:var(--panel);">
-            </div>
-          </div>
-
-          <!-- Inline add customer form -->
-          <div id="nj-add-customer-form" style="display:none;margin-bottom:12px;
-            padding:12px 14px;background:var(--bg);border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);">
-            <div style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
-              New Customer
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-              <input type="text" id="nc-first-name" placeholder="First name"
-                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-              <input type="text" id="nc-last-name" placeholder="Last name"
-                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-              <input type="tel" id="nc-phone" placeholder="Phone (required)"
-                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-              <input type="text" id="nc-company" placeholder="Company (optional)"
-                style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
-                  background:var(--panel);color:var(--text);font-size:12px;font-family:inherit;outline:none;">
-            </div>
-            <div id="nc-error" style="display:none;font-size:11px;color:var(--red-text);margin-bottom:8px;"></div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-              <button type="button" onclick="NJ._closeAddCustomer()"
-                style="padding:5px 12px;font-size:12px;font-weight:600;background:none;
-                  border:1px solid var(--border);border-radius:var(--radius-sm);
-                  cursor:pointer;color:var(--text-2);font-family:inherit;">Cancel</button>
-              <button type="button" id="nc-save-btn" onclick="NJ._saveNewCustomer()"
-                style="padding:5px 12px;font-size:12px;font-weight:700;background:var(--text);
-                  color:#fff;border:none;border-radius:var(--radius-sm);
-                  cursor:pointer;font-family:inherit;">Save Customer</button>
             </div>
           </div>
 
@@ -1290,80 +1251,11 @@ function _resetConfigurator() {
     document.getElementById('nj-customer-search-area').style.display = 'none';
   }
 
-  function _openAddCustomer() {
-    const form = document.getElementById('nj-add-customer-form');
-    if (!form) return;
-    const isOpen = form.style.display !== 'none';
-    if (isOpen) {
-      form.style.display = 'none';
-    } else {
-      form.style.display = 'block';
-      document.getElementById('nc-first-name')?.focus();
-      const err = document.getElementById('nc-error');
-      if (err) err.style.display = 'none';
-    }
-  }
-
   function _closeAddCustomer() {
     const form = document.getElementById('nj-add-customer-form');
     if (form) form.style.display = 'none';
   }
 
-  async function _saveNewCustomer() {
-    const btn       = document.getElementById('nc-save-btn');
-    const errorEl   = document.getElementById('nc-error');
-    const firstName = document.getElementById('nc-first-name')?.value.trim() || '';
-    const lastName  = document.getElementById('nc-last-name')?.value.trim()  || '';
-    const phone     = document.getElementById('nc-phone')?.value.trim()      || '';
-    const company   = document.getElementById('nc-company')?.value.trim()    || '';
-
-    errorEl.style.display = 'none';
-
-    if (!phone) {
-      errorEl.textContent   = 'Phone number is required.';
-      errorEl.style.display = 'block';
-      return;
-    }
-
-    btn.disabled    = true;
-    btn.textContent = 'Saving…';
-
-    try {
-      const res = await Auth.fetch('/api/v1/customers/create/', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({
-          first_name   : firstName,
-          last_name    : lastName,
-          phone,
-          company_name : company,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        const msg = Object.values(data).flat().join(' ');
-        errorEl.textContent   = msg || 'Could not save customer.';
-        errorEl.style.display = 'block';
-        return;
-      }
-
-      // Add to State.customers and select the new customer
-      State.customers.push(data);
-      const displayName = data.display_name || data.full_name || phone;
-      _selectCustomer(data.id, displayName);
-      _closeAddCustomer();
-      _toast(`${data.display_name || data.full_name || phone} added.`, 'success');
-
-    } catch {
-      errorEl.textContent   = 'Network error. Please try again.';
-      errorEl.style.display = 'block';
-    } finally {
-      btn.disabled    = false;
-      btn.textContent = 'Save Customer';
-    }
-  }
 return {
     setType,
     onServiceChange,
@@ -1380,9 +1272,6 @@ return {
     tryAutoSaveDraft,
     _filterServiceChips,
     _serviceSearchKeydown,
-    _openAddCustomer,
-    _closeAddCustomer,
-    _saveNewCustomer,
     _selectRing,
     _toggleCustomerSearch,
     _filterCustomers,

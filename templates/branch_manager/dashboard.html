@@ -365,6 +365,12 @@
               <span class="sidebar-label">Inventory</span>
             </div>
             
+        <div class="sidebar-item" data-pane="customers" data-label="Customers"
+          onclick="Dashboard.switchPane('customers', 'Customers')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span class="sidebar-label">Customers</span>
+        </div>
+
         <div class="sidebar-item" data-pane="reports" data-label="Reports"
           onclick="Dashboard.switchPane('reports', 'Reports')">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -643,6 +649,7 @@
         </div>
         
         <div class="pane" id="pane-inventory"></div>
+        <div class="pane" id="pane-customers"></div>
       </div><!-- /pane-area -->
     </div><!-- /main-content -->
   </div><!-- /body-layout -->
@@ -768,6 +775,20 @@
       <button class="btn-ghost" onclick="Invoice.close()">Cancel</button>
       <button class="btn-dark" id="invoice-next-btn" onclick="Invoice.next()">Continue →</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Customer Profile Modal ────────────────────────────── -->
+<div id="customer-profile-overlay"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);
+    z-index:2000;padding:24px;overflow-y:auto;">
+  <div id="customer-profile-modal"
+    style="background:var(--bg);border-radius:var(--radius);
+      max-width:860px;margin:0 auto;
+      border:1px solid var(--border);
+      box-shadow:0 24px 64px rgba(0,0,0,0.2);
+      overflow:hidden;">
+    <div id="customer-profile-content"></div>
   </div>
 </div>
 
@@ -1063,6 +1084,7 @@
 <script src="{% static 'js/nj_controller.js' %}"></script>
 <script src="{% static 'js/invoice_controller.js' %}"></script>
 <script src="{% static 'js/week_greeter.js' %}"></script>
+<script src="{% static 'js/customer_reg.js' %}"></script>
 <script>
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
     document.getElementById('app-shell').classList.toggle('collapsed');

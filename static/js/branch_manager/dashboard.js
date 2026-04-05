@@ -295,6 +295,7 @@ async function loadRecentJobs() {
     }
     if (paneId === 'reports')                     _loadReportsPane();
     if (paneId === 'inventory')                   _loadInventoryPane();
+    if (paneId === 'customers')                   _loadCustomersPane();
   }
 
   // ── Jobs pane ──────────────────────────────────────────────
@@ -1013,7 +1014,7 @@ win.document.write(`<!DOCTYPE html>
     switchPerformanceTab('metrics');
   }
 
-  function switchPerformanceTab(tab) {
+function switchPerformanceTab(tab) {
     _performanceTab = tab;
     document.querySelectorAll('#performance-tab-bar .reports-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -1049,6 +1050,7 @@ win.document.write(`<!DOCTYPE html>
       _renderServicesReport(content);
     }
   }
+
 
 
   // ── Finance pane ───────────────────────────────────────────
@@ -2976,11 +2978,11 @@ win.document.write(`<!DOCTYPE html>
     }
   }
 
-  async function _renderStockLevels(container) {
+async function _renderStockLevels(container) {
     try {
       const res  = await Auth.fetch('/api/v1/inventory/stock/');
       if (!res.ok) throw new Error();
-      const data = await res.json();
+      const data  = await res.json();
       const items = data.results || data;
 
       if (!items.length) {
@@ -2988,17 +2990,27 @@ win.document.write(`<!DOCTYPE html>
         return;
       }
 
-      // Group by category
-      const grouped = {};
-      items.forEach(item => {
-        const cat = item.category || 'Other';
-        if (!grouped[cat]) grouped[cat] = [];
-        grouped[cat].push(item);
-      });
+      const lowItems = items.filter(i =>
+        parseFloat(i.quantity) <= parseFloat(i.reorder_point) &&
+        i.category !== 'Machinery'
+      );
 
-      const fmt = n => parseFloat(n).toLocaleString('en-GH', { minimumFractionDigits: 2 });
+      const alertHtml = lowItems.length ? `
+        <div style="padding:10px 14px;background:#fee2e2;
+          border:1px solid #fca5a5;border-radius:8px;margin-bottom:16px;
+          display:flex;align-items:center;gap:8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+            viewBox="0 0 24 24" fill="none" stroke="#991b1b" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span style="font-size:11px;font-weight:700;color:#991b1b;">
+            Low stock: ${lowItems.map(i => i.name).join(', ')}
+          </span>
+        </div>` : '';
 
-      let html = `
+      container.innerHTML = `
         <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
           <button onclick="Dashboard.openReceiveStock()"
             style="padding:8px 18px;background:var(--text);color:#fff;border:none;
@@ -3006,81 +3018,10 @@ win.document.write(`<!DOCTYPE html>
                    cursor:pointer;font-family:'DM Sans',sans-serif;">
             + Receive Stock
           </button>
-        </div>`;
+        </div>
+        ${alertHtml}
+        ${_renderInventoryCards(items.filter(i => i.category !== 'Machinery'), 'live')}`;
 
-      for (const [cat, catItems] of Object.entries(grouped)) {
-        html += `
-          <div style="margin-bottom:20px;">
-            <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">${cat}</div>
-            <div style="background:var(--panel);border:1px solid var(--border);
-              border-radius:var(--radius);overflow:hidden;">
-              <table style="width:100%;border-collapse:collapse;">
-                <thead>
-                  <tr style="background:var(--bg);">
-                    <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
-                      border-bottom:2px solid var(--border);">Item</th>
-                    <th style="text-align:left;padding:9px 16px;font-size:10.5px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
-                      border-bottom:2px solid var(--border);">Size</th>
-                    <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
-                      border-bottom:2px solid var(--border);">Stock</th>
-                    <th style="text-align:right;padding:9px 16px;font-size:10.5px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
-                      border-bottom:2px solid var(--border);">Reorder At</th>
-                    <th style="text-align:center;padding:9px 16px;font-size:10.5px;font-weight:700;
-                      text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);
-                      border-bottom:2px solid var(--border);">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${catItems.map(item => {
-                    const qty      = parseFloat(item.quantity);
-                    const rp       = parseFloat(item.reorder_point);
-                    const isLow    = qty <= rp;
-                    const isCrit   = rp > 0 && qty <= rp * 0.5;
-                    const statusBg = isCrit ? 'var(--red-bg)'   : isLow ? 'var(--amber-bg)'   : 'var(--green-bg)';
-                    const statusFg = isCrit ? 'var(--red-text)' : isLow ? 'var(--amber-text)' : 'var(--green-text)';
-                    const statusTx = isCrit ? 'Critical'        : isLow ? 'Low'               : 'OK';
-                    const isPercent = item.unit_type === 'PERCENT';
-                    const qtyDisplay = isPercent
-                      ? `<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">
-                           <div style="width:80px;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-                             <div style="height:100%;width:${qty}%;background:${statusFg};border-radius:3px;"></div>
-                           </div>
-                           <span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${qty}%</span>
-                         </div>`
-                      : `<span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
-                           ${fmt(qty)} ${item.unit_label}
-                         </span>`;
-                    return `
-                      <tr style="border-bottom:1px solid var(--border);">
-                        <td style="padding:11px 16px;font-size:13px;font-weight:500;color:var(--text);">
-                          ${_esc(item.name)}
-                        </td>
-                        <td style="padding:11px 16px;font-size:12px;color:var(--text-3);">
-                          ${item.paper_size !== 'N/A' ? item.paper_size : '—'}
-                        </td>
-                        <td style="padding:11px 16px;text-align:right;">${qtyDisplay}</td>
-                        <td style="padding:11px 16px;text-align:right;font-size:12px;color:var(--text-3);
-                          font-family:'JetBrains Mono',monospace;">
-                          ${rp > 0 ? rp + ' ' + item.unit_label : '—'}
-                        </td>
-                        <td style="padding:11px 16px;text-align:center;">
-                          <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
-                            background:${statusBg};color:${statusFg};">${statusTx}</span>
-                        </td>
-                      </tr>`;
-                  }).join('')}
-                </tbody>
-              </table>
-            </div>
-          </div>`;
-      }
-
-      container.innerHTML = html;
     } catch {
       container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load stock levels.</div>';
     }
@@ -3405,41 +3346,51 @@ async function _loadReportsPane() {
       </div>
 
       <div class="reports-tabs">
-        <button class="reports-tab active" data-tab="history"
-          onclick="Dashboard.switchReportsTab('history')">Jobs Archive</button>
+        <button class="reports-tab active" data-tab="daily"
+          onclick="Dashboard.switchReportsTab('daily')">Daily</button>
         <button class="reports-tab" data-tab="filing"
-          onclick="Dashboard.switchReportsTab('filing')">Weekly Filing</button>
+          onclick="Dashboard.switchReportsTab('filing')">Weekly</button>
         <button class="reports-tab" data-tab="monthly"
-          onclick="Dashboard.switchReportsTab('monthly')">Monthly Close</button>
+          onclick="Dashboard.switchReportsTab('monthly')">Monthly</button>
+        <button class="reports-tab" data-tab="yearly"
+          onclick="Dashboard.switchReportsTab('yearly')">Yearly</button>
+        <button class="reports-tab" data-tab="ledger"
+          onclick="Dashboard.switchReportsTab('ledger')">Job Ledger</button>
       </div>
 
       <div id="reports-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
 
-    await _loadReportsTab('history');
+    await _loadReportsTab('daily');
   }
+
+
+
   async function setReportsPeriod(period) {
     const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'history';
     await _loadReportsTab(activeTab);
   }
 
-  async function switchReportsTab(tab) {
-    document.querySelectorAll('.reports-tab').forEach(btn => {
+async function switchReportsTab(tab) {
+    document.querySelectorAll('#pane-reports .reports-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tab);
     });
     await _loadReportsTab(tab);
   }
 
-  async function _loadReportsTab(tab) {
+async function _loadReportsTab(tab) {
     const content = document.getElementById('reports-content');
     if (!content) return;
     content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
-    if (tab === 'history') await _renderHistoryReport(content);
+    if (tab === 'daily')   await _renderDailySheets(content);
     if (tab === 'filing')  await _renderWeeklyFiling(content);
     if (tab === 'monthly') await _renderMonthlyClose(content);
+    if (tab === 'yearly')  await _renderYearlySummary(content);
+    if (tab === 'ledger')  _renderHistoryReport(content);
   }
+
 
   // ── Sheets Archive ────────────────────────────────────────────
   async function _renderSheetsReport(container) {
@@ -3675,206 +3626,220 @@ async function _loadReportsPane() {
     await _fetchServicesReport();
   }
 
-  // ── Monthly Close ─────────────────────────────────────────
-  async function _renderMonthlyClose(container) {
+ async function _renderMonthlyClose(container) {
     if (!container) return;
 
     const now   = new Date();
     const month = now.getMonth() + 1;
     const year  = now.getFullYear();
 
-    container.innerHTML = `<div class="loading-cell"><span class="spin"></span> Loading…</div>`;
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">Monthly Close</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            End-of-month operations closure and Finance review
+          </div>
+        </div>
+      </div>
+      <div id="monthly-current-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>
+      <div id="monthly-history" style="margin-top:24px;"></div>`;
 
     try {
       const res = await Auth.fetch(
         `/api/v1/finance/monthly-close/?month=${month}&year=${year}`
       );
-      if (!res.ok) throw new Error();
+      const content = document.getElementById('monthly-current-content');
+      if (!content) return;
+
+      if (!res.ok) {
+        const monthName = ['January','February','March','April','May','June',
+          'July','August','September','October','November','December'][month - 1];
+        content.innerHTML = `
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:24px 20px;text-align:center;
+            color:var(--text-3);">
+            <div style="font-size:14px;font-weight:600;color:var(--text);
+              margin-bottom:6px;">${monthName} ${year}</div>
+            <div style="font-size:13px;">
+              No monthly close record yet. Submit at month end when all
+              integrity gates are met.
+            </div>
+          </div>`;
+        return;
+      }
+
       const data = await res.json();
-      _renderMonthlyCloseDetail(container, data);
+      _renderMonthlyCloseDetail(content, data);
     } catch {
-      container.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
-        Could not load monthly close.</div>`;
+      const content = document.getElementById('monthly-current-content');
+      if (content) content.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:24px 20px;text-align:center;
+          color:var(--text-3);font-size:13px;">
+          Monthly close not yet initiated for this month.
+        </div>`;
     }
+
+    await _loadMonthlyHistory();
   }
 
-  function _renderMonthlyCloseDetail(container, data) {
+  async function _loadMonthlyHistory() {
+    const container = document.getElementById('monthly-history');
+    if (!container) return;
+
     const monthNames = ['January','February','March','April','May','June',
       'July','August','September','October','November','December'];
-    const monthName  = monthNames[(data.month || 1) - 1];
 
-    const statusMap = {
-      OPEN      : { bg: 'var(--bg)',       text: 'var(--text-3)',     label: 'Open' },
-      SUBMITTED : { bg: 'var(--amber-bg)', text: 'var(--amber-text)', label: 'Awaiting Endorsement' },
-      ENDORSED  : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: 'Endorsed & Finalized' },
-      REJECTED  : { bg: 'var(--red-bg)',   text: 'var(--red-text)',   label: 'Rejected' },
-    };
-    const s = statusMap[data.status] || statusMap.OPEN;
+    try {
+      // Fetch all closes for this branch — we use the weekly list endpoint trick
+      // by fetching each previous month close
+      const now   = new Date();
+      const year  = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
 
-    const integrity  = data.integrity || {};
-    const checks     = integrity.checks || {};
-    const canSubmit  = data.can_submit && integrity.can_submit;
+      // Fetch closes for all previous months this year
+      const fetches = [];
+      for (let m = 1; m < currentMonth; m++) {
+        fetches.push(
+          Auth.fetch(`/api/v1/finance/monthly-close/?month=${m}&year=${year}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+        );
+      }
 
-    const checkRow = (check) => {
-      if (!check) return '';
-      const icon  = check.pass ? '✓' : '✗';
-      const color = check.pass ? 'var(--green-text)' : 'var(--red-text)';
-      return `
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
-          border-bottom:1px solid var(--border);">
-          <span style="font-size:13px;font-weight:700;color:${color};min-width:16px;">
-            ${icon}</span>
-          <div>
-            <div style="font-size:13px;font-weight:500;color:var(--text);">
-              ${check.label}</div>
-            <div style="font-size:11px;color:var(--text-3);">${check.detail}</div>
-          </div>
-        </div>`;
-    };
+      const results = await Promise.all(fetches);
+      const closes  = results
+        .filter(r => r && r.status && r.status !== 'OPEN')
+        .sort((a, b) => b.month - a.month);
 
-    const snap    = data.summary_snapshot || {};
-    const revenue = snap.revenue || {};
-    const jobs    = snap.jobs    || {};
+      if (!closes.length) return;
 
-    container.innerHTML = `
-      <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-        padding:16px 20px;margin-bottom:16px;">
-        <div>
-          <div style="font-size:18px;font-weight:700;color:var(--text);">
-            ${monthName} ${data.year} Monthly Close
-          </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:3px;">
-            End-of-month operations closure and Belt Manager endorsement
-          </div>
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      const statusConfig = {
+        SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
+        FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
+        NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
+        RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
+        FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
+        ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ✓' },
+        LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ✓' },
+        REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
+      };
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Previous Monthly Closes
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;
-            background:${s.bg};color:${s.text};">${s.label}</span>
-          ${data.status === 'SUBMITTED' || data.status === 'ENDORSED' ? `
-            <button onclick="Dashboard._downloadMonthlyPDF(${data.id})"
-              style="padding:7px 14px;background:var(--text);color:#fff;border:none;
-                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                cursor:pointer;font-family:inherit;">
-              ↓ Download PDF
-            </button>` : ''}
-        </div>
-      </div>
+        ${closes.map(c => {
+          const snap    = c.summary_snapshot || {};
+          const revenue = snap.revenue || {};
+          const jobs    = snap.jobs    || {};
+          const sc      = statusConfig[c.status] || { bg:'var(--bg)', text:'var(--text-3)', label: c.status };
+          const canDownload = ['ENDORSED','LOCKED'].includes(c.status);
 
-      ${data.status === 'REJECTED' ? `
-        <div style="background:var(--red-bg);border:1px solid var(--red-border);
-          border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:700;color:var(--red-text);margin-bottom:4px;">
-            Rejected by ${data.rejected_by || '—'}
-          </div>
-          <div style="font-size:13px;color:var(--red-text);">
-            ${data.rejection_reason || '—'}
-          </div>
-        </div>` : ''}
+          return `
+            <div style="border:1px solid var(--border);border-radius:var(--radius);
+              overflow:hidden;margin-bottom:10px;">
 
-      <!-- Integrity checks -->
-      ${data.can_submit ? `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
-          <div style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">
-            Submission Requirements
-          </div>
-          ${checkRow(checks.last_day_of_month)}
-          ${checkRow(checks.all_sheets_closed)}
-          ${checkRow(checks.all_weekly_filed)}
-          ${checkRow(checks.no_pending_payments)}
-          ${checkRow(checks.no_unsigned_floats)}
-        </div>` : ''}
+              <!-- Header -->
+              <div style="padding:16px 20px;background:var(--panel);
+                border-bottom:1px solid var(--border);">
+                <div style="display:flex;align-items:center;
+                  justify-content:space-between;margin-bottom:10px;">
+                  <div>
+                    <div style="font-size:15px;font-weight:700;color:var(--text);">
+                      ${monthNames[(c.month||1)-1]} ${c.year}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                      Submitted by ${c.submitted_by || '—'}
+                      ${c.submitted_at ? ' · ' + new Date(c.submitted_at)
+                        .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+                      font-weight:700;background:${sc.bg};color:${sc.text};">
+                      ${sc.label}
+                    </span>
+                    ${canDownload ? `
+                      <button onclick="Dashboard._downloadMonthlyPDF(${c.id})"
+                        style="display:inline-flex;align-items:center;gap:5px;
+                          padding:6px 14px;background:var(--text);color:#fff;
+                          border:none;border-radius:var(--radius-sm);font-size:12px;
+                          font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        PDF
+                      </button>` : ''}
+                  </div>
+                </div>
 
-      <!-- Summary snapshot (if submitted) -->
-      ${snap.revenue ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Total Collected</div>
-            <div style="font-size:20px;font-weight:800;color:var(--text);
-              font-family:'JetBrains Mono',monospace;">
-              ${_fmt(revenue.total_collected || 0)}</div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-              Cash ${revenue.cash_pct || 0}% · MoMo ${revenue.momo_pct || 0}%
-            </div>
-          </div>
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Total Jobs</div>
-            <div style="font-size:20px;font-weight:800;color:var(--text);">
-              ${jobs.total || 0}</div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-              ${jobs.completion_rate || 0}% completion rate
-            </div>
-          </div>
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:14px 16px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-              Status</div>
-            <div style="font-size:14px;font-weight:700;color:${s.text};">${s.label}</div>
-            ${data.submitted_at ? `
-              <div style="font-size:11px;color:var(--text-3);margin-top:4px;">
-                Submitted ${new Date(data.submitted_at).toLocaleDateString('en-GB',
-                  {day:'numeric',month:'short',year:'numeric'})}
-              </div>` : ''}
-          </div>
-        </div>` : ''}
+                <!-- Revenue + jobs strip -->
+                ${snap.revenue ? `
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                    ${[
+                      ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
+                      ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong)'],
+                      ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong)'],
+                      ['Jobs',            jobs.total || 0,                   'var(--text)'],
+                    ].map(([label, val, color]) => `
+                      <div style="padding:8px 12px;background:var(--bg);
+                        border:1px solid var(--border);border-radius:var(--radius-sm);">
+                        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                          ${label}</div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                          font-weight:700;color:${color};">${val}</div>
+                      </div>`).join('')}
+                  </div>` : ''}
+              </div>
 
-      <!-- BM Notes + Submit -->
-      ${data.can_submit ? `
-        <div style="margin-bottom:16px;">
-          <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">
-            Branch Manager Notes (optional)
-          </div>
-          <textarea id="monthly-bm-notes" rows="3"
-            placeholder="Add any observations or notes for this month…"
-            style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;resize:vertical;box-sizing:border-box;
-              font-family:'DM Sans',sans-serif;">${data.bm_notes || ''}</textarea>
-        </div>
+              <!-- Audit trail -->
+              <div style="padding:12px 20px;background:var(--bg);">
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+                  Audit Trail
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  ${[
+                    ['Submitted',       c.submitted_by,        c.submitted_at,        '#3355cc'],
+                    ['Finance Cleared', c.finance_reviewer,    c.finance_cleared_at,  '#22c98a'],
+                    ['Endorsed',        c.endorsed_by,         c.endorsed_at,         '#9b59b6'],
+                    ['Locked',          c.locked_at ? 'System' : null, c.locked_at,  '#666'],
+                  ].filter(([,actor]) => actor).map(([label, actor, ts, color]) => `
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <div style="width:6px;height:6px;border-radius:50%;
+                        background:${color};flex-shrink:0;"></div>
+                      <span style="font-size:12px;font-weight:600;color:var(--text);
+                        min-width:120px;">${label}</span>
+                      <span style="font-size:12px;color:var(--text-2);">${actor || '—'}</span>
+                      ${ts ? `<span style="font-size:11px;color:var(--text-3);margin-left:auto;">
+                        ${new Date(ts).toLocaleDateString('en-GB',
+                          {day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
+                    </div>`).join('')}
+                </div>
+                ${c.rejection_reason ? `
+                  <div style="margin-top:10px;padding:8px 12px;
+                    background:var(--red-bg);border:1px solid var(--red-border);
+                    border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);">
+                    <strong>Rejection reason:</strong> ${c.rejection_reason}
+                  </div>` : ''}
+              </div>
 
-        <div style="display:flex;justify-content:flex-end;">
-          <button id="monthly-submit-btn"
-            onclick="Dashboard._submitMonthlyClose(${data.month}, ${data.year})"
-            ${!canSubmit ? 'disabled' : ''}
-            style="padding:10px 28px;background:var(--text);color:#fff;border:none;
-              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-              cursor:pointer;font-family:inherit;
-              ${!canSubmit ? 'opacity:0.4;cursor:not-allowed;' : ''}">
-            Submit for Endorsement
-          </button>
-        </div>
-        ${!canSubmit ? `
-          <div style="text-align:right;font-size:12px;color:var(--text-3);margin-top:6px;">
-            All requirements above must be met before you can submit.
-          </div>` : ''}` : ''}
+            </div>`;
+        }).join('')}`;
 
-      ${data.status === 'ENDORSED' ? `
-        <div style="background:var(--green-bg);border:1px solid var(--green-border);
-          border-radius:var(--radius);padding:14px 16px;display:flex;
-          align-items:center;gap:10px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-            viewBox="0 0 24 24" fill="none" stroke="var(--green-text)" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--green-text);">
-              Endorsed by ${data.endorsed_by || '—'}</div>
-            ${data.belt_notes ? `<div style="font-size:12px;color:var(--green-text);
-              margin-top:2px;">"${data.belt_notes}"</div>` : ''}
-          </div>
-        </div>` : ''}`;
+    } catch { /* silent */ }
   }
 
   async function _submitMonthlyClose(month, year) {
@@ -3924,11 +3889,409 @@ async function _loadReportsPane() {
     }
   }
 
- async function _renderWeeklyFiling(container) {
+async function _renderYearlySummary(container) {
+    if (!container) return;
+
+    const year = new Date().getFullYear();
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">${year} Annual Overview</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            Month-by-month summary for the current year
+          </div>
+        </div>
+      </div>
+      <div id="yearly-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/jobs/history/?level=month&year=${year}`
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      const content = document.getElementById('yearly-content');
+      if (!content) return;
+
+      const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+      const kpis    = data.kpis || {};
+      const items   = data.items || [];
+
+      // ── KPI strip ─────────────────────────────────────────
+      const kpiHtml = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);
+          gap:10px;margin-bottom:24px;">
+          ${[
+            { label:'Total Jobs',   value: kpis.total?.value   || 0, fmt: v => v,       color:'#3355cc' },
+            { label:'Revenue',      value: kpis.revenue?.value || 0, fmt: v => fmt(v),  color:'#22c98a' },
+            { label:'Pending',      value: kpis.pending?.value || 0, fmt: v => v,       color:'#e8a820' },
+            { label:'Completion',   value: kpis.rate?.value    || 0, fmt: v => v + '%', color:'#9b59b6' },
+          ].map(k => {
+            const change = kpis[Object.keys(kpis).find(key =>
+              kpis[key].value === k.value
+            )]?.change;
+            return `
+              <div style="background:var(--panel);border:1px solid var(--border);
+                border-top:3px solid ${k.color};border-radius:var(--radius);
+                padding:14px 16px;">
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+                  ${k.label}</div>
+                <div style="font-size:20px;font-weight:800;color:${k.color};
+                  font-family:'Outfit',sans-serif;">${k.fmt(k.value)}</div>
+              </div>`;
+          }).join('')}
+        </div>`;
+
+      // ── Monthly breakdown table ────────────────────────────
+      const maxRevenue = Math.max(...items.map(i => i.revenue || 0), 1);
+
+      const tableHtml = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;margin-bottom:20px;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Month</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Jobs</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Revenue</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Rate</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Trend</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
+                  border-bottom:2px solid var(--border);">Close</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${monthNames.map((name, i) => {
+                const m      = i + 1;
+                const item   = items.find(it => it.month === m);
+                const now    = new Date();
+                const isPast = m < now.getMonth() + 1;
+                const isCurr = m === now.getMonth() + 1;
+                const isFuture = m > now.getMonth() + 1;
+
+                if (isFuture) {
+                  return `
+                    <tr style="border-bottom:1px solid var(--border);opacity:0.3;">
+                      <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                        color:var(--text-3);">${name}</td>
+                      <td colspan="5" style="padding:12px 16px;font-size:12px;
+                        color:var(--text-3);text-align:center;">—</td>
+                    </tr>`;
+                }
+
+                const total   = item?.total   || 0;
+                const revenue = item?.revenue  || 0;
+                const rate    = item?.rate     || 0;
+                const barPct  = maxRevenue > 0 ? (revenue / maxRevenue * 100) : 0;
+
+                return `
+                  <tr style="border-bottom:1px solid var(--border);
+                    ${isCurr ? 'background:var(--bg);' : ''}
+                    transition:background 0.12s;"
+                    onmouseover="this.style.background='var(--bg)'"
+                    onmouseout="this.style.background='${isCurr ? 'var(--bg)' : ''}'">
+                    <td style="padding:12px 16px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text);">
+                          ${name}</span>
+                        ${isCurr ? `<span style="padding:2px 8px;border-radius:20px;
+                          font-size:10px;font-weight:700;background:var(--amber-bg);
+                          color:var(--amber-text);">Current</span>` : ''}
+                      </div>
+                    </td>
+                    <td style="padding:12px 16px;text-align:right;font-size:13px;
+                      font-weight:600;color:var(--text);">${total}</td>
+                    <td style="padding:12px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:var(--text);">${fmt(revenue)}</td>
+                    <td style="padding:12px 16px;text-align:right;font-size:13px;
+                      font-weight:600;color:${rate >= 95 ? 'var(--green-text)' :
+                        rate >= 80 ? 'var(--amber-text)' : 'var(--red-text)'};">
+                      ${rate}%</td>
+                    <td style="padding:12px 16px;">
+                      <div style="height:6px;background:var(--border);
+                        border-radius:3px;width:120px;overflow:hidden;">
+                        <div style="height:100%;width:${barPct.toFixed(1)}%;
+                          background:var(--text);border-radius:3px;
+                          transition:width 0.4s ease;"></div>
+                      </div>
+                    </td>
+                    <td style="padding:12px 16px;text-align:center;">
+                      ${isPast || isCurr ? `
+                        <button onclick="Dashboard.switchReportsTab('monthly')"
+                          style="padding:4px 12px;background:none;
+                            border:1px solid var(--border);border-radius:var(--radius-sm);
+                            font-size:11px;font-weight:600;cursor:pointer;
+                            color:var(--text-2);font-family:'DM Sans',sans-serif;">
+                          View
+                        </button>` : '—'}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      content.innerHTML = kpiHtml + tableHtml;
+
+    } catch {
+      const content = document.getElementById('yearly-content');
+      if (content) content.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load yearly summary.</div>`;
+    }
+  }
+
+async function _renderDailySheets(container) {
+    if (!container) return;
+
+    const now   = new Date();
+    const month = now.getMonth() + 1;
+    const year  = now.getFullYear();
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+            color:var(--text);letter-spacing:-0.3px;">Daily Sheets</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
+            Closed sheets for ${now.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}
+             — read-only records
+          </div>
+        </div>
+      </div>
+      <div id="daily-sheets-list">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/sheets/?period=month&page_size=31`
+      );
+      if (!res.ok) throw new Error();
+      const data   = await res.json();
+      const sheets = (Array.isArray(data) ? data : (data.results || []))
+        .filter(s => s.status !== 'OPEN')
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      const list = document.getElementById('daily-sheets-list');
+      if (!list) return;
+
+      if (!sheets.length) {
+        list.innerHTML = `
+          <div style="text-align:center;padding:48px;color:var(--text-3);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No closed sheets this month</div>
+            <div style="font-size:13px;">Sheets appear here once closed by the Branch Manager.</div>
+          </div>`;
+        return;
+      }
+
+      list.innerHTML = sheets.map(s => {
+        const total    = parseFloat(s.total_cash||0) + parseFloat(s.total_momo||0) + parseFloat(s.total_pos||0);
+        const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+        const dateObj  = new Date(s.date);
+        const dayName  = dateObj.toLocaleDateString('en-GB',{weekday:'long'});
+        const dateStr  = dateObj.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+        const isAuto   = s.status === 'AUTO_CLOSED';
+
+        return `
+          <div style="border:1px solid var(--border);border-radius:var(--radius);
+            overflow:hidden;margin-bottom:10px;">
+
+            <!-- Sheet header — always visible, click to expand -->
+            <div onclick="Dashboard._toggleDailySheet(${s.id})"
+              style="display:flex;align-items:center;justify-content:space-between;
+                padding:14px 20px;background:var(--panel);cursor:pointer;
+                transition:background 0.12s;"
+              onmouseover="this.style.background='var(--bg)'"
+              onmouseout="this.style.background='var(--panel)'">
+
+              <div style="display:flex;align-items:center;gap:14px;">
+                <!-- Date block -->
+                <div style="text-align:center;min-width:44px;">
+                  <div style="font-size:11px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;">${dateObj.toLocaleDateString('en-GB',{month:'short'})}</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--text);
+                    font-family:'Syne',sans-serif;line-height:1;">${dateObj.getDate()}</div>
+                  <div style="font-size:10px;color:var(--text-3);">${dateObj.toLocaleDateString('en-GB',{weekday:'short'})}</div>
+                </div>
+
+                <!-- Divider -->
+                <div style="width:1px;height:40px;background:var(--border);"></div>
+
+                <!-- Stats -->
+                <div>
+                  <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
+                    ${dayName} · ${dateStr}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:16px;">
+                    <span style="font-size:12px;color:var(--text-3);">
+                      ${s.total_jobs_created || 0} jobs
+                    </span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:var(--text);">${fmt(total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;">
+                ${isAuto ? `
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--amber-bg);color:var(--amber-text);">
+                    Auto-closed
+                  </span>` : `
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
+                    Closed
+                  </span>`}
+                <svg id="daily-chevron-${s.id}" xmlns="http://www.w3.org/2000/svg"
+                  width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2"
+                  style="color:var(--text-3);transition:transform 0.2s;">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Expandable detail -->
+            <div id="daily-detail-${s.id}" style="display:none;">
+              <div style="padding:16px 20px;border-top:1px solid var(--border);
+                background:var(--bg);">
+
+                <!-- Revenue strip -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);
+                  gap:8px;margin-bottom:14px;">
+                  ${[
+                    ['Cash',           s.total_cash,          'cash'],
+                    ['MoMo',           s.total_momo,          'momo'],
+                    ['POS',            s.total_pos,           'pos'],
+                    ['Net Cash in Till', s.net_cash_in_till,  'green'],
+                  ].map(([label, val, theme]) => `
+                    <div style="padding:10px 12px;
+                      background:var(--${theme}-bg, var(--bg));
+                      border:1px solid var(--${theme}-border, var(--border));
+                      border-radius:var(--radius-sm);">
+                      <div style="font-size:10px;font-weight:700;
+                        color:var(--${theme}-text, var(--text-3));
+                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                        ${label}</div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:700;color:var(--${theme}-strong, var(--text));">
+                        ${fmt(val)}</div>
+                    </div>`).join('')}
+                </div>
+
+                <!-- Secondary metrics -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);
+                  gap:8px;margin-bottom:14px;">
+                  ${[
+                    ['Jobs Created',   s.total_jobs_created || 0, false],
+                    ['Petty Cash Out', s.total_petty_cash_out,    true],
+                    ['Credit Issued',  s.total_credit_issued,     true],
+                    ['Credit Settled', s.total_credit_settled,    true],
+                  ].map(([label, val, isMoney]) => `
+                    <div style="padding:10px 12px;background:var(--panel);
+                      border:1px solid var(--border);border-radius:var(--radius-sm);">
+                      <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                        ${label}</div>
+                      <div style="font-size:15px;font-weight:700;color:var(--text);">
+                        ${isMoney ? fmt(val) : val}</div>
+                    </div>`).join('')}
+                </div>
+
+                <!-- Actions -->
+                <div style="display:flex;justify-content:flex-end;gap:8px;">
+                  ${s.status !== 'OPEN' ? `
+                    <button onclick="Dashboard.initiateSheetDownload(${s.id}, '${s.date}')"
+                      style="display:inline-flex;align-items:center;gap:6px;
+                        padding:7px 16px;background:var(--text);color:#fff;border:none;
+                        border-radius:var(--radius-sm);font-size:12px;font-weight:700;
+                        cursor:pointer;font-family:'DM Sans',sans-serif;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                      Download PDF
+                    </button>` : ''}
+                </div>
+
+              </div>
+            </div>
+
+          </div>`;
+      }).join('');
+
+    } catch {
+      const list = document.getElementById('daily-sheets-list');
+      if (list) list.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load daily sheets.</div>`;
+    }
+  }
+
+  let _openDailySheet = null;
+
+  function _toggleDailySheet(sheetId) {
+    const detail  = document.getElementById(`daily-detail-${sheetId}`);
+    const chevron = document.getElementById(`daily-chevron-${sheetId}`);
+    const isOpen  = detail.style.display !== 'none';
+
+    // Close any open sheet
+    if (_openDailySheet && _openDailySheet !== sheetId) {
+      const prev         = document.getElementById(`daily-detail-${_openDailySheet}`);
+      const prevChevron  = document.getElementById(`daily-chevron-${_openDailySheet}`);
+      if (prev)        prev.style.display        = 'none';
+      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
+    }
+
+    if (isOpen) {
+      detail.style.display    = 'none';
+      chevron.style.transform = 'rotate(0deg)';
+      _openDailySheet         = null;
+    } else {
+      detail.style.display    = 'block';
+      chevron.style.transform = 'rotate(180deg)';
+      _openDailySheet         = sheetId;
+    }
+  }
+
+
+async function _renderWeeklyFiling(container) {
     if (!container) return;
 
     container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:20px;">
         <div>
           <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
             color:var(--text);letter-spacing:-0.3px;">Weekly Filing</div>
@@ -3945,34 +4308,283 @@ async function _loadReportsPane() {
       </div>
       <div id="weekly-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
-      </div>`;
+      </div>
+      <div id="weekly-history" style="margin-top:24px;"></div>`;
 
     await _loadWeeklyReport();
+    await _loadWeeklyHistory();
   }
 
-  async function _loadWeeklyReport() {
+ async function _loadWeeklyHistory() {
+    const container = document.getElementById('weekly-history');
+    if (!container) return;
+
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/weekly/');
+      if (!res.ok) throw new Error();
+      const data    = await res.json();
+      const reports = (Array.isArray(data) ? data : (data.results || []))
+        .filter(r => r.status === 'LOCKED')
+        .sort((a, b) => {
+          if (b.year !== a.year) return b.year - a.year;
+          return b.week_number - a.week_number;
+        });
+
+      if (!reports.length) return;
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Previous Filed Weeks
+        </div>
+        ${reports.map(r => {
+          const total      = parseFloat(r.total_cash||0) + parseFloat(r.total_momo||0) + parseFloat(r.total_pos||0);
+          const dateFrom   = new Date(r.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+          const dateTo     = new Date(r.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+          const submittedAt = r.submitted_at
+            ? new Date(r.submitted_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})
+            : '—';
+
+          return `
+            <div style="border:1px solid var(--border);border-radius:var(--radius);
+              overflow:hidden;margin-bottom:8px;">
+
+              <!-- Header — clickable to expand -->
+              <div onclick="Dashboard._toggleHistoryWeek(${r.id})"
+                style="display:flex;align-items:center;justify-content:space-between;
+                  padding:14px 20px;background:var(--panel);cursor:pointer;
+                  transition:background 0.12s;"
+                onmouseover="this.style.background='var(--bg)'"
+                onmouseout="this.style.background='var(--panel)'">
+                <div>
+                  <div style="font-size:14px;font-weight:700;color:var(--text);
+                    margin-bottom:3px;">
+                    Week ${r.week_number}, ${r.year}
+                    <span style="font-size:12px;font-weight:400;color:var(--text-3);
+                      margin-left:8px;">${dateFrom} – ${dateTo}</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-3);">
+                    Filed by ${r.submitted_by_name || '—'} · ${submittedAt}
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
+                    ✓ Locked
+                  </span>
+                  <button onclick="event.stopPropagation();Dashboard.weeklyDownloadPDF(${r.id})"
+                    style="display:inline-flex;align-items:center;gap:5px;
+                      padding:6px 14px;background:var(--text);color:#fff;border:none;
+                      border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                      cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    PDF
+                  </button>
+                  <svg id="history-week-chevron-${r.id}"
+                    xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    style="color:var(--text-3);transition:transform 0.2s;">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Revenue strip — always visible -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;
+                gap:0;border-top:1px solid var(--border);">
+                ${[
+                  ['Total',  fmt(total),           'var(--text)',       'var(--panel)'],
+                  ['Cash',   fmt(r.total_cash),    'var(--cash-strong)','var(--cash-bg)'],
+                  ['MoMo',   fmt(r.total_momo),    'var(--momo-strong)','var(--momo-bg)'],
+                  ['Jobs',   r.total_jobs_created || 0, 'var(--text)', 'var(--panel)'],
+                ].map(([label, val, color, bg]) => `
+                  <div style="padding:10px 16px;background:${bg};
+                    border-right:1px solid var(--border);">
+                    <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                      text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                      ${label}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                      font-weight:700;color:${color};">${val}</div>
+                  </div>`).join('')}
+              </div>
+
+              <!-- Expandable full detail — lazy loaded -->
+              <div id="history-week-detail-${r.id}" style="display:none;">
+                <div style="padding:16px 20px;border-top:1px solid var(--border);
+                  background:var(--bg);">
+                  <div class="loading-cell"><span class="spin"></span> Loading…</div>
+                </div>
+              </div>
+
+            </div>`;
+        }).join('')}`;
+
+    } catch { /* silent */ }
+  }
+
+  let _openHistoryWeek = null;
+
+  async function _toggleHistoryWeek(reportId) {
+    const detail  = document.getElementById(`history-week-detail-${reportId}`);
+    const chevron = document.getElementById(`history-week-chevron-${reportId}`);
+    if (!detail) return;
+
+    const isOpen = detail.style.display !== 'none';
+
+    // Close any open
+    if (_openHistoryWeek && _openHistoryWeek !== reportId) {
+      const prev        = document.getElementById(`history-week-detail-${_openHistoryWeek}`);
+      const prevChevron = document.getElementById(`history-week-chevron-${_openHistoryWeek}`);
+      if (prev)        prev.style.display        = 'none';
+      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
+    }
+
+    if (isOpen) {
+      detail.style.display    = 'none';
+      chevron.style.transform = 'rotate(0deg)';
+      _openHistoryWeek        = null;
+      return;
+    }
+
+    // Open and lazy-load detail
+    detail.style.display    = 'block';
+    chevron.style.transform = 'rotate(180deg)';
+    _openHistoryWeek        = reportId;
+
+    const inner = detail.querySelector('div');
+
+    try {
+      const res    = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/`);
+      if (!res.ok) throw new Error();
+      const report = await res.json();
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+
+      // Sheet grid
+      const days   = ['Mon','Tue','Wed','Thu','Fri','Sat'];
+      const sheets = report.daily_sheets || [];
+      const sheetGrid = days.map((day, i) => {
+        const sheet = sheets.find(s => new Date(s.date).getDay() === (i + 1));
+        if (!sheet) return `
+          <div style="flex:1;padding:8px 6px;background:var(--bg);
+            border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:9px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;margin-bottom:3px;">${day}</div>
+            <div style="font-size:9px;color:var(--text-3);">No sheet</div>
+          </div>`;
+        const isClosed = sheet.status !== 'OPEN';
+        const dotColor = isClosed ? 'var(--green-text)' : 'var(--amber-text)';
+        const dotBg    = isClosed ? 'var(--green-bg)'   : 'var(--amber-bg)';
+        const tot      = parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0);
+        return `
+          <div style="flex:1;padding:8px 6px;background:${dotBg};
+            border:1px solid ${isClosed ? 'var(--green-border)' : 'var(--amber-border)'};
+            border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:9px;font-weight:700;color:${dotColor};
+              text-transform:uppercase;margin-bottom:3px;">${day}</div>
+            <div style="font-size:9px;color:${dotColor};font-weight:600;">
+              ${isClosed ? '✓' : '●'}</div>
+            <div style="font-size:8px;color:${dotColor};margin-top:2px;
+              font-family:'JetBrains Mono',monospace;">
+              ${fmt(tot)}</div>
+          </div>`;
+      }).join('');
+
+      inner.innerHTML = `
+        <!-- Sheet grid -->
+        <div style="margin-bottom:14px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Daily Sheets</div>
+          <div style="display:flex;gap:6px;">${sheetGrid}</div>
+        </div>
+
+        <!-- Jobs summary -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);
+          gap:8px;margin-bottom:14px;">
+          ${[
+            ['Jobs Created',  report.total_jobs_created  || 0, 'var(--text)'],
+            ['Completed',     report.total_jobs_complete  || 0, 'var(--green-text)'],
+            ['Cancelled',     report.total_jobs_cancelled || 0, 'var(--red-text)'],
+            ['Carry Forward', report.carry_forward_count  || 0, 'var(--amber-text)'],
+          ].map(([label, val, color]) => `
+            <div style="padding:10px 12px;background:var(--panel);
+              border:1px solid var(--border);border-radius:var(--radius-sm);
+              text-align:center;">
+              <div style="font-size:18px;font-weight:700;color:${color};">${val}</div>
+              <div style="font-size:10px;color:var(--text-3);margin-top:2px;">${label}</div>
+            </div>`).join('')}
+        </div>
+
+        <!-- Inventory -->
+        <div style="margin-bottom:14px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Inventory Snapshot</div>
+          ${_renderInventorySnapshot(report.inventory_snapshot)}
+        </div>
+
+      <!-- BM Notes -->
+      <div style="margin-bottom:16px;">
+
+        <!-- BM Notes -->
+        <div style="padding:10px 14px;background:var(--panel);
+          border:1px solid var(--border);border-radius:var(--radius-sm);">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+            Branch Manager Notes</div>
+          <div style="font-size:13px;color:var(--text-2);">
+            ${report.bm_notes || '—'}</div>
+        </div>`;
+
+    } catch {
+      inner.innerHTML = `<div style="color:var(--red-text);font-size:13px;">
+        Could not load week detail.</div>`;
+    }
+  }
+
+
+ async function _loadWeeklyReport() {
     const content = document.getElementById('weekly-content');
     if (!content) return;
 
     try {
-      // Check if a report exists for current week
       const res  = await Auth.fetch('/api/v1/finance/weekly/');
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      const reports = data.results || data;
+      const data    = await res.json();
+      const reports = Array.isArray(data) ? data : (data.results || []);
 
-      // Get current ISO week
-      const now    = new Date();
-      const jan4   = new Date(now.getFullYear(), 0, 4);
-      const weekN  = Math.ceil(((now - jan4) / 86400000 + jan4.getDay() + 1) / 7);
+      const now   = new Date();
+      const year  = now.getFullYear();
+      const month = now.getMonth() + 1;
 
+      // Find report whose date range covers today
+      const today = now.toISOString().split('T')[0];
       const current = reports.find(r =>
-        r.week_number === weekN && r.year === now.getFullYear()
+        r.date_from <= today && r.date_to >= today
       );
 
       if (current) {
-        _renderWeeklyReportDetail(content, current);
+        // Fetch full detail so inventory_snapshot is available
+        const detailRes = await Auth.fetch(`/api/v1/finance/weekly/${current.id}/`);
+        if (!detailRes.ok) throw new Error();
+        const fullReport = await detailRes.json();
+
+        // Hide prepare button if locked
+        const prepareBtn = document.getElementById('weekly-prepare-btn');
+        if (prepareBtn) prepareBtn.style.display = fullReport.status === 'LOCKED' ? 'none' : '';
+
+        _renderWeeklyReportDetail(content, fullReport);
       } else {
+        // No report covering today — show empty state with prepare button
+        const prepareBtn = document.getElementById('weekly-prepare-btn');
+        if (prepareBtn) prepareBtn.style.display = '';
         _renderWeeklyEmpty(content);
       }
 
@@ -4019,227 +4631,228 @@ async function _loadReportsPane() {
       </div>`;
   }
 
-  function _renderWeeklyReportDetail(container, report) {
-    const fmt     = n => `GHS ${Number(n).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
-    const isLocked = report.status === 'LOCKED';
-    const isDraft  = report.status === 'DRAFT';
-
-    const statusColor = {
-      DRAFT     : 'var(--amber-text)',
-      SUBMITTED : 'var(--green-text)',
-      LOCKED    : 'var(--green-text)',
-    }[report.status] || 'var(--text-3)';
-
-    const statusBg = {
-      DRAFT     : 'var(--amber-bg)',
-      SUBMITTED : 'var(--green-bg)',
-      LOCKED    : 'var(--green-bg)',
-    }[report.status] || 'var(--bg)';
-
-    // ── Sheet status grid ─────────────────────────────────────────────────
-    const days    = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const sheets  = report.daily_sheets || [];
-
-    const sheetGrid = days.map((day, i) => {
-      const sheet = sheets.find(s => new Date(s.date).getDay() === (i + 1));
-      if (!sheet) {
-        return `
-          <div style="flex:1;padding:10px 8px;background:var(--bg);border:1px solid var(--border);
-            border-radius:var(--radius-sm);text-align:center;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;margin-bottom:4px;">${day}</div>
-            <div style="font-size:10px;color:var(--text-3);">No sheet</div>
-          </div>`;
-      }
-      const isClosed = sheet.status !== 'OPEN';
-      const dotColor = isClosed ? 'var(--green-text)' : 'var(--amber-text)';
-      const dotBg    = isClosed ? 'var(--green-bg)'   : 'var(--amber-bg)';
+function _renderInventorySnapshot(snapshot) {
+    if (!snapshot || !snapshot.items || !snapshot.items.length) {
       return `
-        <div style="flex:1;padding:10px 8px;background:${dotBg};
-          border:1px solid ${isClosed ? 'var(--green-border)' : 'var(--amber-border)'};
-          border-radius:var(--radius-sm);text-align:center;">
-          <div style="font-size:10px;font-weight:700;color:${dotColor};
-            text-transform:uppercase;margin-bottom:4px;">${day}</div>
-          <div style="font-size:10px;color:${dotColor};font-weight:600;">
-            ${isClosed ? '✓ Closed' : '● Open'}
-          </div>
-          <div style="font-size:9px;color:${dotColor};margin-top:2px;
-            font-family:'JetBrains Mono',monospace;">
-            ${fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}
-          </div>
+        <div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">
+          No inventory data for this period.
         </div>`;
-    }).join('');
+    }
 
-    container.innerHTML = `
-      <!-- Status header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-        padding:16px 20px;margin-bottom:16px;">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);">
-            Week ${report.week_number}, ${report.year}
-          </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:2px;">
-            ${new Date(report.date_from).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-            –
-            ${new Date(report.date_to).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;
-            background:${statusBg};color:${statusColor};">${report.status}</span>
-          ${isDraft ? `
-            <button onclick="Dashboard.weeklyPrepare()"
-              style="padding:6px 14px;background:none;border:1.5px solid var(--border);
-                     border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                     cursor:pointer;color:var(--text-2);font-family:'DM Sans',sans-serif;">
-              Refresh
-            </button>` : ''}
-          ${isLocked && report.pdf_path ? `
-            <button onclick="Dashboard.weeklyDownloadPDF(${report.id})"
-              style="padding:6px 14px;background:var(--text);color:#fff;border:none;
-                     border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                     cursor:pointer;font-family:'DM Sans',sans-serif;">
-              Download PDF
-            </button>` : ''}
-        </div>
-      </div>
+    const items = snapshot.items.filter(i => i.category !== 'Machinery');
+    const lowStockFiltered = (snapshot.low_stock || []).filter(name => {
+      const item = items.find(i => i.consumable === name);
+      return item && item.category !== 'Machinery';
+    });
 
-      <!-- Sheet status grid -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;">Daily Sheets</div>
-        <div style="display:flex;gap:8px;">${sheetGrid}</div>
-      </div>
-
-      <!-- Revenue summary -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:14px 16px;">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Total Collected</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
-            font-weight:700;color:var(--text);">${fmt(parseFloat(report.total_cash||0) + parseFloat(report.total_momo||0) + parseFloat(report.total_pos||0))}</div>
-        </div>
-        <div style="background:var(--cash-bg);border:1px solid var(--cash-border);
-          border-radius:var(--radius);padding:14px 16px;">
-          <div style="font-size:10px;font-weight:700;color:var(--cash-text);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Cash</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
-            font-weight:700;color:var(--cash-strong);">${fmt(parseFloat(report.total_cash||0))}</div>
-        </div>
-        <div style="background:var(--momo-bg);border:1px solid var(--momo-border);
-          border-radius:var(--radius);padding:14px 16px;">
-          <div style="font-size:10px;font-weight:700;color:var(--momo-text);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">MoMo</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
-            font-weight:700;color:var(--momo-strong);">${fmt(parseFloat(report.total_momo||0))}</div>
-        </div>
-        <div style="background:var(--pos-bg);border:1px solid var(--pos-border);
-          border-radius:var(--radius);padding:14px 16px;">
-          <div style="font-size:10px;font-weight:700;color:var(--pos-text);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">POS</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
-            font-weight:700;color:var(--pos-strong);">${fmt(parseFloat(report.total_pos||0))}</div>
-        </div>
-      </div>
-
-      <!-- Jobs summary -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:14px 16px;text-align:center;">
-          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
-            color:var(--text);">${fmt(parseFloat(report.total_jobs_created||0))}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Jobs Created</div>
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:14px 16px;text-align:center;">
-          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
-            color:var(--green-text);">${report.total_jobs_complete}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Completed</div>
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:14px 16px;text-align:center;">
-          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
-            color:var(--red-text);">${report.total_jobs_cancelled}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Cancelled</div>
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:14px 16px;text-align:center;">
-          <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;
-            color:var(--amber-text);">${report.carry_forward_count}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Carry Forward</div>
-        </div>
-      </div>
-
-      <!-- Inventory placeholder -->
-      <div style="background:#fffbec;border:1px solid var(--momo-border);
-        border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;
-        display:flex;align-items:center;gap:10px;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-          fill="none" stroke="var(--momo-text)" stroke-width="2">
+    const alertHtml = lowStockFiltered.length ? `
+      <div style="padding:10px 14px;background:#fee2e2;
+        border:1px solid #fca5a5;border-radius:8px;margin-bottom:16px;
+        display:flex;align-items:center;gap:8px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+          viewBox="0 0 24 24" fill="none" stroke="#991b1b" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="8" x2="12" y2="12"/>
           <line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
-        <span style="font-size:12.5px;color:var(--momo-text);">
-          Inventory section will appear here once the inventory module is active.
+        <span style="font-size:11px;font-weight:700;color:#991b1b;">
+          Low stock: ${lowStockFiltered.join(', ')}
         </span>
-      </div>
+      </div>` : '';
 
-      <!-- BM Notes -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">Branch Manager Notes</div>
-        ${isLocked
-          ? `<div style="background:var(--panel);border:1px solid var(--border);
-               border-radius:var(--radius);padding:14px 16px;font-size:13px;
-               color:var(--text-2);min-height:60px;">${report.bm_notes || '—'}</div>`
-          : `<textarea id="weekly-notes" rows="3"
-               placeholder="Add weekly observations, incidents, or notes…"
-               style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-                      border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                      font-size:13px;resize:vertical;box-sizing:border-box;
-                      font-family:'DM Sans',sans-serif;">${report.bm_notes || ''}</textarea>`
-        }
-      </div>
+    return alertHtml + _renderInventoryCards(items, 'snapshot');
+  }
 
-      <!-- Submit button -->
-      ${isDraft ? `
-        <div style="display:flex;justify-content:flex-end;gap:10px;">
-          <button onclick="Dashboard.weeklySubmit(${report.id})"
-            id="weekly-submit-btn"
-            style="padding:10px 24px;background:var(--text);color:#fff;border:none;
-                   border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-                   cursor:pointer;font-family:'DM Sans',sans-serif;
-                   ${!report.all_sheets_closed ? 'opacity:0.4;cursor:not-allowed;' : ''}">
-            ${report.all_sheets_closed ? 'Submit & Lock Filing' : 'Close all sheets to submit'}
-          </button>
-        </div>
-        ${!report.all_sheets_closed ? `
-          <div style="text-align:right;font-size:12px;color:var(--text-3);margin-top:6px;">
-            All daily sheets must be closed before the weekly filing can be submitted.
-          </div>` : ''}
-      ` : ''}
+function _renderInventoryCards(items, mode = 'snapshot') {
+    if (!items || !items.length) {
+      return `
+        <div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px;">
+          No inventory data available.
+        </div>`;
+    }
 
-      ${isLocked ? `
-        <div style="background:var(--green-bg);border:1px solid var(--green-border);
-          border-radius:var(--radius);padding:14px 16px;display:flex;
-          align-items:center;gap:10px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-            fill="none" stroke="var(--green-text)" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-          <span style="font-size:13px;font-weight:600;color:var(--green-text);">
-            Filed by ${report.submitted_by_name || '—'} on
-            ${report.submitted_at
-              ? new Date(report.submitted_at).toLocaleDateString('en-GB',
-                  { day: 'numeric', month: 'short', year: 'numeric' })
-              : '—'}
-          </span>
-        </div>
-      ` : ''}`;
+    const filtered = items.filter(i => i.category !== 'Machinery');
+
+    const categoryConfig = {
+      'Paper'      : { bg: '#fdf8f0', strip: '#e8a820', header: '#8a6a2e', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>` },
+      'Toner'      : { bg: '#f0f4fd', strip: '#3355cc', header: '#2e4a8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>` },
+      'Binding'    : { bg: '#f5f0fd', strip: '#9b59b6', header: '#5a2e8a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>` },
+      'Lamination' : { bg: '#f0fdf4', strip: '#22c98a', header: '#1a6b3a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>` },
+      'Envelopes'  : { bg: '#fffbeb', strip: '#f59e0b', header: '#8a6a00', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>` },
+      'Photography': { bg: '#fdf0f5', strip: '#e8294a', header: '#8a1a4a', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>` },
+    };
+
+    const defaultConfig = { bg: '#f8f8f8', strip: '#888', header: '#444', icon: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>` };
+
+    const groups = {};
+    filtered.forEach(item => {
+      const cat = item.category || 'Other';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
+    });
+
+    return Object.entries(groups).map(([cat, catItems]) => {
+      const cfg      = categoryConfig[cat] || defaultConfig;
+      const isToner  = cat === 'Toner';
+      const lowCount = catItems.filter(i => i.is_low).length;
+
+      const rows = catItems.map((item, idx) => {
+        const name         = mode === 'snapshot' ? item.consumable : item.name;
+        const unit         = item.unit || item.unit_label || '';
+        const isPercent    = unit === '%';
+        const isLow        = item.is_low;
+        const isCritical   = isLow && (mode === 'snapshot'
+          ? parseFloat(item.closing  || 0) === 0
+          : parseFloat(item.quantity || 0) === 0);
+
+        const closing      = mode === 'snapshot'
+          ? parseFloat(item.closing  || 0)
+          : parseFloat(item.quantity || 0);
+        const received     = mode === 'snapshot' ? parseFloat(item.received || 0) : 0;
+        const consumed     = mode === 'snapshot' ? parseFloat(item.consumed || 0) : 0;
+        const reorderPoint = parseFloat(item.reorder_point || 0);
+        const lastReceived = item.last_received || null;
+
+        const fmtQty = n => isPercent
+          ? `${parseFloat(n).toFixed(1)}%`
+          : parseFloat(n).toLocaleString('en-GH', { minimumFractionDigits: 0 });
+
+        const statusColor = isCritical ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+        const statusBg    = isCritical ? '#fee2e2' : isLow ? '#fef3c7' : '#dcfce7';
+        const statusLabel = isCritical ? 'Critical'  : isLow ? 'Low'  : 'OK';
+
+        // Toner progress bar
+        const barPct = reorderPoint > 0
+          ? Math.min(100, (closing / 100) * 100)  // toner is %, so closing IS the pct
+          : Math.min(100, (closing / (reorderPoint * 3 || 1)) * 100);
+        const barColor = isCritical ? '#dc2626' : isLow ? '#d97706' : '#3355cc';
+
+        // Last received info
+        const lastReceivedHtml = received > 0
+          ? `<div style="font-size:10px;color:#16a34a;margin-top:2px;font-weight:600;">
+               +${fmtQty(received)} ${unit} received
+             </div>`
+          : lastReceived
+            ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">
+                 Last: ${new Date(lastReceived).toLocaleDateString('en-GB',
+                   { day:'numeric', month:'short' })}
+               </div>`
+            : '';
+
+        return `
+          <tr style="border-bottom:1px solid #f3f4f6;
+            background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
+
+            <!-- Item name -->
+            <td style="padding:9px 14px;">
+              <div style="font-size:12px;font-weight:600;color:#111;">${name}</div>
+              ${lastReceivedHtml}
+            </td>
+
+            <!-- Unit -->
+            <td style="padding:9px 14px;font-size:11px;color:#9ca3af;
+              text-align:center;">${unit}</td>
+
+            <!-- In stock — with toner progress bar -->
+            <td style="padding:9px 14px;text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                font-weight:700;color:${statusColor};">${fmtQty(closing)}</div>
+              ${isToner ? `
+                <div style="margin-top:4px;height:3px;background:#e5e7eb;
+                  border-radius:2px;overflow:hidden;width:80px;margin-left:auto;">
+                  <div style="height:100%;width:${barPct.toFixed(1)}%;
+                    background:${barColor};border-radius:2px;"></div>
+                </div>` : ''}
+            </td>
+
+            <!-- Reorder at -->
+            <td style="padding:9px 14px;text-align:right;font-size:12px;
+              color:#6b7280;font-family:'JetBrains Mono',monospace;">
+              ${reorderPoint > 0 ? fmtQty(reorderPoint) : '—'}
+            </td>
+
+            <!-- Consumed -->
+            <td style="padding:9px 14px;text-align:right;font-size:12px;
+              font-family:'JetBrains Mono',monospace;
+              color:${consumed > 0 ? '#dc2626' : '#9ca3af'};">
+              ${consumed > 0 ? '-' + fmtQty(consumed) : '—'}
+            </td>
+
+            <!-- Status -->
+            <td style="padding:9px 14px;text-align:center;">
+              <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                font-weight:700;background:${statusBg};color:${statusColor};">
+                ${statusLabel}
+              </span>
+            </td>
+
+          </tr>`;
+      }).join('');
+
+      return `
+        <div style="margin-bottom:16px;border:1px solid #e5e7eb;
+          border-radius:8px;overflow:hidden;">
+
+          <!-- Category header -->
+          <div style="display:flex;align-items:center;gap:8px;
+            padding:8px 14px;
+            background:${cfg.bg};
+            border-bottom:2px solid ${cfg.strip};">
+            <span style="color:${cfg.header};">${cfg.icon}</span>
+            <span style="font-size:11px;font-weight:800;color:${cfg.header};
+              text-transform:uppercase;letter-spacing:0.6px;">${cat}</span>
+            <span style="font-size:10px;color:${cfg.header};opacity:0.5;margin-left:2px;">
+              · ${catItems.length} item${catItems.length !== 1 ? 's' : ''}
+            </span>
+            ${lowCount > 0 ? `
+              <span style="margin-left:auto;padding:1px 8px;border-radius:20px;
+                font-size:9px;font-weight:700;background:#fee2e2;color:#dc2626;">
+                ${lowCount} need${lowCount === 1 ? 's' : ''} attention
+              </span>` : `
+              <span style="margin-left:auto;padding:1px 8px;border-radius:20px;
+                font-size:9px;font-weight:700;background:#dcfce7;color:#16a34a;">
+                All good
+              </span>`}
+          </div>
+
+          <!-- Table -->
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+                <th style="padding:7px 14px;text-align:left;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Item</th>
+                <th style="padding:7px 14px;text-align:center;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Unit</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">In Stock</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Reorder At</th>
+                <th style="padding:7px 14px;text-align:right;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Consumed</th>
+                <th style="padding:7px 14px;text-align:center;font-size:10px;
+                  font-weight:700;color:#9ca3af;text-transform:uppercase;
+                  letter-spacing:0.5px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+
+        </div>`;
+    }).join('');
+  }
+
+  function _toggleCurrentWeek() {
+    const detail  = document.getElementById('current-week-detail');
+    const chevron = document.getElementById('current-week-chevron');
+    if (!detail) return;
+    const isOpen = detail.style.display !== 'none';
+    detail.style.display    = isOpen ? 'none' : 'block';
+    chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
   }
 
   async function weeklyPrepare() {
@@ -4331,7 +4944,7 @@ async function _loadReportsPane() {
   }
 
   async function _fetchAndRenderHistory(container) {
-    if (!container) container = document.getElementById('reports-content');
+    if (!container) container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
     container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
 
     // Destroy existing charts
@@ -4391,7 +5004,8 @@ async function _loadReportsPane() {
             const colors = ['#1a1a2e','#6b47d9','#1a3a2e','#2e1a1a','#1a2e3a','#3a2e1a'];
             const bg = colors[i % colors.length];
             return `
-            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+            <div onclick="Dashboard._historyDrill(this)"
+              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
               style="border:1px solid var(--border);border-radius:8px;overflow:hidden;
                      cursor:pointer;transition:all 0.15s;display:flex;height:64px;
                      box-shadow:0 1px 4px rgba(0,0,0,0.05);"
@@ -4436,7 +5050,8 @@ async function _loadReportsPane() {
         <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
           overflow:hidden;margin-bottom:24px;">
           ${(data.items||[]).map(item => `
-            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+            <div onclick="Dashboard._historyDrill(this)"
+              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
               style="display:flex;align-items:center;justify-content:space-between;
                      padding:14px 20px;border-bottom:1px solid var(--border);cursor:pointer;
                      transition:background 0.12s;"
@@ -4727,9 +5342,12 @@ const kpiCards = [
     }
   }
 
-  function _historyDrill(item) {
-    if (typeof item === 'string') {
-      try { item = JSON.parse(item.replace(/&quot;/g, '"')); } catch { return; }
+  function _historyDrill(elOrItem) {
+    let item = elOrItem;
+    if (elOrItem instanceof HTMLElement) {
+      try { item = JSON.parse(elOrItem.dataset.item.replace(/&quot;/g, '"')); } catch { return; }
+    } else if (typeof elOrItem === 'string') {
+      try { item = JSON.parse(elOrItem.replace(/&quot;/g, '"')); } catch { return; }
     }
     _historyYear  = item.year  || _historyYear;
     _historyMonth = item.month || null;
@@ -4743,7 +5361,8 @@ const kpiCards = [
       _historyLevel = 'month';
     }
 
-    _fetchAndRenderHistory(document.getElementById('reports-content'));
+    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
+    _fetchAndRenderHistory(container);
   }
 
   function _historyNav(level, year, month, week) {
@@ -4751,7 +5370,8 @@ const kpiCards = [
     _historyYear  = year;
     _historyMonth = month;
     _historyWeek  = week;
-    _fetchAndRenderHistory(document.getElementById('reports-content'));
+    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
+    _fetchAndRenderHistory(container);
   }
   async function downloadSheetPDF(sheetId, sheetDate) {
     try {
@@ -5542,6 +6162,1712 @@ const kpiCards = [
       }
     }, 1000);
   }
+// ── Customers pane ────────────────────────────────────────
+  let _customersTab = 'all';
+
+  async function _loadCustomersPane() {
+    const pane = document.getElementById('pane-customers');
+    if (!pane) return;
+
+    pane.innerHTML = `
+      <div class="section-head">
+        <span class="section-title">Customers</span>
+        <button onclick="Dashboard.openAddCustomerModal()"
+          style="padding:7px 16px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          + Add Customer
+        </button>
+      </div>
+
+      <div class="reports-tabs" id="customers-tab-bar">
+        <button class="reports-tab active" data-tab="all"
+          onclick="Dashboard.switchCustomersTab('all')">All</button>
+        <button class="reports-tab" data-tab="individuals"
+          onclick="Dashboard.switchCustomersTab('individuals')">Individuals</button>
+        <button class="reports-tab" data-tab="businesses"
+          onclick="Dashboard.switchCustomersTab('businesses')">Businesses</button>
+        <button class="reports-tab" data-tab="institutions"
+          onclick="Dashboard.switchCustomersTab('institutions')">Institutions</button>
+        <button class="reports-tab" data-tab="credit"
+          onclick="Dashboard.switchCustomersTab('credit')">Credit Accounts</button>
+      </div>
+
+      <div id="customers-content">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>`;
+
+    await _loadCustomersTab('all');
+  }
+
+  async function switchCustomersTab(tab) {
+    _customersTab = tab;
+    document.querySelectorAll('#customers-tab-bar .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    await _loadCustomersTab(tab);
+  }
+
+  async function _loadCustomersTab(tab) {
+    const content = document.getElementById('customers-content');
+    if (!content) return;
+    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
+    if (tab === 'all')          await _renderCustomerList(content, {});
+    if (tab === 'individuals')  await _renderCustomerList(content, { customer_type: 'INDIVIDUAL' });
+    if (tab === 'businesses')   await _renderCustomerList(content, { customer_type: 'BUSINESS' });
+    if (tab === 'institutions') await _renderCustomerList(content, { customer_type: 'INSTITUTION' });
+    if (tab === 'credit')       await _renderCreditCustomers(content);
+  }
+
+  async function _renderCustomerList(container, filters = {}) {
+    try {
+      const params = new URLSearchParams(filters);
+      const res    = await Auth.fetch(`/api/v1/customers/?${params}`);
+      if (!res.ok) throw new Error();
+      const data      = await res.json();
+      const customers = Array.isArray(data) ? data : (data.results || []);
+
+      if (!customers.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-3);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+            </svg>
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No customers found</div>
+            <div style="font-size:13px;">Add your first customer to get started.</div>
+          </div>`;
+        return;
+      }
+
+      const typeConfig = {
+        INDIVIDUAL : { label: 'Individual',   bg: '#f0f4fd', color: '#2e4a8a' },
+        BUSINESS   : { label: 'Business',     bg: '#f0fdf4', color: '#1a6b3a' },
+        INSTITUTION: { label: 'Institution',  bg: '#f5f0fd', color: '#5a2e8a' },
+      };
+
+      const tierConfig = {
+        REGULAR  : { label: 'Regular',   bg: 'var(--bg)',       color: 'var(--text-3)' },
+        PREFERRED: { label: 'Preferred', bg: '#fef3c7',         color: '#d97706'       },
+        VIP      : { label: 'VIP',       bg: '#fdf0f5',         color: '#8a1a4a'       },
+      };
+
+      const subtypeLabel = {
+        SCHOOL: 'School', CHURCH: 'Church', NGO: 'NGO',
+        GOVT: 'Government', OTHER: 'Institution',
+      };
+
+      container.innerHTML = `
+        <!-- Search bar -->
+        <div style="margin-bottom:16px;">
+          <input type="text" id="customers-search"
+            placeholder="Search by name or phone…"
+            oninput="Dashboard._filterCustomerRows(this.value)"
+            style="width:100%;max-width:320px;padding:8px 14px;
+              border:1.5px solid var(--border);border-radius:var(--radius-sm);
+              background:var(--bg);color:var(--text);font-size:13px;
+              font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+        </div>
+
+        <!-- Summary strip -->
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          ${[
+            ['Total', customers.length, 'var(--text)', 'var(--panel)'],
+            ['Individuals',  customers.filter(c => c.customer_type === 'INDIVIDUAL').length,  '#2e4a8a', '#f0f4fd'],
+            ['Businesses',   customers.filter(c => c.customer_type === 'BUSINESS').length,    '#1a6b3a', '#f0fdf4'],
+            ['Institutions', customers.filter(c => c.customer_type === 'INSTITUTION').length, '#5a2e8a', '#f5f0fd'],
+          ].map(([label, count, color, bg]) => `
+            <div style="padding:10px 16px;background:${bg};border:1px solid #e5e7eb;
+              border-radius:8px;text-align:center;min-width:90px;">
+              <div style="font-size:20px;font-weight:800;color:${color};">${count}</div>
+              <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;
+                letter-spacing:0.4px;margin-top:2px;">${label}</div>
+            </div>`).join('')}
+        </div>
+
+        <!-- Table -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;" id="customers-table">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Phone</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Type</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Visits</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Tier</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Score</th>
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Since</th>
+                <th style="padding:10px 16px;"></th>
+              </tr>
+            </thead>
+            <tbody id="customers-tbody">
+              ${customers.map((c, idx) => {
+                const tc  = typeConfig[c.customer_type]  || typeConfig.INDIVIDUAL;
+                const trc = tierConfig[c.tier]           || tierConfig.REGULAR;
+                const isIndividual = c.customer_type === 'INDIVIDUAL';
+                const name = isIndividual
+                  ? (c.full_name || c.display_name || '—')
+                  : (c.display_name || '—');
+                const sub = isIndividual
+                  ? ''
+                  : (c.full_name ? `Rep: ${c.full_name}` : '');
+                const sinceDate = c.created_at
+                  ? new Date(c.created_at).toLocaleDateString('en-GB',
+                      { day: 'numeric', month: 'short', year: 'numeric' })
+                  : '—';
+                const scoreColor = c.confidence_score >= 70
+                  ? '#16a34a' : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
+                const typeLabel = c.institution_subtype
+                  ? subtypeLabel[c.institution_subtype] || tc.label
+                  : tc.label;
+
+                return `
+                  <tr data-search="${(name + ' ' + (c.phone||'')).toLowerCase()}"
+                    style="border-bottom:1px solid var(--border);
+                      background:${idx % 2 === 0 ? '#fff' : '#fafafa'};
+                      cursor:pointer;transition:background 0.12s;"
+                    onmouseover="this.style.background='var(--bg)'"
+                    onmouseout="this.style.background='${idx % 2 === 0 ? '#fff' : '#fafafa'}'"
+                    onclick="Dashboard.openCustomerDetail(${c.id})">
+
+                    <!-- Name -->
+                    <td style="padding:11px 16px;">
+                      <div style="font-size:13px;font-weight:700;color:var(--text);">
+                        ${_esc(name)}</div>
+                      ${sub ? `
+                        <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+                          ${_esc(sub)}
+                        </div>` : ''}
+                    </td>
+
+                    <!-- Phone -->
+                    <td style="padding:11px 16px;font-family:'JetBrains Mono',monospace;
+                      font-size:12px;color:var(--text-2);">${_esc(c.phone || '—')}</td>
+
+                    <!-- Type -->
+                    <td style="padding:11px 16px;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${tc.bg};color:${tc.color};">
+                        ${typeLabel}
+                      </span>
+                    </td>
+
+                    <!-- Visits -->
+                    <td style="padding:11px 16px;text-align:center;font-size:13px;
+                      font-weight:600;color:var(--text);">${c.visit_count || 0}</td>
+
+                    <!-- Tier -->
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${trc.bg};color:${trc.color};">
+                        ${trc.label}
+                      </span>
+                    </td>
+
+                    <!-- Score -->
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:700;color:${scoreColor};">${c.confidence_score}</span>
+                    </td>
+
+                    <!-- Since -->
+                    <td style="padding:11px 16px;font-size:12px;color:var(--text-3);">
+                      ${sinceDate}</td>
+
+                    <!-- Action -->
+                    <td style="padding:11px 16px;text-align:right;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" style="color:var(--text-3);">
+                        <polyline points="9 18 15 12 9 6"/>
+                      </svg>
+                    </td>
+
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load customers.</div>`;
+    }
+  }
+
+  async function _renderCreditCustomers(container) {
+    try {
+      const res  = await Auth.fetch('/api/v1/customers/credit/');
+      if (!res.ok) throw new Error();
+      const data     = await res.json();
+      const accounts = Array.isArray(data) ? data : (data.results || []);
+
+      if (!accounts.length) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-3);">
+            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
+              No credit accounts</div>
+            <div style="font-size:13px;">
+              Nominate a customer for credit from their profile.</div>
+          </div>`;
+        return;
+      }
+
+      const statusConfig = {
+        ACTIVE   : { bg: '#dcfce7', color: '#16a34a', label: 'Active'    },
+        PENDING  : { bg: '#fef3c7', color: '#d97706', label: 'Pending'   },
+        SUSPENDED: { bg: '#fee2e2', color: '#dc2626', label: 'Suspended' },
+        CLOSED   : { bg: '#f3f4f6', color: '#6b7280', label: 'Closed'    },
+      };
+
+      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',
+        { minimumFractionDigits: 2 })}`;
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
+                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Limit</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Balance</th>
+                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Available</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Usage</th>
+                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${accounts.map((a, idx) => {
+                const sc      = statusConfig[a.status] || statusConfig.PENDING;
+                const usagePct = a.utilisation_pct || 0;
+                const usageColor = usagePct >= 90 ? '#dc2626'
+                  : usagePct >= 70 ? '#d97706' : '#16a34a';
+
+                return `
+                  <tr style="border-bottom:1px solid var(--border);
+                    background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
+                    <td style="padding:11px 16px;">
+
+                      <!-- Line 1: Primary name + account type badge -->
+                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text);">
+                          ${_esc(a.customer_name || '—')}
+                        </span>
+                        <span style="font-size:9px;font-weight:700;padding:1px 7px;
+                          border-radius:20px;
+                          background:${a.account_type === 'BUSINESS' ? '#f0fdf4' : '#f0f4fd'};
+                          color:${a.account_type === 'BUSINESS' ? '#1a6b3a' : '#2e4a8a'};">
+                          ${a.account_type === 'BUSINESS' ? 'Business' : 'Individual'}
+                        </span>
+                      </div>
+
+                      <!-- Line 2: Rep (business) or company affiliation (individual) + phone -->
+                      <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">
+                        ${a.account_type === 'BUSINESS'
+                          ? (a.contact_person ? `Rep: ${_esc(a.contact_person)} · ` : '')
+                          : (a.customer_company ? `${_esc(a.customer_company)} · ` : '')}
+                        <span style="font-family:'JetBrains Mono',monospace;">
+                          ${_esc(a.customer_phone || '—')}
+                        </span>
+                      </div>
+
+                      <!-- Line 3: Address if available -->
+                      ${a.customer_address ? `
+                        <div style="font-size:11px;color:var(--text-3);">
+                          ${_esc(a.customer_address)}
+                        </div>` : ''}
+
+                    </td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:600;color:var(--text);">${fmt(a.credit_limit)}</td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:700;color:#dc2626;">${fmt(a.current_balance)}</td>
+                    <td style="padding:11px 16px;text-align:right;
+                      font-family:'JetBrains Mono',monospace;font-size:12px;
+                      color:#16a34a;font-weight:600;">${fmt(a.available_credit)}</td>
+                    <td style="padding:11px 16px;text-align:center;">
+                      <div style="display:flex;align-items:center;gap:6px;
+                        justify-content:center;">
+                        <div style="width:60px;height:4px;background:#f3f4f6;
+                          border-radius:2px;overflow:hidden;">
+                          <div style="height:100%;width:${Math.min(100,usagePct).toFixed(1)}%;
+                            background:${usageColor};border-radius:2px;"></div>
+                        </div>
+                        <span style="font-size:11px;font-weight:600;
+                          color:${usageColor};">${usagePct.toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td style="padding:11px 16px;text-align:center;">
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${sc.bg};color:${sc.color};">
+                        ${sc.label}
+                      </span>
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div class="loading-cell" style="color:var(--red-text);">
+          Could not load credit accounts.</div>`;
+    }
+  }
+
+  function _filterCustomerRows(query) {
+    const q    = query.toLowerCase();
+    const rows = document.querySelectorAll('#customers-tbody tr');
+    rows.forEach(row => {
+      const search = row.dataset.search || '';
+      row.style.display = search.includes(q) ? '' : 'none';
+    });
+  }
+
+async function openCustomerDetail(customerId) {
+    const overlay = document.getElementById('customer-profile-overlay');
+    const content = document.getElementById('customer-profile-content');
+    if (!overlay || !content) return;
+
+    overlay.style.display = 'block';
+
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        min-height:100vh;color:var(--text-3);">
+        <span class="spin"></span>
+      </div>`;
+
+    try {
+      const [profileRes, jobsRes, creditRes] = await Promise.all([
+        Auth.fetch(`/api/v1/customers/${customerId}/`),
+        Auth.fetch(`/api/v1/jobs/?customer=${customerId}&page_size=100`),
+        Auth.fetch(`/api/v1/customers/credit/`),
+      ]);
+
+      const customer  = profileRes.ok ? await profileRes.json() : null;
+      if (!customer) throw new Error();
+
+      const jobsData   = jobsRes.ok   ? await jobsRes.json()   : { results: [] };
+      const creditData = creditRes.ok ? await creditRes.json() : { results: [] };
+
+      // Filter jobs that are actually linked to this customer
+      const jobs   = (jobsData.results || []).filter(j => j.customer === customerId);
+
+      // Filter credit account for this customer
+      const credit = (creditData.results || []).find(c => c.customer === customerId) || null;
+
+      _renderCustomerProfile(content, customer, jobs, credit);
+
+    } catch {
+      content.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;
+          min-height:100vh;flex-direction:column;gap:12px;color:var(--red-text);">
+          <div>Could not load customer profile.</div>
+          <button onclick="Dashboard.closeCustomerProfile()"
+            style="padding:8px 20px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;">
+            Close
+          </button>
+        </div>`;
+    }
+  }
+
+  function _renderCustomerProfile(container, c, jobs, credit) {
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const isIndividual = c.customer_type === 'INDIVIDUAL';
+
+    const primaryName = isIndividual
+      ? (c.full_name || '—')
+      : (c.company_name || '—');
+    const secondaryName = isIndividual
+      ? (c.company_name || '')
+      : (c.full_name ? `Rep: ${c.full_name}` : '');
+
+    const typeConfig = {
+      INDIVIDUAL : { label: 'Individual',  bg: '#f0f4fd', color: '#2e4a8a' },
+      BUSINESS   : { label: 'Business',    bg: '#f0fdf4', color: '#1a6b3a' },
+      INSTITUTION: { label: 'Institution', bg: '#f5f0fd', color: '#5a2e8a' },
+    };
+    const tc  = typeConfig[c.customer_type] || typeConfig.INDIVIDUAL;
+
+    const tierConfig = {
+      REGULAR  : { label: 'Regular',   color: '#6b7280' },
+      PREFERRED: { label: 'Preferred', color: '#d97706' },
+      VIP      : { label: 'VIP',       color: '#8a1a4a' },
+    };
+    const trc = tierConfig[c.tier] || tierConfig.REGULAR;
+
+    const sinceDate = c.created_at
+      ? new Date(c.created_at).toLocaleDateString('en-GB',
+          { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+
+    const initials = primaryName.split(' ').slice(0,2)
+      .map(w => w[0]?.toUpperCase() || '').join('');
+
+    const scoreColor = c.confidence_score >= 70 ? '#16a34a'
+      : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
+
+    const totalSpent = jobs.reduce((s, j) => s + parseFloat(j.amount_paid||0), 0);
+    const scoreToCredit = Math.max(0, 50 - c.confidence_score);
+
+    // ── Timeline HTML ─────────────────────────────────────
+    const timelineHtml = !jobs.length ? `
+      <div style="text-align:center;padding:48px 24px;
+        background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;
+          color:var(--text-3);">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">
+          No Job History Available for ${_esc(primaryName)}
+        </div>
+        <div style="font-size:13px;color:var(--text-3);">
+          Jobs linked to this customer will appear here once created.
+        </div>
+      </div>` : `
+      <div style="position:relative;">
+        ${jobs.map((j, idx) => {
+          const dt       = new Date(j.created_at);
+          const dateStr  = dt.toLocaleDateString('en-GB',
+            { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+          const timeStr  = dt.toLocaleTimeString('en-GH',
+            { hour: '2-digit', minute: '2-digit' });
+          const services = (j.line_items || [])
+            .map(li => li.service_name).join(', ') || '—';
+          const isLast   = idx === jobs.length - 1;
+
+          const statusColor = {
+            COMPLETE       : '#16a34a', CANCELLED: '#dc2626',
+            IN_PROGRESS    : '#d97706', PENDING_PAYMENT: '#d97706',
+          }[j.status] || '#6b7280';
+
+          const statusBg = {
+            COMPLETE       : '#dcfce7', CANCELLED: '#fee2e2',
+            IN_PROGRESS    : '#fef3c7', PENDING_PAYMENT: '#fef3c7',
+          }[j.status] || '#f3f4f6';
+
+          const methodColor = {
+            CASH: '#8a6a2e', MOMO: '#1a6b3a', POS: '#2e4a8a', CREDIT: '#8a1a4a',
+          }[j.payment_method] || '#6b7280';
+
+          const methodBg = {
+            CASH: '#fdf8f0', MOMO: '#f0fdf4', POS: '#f0f4fd', CREDIT: '#fdf0f5',
+          }[j.payment_method] || '#f3f4f6';
+
+          return `
+            <div style="display:flex;gap:16px;margin-bottom:${isLast ? '0' : '0'};">
+
+              <!-- Timeline spine -->
+              <div style="display:flex;flex-direction:column;align-items:center;
+                flex-shrink:0;width:32px;">
+                <!-- Node dot -->
+                <div style="width:12px;height:12px;border-radius:50%;
+                  background:${statusColor};border:2px solid #fff;
+                  box-shadow:0 0 0 2px ${statusColor};
+                  flex-shrink:0;margin-top:16px;"></div>
+                <!-- Line -->
+                ${!isLast ? `
+                  <div style="width:2px;flex:1;background:#e5e7eb;
+                    margin-top:4px;min-height:24px;"></div>` : ''}
+              </div>
+
+              <!-- Job card -->
+              <div style="flex:1;background:var(--panel);border:1px solid var(--border);
+                border-radius:var(--radius);overflow:hidden;margin-bottom:12px;">
+
+                <!-- Job header — dark strip -->
+                <div style="padding:10px 16px;background:var(--text);
+                  display:flex;align-items:center;justify-content:space-between;">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                    font-weight:700;color:#fff;letter-spacing:0.3px;">
+                    ${_esc(j.job_number || '—')}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                      font-weight:700;background:rgba(255,255,255,0.15);color:#fff;">
+                      ${j.job_type || '—'}
+                    </span>
+                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                      font-weight:700;background:${statusBg};color:${statusColor};">
+                      ${j.status.replace(/_/g,' ')}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Job body -->
+                <div style="padding:12px 16px;">
+
+                  <!-- Service name -->
+                  <div style="font-size:13px;font-weight:600;color:var(--text);
+                    margin-bottom:10px;">${_esc(services)}</div>
+
+                  <!-- Meta grid -->
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);
+                    gap:8px;margin-bottom:10px;">
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Date & Time</div>
+                      <div style="font-size:11px;color:var(--text-2);">${dateStr}</div>
+                      <div style="font-size:10px;color:var(--text-3);">${timeStr}</div>
+                    </div>
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Attendant</div>
+                      <div style="font-size:11px;color:var(--text-2);">
+                        ${_esc(j.intake_by_name || '—')}</div>
+                    </div>
+
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
+                        Amount</div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:800;color:var(--text);">${fmt(j.amount_paid)}</div>
+                    </div>
+
+                  </div>
+
+                  <!-- Bottom row: payment method + production duration -->
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    ${j.payment_method ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:${methodBg};color:${methodColor};">
+                        ${j.payment_method}
+                      </span>` : ''}
+                    ${j.job_type === 'PRODUCTION' && j.deadline ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:#f0f4fd;color:#2e4a8a;">
+                        Due: ${new Date(j.deadline).toLocaleDateString('en-GB',
+                          { day: 'numeric', month: 'short' })}
+                      </span>` : ''}
+                    ${j.is_routed ? `
+                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
+                        font-weight:700;background:#f5f0fd;color:#5a2e8a;">
+                        → Routed
+                      </span>` : ''}
+                  </div>
+
+                </div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>`;
+
+    // ── Full modal HTML ───────────────────────────────────
+    container.innerHTML = `
+      <!-- Topbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 28px;border-bottom:1px solid var(--border);
+        background:var(--panel);position:sticky;top:0;z-index:10;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button onclick="Dashboard.closeCustomerProfile()"
+            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
+              background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Back
+          </button>
+          <span style="font-size:13px;color:var(--text-3);">Customer Profile</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="Dashboard._editCustomer(${c.id})"
+            style="padding:7px 16px;background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;">
+            Edit Profile
+          </button>
+          ${!credit && c.confidence_score >= 50 ? `
+          <button onclick="Dashboard._nominateCredit(${c.id})"
+            style="padding:7px 16px;background:#16a34a;color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+              cursor:pointer;font-family:inherit;">
+            Nominate for Credit
+          </button>` : ''}
+        </div>
+      </div>
+
+      <!-- Scrollable body — single column -->
+      <div style="max-height:calc(100vh - 120px);overflow-y:auto;">
+      <div style="max-width:800px;margin:0 auto;padding:32px 28px;">
+
+        <!-- ── Profile header ──────────────────────────── -->
+        <div style="display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;">
+
+          <!-- Avatar with score ring -->
+          <div style="position:relative;flex-shrink:0;">
+            <svg width="80" height="80" viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" fill="none"
+                stroke="#f3f4f6" stroke-width="4"/>
+              <circle cx="40" cy="40" r="34" fill="none"
+                stroke="${scoreColor}" stroke-width="4"
+                stroke-dasharray="${2 * Math.PI * 34}"
+                stroke-dashoffset="${2 * Math.PI * 34 * (1 - c.confidence_score / 100)}"
+                stroke-linecap="round"
+                transform="rotate(-90 40 40)"/>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;
+              align-items:center;justify-content:center;">
+              <div style="width:60px;height:60px;border-radius:50%;
+                background:var(--text);display:flex;align-items:center;
+                justify-content:center;font-family:'Syne',sans-serif;
+                font-size:20px;font-weight:800;color:#fff;">
+                ${initials}
+              </div>
+            </div>
+          </div>
+
+          <!-- Name + badges + meta -->
+          <div style="flex:1;">
+            <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
+              color:var(--text);letter-spacing:-0.4px;margin-bottom:4px;">
+              ${_esc(primaryName)}
+            </div>
+            ${secondaryName ? `
+              <div style="font-size:13px;color:var(--text-3);margin-bottom:8px;">
+                ${_esc(secondaryName)}
+              </div>` : ''}
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+              margin-bottom:12px;">
+              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                font-weight:700;background:${tc.bg};color:${tc.color};">
+                ${tc.label}
+              </span>
+              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                font-weight:700;background:var(--bg);color:${trc.color};
+                border:1px solid var(--border);">
+                ${trc.label}
+              </span>
+              ${c.is_priority ? `
+                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                  font-weight:700;background:#fef3c7;color:#d97706;">
+                  ⭐ Priority
+                </span>` : ''}
+              ${credit ? `
+                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
+                  font-weight:700;background:#fdf0f5;color:#8a1a4a;">
+                  💳 Credit Account
+                </span>` : ''}
+            </div>
+            <!-- Quick stats -->
+            <div style="display:flex;gap:20px;flex-wrap:wrap;">
+              ${[
+                ['Customer since', sinceDate],
+                ['Total visits',   c.visit_count || 0],
+                ['Jobs on record', jobs.length],
+                ['Lifetime spend', fmt(totalSpent)],
+              ].map(([label, val]) => `
+                <div>
+                  <div style="font-size:10px;color:var(--text-3);margin-bottom:1px;">
+                    ${label}</div>
+                  <div style="font-size:13px;font-weight:700;color:var(--text);">
+                    ${val}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Info sections ───────────────────────────── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;
+          margin-bottom:24px;">
+
+          <!-- Contact -->
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+              Contact Details
+            </div>
+            ${[
+              ['Phone',   c.phone   || '—'],
+              ['Email',   c.email   || '—'],
+              ['Address', c.address || '—'],
+            ].map(([label, val]) => `
+              <div style="display:flex;justify-content:space-between;
+                padding:6px 0;border-bottom:1px solid var(--border);">
+                <span style="font-size:12px;color:var(--text-3);">${label}</span>
+                <span style="font-size:12px;font-weight:500;
+                  color:${val === '—' ? 'var(--text-3)' : 'var(--text)'};">
+                  ${_esc(val)}</span>
+              </div>`).join('')}
+          </div>
+
+          <!-- Credit or eligibility -->
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:16px 18px;">
+            ${credit ? `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+                Credit Account
+              </div>
+              ${[
+                ['Limit',     fmt(credit.credit_limit)],
+                ['Balance',   fmt(credit.current_balance)],
+                ['Available', fmt(credit.available_credit)],
+                ['Terms',     `${credit.payment_terms} days`],
+                ['Status',    credit.status],
+              ].map(([label, val]) => `
+                <div style="display:flex;justify-content:space-between;
+                  padding:6px 0;border-bottom:1px solid var(--border);">
+                  <span style="font-size:12px;color:var(--text-3);">${label}</span>
+                  <span style="font-size:12px;font-weight:600;
+                    color:${label==='Balance' ? '#dc2626'
+                      : label==='Available' ? '#16a34a' : 'var(--text)'};">
+                    ${_esc(String(val))}</span>
+                </div>`).join('')}
+              <!-- Usage bar -->
+              <div style="margin-top:10px;">
+                <div style="height:4px;background:#f3f4f6;border-radius:2px;
+                  overflow:hidden;">
+                  <div style="height:100%;
+                    width:${Math.min(100,credit.utilisation_pct).toFixed(1)}%;
+                    background:${credit.utilisation_pct>=90?'#dc2626'
+                      :credit.utilisation_pct>=70?'#d97706':'#16a34a'};
+                    border-radius:2px;"></div>
+                </div>
+                <div style="font-size:10px;color:var(--text-3);margin-top:3px;
+                  text-align:right;">${credit.utilisation_pct.toFixed(0)}% utilised</div>
+              </div>` : `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+                Credit Eligibility
+              </div>
+              <div style="margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;
+                  margin-bottom:6px;">
+                  <span style="font-size:12px;color:var(--text-2);">
+                    Confidence Score</span>
+                  <span style="font-size:13px;font-weight:700;color:${scoreColor};">
+                    ${c.confidence_score} / 100</span>
+                </div>
+                <div style="height:6px;background:#f3f4f6;border-radius:3px;
+                  overflow:hidden;">
+                  <div style="height:100%;width:${c.confidence_score}%;
+                    background:${scoreColor};border-radius:3px;"></div>
+                </div>
+              </div>
+              <div style="font-size:12px;color:var(--text-3);">
+                ${c.confidence_score >= 50
+                  ? '✓ Eligible — use Nominate for Credit button above'
+                  : `Needs <strong style="color:var(--text);">${scoreToCredit} more points</strong> to reach credit threshold`}
+              </div>`}
+          </div>
+
+        </div>
+
+        <!-- ── BM Notes ─────────────────────────────────── -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:16px 18px;margin-bottom:24px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+            Branch Manager Notes
+          </div>
+          <textarea id="customer-notes-${c.id}" rows="3"
+            placeholder="Add notes about this customer…"
+            onblur="Dashboard._saveCustomerNotes(${c.id})"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;resize:vertical;box-sizing:border-box;
+              font-family:'DM Sans',sans-serif;outline:none;">
+${_esc(c.notes || '')}</textarea>
+          <div style="font-size:10px;color:var(--text-3);margin-top:4px;">
+            Auto-saves when you click away
+          </div>
+        </div>
+
+        <!-- ── Job History timeline ────────────────────── -->
+        <div style="margin-bottom:32px;">
+          <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
+            color:var(--text);letter-spacing:-0.2px;margin-bottom:16px;
+            display:flex;align-items:center;gap:10px;">
+            Job History
+            <span style="font-size:12px;font-weight:400;color:var(--text-3);
+              font-family:'DM Sans',sans-serif;">
+              ${jobs.length} job${jobs.length !== 1 ? 's' : ''} on record
+            </span>
+          </div>
+          ${timelineHtml}
+        </div>
+
+      </div>
+      </div>`;
+  }
+
+  function closeCustomerProfile() {
+    const overlay = document.getElementById('customer-profile-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  async function _saveCustomerNotes(customerId) {
+    const textarea = document.getElementById(`customer-notes-${customerId}`);
+    if (!textarea) return;
+    const notes = textarea.value.trim();
+    try {
+      await Auth.fetch(`/api/v1/customers/${customerId}/`, {
+        method : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ notes }),
+      });
+    } catch { /* silent */ }
+  }
+
+  // ── Customer Inline Edit ──────────────────────────────────────
+// Replaces _editCustomer stub. Opens edit view inside the profile overlay.
+
+  async function _editCustomer(customerId) {
+    const content = document.getElementById('customer-profile-content');
+    if (!content) return;
+
+    // Show spinner while we fetch fresh data
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        min-height:100vh;color:var(--text-3);">
+        <span class="spin"></span>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(`/api/v1/customers/${customerId}/`);
+      if (!res.ok) throw new Error();
+      const c = await res.json();
+      _renderEditCustomerForm(content, c);
+    } catch {
+      _toast('Could not load customer for editing.', 'error');
+      // Fall back to re-opening the profile view
+      openCustomerDetail(customerId);
+    }
+  }
+
+  function _renderEditCustomerForm(container, c) {
+    const isIndividual  = c.customer_type === 'INDIVIDUAL';
+    const isBusiness    = c.customer_type === 'BUSINESS';
+    const isInstitution = c.customer_type === 'INSTITUTION';
+
+    const primaryName = isIndividual
+      ? (c.full_name || '—')
+      : (c.company_name || '—');
+
+    // Fields allowed per type
+    const showCompany    = isBusiness || isInstitution;
+    const showSubtype    = isInstitution;
+
+    const subtypeOptions = [
+      ['SCHOOL', 'School'],
+      ['CHURCH', 'Church / Religious'],
+      ['NGO',    'NGO / Non-profit'],
+      ['GOVT',   'Government / Public'],
+      ['OTHER',  'Other Institution'],
+    ];
+
+    container.innerHTML = `
+      <!-- Topbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 28px;border-bottom:1px solid var(--border);
+        background:var(--panel);position:sticky;top:0;z-index:10;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button onclick="Dashboard.openCustomerDetail(${c.id})"
+            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
+              background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Cancel
+          </button>
+          <span style="font-size:13px;color:var(--text-3);">
+            Editing: <strong style="color:var(--text);">${_esc(primaryName)}</strong>
+          </span>
+        </div>
+        <button id="edit-cust-save-btn"
+          onclick="Dashboard._saveCustomerEdit(${c.id})"
+          style="padding:8px 20px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Save Changes
+        </button>
+      </div>
+
+      <!-- Edit form body -->
+      <div style="max-height:calc(100vh - 64px);overflow-y:auto;">
+      <div style="max-width:680px;margin:0 auto;padding:36px 28px;">
+
+        <!-- Section label -->
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+          color:var(--text);letter-spacing:-0.3px;margin-bottom:6px;">Edit Profile</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
+          Locked fields (tier, score, customer type, visit count) cannot be edited here.
+          All changes are logged in the audit trail.
+        </div>
+
+        <!-- Error banner -->
+        <div id="edit-cust-error" style="display:none;font-size:13px;
+          color:var(--red-text);padding:10px 14px;background:var(--red-bg);
+          border:1px solid var(--red-border);border-radius:var(--radius-sm);
+          margin-bottom:20px;"></div>
+
+        <!-- ── Editable fields ───────────────────────── -->
+        <div style="display:flex;flex-direction:column;gap:18px;">
+
+          ${showCompany ? `
+          <!-- Company / Institution name -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              ${isBusiness ? 'Company Name' : 'Institution Name'} *
+            </label>
+            <input type="text" id="edit-company"
+              value="${_esc(c.company_name || '')}"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>` : ''}
+
+          ${showSubtype ? `
+          <!-- Institution subtype -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Institution Type</label>
+            <select id="edit-subtype"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">Select type…</option>
+              ${subtypeOptions.map(([val, label]) =>
+                `<option value="${val}" ${c.institution_subtype === val ? 'selected' : ''}>${label}</option>`
+              ).join('')}
+            </select>
+          </div>` : ''}
+
+          <!-- Name row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">
+                ${isIndividual ? 'First Name' : 'Rep First Name'} *
+              </label>
+              <input type="text" id="edit-first-name"
+                value="${_esc(c.first_name || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">
+                ${isIndividual ? 'Last Name' : 'Rep Last Name'} *
+              </label>
+              <input type="text" id="edit-last-name"
+                value="${_esc(c.last_name || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+          </div>
+
+          <!-- Phone -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Phone Number *</label>
+            <input type="tel" id="edit-phone"
+              value="${_esc(c.phone || '')}"
+              onblur="Dashboard._editPhoneNormalise(this)"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+            <div id="edit-phone-feedback"
+              style="font-size:11px;margin-top:5px;"></div>
+          </div>
+
+          <!-- Email -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              Email <span style="font-weight:400;">(optional)</span>
+            </label>
+            <input type="email" id="edit-email"
+              value="${_esc(c.email || '')}"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+
+          <!-- Address -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              Address ${!isIndividual
+                ? '*'
+                : '<span style="font-weight:400;">(optional)</span>'}
+            </label>
+            <textarea id="edit-address" rows="3"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                resize:vertical;box-sizing:border-box;">${_esc(c.address || '')}</textarea>
+          </div>
+
+          <!-- ── Locked fields — read-only display ───── -->
+          <div style="padding:16px 18px;background:var(--bg);
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+              Read-only Fields
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              ${[
+                ['Customer Type',     c.customer_type],
+                ['Tier',              c.tier || 'REGULAR'],
+                ['Confidence Score',  c.confidence_score + ' / 100'],
+                ['Total Visits',      c.visit_count || 0],
+              ].map(([label, val]) => `
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">
+                    ${label}</div>
+                  <div style="font-size:13px;color:var(--text-3);font-weight:500;">
+                    ${_esc(String(val))}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── Edit History ──────────────────────────── -->
+        <div style="margin-top:36px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            margin-bottom:12px;">
+            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
+              color:var(--text);letter-spacing:-0.2px;">Edit History</div>
+            <button onclick="Dashboard._toggleEditHistory(${c.id})"
+              id="edit-history-toggle-btn"
+              style="padding:5px 14px;background:none;border:1px solid var(--border);
+                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                cursor:pointer;color:var(--text-2);font-family:inherit;">
+              Load History
+            </button>
+          </div>
+          <div id="edit-history-content" style="display:none;"></div>
+        </div>
+
+      </div>
+      </div>`;
+  }
+
+  function _editPhoneNormalise(input) {
+    const norm = _normalisePhone(input.value);
+    input.value = norm;
+    const fb = document.getElementById('edit-phone-feedback');
+    if (fb && norm && norm !== document.getElementById('edit-phone')?.dataset.original) {
+      fb.textContent = 'Number normalised to: ' + norm;
+      fb.style.color = 'var(--text-3)';
+    }
+  }
+
+  async function _saveCustomerEdit(customerId) {
+    const btn   = document.getElementById('edit-cust-save-btn');
+    const errEl = document.getElementById('edit-cust-error');
+    errEl.style.display = 'none';
+
+    const firstName = document.getElementById('edit-first-name')?.value.trim();
+    const lastName  = document.getElementById('edit-last-name')?.value.trim();
+    const rawPhone  = document.getElementById('edit-phone')?.value.trim();
+    const phone     = _normalisePhone(rawPhone);
+    const email     = document.getElementById('edit-email')?.value.trim();
+    const address   = document.getElementById('edit-address')?.value.trim();
+    const company   = document.getElementById('edit-company')?.value.trim();
+    const subtype   = document.getElementById('edit-subtype')?.value;
+
+    // ── Validation ──────────────────────────────────────
+    const showErr = msg => {
+      errEl.textContent   = msg;
+      errEl.style.display = 'block';
+      errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    if (!firstName) return showErr('First name is required.');
+    if (!lastName)  return showErr('Last name is required.');
+    if (!phone)     return showErr('Phone number is required.');
+
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+
+    // Build payload — only send fields that exist in the form
+    const payload = { first_name: firstName, last_name: lastName, phone };
+    if (email   !== undefined) payload.email   = email;
+    if (address !== undefined) payload.address = address;
+    if (company !== undefined && document.getElementById('edit-company'))
+      payload.company_name = company;
+    if (subtype !== undefined && document.getElementById('edit-subtype'))
+      payload.institution_subtype = subtype;
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit/`, {
+        method : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = typeof data.detail === 'string'
+          ? data.detail
+          : Object.values(data).flat().join(' ');
+        btn.disabled    = false;
+        btn.textContent = 'Save Changes';
+        return showErr(msg || 'Save failed. Please try again.');
+      }
+
+      _toast('Profile updated successfully.', 'success');
+      // Refresh the full profile view
+      openCustomerDetail(customerId);
+
+    } catch {
+      btn.disabled    = false;
+      btn.textContent = 'Save Changes';
+      showErr('Network error. Please try again.');
+    }
+  }
+
+  async function _toggleEditHistory(customerId) {
+    const content = document.getElementById('edit-history-content');
+    const btn     = document.getElementById('edit-history-toggle-btn');
+    if (!content) return;
+
+    const isVisible = content.style.display !== 'none';
+    if (isVisible) {
+      content.style.display = 'none';
+      btn.textContent = 'Load History';
+      return;
+    }
+
+    content.style.display = 'block';
+    btn.textContent = 'Hide History';
+    content.innerHTML = '<div style="padding:16px 0;color:var(--text-3);font-size:13px;"><span class="spin"></span> Loading…</div>';
+
+    await _loadEditHistory(customerId, content);
+  }
+
+  async function _loadEditHistory(customerId, container) {
+    try {
+      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit-log/`);
+      if (!res.ok) throw new Error();
+      const logs = await res.json();
+
+      if (!logs.length) {
+        container.innerHTML = `
+          <div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px;
+            background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius-sm);">
+            No edits recorded yet.
+          </div>`;
+        return;
+      }
+
+      const fieldLabel = field => ({
+        first_name          : 'First Name',
+        last_name           : 'Last Name',
+        phone               : 'Phone',
+        email               : 'Email',
+        address             : 'Address',
+        company_name        : 'Company / Institution Name',
+        institution_subtype : 'Institution Type',
+      }[field] || field);
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          ${logs.map((log, idx) => {
+            const dt = new Date(log.changed_at);
+            const dateStr = dt.toLocaleDateString('en-GB',
+              { day: 'numeric', month: 'short', year: 'numeric' });
+            const timeStr = dt.toLocaleTimeString('en-GH',
+              { hour: '2-digit', minute: '2-digit' });
+            const isLast = idx === logs.length - 1;
+
+            return `
+              <div style="display:flex;align-items:flex-start;gap:14px;
+                padding:14px 18px;
+                ${!isLast ? 'border-bottom:1px solid var(--border);' : ''}">
+
+                <!-- Field pill -->
+                <div style="flex-shrink:0;margin-top:2px;">
+                  <span style="padding:3px 9px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--bg);color:var(--text-2);
+                    border:1px solid var(--border);">
+                    ${_esc(fieldLabel(log.field_name))}
+                  </span>
+                </div>
+
+                <!-- Change -->
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+                    margin-bottom:5px;">
+                    <span style="font-size:13px;color:var(--red-text);font-weight:500;
+                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
+                      white-space:nowrap;"
+                      title="${_esc(log.old_value || '(empty)')}">
+                      ${_esc(log.old_value || '(empty)')}
+                    </span>
+                    <span style="color:var(--text-3);font-size:12px;">→</span>
+                    <span style="font-size:13px;color:var(--green-text);font-weight:600;
+                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
+                      white-space:nowrap;"
+                      title="${_esc(log.new_value || '(empty)')}">
+                      ${_esc(log.new_value || '(empty)')}
+                    </span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-3);">
+                    By <strong style="color:var(--text-2);">
+                      ${_esc(log.changed_by_name || '—')}
+                    </strong>
+                    · ${dateStr} at ${timeStr}
+                  </div>
+                </div>
+
+              </div>`;
+          }).join('')}
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div style="padding:16px;color:var(--red-text);font-size:13px;
+          background:var(--red-bg);border:1px solid var(--red-border);
+          border-radius:var(--radius-sm);">
+          Could not load edit history.
+        </div>`;
+    }
+  }
+
+  function _nominateCredit(customerId) {
+    _toast('Credit nomination coming soon.', 'info');
+  }
+
+// ── Add Customer Modal — delegates to CustomerReg ─────────────────────────
+  function openAddCustomerModal() {
+    CustomerReg.open(async function(data) {
+      _toast(`${data.display_name || data.full_name || 'Customer'} registered successfully.`, 'success');
+      await _loadCustomersTab(_customersTab);
+      if (data.id) setTimeout(() => openCustomerDetail(data.id), 300);
+    });
+  }
+
+  function _buildCustForm(type) {
+    const isIndividual  = type === 'INDIVIDUAL';
+    const isBusiness    = type === 'BUSINESS';
+    const isInstitution = type === 'INSTITUTION';
+
+    return `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+
+        ${isInstitution ? `
+        <!-- Institution subtype -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Institution Type *
+          </label>
+          <select id="cust-subtype" style="width:100%;padding:9px 12px;
+            border:1.5px solid var(--border);border-radius:var(--radius-sm);
+            background:var(--bg);color:var(--text);font-size:13px;
+            font-family:'DM Sans',sans-serif;outline:none;">
+            <option value="">Select type…</option>
+            <option value="SCHOOL">School</option>
+            <option value="CHURCH">Church / Religious</option>
+            <option value="NGO">NGO / Non-profit</option>
+            <option value="GOVT">Government / Public</option>
+            <option value="OTHER">Other Institution</option>
+          </select>
+        </div>` : ''}
+
+        ${!isIndividual ? `
+        <!-- Company / Institution name -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            ${isBusiness ? 'Company Name' : 'Institution Name'} *
+          </label>
+          <input type="text" id="cust-company" placeholder="${isBusiness ? 'e.g. Suma Court Hotel' : 'e.g. Accra High School'}"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              box-sizing:border-box;">
+        </div>` : ''}
+
+        <!-- Name row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              ${isIndividual ? 'First Name *' : 'Rep First Name *'}
+            </label>
+            <input type="text" id="cust-first-name"
+              placeholder="${isIndividual ? 'e.g. Kwame' : 'e.g. Ama'}"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              ${isIndividual ? 'Last Name *' : 'Rep Last Name *'}
+            </label>
+            <input type="text" id="cust-last-name"
+              placeholder="${isIndividual ? 'e.g. Mensah' : 'e.g. Owusu'}"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+        </div>
+
+        <!-- Phone -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Phone Number *
+          </label>
+          <input type="tel" id="cust-phone" placeholder="e.g. 0244123456"
+            onblur="Dashboard._checkCustPhoneDuplicate()"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              box-sizing:border-box;">
+          <div id="cust-phone-feedback" style="font-size:11px;margin-top:4px;"></div>
+        </div>
+
+        <!-- Email -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Email <span style="font-weight:400;color:var(--text-3);">(optional)</span>
+          </label>
+          <input type="email" id="cust-email" placeholder="e.g. info@sumacourt.com"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              box-sizing:border-box;">
+        </div>
+
+        <!-- Address -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Address ${!isIndividual ? '*' : '<span style="font-weight:400;color:var(--text-3);">(optional)</span>'}
+          </label>
+          <textarea id="cust-address" rows="2"
+            placeholder="Physical address…"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              resize:none;box-sizing:border-box;"></textarea>
+        </div>
+
+        <!-- BM Notes -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Notes <span style="font-weight:400;color:var(--text-3);">(optional)</span>
+          </label>
+          <textarea id="cust-notes" rows="2"
+            placeholder="Any notes about this customer…"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              resize:none;box-sizing:border-box;"></textarea>
+        </div>
+
+      </div>`;
+  }
+
+  function _setCustType(type) {
+    _addCustType = type;
+
+    // Update button styles
+    const typeColors = {
+      INDIVIDUAL : { bg: '#f0f4fd', color: '#2e4a8a', border: '#2e4a8a' },
+      BUSINESS   : { bg: '#f0fdf4', color: '#1a6b3a', border: '#1a6b3a' },
+      INSTITUTION: { bg: '#f5f0fd', color: '#5a2e8a', border: '#5a2e8a' },
+    };
+    ['INDIVIDUAL','BUSINESS','INSTITUTION'].forEach(t => {
+      const btn = document.getElementById(`cust-type-${t}`);
+      if (!btn) return;
+      if (t === type) {
+        const c = typeColors[t];
+        btn.style.background = c.bg;
+        btn.style.color      = c.color;
+        btn.style.border     = `2px solid ${c.border}`;
+      } else {
+        btn.style.background = 'var(--bg)';
+        btn.style.color      = 'var(--text-3)';
+        btn.style.border     = '2px solid var(--border)';
+      }
+    });
+
+    // Rebuild form
+    const body = document.getElementById('add-cust-form-body');
+    if (body) {
+      body.innerHTML = _buildCustForm(type);
+      setTimeout(() => document.getElementById('cust-first-name')?.focus(), 50);
+    }
+  }
+
+  async function _checkCustPhoneDuplicate() {
+    const raw   = document.getElementById('cust-phone')?.value.trim();
+    const phone = _normalisePhone(raw);
+    if (raw !== phone) {
+      const phoneInput = document.getElementById('cust-phone');
+      if (phoneInput) phoneInput.value = phone;
+    }
+    const feedback = document.getElementById('cust-phone-feedback');
+    const input    = document.getElementById('cust-phone');
+    if (!feedback || !phone) return;
+
+    feedback.textContent = '';
+    feedback.style.color = '';
+
+    // Check against employee roster first
+    try {
+      const branchId  = State.branchId;
+      const empRes    = await Auth.fetch(`/api/v1/accounts/users/?branch=${branchId}`);
+      if (empRes.ok) {
+        const empData = await empRes.json();
+        const empList = Array.isArray(empData) ? empData : (empData.results || []);
+        const match   = empList.find(u => u.phone && u.phone === phone);
+        if (match) {
+          feedback.textContent = `⚠ This number belongs to a branch employee (${match.full_name}). Cannot register.`;
+          feedback.style.color = 'var(--red-text)';
+          input.style.borderColor = 'var(--red-border)';
+          return;
+        }
+      }
+    } catch { /* silent */ }
+
+    // Check against existing customers
+    try {
+      const res = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(phone)}`);
+      if (res.status === 200) {
+        const existing = await res.json();
+        const name     = existing.display_name || existing.full_name || 'Unknown';
+        feedback.innerHTML = `⚠ A customer with this number already exists: <strong>${_esc(name)}</strong>. Cannot register a duplicate.`;
+        feedback.style.color = 'var(--red-text)';
+        input.style.borderColor = 'var(--red-border)';
+        return;
+      }
+    } catch { /* silent */ }
+
+    // Clean
+    feedback.textContent    = '✓ Phone number is available';
+    feedback.style.color    = 'var(--green-text)';
+    input.style.borderColor = 'var(--green-border, #16a34a)';
+  }
+
+  async function _submitAddCustomer() {
+    const btn    = document.getElementById('add-cust-submit-btn');
+    const errEl  = document.getElementById('add-cust-error');
+    errEl.style.display = 'none';
+
+    const type      = _addCustType;
+    const firstName = document.getElementById('cust-first-name')?.value.trim();
+    const lastName  = document.getElementById('cust-last-name')?.value.trim();
+    const phone     = _normalisePhone(document.getElementById('cust-phone')?.value.trim());
+    const email     = document.getElementById('cust-email')?.value.trim();
+    const address   = document.getElementById('cust-address')?.value.trim();
+    const notes     = document.getElementById('cust-notes')?.value.trim();
+    const company   = document.getElementById('cust-company')?.value.trim() || '';
+    const subtype   = document.getElementById('cust-subtype')?.value || '';
+
+    // ── Validation ──────────────────────────────────────────
+    const showErr = msg => {
+      errEl.textContent   = msg;
+      errEl.style.display = 'block';
+      errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    if (!firstName) return showErr('First name is required.');
+    if (!lastName)  return showErr('Last name is required.');
+    if (!phone)     return showErr('Phone number is required.');
+
+    if (type !== 'INDIVIDUAL' && !company) {
+      return showErr(`${type === 'BUSINESS' ? 'Company' : 'Institution'} name is required.`);
+    }
+    if (type === 'INSTITUTION' && !subtype) {
+      return showErr('Please select the institution type.');
+    }
+    if (type !== 'INDIVIDUAL' && !address) {
+      return showErr('Address is required for businesses and institutions.');
+    }
+
+    // ── Duplicate checks ────────────────────────────────────
+    btn.disabled    = true;
+    btn.textContent = 'Checking…';
+
+    // Employee phone check
+    try {
+      const branchId = State.branchId;
+      const empRes   = await Auth.fetch(`/api/v1/accounts/users/?branch=${branchId}`);
+      if (empRes.ok) {
+        const empData = await empRes.json();
+        const empList = Array.isArray(empData) ? empData : (empData.results || []);
+        const match   = empList.find(u => u.phone && u.phone === phone);
+        if (match) {
+          btn.disabled    = false;
+          btn.textContent = 'Register Customer';
+          return showErr(`This phone number belongs to a branch employee (${match.full_name}). Registration blocked.`);
+        }
+      }
+    } catch { /* silent */ }
+
+    // Customer phone duplicate check
+    try {
+      const res = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(phone)}`);
+      if (res.status === 200) {
+        const existing = await res.json();
+        const name     = existing.display_name || existing.full_name || 'this number';
+        btn.disabled    = false;
+        btn.textContent = 'Register Customer';
+        return showErr(`A customer with this number already exists: ${name}. Cannot create a duplicate.`);
+      }
+    } catch { /* silent */ }
+
+    // Company name duplicate check
+    if (company) {
+      try {
+        const res  = await Auth.fetch(`/api/v1/customers/?company_name=${encodeURIComponent(company)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.results || []);
+          if (list.length > 0) {
+            btn.disabled    = false;
+            btn.textContent = 'Register Customer';
+            return showErr(`A customer named "${company}" already exists. Cannot create a duplicate.`);
+          }
+        }
+      } catch { /* silent */ }
+    }
+
+    // ── Submit ──────────────────────────────────────────────
+    btn.textContent = 'Registering…';
+
+    const payload = {
+      customer_type       : type,
+      first_name          : firstName,
+      last_name           : lastName,
+      phone,
+      email               : email || '',
+      address             : address || '',
+      company_name        : company || '',
+      institution_subtype : subtype || '',
+      notes               : notes || '',
+    };
+
+    try {
+      const res  = await Auth.fetch('/api/v1/customers/create/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = Object.values(data).flat().join(' ');
+        btn.disabled    = false;
+        btn.textContent = 'Register Customer';
+        return showErr(msg || 'Registration failed. Please try again.');
+      }
+
+      // Success
+      _closeAddCustomer();
+      _toast(`${data.display_name || firstName + ' ' + lastName} registered successfully.`, 'success');
+
+      // Refresh customer list
+      await _loadCustomersTab(_customersTab);
+
+      // Look up the new customer by phone to get full profile with id
+      if (phone) {
+        try {
+          const lookupRes = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(_normalisePhone(phone))}`);
+          if (lookupRes.ok) {
+            const newCust = await lookupRes.json();
+            if (newCust.id) setTimeout(() => openCustomerDetail(newCust.id), 300);
+          }
+        } catch { /* silent */ }
+      }
+
+    } catch {
+      btn.disabled    = false;
+      btn.textContent = 'Register Customer';
+      showErr('Network error. Please try again.');
+    }
+  }
+
+  function _closeAddCustomer() {
+    document.getElementById('add-customer-overlay')?.remove();
+  }
+  function _normalisePhone(raw) {
+    // Strip all spaces, dashes, parentheses
+    let p = String(raw || '').replace(/[\s\-().]/g, '');
+    // Convert +233XXXXXXXXX → 0XXXXXXXXX
+    if (p.startsWith('+233')) p = '0' + p.slice(4);
+    // Convert 233XXXXXXXXX → 0XXXXXXXXX
+    if (p.startsWith('233') && p.length >= 12) p = '0' + p.slice(3);
+    return p;
+  }
+
   // ── Public API ─────────────────────────────────────────────
 return {
     init,
@@ -5613,6 +7939,23 @@ return {
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
+    switchPerformanceTab,
+    _toggleDailySheet,
+    _toggleCurrentWeek,
+    _toggleHistoryWeek,
+    switchCustomersTab,
+    openCustomerDetail,
+    openAddCustomerModal,
+    _filterCustomerRows,
+    closeCustomerProfile,
+    _saveCustomerNotes,
+    _editCustomer,
+    _renderEditCustomerForm,
+    _saveCustomerEdit,
+    _editPhoneNormalise,
+    _toggleEditHistory,
+    _loadEditHistory,
+    _nominateCredit,
   };
 
 })();

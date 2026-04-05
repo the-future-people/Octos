@@ -154,15 +154,15 @@ class RegionalDashboardView(APIView):
 
         # ── Pull unsigned floats per branch ───────────────────
         unsigned_floats = set(
-    CashierFloat.objects
-    .filter(
-        cashier__branch__in=branches,
-        scheduled_date=today,
-        signed_off_at__isnull=True,
-    )
-    .values_list('cashier__branch_id', flat=True)
-    .distinct()
-)
+            CashierFloat.objects
+            .filter(
+                cashier__branch__in  = branches,
+                daily_sheet__date    = today,
+                morning_acknowledged = False,
+            )
+            .values_list('cashier__branch_id', flat=True)
+            .distinct()
+        )
 
         # ── Pull staff clocked in per branch ──────────────────
         from apps.accounts.models import CustomUser

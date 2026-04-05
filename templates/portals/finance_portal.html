@@ -1,0 +1,279 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Octos — Finance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+  <link rel="stylesheet" href="{% static 'css/regional_manager.css' %}">
+</head>
+<body>
+
+<div class="app-shell" id="app-shell">
+
+  <!-- ── Topbar ── -->
+  <header class="topbar">
+    <div class="topbar-inner">
+
+      <div class="topbar-toggle">
+        <span class="brand-logo">Octos</span>
+        <span class="brand-divider"></span>
+        <div style="display:flex;flex-direction:column;line-height:1.1;">
+          <span class="brand-role">Finance</span>
+        </div>
+      </div>
+
+      <div class="topbar-center"></div>
+
+      <div class="topbar-right">
+        <div style="position:relative;">
+          <button id="fin-profile-btn" onclick="FinProfile.toggle()"
+            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+              background:none;border:1px solid var(--border);border-radius:20px;
+              cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <div class="user-avatar" id="fin-avatar">—</div>
+            <span style="font-size:13px;font-weight:600;color:var(--text);"
+              id="fin-user-name">—</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              id="fin-profile-arrow"
+              style="color:var(--text-3);transition:transform 0.2s;">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div id="fin-profile-dropdown"
+            style="display:none;position:absolute;top:46px;right:0;width:200px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
+              z-index:1000;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+              <div style="font-size:13px;font-weight:700;color:var(--text);"
+                id="fin-profile-name">—</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Finance</div>
+            </div>
+            <div style="padding:6px 0;">
+              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+              <button onclick="Auth.logout()"
+                style="width:100%;padding:9px 16px;text-align:left;background:none;border:none;
+                  cursor:pointer;font-size:13px;color:var(--red-text);font-family:inherit;
+                  display:flex;align-items:center;gap:10px;transition:background 0.12s;"
+                onmouseover="this.style.background='var(--red-bg)'"
+                onmouseout="this.style.background='none'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ── Body ── -->
+  <div class="body-layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+
+        <div class="sidebar-section">Reviews</div>
+
+        <div class="sidebar-item active" data-pane="queue" data-label="My Queue"
+          onclick="FinancePortal.switchPane('queue')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span class="sidebar-label">My Queue</span>
+          <span class="sidebar-badge" id="queue-badge" style="display:none;">0</span>
+        </div>
+
+        <div class="sidebar-item" data-pane="history" data-label="History"
+          onclick="FinancePortal.switchPane('history')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="12 8 12 12 14 14"/>
+            <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
+          </svg>
+          <span class="sidebar-label">History</span>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-content">
+      <div class="pane-area">
+
+        <!-- Queue pane -->
+        <div class="pane active" id="pane-queue">
+          <div class="section-head">
+            <span class="section-title">My Review Queue</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+            Monthly closes assigned to you for review. Clear when satisfied or
+            request clarification from the Branch Manager.
+          </p>
+          <div id="queue-content">
+            <div class="loading-cell"><span class="spin"></span> Loading…</div>
+          </div>
+        </div>
+
+        <!-- History pane -->
+        <div class="pane" id="pane-history">
+          <div class="section-head">
+            <span class="section-title">Cleared History</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
+            Monthly closes you have reviewed and cleared.
+          </p>
+          <div id="history-content">
+            <div class="loading-cell"><span class="spin"></span> Loading…</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clarification modal -->
+<div id="clarify-modal-overlay" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
+    max-width:480px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+      display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);">
+        Request Clarification
+      </div>
+      <button onclick="FinancePortal.closeClarifyModal()"
+        style="background:none;border:none;font-size:20px;cursor:pointer;
+          color:var(--text-3);">×</button>
+    </div>
+    <div style="padding:24px;">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
+        Describe what the Branch Manager needs to clarify. They will have
+        <strong>24 hours</strong> to respond before the case escalates to the
+        Regional Manager.
+      </div>
+      <textarea id="clarify-text" rows="4"
+        placeholder="Describe the items that require clarification…"
+        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+          font-size:13px;resize:vertical;box-sizing:border-box;
+          font-family:'DM Sans',sans-serif;"></textarea>
+      <div id="clarify-error" style="display:none;font-size:12px;
+        color:var(--red-text);margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+        <button onclick="FinancePortal.closeClarifyModal()"
+          style="padding:8px 18px;border:1px solid var(--border);
+            border-radius:var(--radius-sm);background:none;color:var(--text-2);
+            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="FinancePortal.confirmClarify()"
+          style="padding:8px 18px;background:var(--amber-text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:inherit;">
+          Send Request
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clear modal -->
+<div id="clear-modal-overlay" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
+    max-width:460px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
+      display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);">
+        Clear Monthly Close
+      </div>
+      <button onclick="FinancePortal.closeClearModal()"
+        style="background:none;border:none;font-size:20px;cursor:pointer;
+          color:var(--text-3);">×</button>
+    </div>
+    <div style="padding:24px;">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
+        Clearing this close will mark it as <strong>Finance Cleared</strong> and
+        notify the Regional Manager to endorse. Add any notes for the record.
+      </div>
+      <textarea id="clear-notes" rows="3"
+        placeholder="Finance notes (optional)…"
+        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+          font-size:13px;resize:vertical;box-sizing:border-box;
+          font-family:'DM Sans',sans-serif;"></textarea>
+      <div id="clear-error" style="display:none;font-size:12px;
+        color:var(--red-text);margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+        <button onclick="FinancePortal.closeClearModal()"
+          style="padding:8px 18px;border:1px solid var(--border);
+            border-radius:var(--radius-sm);background:none;color:var(--text-2);
+            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="FinancePortal.confirmClear()"
+          style="padding:8px 18px;background:var(--text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:13px;
+            font-weight:700;cursor:pointer;font-family:inherit;">
+          ✓ Confirm Clear
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/finance_portal.js' %}"></script>
+<script>
+  const FinProfile = (() => {
+    let open = false;
+    function toggle() { open ? close() : _open(); }
+    function _open() {
+      open = true;
+      const dd    = document.getElementById('fin-profile-dropdown');
+      const arrow = document.getElementById('fin-profile-arrow');
+      if (dd)    dd.style.display      = 'block';
+      if (arrow) arrow.style.transform = 'rotate(180deg)';
+      const name = document.getElementById('fin-profile-name');
+      if (name)  name.textContent =
+        document.getElementById('fin-user-name')?.textContent || '—';
+    }
+    function close() {
+      open = false;
+      const dd    = document.getElementById('fin-profile-dropdown');
+      const arrow = document.getElementById('fin-profile-arrow');
+      if (dd)    dd.style.display      = 'none';
+      if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+    document.addEventListener('click', e => {
+      if (open && !e.target.closest('#fin-profile-btn') &&
+          !e.target.closest('#fin-profile-dropdown')) close();
+    });
+    return { toggle, close };
+  })();
+</script>
+</body>
+</html>

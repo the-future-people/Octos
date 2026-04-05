@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, time, timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from django.db import transaction
@@ -18,7 +18,6 @@ class SheetEngine:
     - Auto-open a sheet for a branch on a given date
     - Provide a fallback open if the scheduled task missed
     - Enforce the staged end-of-day close sequence
-    - Handle the payment extension when ≥5 jobs are pending at cashier lock
     - Auto-close sheets that were never manually closed
     - Freeze and snapshot totals at close — numbers never change after
 
@@ -26,26 +25,23 @@ class SheetEngine:
     - One sheet per branch per day — enforced at DB level
     - Sundays never open
     - Public holidays open but are flagged with name and date
-    - Regular pending payments cannot carry over — BM must resolve
-    - Credit account and cross-branch jobs are legitimate carryovers
+    - Instant jobs cannot carry past hard lock without CRITICAL flag
+    - Production jobs never block EOD
     - Sheet is immutable once closed — no reopening ever
 
-    Close sequence (relative to branch.closing_time = 19:25):
-    - 6:55pm  — warning modal shown to all portal users
-    - 7:25pm  — job creation locked for attendants and all staff
-    - 7:30pm  — cashier locked (closing_time + 5 min)
-    - 7:45pm  — cashier extended lock if ≥5 pending payments exist
-    - 8:30pm  — BM auto-close (closing_time + 65 min)
+    Close sequence (all times from ShiftRoleConfig — no hardcoded constants):
+    - BM shift_end - 30min  → warning modal shown to all portal users
+    - Attendant job_lock_at → job creation locked for attendants
+    - Cashier job_lock_at   → cashier payment queue locks
+    - BM autoclose_at       → system auto-closes if BM hasn't closed
     """
 
-    # ── Timing now driven by ShiftEngine + ShiftRoleConfig ────────
-    # No hardcoded constants — all times come from BranchShift seeds
-    WARNING_BEFORE_CLOSE = 30  # kept for warn task only
+    WARNING_BEFORE_CLOSE = 30  # minutes before shift_end to show warning
 
     def __init__(self, branch) -> None:
         self.branch = branch
 
-    # ── Open ──────────────────────────────────────────────────────
+    # ── Open ──────────────────────────────────────────────────────────────────
 
     @transaction.atomic
     def open_sheet(
@@ -75,17 +71,16 @@ class SheetEngine:
         if target_date.weekday() == 6:
             logger.info(
                 'SheetEngine: skipping Sunday %s for branch %s',
-                target_date,
-                self.branch.code,
+                target_date, self.branch.code,
             )
             return None, False
 
         is_holiday = bool(holiday_name)
 
         sheet, created = DailySalesSheet.objects.get_or_create(
-            branch=self.branch,
-            date=target_date,
-            defaults={
+            branch = self.branch,
+            date   = target_date,
+            defaults = {
                 'status'             : DailySalesSheet.Status.OPEN,
                 'opened_by'          : opened_by,
                 'is_public_holiday'  : is_holiday,
@@ -96,9 +91,7 @@ class SheetEngine:
         if created:
             logger.info(
                 'SheetEngine: opened sheet %s for branch %s on %s',
-                sheet.pk,
-                self.branch.code,
-                target_date,
+                sheet.pk, self.branch.code, target_date,
             )
             self._link_staged_floats(sheet)
 
@@ -114,22 +107,17 @@ class SheetEngine:
         from apps.finance.models import DailySalesSheet
         today = timezone.localdate()
 
-        # Always return existing sheet if one exists — regardless of day
         existing = DailySalesSheet.objects.filter(
-            branch=self.branch,
-            date=today,
+            branch = self.branch,
+            date   = today,
         ).first()
         if existing:
             return existing, False
 
-        # Sunday — don't auto-create, return None
         if today.weekday() == 6:
             return None, False
 
-        return self.open_sheet(
-            target_date=today,
-            opened_by=opened_by,
-        )
+        return self.open_sheet(target_date=today, opened_by=opened_by)
 
     def set_first_job_opener(self, sheet, user) -> None:
         """
@@ -142,50 +130,19 @@ class SheetEngine:
             sheet.save(update_fields=['opened_by'])
             logger.info(
                 'SheetEngine: sheet %s opened_by set to user %s (first job)',
-                sheet.pk,
-                user.pk,
+                sheet.pk, user.pk,
             )
 
-    def _link_staged_floats(self, sheet) -> int:
+    def _link_staged_floats(self, sheet) -> dict:
         """
         Link any pre-staged cashier floats to the newly opened sheet.
-        Called automatically when a sheet is created.
-
-        Staged floats are created by the BM at EOD the previous evening
-        with daily_sheet=None and scheduled_date=tomorrow.
-        This method links them to the sheet when it opens.
-
-        Returns count of floats linked.
+        Delegates entirely to FloatEngine — SheetEngine never touches
+        CashierFloat directly.
         """
-        from apps.finance.models import CashierFloat
+        from apps.finance.float_engine import FloatEngine
+        return FloatEngine.link_staged_floats(sheet)
 
-        staged = CashierFloat.objects.filter(
-            daily_sheet    = None,
-            scheduled_date = sheet.date,
-            cashier__branch = self.branch,
-        )
-
-        count = staged.count()
-        if count:
-            staged.update(daily_sheet=sheet)
-            logger.info(
-                'SheetEngine: linked %d staged float(s) to sheet %s for branch %s',
-                count,
-                sheet.pk,
-                self.branch.code,
-            )
-        else:
-            logger.warning(
-                'SheetEngine: no staged floats found for sheet %s branch %s on %s — '
-                'BM may not have set tomorrow\'s float at EOD.',
-                sheet.pk,
-                self.branch.code,
-                sheet.date,
-            )
-
-        return count
-    
-    # ── Close sequence ────────────────────────────────────────────
+    # ── Lock status ───────────────────────────────────────────────────────────
 
     def get_branch_lock_status(self, sheet=None, role_name: str = 'ATTENDANT') -> dict:
         """
@@ -193,468 +150,78 @@ class SheetEngine:
         Uses ShiftEngine for all timing — no hardcoded constants.
 
         Args:
-            sheet     : Today's DailySalesSheet — for extension check
-            role_name : Role to check lock status for
+            sheet     : Today's DailySalesSheet (optional)
+            role_name : 'ATTENDANT' | 'CASHIER' | 'BRANCH_MANAGER'
 
         Returns dict with:
-            can_create_jobs   : bool
-            can_close_sheet   : bool
-            lock_reason       : str or None
-            extension_active  : bool
-            extension_reason  : str or None
-            schedule          : dict of close timestamps
-            mins_to_close     : int
+            can_create_jobs : bool
+            can_close_sheet : bool
+            lock_reason     : str or None
+            mins_to_close   : int
+            schedule        : dict of close timestamps
         """
         from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+        from datetime import datetime
 
-        now    = timezone.now()
-        today  = timezone.localdate()
+        now   = timezone.now()
+        today = timezone.localdate()
 
         # Sunday — always fully locked
         if today.weekday() == 6:
             return {
-                'can_create_jobs'  : False,
-                'can_close_sheet'  : False,
-                'lock_reason'      : 'Branch is closed on Sundays.',
-                'extension_active' : False,
-                'extension_reason' : None,
-                'mins_to_close'    : 0,
-                'schedule'         : {},
+                'can_create_jobs': False,
+                'can_close_sheet': False,
+                'lock_reason'    : 'Branch is closed on Sundays.',
+                'mins_to_close'  : 0,
+                'schedule'       : {},
             }
 
-        engine       = HRShiftEngine(self.branch)
-        att_schedule = engine.get_role_schedule('ATTENDANT',      target_date=today)
-        cash_schedule= engine.get_role_schedule('CASHIER',        target_date=today)
-        bm_schedule  = engine.get_role_schedule('BRANCH_MANAGER', target_date=today)
+        engine        = HRShiftEngine(self.branch)
+        att_schedule  = engine.get_role_schedule('ATTENDANT',      target_date=today)
+        cash_schedule = engine.get_role_schedule('CASHIER',        target_date=today)
+        bm_schedule   = engine.get_role_schedule('BRANCH_MANAGER', target_date=today)
 
-        from datetime import datetime
         attendant_lock_at = datetime.fromisoformat(att_schedule['job_lock_at'])
         cashier_lock_at   = datetime.fromisoformat(cash_schedule['job_lock_at'])
-        bm_autoclose_at   = datetime.fromisoformat(bm_schedule['autoclose_at']) if bm_schedule['autoclose_at'] else None
-        shift_end         = datetime.fromisoformat(bm_schedule['shift_end'])
-        warning_at        = shift_end - timedelta(minutes=30)
+        bm_autoclose_at   = (
+            datetime.fromisoformat(bm_schedule['autoclose_at'])
+            if bm_schedule.get('autoclose_at')
+            else None
+        )
+        shift_end  = datetime.fromisoformat(bm_schedule['shift_end'])
+        warning_at = shift_end - timedelta(minutes=self.WARNING_BEFORE_CLOSE)
 
         # Role-specific lock time
         role_lock_at = {
             'ATTENDANT'     : attendant_lock_at,
             'CASHIER'       : cashier_lock_at,
-            'BRANCH_MANAGER': bm_autoclose_at or attendant_lock_at,
+            'BRANCH_MANAGER': bm_autoclose_at or shift_end,
         }.get(role_name, attendant_lock_at)
 
-        can_create   = now < role_lock_at
-        can_close    = now >= shift_end
+        can_create    = now < role_lock_at
+        can_close     = now >= shift_end
         mins_to_close = int((role_lock_at - now).total_seconds() / 60)
 
         lock_reason = None
         if not can_create:
-            lock_reason = att_schedule.get('lock_reason') or (
-                f"Shift ended at {shift_end.strftime('%I:%M %p')}. No new jobs can be recorded."
+            lock_reason = (
+                f"Shift ended at {shift_end.strftime('%I:%M %p')}. "
+                f"No new jobs can be recorded."
             )
 
         return {
-            'can_create_jobs'  : can_create,
-            'can_close_sheet'  : can_close,
-            'lock_reason'      : lock_reason,
-            'extension_active' : False,
-            'extension_reason' : None,
-            'mins_to_close'    : mins_to_close,
-            'schedule'         : {
+            'can_create_jobs': can_create,
+            'can_close_sheet': can_close,
+            'lock_reason'    : lock_reason,
+            'mins_to_close'  : mins_to_close,
+            'schedule'       : {
                 'warning_at'        : warning_at.isoformat(),
                 'attendant_lock_at' : att_schedule['job_lock_at'],
                 'cashier_lock_at'   : cash_schedule['job_lock_at'],
-                'bm_autoclose_at'   : bm_schedule['autoclose_at'],
+                'bm_autoclose_at'   : bm_schedule.get('autoclose_at'),
                 'shift_end'         : bm_schedule['shift_end'],
             },
         }
-
-    def has_unsigned_floats(self, sheet) -> bool:
-        """
-        Check if any cashier floats for this sheet are unsigned.
-        Unsigned floats mean the cashier hasn't verified their cash count.
-        Auto-close must not proceed until all floats are signed off.
-        """
-        from apps.finance.models import CashierFloat
-        return CashierFloat.objects.filter(
-            daily_sheet=sheet,
-            is_signed_off=False,
-        ).exists()
-
-    def get_unsigned_float_count(self, sheet) -> int:
-        """Count of unsigned cashier floats on this sheet."""
-        from apps.finance.models import CashierFloat
-        return CashierFloat.objects.filter(
-            daily_sheet=sheet,
-            is_signed_off=False,
-        ).count()
-
-    def has_pending_payments(self, sheet) -> bool:
-        from apps.jobs.models import Job
-
-        return Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.PENDING_PAYMENT,
-            is_routed=False,
-            customer__credit_account__isnull=True,
-        ).exists()
-
-    def get_pending_payment_count(self, sheet) -> int:
-        """Count of non-carryover pending payment jobs on this sheet."""
-        from apps.jobs.models import Job
-
-        return Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.PENDING_PAYMENT,
-            is_routed=False,
-            customer__credit_account__isnull=True,
-        ).count()
-
-    @transaction.atomic
-    def close_sheet(
-        self,
-        sheet,
-        closed_by=None,
-        auto: bool = False,
-    ):
-        """
-        Close a daily sheet and freeze all totals.
-
-        Args:
-            sheet     : DailySalesSheet instance to close
-            closed_by : CustomUser closing the sheet — None if auto-close
-            auto      : True if triggered by the scheduled task
-
-        Returns:
-            DailySalesSheet with frozen totals
-
-        Raises:
-            ValueError : Sheet is already closed
-            ValueError : Attempted to close before closing_time (manual only)
-        """
-        from apps.finance.models import DailySalesSheet
-
-        if sheet.status != DailySalesSheet.Status.OPEN:
-            raise ValueError(
-                f"Sheet {sheet.pk} is already {sheet.status} — cannot close again."
-            )
-
-        # Manual close — enforce closing time
-        if not auto:
-            schedule = self.get_close_schedule()
-            now      = timezone.now()
-
-            if now < schedule['attendant_lock_at']:
-                mins_remaining = int(
-                    (schedule['attendant_lock_at'] - now).total_seconds() / 60
-                )
-                raise ValueError(
-                    f"Sheet cannot be closed until {self.branch.closing_time.strftime('%H:%M')}. "
-                    f"{mins_remaining} minute(s) remaining."
-                )
-
-        # Block auto-close if any cashier floats are unsigned
-        if auto and self.has_unsigned_floats(sheet):
-            count = self.get_unsigned_float_count(sheet)
-            logger.warning(
-                'SheetEngine: auto-close blocked for sheet %s — '
-                '%d cashier float(s) unsigned. BM notified.',
-                sheet.pk,
-                count,
-            )
-            self._notify_bm_unsigned_floats(sheet, count)
-            return sheet
-
-        # Block auto-close if non-carryover pending payments exist
-        if auto and self.has_pending_payments(sheet):
-            count = self.get_pending_payment_count(sheet)
-            logger.warning(
-                'SheetEngine: auto-close blocked for sheet %s — '
-                '%d pending payment(s) unresolved. BM notified.',
-                sheet.pk,
-                count,
-            )
-            self._notify_bm_pending_payments(sheet, count)
-            return sheet
-
-        # Freeze totals
-        self._snapshot_totals(sheet)
-
-        sheet.status    = (
-            DailySalesSheet.Status.AUTO_CLOSED
-            if auto
-            else DailySalesSheet.Status.CLOSED
-        )
-        sheet.closed_by = closed_by
-        sheet.closed_at = timezone.now()
-        sheet.save()
-
-        # Alert HQ if auto-closed — BM failed to close manually
-        if auto:
-            self._notify_hq_auto_close(sheet)
-
-        logger.info(
-            'SheetEngine: sheet %s closed — %s',
-            sheet.pk,
-            sheet.status,
-        )
-
-        return sheet
-
-    # ── Totals snapshot ───────────────────────────────────────────
-
-    def _snapshot_totals(self, sheet) -> None:
-        """
-        Compute and freeze all financial totals on the sheet.
-        Called once at close — never called again.
-        """
-        from apps.jobs.models import Job
-        from apps.finance.models import PettyCash, CreditPayment
-
-        jobs = Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.COMPLETE,
-        )
-
-        total_jobs        = jobs.count()
-        total_cash        = self._sum(jobs, 'CASH')
-        total_momo        = self._sum(jobs, 'MOMO')
-        total_pos         = self._sum(jobs, 'POS')
-        total_credit      = self._sum(jobs, 'CREDIT')
-        total_fresh       = self._sum_fresh(jobs)
-        total_deposits    = self._sum_deposits(jobs)
-        total_balances    = self._sum_balance_collections(sheet)
-        total_refunds     = self._sum_refunds(sheet)
-        total_damages     = self._sum_damages(sheet)
-        total_petty       = self._sum_petty_cash(sheet)
-        total_credit_sett = self._sum_credit_settlements(sheet)
-
-        net_cash = total_cash - total_refunds - total_petty
-
-        sheet.total_jobs_created   = total_jobs
-        sheet.total_fresh_revenue  = total_fresh
-        sheet.total_deposits       = total_deposits
-        sheet.total_balances       = total_balances
-        sheet.total_cash           = total_cash
-        sheet.total_momo           = total_momo
-        sheet.total_pos            = total_pos
-        sheet.total_credit_issued  = total_credit
-        sheet.total_refunds        = total_refunds
-        sheet.total_damages        = total_damages
-        sheet.total_petty_cash_out = total_petty
-        sheet.net_cash_in_till     = net_cash
-        sheet.save(update_fields=[
-            'total_jobs_created', 'total_fresh_revenue',
-            'total_deposits', 'total_balances',
-            'total_cash', 'total_momo', 'total_pos',
-            'total_credit_issued', 'total_credit_settled', 'total_refunds',
-            'total_damages', 'total_petty_cash_out',
-            'net_cash_in_till',
-        ])
-
-    def _sum(self, jobs, method: str):
-        from django.db.models import Sum
-        result = jobs.filter(payment_method=method).aggregate(
-            total=Sum('amount_paid')
-        )['total']
-        return result or 0
-
-    def _sum_fresh(self, jobs):
-        """Jobs that had no prior deposit — full payment in one go."""
-        from django.db.models import Sum
-        result = jobs.filter(deposit_percentage=100).aggregate(
-            total=Sum('amount_paid')
-        )['total']
-        return result or 0
-
-    def _sum_deposits(self, jobs):
-        """Jobs where only a deposit was collected."""
-        from django.db.models import Sum
-        result = jobs.filter(deposit_percentage=70).aggregate(
-            total=Sum('amount_paid')
-        )['total']
-        return result or 0
-
-    def _sum_balance_collections(self, sheet):
-        """
-        Cash collected today as balance payments on prior-day jobs.
-        These are jobs NOT on today's sheet but paid today.
-        """
-        from apps.jobs.models import Job
-        from django.db.models import Sum
-        result = Job.objects.filter(
-            branch=sheet.branch,
-            status=Job.COMPLETE,
-            updated_at__date=sheet.date,
-        ).exclude(
-            daily_sheet=sheet,
-        ).aggregate(
-            total=Sum('amount_paid')
-        )['total']
-        return result or 0
-
-    def _sum_refunds(self, sheet):
-        from apps.jobs.models import Job
-        from django.db.models import Sum
-        result = Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.CANCELLED,
-            amount_paid__isnull=False,
-        ).aggregate(
-            total=Sum('amount_paid')
-        )['total']
-        return result or 0
-
-    def _sum_damages(self, sheet):
-        from apps.jobs.models import Job
-        from django.db.models import Sum
-        result = Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.CANCELLED,
-            cancellation_fee__isnull=False,
-        ).aggregate(
-            total=Sum('cancellation_fee')
-        )['total']
-        return result or 0
-
-    def _sum_petty_cash(self, sheet):
-        from apps.finance.models import PettyCash
-        from django.db.models import Sum
-        result = PettyCash.objects.filter(
-            daily_sheet=sheet,
-        ).aggregate(
-            total=Sum('amount')
-        )['total']
-        return result or 0
-
-    def _sum_credit_settlements(self, sheet):
-        from apps.finance.models import CreditPayment
-        from django.db.models import Sum
-        result = CreditPayment.objects.filter(
-            daily_sheet=sheet,
-        ).aggregate(
-            total=Sum('amount')
-        )['total']
-        return result or 0
-
-    # ── Notifications ─────────────────────────────────────────────
-
-    def _notify_bm_unsigned_floats(self, sheet, count: int) -> None:
-        """
-        Notify the BM that auto-close was blocked because cashier
-        float(s) have not been signed off.
-        """
-        try:
-            from apps.notifications.services import notify
-            from apps.accounts.models import CustomUser
-
-            bm = CustomUser.objects.filter(
-                branch=self.branch,
-                role__name='BRANCH_MANAGER',
-                is_active=True,
-            ).first()
-
-            if bm:
-                notify(
-                    recipient=bm,
-                    verb='SHEET_CLOSE_BLOCKED',
-                    message=(
-                        f"Sheet cannot auto-close — {count} cashier float(s) "
-                        f"have not been signed off. Cashier must complete their "
-                        f"end-of-day count before the sheet can close."
-                    ),
-                    link='/portal/finance/sheet/',
-                )
-        except Exception:
-            logger.exception(
-                'SheetEngine: failed to notify BM of unsigned floats for sheet %s',
-                sheet.pk,
-            )
-
-
-    def _notify_bm_pending_payments(self, sheet, count: int) -> None:
-        try:
-            from apps.notifications.services import notify
-            from apps.accounts.models import CustomUser
-
-            bm = CustomUser.objects.filter(
-                branch=self.branch,
-                role__name='BRANCH_MANAGER',
-                is_active=True,
-            ).first()
-
-            if bm:
-                notify(
-                    recipient=bm,
-                    verb='SHEET_CLOSE_BLOCKED',
-                    message=(
-                        f"{count} job(s) still pending payment on today's sheet. "
-                        f"Resolve before the sheet can close."
-                    ),
-                    link='/portal/jobs/?status=PENDING_PAYMENT',
-                )
-        except Exception:
-            logger.exception(
-                'SheetEngine: failed to notify BM for sheet %s', sheet.pk
-            )
-
-    def _notify_hq_auto_close(self, sheet) -> None:
-        """
-        Red alert to HQ when a sheet is auto-closed.
-        Means the BM failed to close the sheet manually by 8:30pm.
-        HQ recipients are determined by role — to be wired once HQ
-        role is defined in the accounts app.
-        """
-        try:
-            logger.warning(
-                'SheetEngine: sheet %s for branch %s was AUTO-CLOSED — '
-                'BM did not close manually. HQ alert pending role definition.',
-                sheet.pk,
-                self.branch.code,
-            )
-            # TODO: wire to HQ role once defined
-            # from apps.notifications.services import notify_many
-            # from apps.accounts.models import CustomUser
-            # hq_users = CustomUser.objects.filter(role__name='HQ_ADMIN', is_active=True)
-            # notify_many(
-            #     recipients=hq_users,
-            #     verb='SHEET_AUTO_CLOSED',
-            #     message=(
-            #         f"ALERT: {self.branch.name} sheet was auto-closed at 8:30pm. "
-            #         f"Branch Manager did not file EOD. Summoned for questioning."
-            #     ),
-            #     link=f'/portal/finance/sheets/{sheet.pk}/',
-            # )
-        except Exception:
-            logger.exception(
-                'SheetEngine: failed to send HQ auto-close alert for sheet %s', sheet.pk
-            )
-
-    # ── Carry forward ─────────────────────────────────────────────
-
-    @transaction.atomic
-    def carry_forward_pending_jobs(self, sheet) -> int:
-        """
-        At hard lock (closing_time + CASHIER_LOCK_AFTER), mark all
-        remaining PENDING_PAYMENT jobs as carried forward to next sheet.
-        Returns count of jobs carried forward.
-        """
-        from apps.jobs.models import Job
-
-        pending_jobs = Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.PENDING_PAYMENT,
-        )
-
-        count = pending_jobs.count()
-        if count:
-            pending_jobs.update(carried_forward=True)
-            logger.info(
-                'SheetEngine: %d job(s) carried forward from sheet %s',
-                count,
-                sheet.pk,
-            )
-            self._notify_bm_pending_payments(sheet, count)
-
-        return count
 
     def get_close_schedule(self) -> dict:
         """
@@ -673,7 +240,11 @@ class SheetEngine:
 
         shift_end    = datetime.fromisoformat(bm_schedule['shift_end'])
         warning_at   = shift_end - timedelta(minutes=self.WARNING_BEFORE_CLOSE)
-        autoclose_at = datetime.fromisoformat(bm_schedule['autoclose_at']) if bm_schedule['autoclose_at'] else shift_end + timedelta(minutes=60)
+        autoclose_at = (
+            datetime.fromisoformat(bm_schedule['autoclose_at'])
+            if bm_schedule.get('autoclose_at')
+            else shift_end + timedelta(minutes=60)
+        )
 
         return {
             'warning_at'       : warning_at,
@@ -682,94 +253,314 @@ class SheetEngine:
             'bm_autoclose_at'  : autoclose_at,
             'shift_end'        : shift_end,
         }
-    
-    
-    # ── Lock status ───────────────────────────────────────────────
 
-    def get_branch_lock_status(self, sheet=None) -> dict:
+    # ── Float helpers (delegate to FloatEngine) ───────────────────────────────
+
+    def has_unsigned_floats(self, sheet) -> bool:
+        from apps.finance.float_engine import FloatEngine
+        result = FloatEngine.validate_signoff_gate(sheet)
+        return not result['passed']
+
+    def get_unsigned_float_count(self, sheet) -> int:
+        from apps.finance.models import CashierFloat
+        return CashierFloat.objects.filter(
+            daily_sheet   = sheet,
+            is_signed_off = False,
+        ).count()
+
+    def has_pending_payments(self, sheet) -> bool:
+        from apps.jobs.models import Job
+        return Job.objects.filter(
+            daily_sheet  = sheet,
+            status       = Job.PENDING_PAYMENT,
+            job_type     = 'INSTANT',
+            is_routed    = False,
+            customer__credit_account__isnull = True,
+        ).exists()
+
+    def get_pending_payment_count(self, sheet) -> int:
+        from apps.jobs.models import Job
+        return Job.objects.filter(
+            daily_sheet  = sheet,
+            status       = Job.PENDING_PAYMENT,
+            job_type     = 'INSTANT',
+            is_routed    = False,
+            customer__credit_account__isnull = True,
+        ).count()
+
+    # ── Close ─────────────────────────────────────────────────────────────────
+
+    @transaction.atomic
+    def close_sheet(self, sheet, closed_by=None, auto: bool = False):
         """
-        Returns the current lock state for the branch.
-        Used by the frontend to show/hide the New Job button.
+        Close a daily sheet and freeze all totals.
 
         Args:
-            sheet : Today's DailySalesSheet — required for extension check.
-                    If None, extension logic is skipped.
+            sheet     : DailySalesSheet instance to close
+            closed_by : CustomUser closing the sheet — None if auto-close
+            auto      : True if triggered by the scheduled task
 
-        Returns dict with:
-            can_create_jobs   : bool
-            can_close_sheet   : bool
-            lock_reason       : str or None
-            extension_active  : bool
-            extension_reason  : str or None
-            schedule          : dict of close timestamps
-            mins_to_close     : int (negative if past closing time)
+        Returns:
+            DailySalesSheet with frozen totals
+
+        Raises:
+            ValueError : Sheet is already closed
+            ValueError : Attempted manual close before attendant_lock_at
         """
-        now      = timezone.now()
-        today    = timezone.localdate()
-        schedule = self.get_close_schedule()
+        from apps.finance.models import DailySalesSheet
 
-        # Sunday — always fully locked
-        if today.weekday() == 6:
-            return {
-                'can_create_jobs'  : False,
-                'can_close_sheet'  : False,
-                'lock_reason'      : 'Branch is closed on Sundays.',
-                'extension_active' : False,
-                'extension_reason' : None,
-                'mins_to_close'    : 0,
-                'schedule'         : {},
-            }
+        if sheet.status != DailySalesSheet.Status.OPEN:
+            raise ValueError(
+                f"Sheet {sheet.pk} is already {sheet.status} — cannot close again."
+            )
 
-        # Evaluate payment extension for cashier lock
-        extension_active = False
-        extension_reason = None
-        cashier_lock_at  = schedule['cashier_lock_at']
+        # Manual close — enforce timing
+        if not auto:
+            schedule = self.get_close_schedule()
+            now      = timezone.now()
 
-        if sheet is not None:
-            pending_count = self.get_pending_payment_count(sheet)
-            if pending_count >= self.PENDING_EXTENSION_THRESHOLD:
-                cashier_lock_at  = cashier_lock_at + timedelta(minutes=self.PAYMENT_EXTENSION)
-                extension_active = True
-                extension_reason = (
-                    f"{pending_count} payment(s) still in queue — "
-                    f"cashier close extended by {self.PAYMENT_EXTENSION} minutes to "
-                    f"{cashier_lock_at.strftime('%H:%M')}."
+            if now < schedule['attendant_lock_at']:
+                mins_remaining = int(
+                    (schedule['attendant_lock_at'] - now).total_seconds() / 60
+                )
+                raise ValueError(
+                    f"Sheet cannot be closed yet. "
+                    f"{mins_remaining} minute(s) remaining until lock."
                 )
 
-        mins_to_close = int(
-            (schedule['attendant_lock_at'] - now).total_seconds() / 60
+        # Auto-close: block if unsigned floats exist
+        if auto and self.has_unsigned_floats(sheet):
+            count = self.get_unsigned_float_count(sheet)
+            logger.warning(
+                'SheetEngine: auto-close blocked for sheet %s — '
+                '%d float(s) unsigned.',
+                sheet.pk, count,
+            )
+            self._notify_bm_unsigned_floats(sheet, count)
+            return sheet
+
+        # Auto-close: block if pending instant payments exist
+        if auto and self.has_pending_payments(sheet):
+            count = self.get_pending_payment_count(sheet)
+            logger.warning(
+                'SheetEngine: auto-close blocked for sheet %s — '
+                '%d pending payment(s).',
+                sheet.pk, count,
+            )
+            self._notify_bm_pending_payments(sheet, count)
+            return sheet
+
+        # Freeze totals
+        self._snapshot_totals(sheet)
+
+        sheet.status    = (
+            DailySalesSheet.Status.AUTO_CLOSED if auto
+            else DailySalesSheet.Status.CLOSED
+        )
+        sheet.closed_by = closed_by
+        sheet.closed_at = timezone.now()
+        sheet.save()
+
+        if auto:
+            self._notify_auto_close(sheet)
+
+        logger.info('SheetEngine: sheet %s closed — %s', sheet.pk, sheet.status)
+        return sheet
+
+    # ── Totals snapshot ───────────────────────────────────────────────────────
+
+    def _snapshot_totals(self, sheet) -> None:
+        """
+        Compute and freeze all financial totals on the sheet.
+        Called once at close — never called again.
+
+        Revenue source: always amount_paid on Receipt, never estimated_cost.
+        """
+        from apps.finance.models import Receipt, PettyCash, CreditPayment
+        from django.db.models import Sum
+
+        receipts = Receipt.objects.filter(
+            daily_sheet = sheet,
+            is_void     = False,
         )
 
-        can_create = now < schedule['attendant_lock_at']
-        can_close  = now >= schedule['attendant_lock_at']
+        total_cash = receipts.filter(
+            payment_method='CASH'
+        ).aggregate(t=Sum('amount_paid'))['t'] or 0
 
-        lock_reason = None
-        if not can_create:
-            if mins_to_close > 0:
-                lock_reason = f"Branch closes in {mins_to_close} minute(s)."
-            else:
-                lock_reason = (
-                    f"Branch closed at {self.branch.closing_time.strftime('%H:%M')}. "
-                    f"No new jobs can be recorded."
+        total_momo = receipts.filter(
+            payment_method='MOMO'
+        ).aggregate(t=Sum('amount_paid'))['t'] or 0
+
+        total_pos = receipts.filter(
+            payment_method='POS'
+        ).aggregate(t=Sum('amount_paid'))['t'] or 0
+
+        total_credit_issued = receipts.filter(
+            payment_method='CREDIT'
+        ).aggregate(t=Sum('amount_paid'))['t'] or 0
+
+        total_petty = PettyCash.objects.filter(
+            daily_sheet=sheet,
+        ).aggregate(t=Sum('amount'))['t'] or 0
+
+        total_credit_settled = CreditPayment.objects.filter(
+            daily_sheet=sheet,
+        ).aggregate(t=Sum('amount'))['t'] or 0
+
+        from apps.jobs.models import Job
+        total_jobs = Job.objects.filter(
+            daily_sheet = sheet,
+            status      = Job.COMPLETE,
+        ).count()
+
+        net_cash = total_cash - total_petty
+
+        sheet.total_jobs_created  = total_jobs
+        sheet.total_cash          = total_cash
+        sheet.total_momo          = total_momo
+        sheet.total_pos           = total_pos
+        sheet.total_credit_issued = total_credit_issued
+        sheet.total_credit_settled = total_credit_settled  # FIX: was silently dropped
+        sheet.total_petty_cash_out = total_petty
+        sheet.net_cash_in_till    = net_cash
+
+        sheet.save(update_fields=[
+            'total_jobs_created',
+            'total_cash',
+            'total_momo',
+            'total_pos',
+            'total_credit_issued',
+            'total_credit_settled',
+            'total_petty_cash_out',
+            'net_cash_in_till',
+        ])
+
+    # ── Carry forward ─────────────────────────────────────────────────────────
+
+    @transaction.atomic
+    def carry_forward_pending_jobs(self, sheet) -> int:
+        """
+        Mark all remaining PENDING_PAYMENT instant jobs as carried forward.
+        Called at hard lock time by Celery task.
+        Returns count of jobs carried forward.
+        """
+        from apps.jobs.models import Job
+
+        pending = Job.objects.filter(
+            daily_sheet = sheet,
+            status      = Job.PENDING_PAYMENT,
+            job_type    = 'INSTANT',
+        )
+
+        count = pending.count()
+        if count:
+            pending.update(carried_forward=True)
+            logger.info(
+                'SheetEngine: %d instant job(s) carried forward from sheet %s',
+                count, sheet.pk,
+            )
+            self._notify_bm_pending_payments(sheet, count)
+
+        return count
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+
+    def _notify_bm_unsigned_floats(self, sheet, count: int) -> None:
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            bm = CustomUser.objects.filter(
+                branch     = self.branch,
+                role__name = 'BRANCH_MANAGER',
+                is_active  = True,
+            ).first()
+
+            if bm:
+                notify(
+                    recipient = bm,
+                    verb      = 'SHEET_CLOSE_BLOCKED',
+                    message   = (
+                        f"Auto-close blocked — {count} cashier float(s) not signed off. "
+                        f"Cashier must complete EOD count before the sheet can close."
+                    ),
+                    link = '/portal/dashboard/',
                 )
+        except Exception:
+            logger.exception(
+                'SheetEngine: failed to notify BM of unsigned floats for sheet %s',
+                sheet.pk,
+            )
 
-        return {
-            'can_create_jobs'  : can_create,
-            'can_close_sheet'  : can_close,
-            'lock_reason'      : lock_reason,
-            'extension_active' : extension_active,
-            'extension_reason' : extension_reason,
-            'mins_to_close'    : mins_to_close,
-            'schedule'         : {
-                'warning_at'        : schedule['warning_at'].isoformat(),
-                'attendant_lock_at' : schedule['attendant_lock_at'].isoformat(),
-                'cashier_lock_at'   : cashier_lock_at.isoformat(),
-                'bm_autoclose_at'   : schedule['bm_autoclose_at'].isoformat(),
-                'closing_time'      : self.branch.closing_time.strftime('%H:%M'),
-            },
-        }
+    def _notify_bm_pending_payments(self, sheet, count: int) -> None:
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
 
-    # ── Class-level convenience ───────────────────────────────────
+            bm = CustomUser.objects.filter(
+                branch     = self.branch,
+                role__name = 'BRANCH_MANAGER',
+                is_active  = True,
+            ).first()
+
+            if bm:
+                notify(
+                    recipient = bm,
+                    verb      = 'SHEET_CLOSE_BLOCKED',
+                    message   = (
+                        f"{count} instant job(s) still pending payment. "
+                        f"Resolve or carry forward before sheet can close."
+                    ),
+                    link = '/portal/dashboard/?tab=jobs&status=PENDING_PAYMENT',
+                )
+        except Exception:
+            logger.exception(
+                'SheetEngine: failed to notify BM pending payments for sheet %s',
+                sheet.pk,
+            )
+
+    def _notify_auto_close(self, sheet) -> None:
+        """
+        Alert RM when a sheet is auto-closed.
+        Auto-close means BM failed to close manually — CRITICAL risk signal.
+        HQ portal notification when HQ role is defined.
+        """
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            region = getattr(self.branch, 'region', None)
+            if region:
+                rm_users = CustomUser.objects.filter(
+                    region     = region,
+                    role__name = 'REGIONAL_MANAGER',
+                    is_active  = True,
+                )
+                for rm in rm_users:
+                    notify(
+                        recipient = rm,
+                        verb      = 'SHEET_AUTO_CLOSED',
+                        message   = (
+                            f"ALERT: {self.branch.name} sheet for "
+                            f"{sheet.date} was auto-closed. "
+                            f"Branch Manager did not close manually. "
+                            f"Immediate follow-up required."
+                        ),
+                        link = '/portal/regional/',
+                    )
+
+            logger.warning(
+                'SheetEngine: sheet %s for branch %s AUTO-CLOSED.',
+                sheet.pk, self.branch.code,
+            )
+        except Exception:
+            logger.exception(
+                'SheetEngine: failed to send auto-close alert for sheet %s',
+                sheet.pk,
+            )
+
+    # ── Class-level convenience ───────────────────────────────────────────────
 
     @classmethod
     def open_for_branch(cls, branch, **kwargs):

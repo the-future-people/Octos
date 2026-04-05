@@ -36,6 +36,12 @@ const Cashier = (() => {
     await loadQueue();
     _startPolling();
     _startShiftPolling();
+    _startShiftPolling();
+    // Set date immediately without waiting for shift poll
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    });
     WeekGreeter.init();
     if (typeof CashierNotif !== 'undefined') CashierNotif.startPolling();
   }
@@ -132,6 +138,39 @@ const Cashier = (() => {
 
   function _renderQueuePane(container) {
     container.innerHTML = `
+      <div class="cashier-info-strip" id="cashier-info-strip">
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Sheet</span>
+          <span class="cashier-info-val" id="cs-sheet">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Date</span>
+          <span class="cashier-info-val" id="cs-date">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Shift ends</span>
+          <span class="cashier-info-val" id="cs-shift-end">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <span class="cashier-info-key">Opening float</span>
+          <span class="cashier-info-val" id="cs-float">—</span>
+        </div>
+        <div class="cashier-info-divider"></div>
+        <div class="cashier-info-item">
+          <div class="cashier-stars">
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-filled">★</span>
+            <span class="cashier-star-empty">★</span>
+          </div>
+          <div class="cashier-rating-label">Performance rating coming soon</div>
+        </div>
+      </div>
+
       <div class="summary-strip">
         <div class="summary-card cash">
           <div class="summary-label">Cash</div>
@@ -176,6 +215,15 @@ const Cashier = (() => {
           <div class="skel" style="width:110px;height:34px;border-radius:8px;"></div>
         </div>
       </div>`;
+
+    // Re-populate info strip from cached shift status
+    if (_shiftStatus) _renderInfoStrip(_shiftStatus);
+
+    // Re-populate date immediately
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    });
   }
 
   // ── Queue ──────────────────────────────────────────────────
@@ -783,6 +831,7 @@ const Cashier = (() => {
   let _shiftStatus    = null;
   let _signOffStep    = 1;
   let _signOffFloatId = null;
+  let _wizardCache    = {};
   const SHIFT_POLL_MS = 60000;
 
   function _startShiftPolling() {
@@ -795,129 +844,101 @@ const Cashier = (() => {
       const res = await Auth.fetch('/api/v1/finance/cashier/shift-status/');
       if (!res.ok) return;
       _shiftStatus = await res.json();
+      _renderInfoStrip(_shiftStatus);
       _handleShiftStatus(_shiftStatus);
     } catch { /* silent */ }
   }
 
-  function _handleShiftStatus(s) {
-    if (!s.has_shift) return;
-
-    _signOffFloatId = s.float_id;
-
-    if (s.is_signed_off) {
-      _lockQueue('Your shift has ended. You have signed off.');
-      return;
+  // ── Info strip ─────────────────────────────────────────
+  function _renderInfoStrip(s) {
+    // Date
+    const dateEl = document.getElementById('cs-date');
+    if (dateEl) {
+      dateEl.textContent = new Date().toLocaleDateString('en-GB', {
+        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+      });
     }
-    if (s.should_lock) {
-          _lockQueue('Your shift has ended. Please complete sign-off.');
-          openSignOffWizard(false);
-          return;
-        }
-    if (s.should_prompt) {
-      _showSignOffBanner(s.minutes_remaining, s.shift_end);
+
+    // Sheet number
+    const sheetEl = document.getElementById('cs-sheet');
+    if (sheetEl) {
+      sheetEl.textContent = s.sheet_id ? `#${s.sheet_id}` : '—';
+    }
+
+    // Opening float
+    const floatEl = document.getElementById('cs-float');
+    if (floatEl) {
+      floatEl.textContent = s.opening_float
+        ? `GHS ${parseFloat(s.opening_float).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`
+        : '—';
+    }
+
+    // Shift end + remaining pill
+    const shiftEndEl = document.getElementById('cs-shift-end');
+    if (shiftEndEl && s.shift_end) {
+      const endTime = _fmtTime(s.shift_end);
+      let pillHtml  = '';
+
+      if (s.minutes_remaining != null && s.minutes_remaining > 0) {
+        const hrs  = Math.floor(s.minutes_remaining / 60);
+        const mins = s.minutes_remaining % 60;
+        const label = hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
+        const cls   = s.minutes_remaining <= 15 ? 'urgent'
+                    : s.minutes_remaining <= 60  ? 'warn'
+                    : '';
+        pillHtml = `<span class="cashier-shift-pill ${cls}">${label}</span>`;
+      }
+
+      shiftEndEl.innerHTML = `${_esc(endTime)}${pillHtml ? ' ' + pillHtml : ''}`;
+    } else if (shiftEndEl) {
+      shiftEndEl.textContent = '—';
     }
   }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BLOCK 1: Replace _handleShiftStatus with this version
-// Find: function _handleShiftStatus(s) {
-// Replace the entire function body
-// ─────────────────────────────────────────────────────────────────────────────
-
-  function _handleShiftStatus(s) {
+   function _handleShiftStatus(s) {
     if (!s.has_shift) return;
-
+ 
     _signOffFloatId = s.float_id;
-
+ 
     // ── Hard block: no float set for today ─────────────────
     if (s.float_status === 'NO_FLOAT') {
       _showNoFloatScreen();
       return;
     }
-
+ 
     // ── Hard block: float staged, awaiting acknowledgement ──
     if (s.float_status === 'PENDING_ACK') {
       _showFloatAckScreen(s.float_id, parseFloat(s.opening_float || 0));
       return;
     }
-
+ 
     // ── Already signed off ─────────────────────────────────
     if (s.float_status === 'SIGNED_OFF' || s.is_signed_off) {
       _lockQueue('Your shift has ended. You have signed off.');
       return;
     }
-
+ 
     // ── Shift ended, pending sign-off ──────────────────────
     if (s.float_status === 'PENDING_SIGNOFF' || s.should_lock) {
       _lockQueue('Your shift has ended. Please complete sign-off.');
       openSignOffWizard(false);
       return;
     }
-
+ 
     // ── End of shift warning ───────────────────────────────
     if (s.should_prompt) {
       _showSignOffBanner(s.minutes_remaining, s.shift_end);
     }
   }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BLOCK 2: Add these two new functions after _handleShiftStatus
-// Insert after the closing brace of _handleShiftStatus
-// ─────────────────────────────────────────────────────────────────────────────
-
-  // ── No float screen ────────────────────────────────────────
-  function _showNoFloatScreen() {
-    if (document.getElementById('float-block-overlay')) return;
-
-    const overlay = document.createElement('div');
-    overlay.id    = 'float-block-overlay';
-    overlay.style.cssText = `
-      position:fixed;inset:0;z-index:9999;
-      background:var(--bg);
-      display:flex;flex-direction:column;align-items:center;justify-content:center;
-      gap:16px;font-family:'DM Sans',sans-serif;padding:24px;text-align:center;`;
-
-    overlay.innerHTML = `
-      <div style="width:64px;height:64px;border-radius:50%;
-        background:var(--amber-bg);border:2px solid var(--amber-border);
-        display:flex;align-items:center;justify-content:center;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
-          viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-      </div>
-      <div style="font-family:'Syne',sans-serif;font-size:22px;
-        font-weight:800;color:var(--text);">No Float Set</div>
-      <div style="font-size:14px;color:var(--text-3);max-width:360px;line-height:1.6;">
-        Your opening float for today has not been set by the Branch Manager.
-        You cannot process payments until your float is confirmed.
-      </div>
-      <div style="font-size:13px;color:var(--text-3);">
-        Please contact your Branch Manager to set your float before starting.
-      </div>
-      <button onclick="Auth.logout()"
-        style="margin-top:8px;padding:10px 28px;background:none;
-          border:1px solid var(--border);border-radius:var(--radius-sm);
-          font-size:13px;font-weight:600;cursor:pointer;color:var(--text-2);
-          font-family:inherit;">
-        Sign Out
-      </button>`;
-
-    document.body.appendChild(overlay);
-  }
-
-  // ── Float acknowledgement screen ───────────────────────────
+// ── Float acknowledgement screen ───────────────────────────
   function _showFloatAckScreen(floatId, openingFloat) {
     if (document.getElementById('float-ack-overlay')) return;
-
+ 
     const DENOMS = [1, 2, 5, 10, 20, 50, 100, 200];
     const counts = {};
     DENOMS.forEach(d => counts[d] = 0);
-
+ 
     const overlay = document.createElement('div');
     overlay.id    = 'float-ack-overlay';
     overlay.style.cssText = `
@@ -925,13 +946,13 @@ const Cashier = (() => {
       background:var(--bg);
       display:flex;align-items:center;justify-content:center;
       font-family:'DM Sans',sans-serif;padding:16px;`;
-
+ 
     overlay.innerHTML = `
       <div style="background:var(--panel);border:1px solid var(--border);
         border-radius:var(--radius);width:100%;max-width:480px;
         max-height:92vh;overflow-y:auto;
         box-shadow:0 20px 60px rgba(0,0,0,0.15);">
-
+ 
         <!-- Header -->
         <div style="padding:20px 24px 0;">
           <div style="font-family:'Syne',sans-serif;font-size:19px;
@@ -943,7 +964,7 @@ const Cashier = (() => {
             Your total must match the staged amount exactly.
           </div>
         </div>
-
+ 
         <!-- Expected amount -->
         <div style="margin:16px 24px 0;padding:12px 16px;
           background:var(--bg);border:1px solid var(--border);
@@ -955,13 +976,13 @@ const Cashier = (() => {
             GHS ${openingFloat.toLocaleString('en-GH', { minimumFractionDigits: 2 })}
           </span>
         </div>
-
+ 
         <!-- Denomination table -->
         <div style="padding:16px 24px 0;">
           <div style="display:grid;grid-template-columns:1fr auto auto auto;
             gap:0;border:1px solid var(--border);border-radius:var(--radius-sm);
             overflow:hidden;">
-
+ 
             <!-- Header row -->
             <div style="padding:8px 12px;background:var(--bg);
               font-size:10px;font-weight:700;color:var(--text-3);
@@ -976,7 +997,7 @@ const Cashier = (() => {
               text-transform:uppercase;letter-spacing:0.5px;
               border-bottom:1px solid var(--border);
               text-align:right;grid-column:3/5;">Subtotal</div>
-
+ 
             ${DENOMS.map(d => `
               <!-- GHS ${d} row -->
               <div style="padding:10px 12px;border-bottom:1px solid var(--border);
@@ -1009,10 +1030,10 @@ const Cashier = (() => {
                   color:var(--text-3);text-align:right;
                   grid-column:3/5;">GHS 0.00</div>
             `).join('')}
-
+ 
           </div>
         </div>
-
+ 
         <!-- Running total + mismatch indicator -->
         <div style="padding:14px 24px 0;">
           <div style="padding:14px 16px;border-radius:var(--radius-sm);
@@ -1032,7 +1053,7 @@ const Cashier = (() => {
             </div>
           </div>
         </div>
-
+ 
         <!-- Confirm button -->
         <div style="padding:16px 24px 20px;">
           <button id="float-ack-btn"
@@ -1052,27 +1073,27 @@ const Cashier = (() => {
             </button>
           </div>
         </div>
-
+ 
       </div>`;
-
+ 
     document.body.appendChild(overlay);
-
+ 
     // Store counts on window so button handlers can access
     window._floatDenomCounts = {};
     DENOMS.forEach(d => window._floatDenomCounts[d] = 0);
     window._floatExpected = openingFloat;
   }
-
+ 
   function _floatDenomChange(denom, delta) {
     if (!window._floatDenomCounts) return;
     const current = window._floatDenomCounts[denom] || 0;
     const next    = Math.max(0, current + delta);
     window._floatDenomCounts[denom] = next;
-
+ 
     // Update count display
     const countEl = document.getElementById(`float-count-${denom}`);
     if (countEl) countEl.textContent = next;
-
+ 
     // Update subtotal
     const subEl = document.getElementById(`float-sub-${denom}`);
     const sub   = denom * next;
@@ -1080,26 +1101,26 @@ const Cashier = (() => {
       subEl.textContent = `GHS ${sub.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
       subEl.style.color = next > 0 ? 'var(--text)' : 'var(--text-3)';
     }
-
+ 
     // Update running total
     const total    = Object.entries(window._floatDenomCounts)
       .reduce((sum, [d, c]) => sum + parseInt(d) * c, 0);
     const expected = window._floatExpected || 0;
     const diff     = total - expected;
     const fmt      = n => `GHS ${n.toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
-
+ 
     const totalEl = document.getElementById('float-running-total');
     const diffEl  = document.getElementById('float-diff-label');
     const rowEl   = document.getElementById('float-total-row');
     const btnEl   = document.getElementById('float-ack-btn');
-
+ 
     if (totalEl) {
       totalEl.textContent = fmt(total);
       totalEl.style.color = diff === 0
         ? 'var(--green-text)'
         : diff > 0 ? 'var(--amber-text)' : 'var(--red-text)';
     }
-
+ 
     if (rowEl) {
       rowEl.style.borderColor = diff === 0
         ? 'var(--green-border)'
@@ -1108,7 +1129,7 @@ const Cashier = (() => {
         ? 'var(--green-bg)'
         : diff > 0 ? 'var(--amber-bg)' : 'var(--red-bg)';
     }
-
+ 
     if (diffEl) {
       if (diff === 0) {
         diffEl.textContent = '✓ Matches expected amount';
@@ -1121,24 +1142,24 @@ const Cashier = (() => {
         diffEl.style.color = 'var(--red-text)';
       }
     }
-
+ 
     if (btnEl) {
       const match       = Math.abs(diff) < 0.001;
       btnEl.disabled    = !match;
       btnEl.style.opacity = match ? '1' : '0.4';
     }
   }
-
+ 
   async function _submitFloatAck(floatId, expectedAmount) {
     const btn = document.getElementById('float-ack-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
-
+ 
     // Build breakdown from window._floatDenomCounts
     const breakdown = {};
     Object.entries(window._floatDenomCounts || {}).forEach(([d, c]) => {
       breakdown[d] = c;
     });
-
+ 
     // Final validation
     const total = CashierFloat_denominationTotal(breakdown);
     if (Math.abs(total - expectedAmount) > 0.001) {
@@ -1146,7 +1167,7 @@ const Cashier = (() => {
       if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
       return;
     }
-
+ 
     try {
       const res = await Auth.fetch(
         `/api/v1/finance/floats/${floatId}/acknowledge/`, {
@@ -1155,34 +1176,34 @@ const Cashier = (() => {
           body   : JSON.stringify({ breakdown }),
         }
       );
-
+ 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         _toast(err.detail || 'Acknowledgement failed.', 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
         return;
       }
-
+ 
       // Remove overlay and start the session
       document.getElementById('float-ack-overlay')?.remove();
       window._floatDenomCounts = null;
       _toast(`Float of GHS ${expectedAmount.toFixed(2)} confirmed. Have a great shift!`, 'success');
-
+ 
       // Re-poll shift status to update state
       await _pollShiftStatus();
-
+ 
     } catch {
       _toast('Network error. Please try again.', 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Confirm Float Receipt'; }
     }
   }
-
+ 
   // Helper — mirrors backend denomination_total classmethod
   function CashierFloat_denominationTotal(breakdown) {
     return Object.entries(breakdown || {})
       .reduce((sum, [d, c]) => sum + parseInt(d) * parseInt(c), 0);
   }
-  
+ 
 
 function _showSignOffBanner(minsRemaining, shiftEnd) {
     // Only show once per session
@@ -1314,7 +1335,8 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
   // ── Sign-off wizard ────────────────────────────────────────
   function openSignOffWizard(dismissible = true, floatId = null) {
     if (floatId) _signOffFloatId = floatId;
-    _signOffStep = 1;
+    _signOffStep  = 1;
+    _wizardCache  = {};
     document.getElementById('signoff-wizard')?.remove();
 
     const overlay = document.createElement('div');
@@ -1335,7 +1357,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
       <div style="
         background:var(--panel);border:1px solid var(--border);
         border-radius:var(--radius);width:100%;max-width:540px;
-        max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
 
         <div style="padding:20px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;">
           <div>
@@ -1361,7 +1383,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
             </div>`).join('')}
         </div>
 
-        <div id="wizard-body" style="padding:24px;"></div>
+        <div id="wizard-body" style="padding:20px 24px;overflow-y:auto;flex:1;"></div>
 
         <div style="padding:16px 24px 20px;border-top:1px solid var(--border);
           display:flex;justify-content:space-between;align-items:center;">
@@ -1400,7 +1422,7 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     if (label)   label.textContent        = `Step ${step} of 5`;
     if (backBtn) backBtn.style.display     = step > 1 ? 'block' : 'none';
     if (nextBtn) nextBtn.textContent       = step === 5 ? 'Sign Off Shift' : 'Continue →';
-    if (nextBtn) nextBtn.style.background  = step === 5 ? 'var(--red-text)' : 'var(--text)';
+    if (nextBtn) nextBtn.style.background  = step === 5 ? '#e8294a' : 'var(--text)';
 
     const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
@@ -1484,7 +1506,9 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
         </div>`,
 
       // ── Step 4: Float handover ──────────────────────────────
-      4: () => `
+      4: () => {
+        const closingCash = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
+        return `
         <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Float Handover</div>
         <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
           Physically hand over your cash float to the Branch Manager before confirming.
@@ -1493,14 +1517,16 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
           border-radius:var(--radius);margin-bottom:20px;">
           <div style="font-size:12px;color:var(--text-3);margin-bottom:4px;">Amount to hand over</div>
           <div style="font-size:24px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text);">
-            ${fmt(totals.CASH)}
+            ${fmt(closingCash)}
           </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Total cash collected today</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Physical cash counted in till</div>
         </div>
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text-2);">
           <input type="checkbox" id="wizard-float-ack" style="margin-top:2px;accent-color:var(--text);">
           <span>I confirm I have physically handed over the cash float to the Branch Manager.</span>
-        </label>`,
+        </label>`;
+      },
+        
 
       // ── Step 5: Shift notes + overtime ─────────────────────
       5: () => `
@@ -1571,9 +1597,10 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
   }
 
   function _updateVariancePreview() {
-    const closing  = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
-    const expected = totals.CASH;
-    const variance = closing - expected;
+    const closing      = parseFloat(document.getElementById('wizard-closing-cash')?.value || 0);
+    const openingFloat = parseFloat(_shiftStatus?.opening_float || 0);
+    const expected     = openingFloat + totals.CASH;
+    const variance     = closing - expected;
     const el       = document.getElementById('variance-preview');
     if (!el) return;
     if (!closing && closing !== 0) { el.style.display = 'none'; return; }
@@ -1620,6 +1647,9 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
       if (!notes) {
         _toast('Variance notes are required.', 'error'); return;
       }
+      // Cache before DOM is replaced
+      _wizardCache.closingCash    = cash;
+      _wizardCache.varianceNotes  = notes;
     }
     if (_signOffStep === 4) {
       if (!document.getElementById('wizard-float-ack')?.checked) {
@@ -1640,11 +1670,10 @@ function _showSignOffBanner(minsRemaining, shiftEnd) {
     }
 
     const isOvertime = document.getElementById('wizard-is-overtime')?.checked || false;
-
     const body = {
-      closing_cash   : parseFloat(document.getElementById('wizard-closing-cash')?.value || 0),
-      variance_notes : document.getElementById('wizard-variance-notes')?.value.trim() || '',
-      shift_notes    : document.getElementById('wizard-shift-notes')?.value.trim()    || '',
+      closing_cash   : parseFloat(_wizardCache.closingCash || 0),
+      variance_notes : _wizardCache.varianceNotes || '',
+      shift_notes    : document.getElementById('wizard-shift-notes')?.value.trim() || '',
       is_overtime    : isOvertime,
       is_cover       : false,
     };

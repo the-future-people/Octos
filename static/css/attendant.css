@@ -404,3 +404,26 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.at-btn-register-customer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px 18px;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.15s;
+}
+
+.at-btn-register-customer:hover {
+  border-color: #2e4a8a;
+  color: #2e4a8a;
+  background: #f0f4fd;
+}

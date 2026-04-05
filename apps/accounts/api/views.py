@@ -9,6 +9,7 @@ from .serializers import (
 )
 
 
+
 class MeView(APIView):
     """Returns the currently authenticated user's profile."""
     permission_classes = [IsAuthenticated]
@@ -169,3 +170,59 @@ class VerifyDownloadPinView(APIView):
         )
 
         return Response({'valid': True, 'sheet_id': sheet.id})
+
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.response import Response
+
+class AuditedTokenObtainPairView(TokenObtainPairView):
+    """
+    Extends SimpleJWT token view to write AuditEvent on login.
+    Replaces TokenObtainPairView in config/urls.py.
+    """
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+
+        if response.status_code == 200:
+            # Login succeeded — write audit event
+            try:
+                from apps.accounts.models import CustomUser
+                from apps.analytics.signals.handlers import _write_event, _get_ip
+
+                email = request.data.get('email', '') or request.data.get('username', '')
+                user  = CustomUser.objects.filter(email=email).first()
+
+                if user:
+                    _write_event(
+                        event_type  = 'LOGIN_SUCCESS',
+                        severity    = 'INFO',
+                        user        = user,
+                        branch      = getattr(user, 'branch', None),
+                        entity_type = 'CustomUser',
+                        entity_id   = user.pk,
+                        metadata    = {
+                            'email'      : user.email,
+                            'role'       : getattr(getattr(user, 'role', None), 'name', None),
+                            'branch_code': getattr(getattr(user, 'branch', None), 'code', None),
+                            'ip'         : _get_ip(request),
+                            'user_agent' : request.META.get('HTTP_USER_AGENT', '')[:200],
+                        },
+                    )
+            except Exception:
+                pass  # Never break login over audit failure
+        else:
+            # Login failed
+            try:
+                from apps.analytics.signals.handlers import _write_event, _get_ip
+                _write_event(
+                    event_type = 'LOGIN_FAILED',
+                    severity   = 'MEDIUM',
+                    metadata   = {
+                        'email'     : request.data.get('email', ''),
+                        'ip'        : _get_ip(request),
+                        'user_agent': request.META.get('HTTP_USER_AGENT', '')[:200],
+                    },
+                )
+            except Exception:
+                pass
+
+        return response
