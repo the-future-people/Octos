@@ -1109,6 +1109,108 @@ const Attendant = (() => {
     setTimeout(() => el.remove(), 3500);
   }
 
+  // ── Register Customer ──────────────────────────────────────
+  function openRegisterCustomer() {
+    CustomerReg.open(_onRegisterSuccess);
+  }
+
+  function _onRegisterSuccess(customer) {
+    // Add to local state so NJ search finds them immediately
+    _customers.push(customer);
+    if (typeof State !== 'undefined') State.customers = _customers;
+    // Show congratulatory flash
+    _showRegistrationFlash(customer);
+  }
+
+  function _showRegistrationFlash(customer) {
+    const typeLabel = {
+      INDIVIDUAL : 'Individual',
+      BUSINESS   : 'Business',
+      INSTITUTION: 'Institution',
+    }[customer.customer_type] || 'Customer';
+
+    const name = customer.display_name || customer.full_name
+      || `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+      || 'New Customer';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'reg-flash-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:3000;
+      background:rgba(0,0,0,0.75);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;
+      animation:fadeIn 0.25s ease;`;
+
+    overlay.innerHTML = `
+      <div style="
+        background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:420px;
+        padding:40px 32px;text-align:center;
+        box-shadow:0 24px 64px rgba(0,0,0,0.4);
+        animation:slideUp 0.3s ease;">
+
+        <!-- Flag icon -->
+        <div style="font-size:48px;margin-bottom:16px;line-height:1;">🎉</div>
+
+        <!-- Headline -->
+        <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;
+          color:var(--text);letter-spacing:-0.3px;margin-bottom:8px;">
+          Customer Registered!
+        </div>
+
+        <!-- Name + type -->
+        <div style="font-size:16px;font-weight:700;color:var(--text);
+          margin-bottom:6px;">${_esc(name)}</div>
+        <div style="display:inline-block;padding:3px 12px;border-radius:20px;
+          font-size:12px;font-weight:700;background:var(--green-bg);
+          color:var(--green-text);border:1px solid var(--green-border);
+          margin-bottom:20px;">${_esc(typeLabel)}</div>
+
+        <!-- Subtext -->
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;
+          line-height:1.5;">
+          Added to the system. They'll be searchable from their next visit.
+        </div>
+
+        <!-- Countdown bar -->
+        <div style="height:3px;background:var(--border);border-radius:2px;
+          overflow:hidden;margin-bottom:16px;">
+          <div id="reg-flash-bar"
+            style="height:100%;width:100%;background:var(--green-text);
+              border-radius:2px;transition:width linear;">
+          </div>
+        </div>
+
+        <!-- Dismiss -->
+        <button onclick="document.getElementById('reg-flash-overlay').remove()"
+          style="padding:9px 24px;background:none;border:1px solid var(--border);
+            border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+            cursor:pointer;color:var(--text-2);font-family:'DM Sans',sans-serif;">
+          Dismiss
+        </button>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Animate countdown bar and auto-dismiss after 4 seconds
+    const bar      = document.getElementById('reg-flash-bar');
+    const duration = 4000;
+    const start    = performance.now();
+
+    function tick(now) {
+      const elapsed = now - start;
+      const pct     = Math.max(0, 100 - (elapsed / duration * 100));
+      if (bar) bar.style.width = pct + '%';
+      if (elapsed < duration) {
+        requestAnimationFrame(tick);
+      } else {
+        overlay.remove();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
   // ── Public API ─────────────────────────────────────────────
   return {
     init,
@@ -1122,6 +1224,7 @@ const Attendant = (() => {
     discardDraft,
     onJobCreated,
     onSearchInput,
+    openRegisterCustomer,
   };
 })();
 

@@ -5004,7 +5004,8 @@ function _renderInventoryCards(items, mode = 'snapshot') {
             const colors = ['#1a1a2e','#6b47d9','#1a3a2e','#2e1a1a','#1a2e3a','#3a2e1a'];
             const bg = colors[i % colors.length];
             return `
-            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+            <div onclick="Dashboard._historyDrill(this)"
+              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
               style="border:1px solid var(--border);border-radius:8px;overflow:hidden;
                      cursor:pointer;transition:all 0.15s;display:flex;height:64px;
                      box-shadow:0 1px 4px rgba(0,0,0,0.05);"
@@ -5049,7 +5050,8 @@ function _renderInventoryCards(items, mode = 'snapshot') {
         <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
           overflow:hidden;margin-bottom:24px;">
           ${(data.items||[]).map(item => `
-            <div onclick="Dashboard._historyDrill(${JSON.stringify(item).replace(/"/g,'&quot;')})"
+            <div onclick="Dashboard._historyDrill(this)"
+              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
               style="display:flex;align-items:center;justify-content:space-between;
                      padding:14px 20px;border-bottom:1px solid var(--border);cursor:pointer;
                      transition:background 0.12s;"
@@ -5340,9 +5342,12 @@ const kpiCards = [
     }
   }
 
-  function _historyDrill(item) {
-    if (typeof item === 'string') {
-      try { item = JSON.parse(item.replace(/&quot;/g, '"')); } catch { return; }
+  function _historyDrill(elOrItem) {
+    let item = elOrItem;
+    if (elOrItem instanceof HTMLElement) {
+      try { item = JSON.parse(elOrItem.dataset.item.replace(/&quot;/g, '"')); } catch { return; }
+    } else if (typeof elOrItem === 'string') {
+      try { item = JSON.parse(elOrItem.replace(/&quot;/g, '"')); } catch { return; }
     }
     _historyYear  = item.year  || _historyYear;
     _historyMonth = item.month || null;
@@ -7044,108 +7049,460 @@ ${_esc(c.notes || '')}</textarea>
     } catch { /* silent */ }
   }
 
-  function _editCustomer(customerId) {
-    _toast('Edit profile coming soon.', 'info');
+  // ── Customer Inline Edit ──────────────────────────────────────
+// Replaces _editCustomer stub. Opens edit view inside the profile overlay.
+
+  async function _editCustomer(customerId) {
+    const content = document.getElementById('customer-profile-content');
+    if (!content) return;
+
+    // Show spinner while we fetch fresh data
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;
+        min-height:100vh;color:var(--text-3);">
+        <span class="spin"></span>
+      </div>`;
+
+    try {
+      const res = await Auth.fetch(`/api/v1/customers/${customerId}/`);
+      if (!res.ok) throw new Error();
+      const c = await res.json();
+      _renderEditCustomerForm(content, c);
+    } catch {
+      _toast('Could not load customer for editing.', 'error');
+      // Fall back to re-opening the profile view
+      openCustomerDetail(customerId);
+    }
+  }
+
+  function _renderEditCustomerForm(container, c) {
+    const isIndividual  = c.customer_type === 'INDIVIDUAL';
+    const isBusiness    = c.customer_type === 'BUSINESS';
+    const isInstitution = c.customer_type === 'INSTITUTION';
+
+    const primaryName = isIndividual
+      ? (c.full_name || '—')
+      : (c.company_name || '—');
+
+    // Fields allowed per type
+    const showCompany    = isBusiness || isInstitution;
+    const showSubtype    = isInstitution;
+
+    const subtypeOptions = [
+      ['SCHOOL', 'School'],
+      ['CHURCH', 'Church / Religious'],
+      ['NGO',    'NGO / Non-profit'],
+      ['GOVT',   'Government / Public'],
+      ['OTHER',  'Other Institution'],
+    ];
+
+    container.innerHTML = `
+      <!-- Topbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 28px;border-bottom:1px solid var(--border);
+        background:var(--panel);position:sticky;top:0;z-index:10;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button onclick="Dashboard.openCustomerDetail(${c.id})"
+            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
+              background:none;border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+              cursor:pointer;color:var(--text-2);font-family:inherit;"
+            onmouseover="this.style.borderColor='var(--border-dark)'"
+            onmouseout="this.style.borderColor='var(--border)'">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"/>
+              <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Cancel
+          </button>
+          <span style="font-size:13px;color:var(--text-3);">
+            Editing: <strong style="color:var(--text);">${_esc(primaryName)}</strong>
+          </span>
+        </div>
+        <button id="edit-cust-save-btn"
+          onclick="Dashboard._saveCustomerEdit(${c.id})"
+          style="padding:8px 20px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Save Changes
+        </button>
+      </div>
+
+      <!-- Edit form body -->
+      <div style="max-height:calc(100vh - 64px);overflow-y:auto;">
+      <div style="max-width:680px;margin:0 auto;padding:36px 28px;">
+
+        <!-- Section label -->
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
+          color:var(--text);letter-spacing:-0.3px;margin-bottom:6px;">Edit Profile</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
+          Locked fields (tier, score, customer type, visit count) cannot be edited here.
+          All changes are logged in the audit trail.
+        </div>
+
+        <!-- Error banner -->
+        <div id="edit-cust-error" style="display:none;font-size:13px;
+          color:var(--red-text);padding:10px 14px;background:var(--red-bg);
+          border:1px solid var(--red-border);border-radius:var(--radius-sm);
+          margin-bottom:20px;"></div>
+
+        <!-- ── Editable fields ───────────────────────── -->
+        <div style="display:flex;flex-direction:column;gap:18px;">
+
+          ${showCompany ? `
+          <!-- Company / Institution name -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              ${isBusiness ? 'Company Name' : 'Institution Name'} *
+            </label>
+            <input type="text" id="edit-company"
+              value="${_esc(c.company_name || '')}"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>` : ''}
+
+          ${showSubtype ? `
+          <!-- Institution subtype -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Institution Type</label>
+            <select id="edit-subtype"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">Select type…</option>
+              ${subtypeOptions.map(([val, label]) =>
+                `<option value="${val}" ${c.institution_subtype === val ? 'selected' : ''}>${label}</option>`
+              ).join('')}
+            </select>
+          </div>` : ''}
+
+          <!-- Name row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">
+                ${isIndividual ? 'First Name' : 'Rep First Name'} *
+              </label>
+              <input type="text" id="edit-first-name"
+                value="${_esc(c.first_name || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">
+                ${isIndividual ? 'Last Name' : 'Rep Last Name'} *
+              </label>
+              <input type="text" id="edit-last-name"
+                value="${_esc(c.last_name || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+          </div>
+
+          <!-- Phone -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Phone Number *</label>
+            <input type="tel" id="edit-phone"
+              value="${_esc(c.phone || '')}"
+              onblur="Dashboard._editPhoneNormalise(this)"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+            <div id="edit-phone-feedback"
+              style="font-size:11px;margin-top:5px;"></div>
+          </div>
+
+          <!-- Email -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              Email <span style="font-weight:400;">(optional)</span>
+            </label>
+            <input type="email" id="edit-email"
+              value="${_esc(c.email || '')}"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+
+          <!-- Address -->
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">
+              Address ${!isIndividual
+                ? '*'
+                : '<span style="font-weight:400;">(optional)</span>'}
+            </label>
+            <textarea id="edit-address" rows="3"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                resize:vertical;box-sizing:border-box;">${_esc(c.address || '')}</textarea>
+          </div>
+
+          <!-- ── Locked fields — read-only display ───── -->
+          <div style="padding:16px 18px;background:var(--bg);
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+              Read-only Fields
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              ${[
+                ['Customer Type',     c.customer_type],
+                ['Tier',              c.tier || 'REGULAR'],
+                ['Confidence Score',  c.confidence_score + ' / 100'],
+                ['Total Visits',      c.visit_count || 0],
+              ].map(([label, val]) => `
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">
+                    ${label}</div>
+                  <div style="font-size:13px;color:var(--text-3);font-weight:500;">
+                    ${_esc(String(val))}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── Edit History ──────────────────────────── -->
+        <div style="margin-top:36px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            margin-bottom:12px;">
+            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
+              color:var(--text);letter-spacing:-0.2px;">Edit History</div>
+            <button onclick="Dashboard._toggleEditHistory(${c.id})"
+              id="edit-history-toggle-btn"
+              style="padding:5px 14px;background:none;border:1px solid var(--border);
+                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                cursor:pointer;color:var(--text-2);font-family:inherit;">
+              Load History
+            </button>
+          </div>
+          <div id="edit-history-content" style="display:none;"></div>
+        </div>
+
+      </div>
+      </div>`;
+  }
+
+  function _editPhoneNormalise(input) {
+    const norm = _normalisePhone(input.value);
+    input.value = norm;
+    const fb = document.getElementById('edit-phone-feedback');
+    if (fb && norm && norm !== document.getElementById('edit-phone')?.dataset.original) {
+      fb.textContent = 'Number normalised to: ' + norm;
+      fb.style.color = 'var(--text-3)';
+    }
+  }
+
+  async function _saveCustomerEdit(customerId) {
+    const btn   = document.getElementById('edit-cust-save-btn');
+    const errEl = document.getElementById('edit-cust-error');
+    errEl.style.display = 'none';
+
+    const firstName = document.getElementById('edit-first-name')?.value.trim();
+    const lastName  = document.getElementById('edit-last-name')?.value.trim();
+    const rawPhone  = document.getElementById('edit-phone')?.value.trim();
+    const phone     = _normalisePhone(rawPhone);
+    const email     = document.getElementById('edit-email')?.value.trim();
+    const address   = document.getElementById('edit-address')?.value.trim();
+    const company   = document.getElementById('edit-company')?.value.trim();
+    const subtype   = document.getElementById('edit-subtype')?.value;
+
+    // ── Validation ──────────────────────────────────────
+    const showErr = msg => {
+      errEl.textContent   = msg;
+      errEl.style.display = 'block';
+      errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    if (!firstName) return showErr('First name is required.');
+    if (!lastName)  return showErr('Last name is required.');
+    if (!phone)     return showErr('Phone number is required.');
+
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+
+    // Build payload — only send fields that exist in the form
+    const payload = { first_name: firstName, last_name: lastName, phone };
+    if (email   !== undefined) payload.email   = email;
+    if (address !== undefined) payload.address = address;
+    if (company !== undefined && document.getElementById('edit-company'))
+      payload.company_name = company;
+    if (subtype !== undefined && document.getElementById('edit-subtype'))
+      payload.institution_subtype = subtype;
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit/`, {
+        method : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = typeof data.detail === 'string'
+          ? data.detail
+          : Object.values(data).flat().join(' ');
+        btn.disabled    = false;
+        btn.textContent = 'Save Changes';
+        return showErr(msg || 'Save failed. Please try again.');
+      }
+
+      _toast('Profile updated successfully.', 'success');
+      // Refresh the full profile view
+      openCustomerDetail(customerId);
+
+    } catch {
+      btn.disabled    = false;
+      btn.textContent = 'Save Changes';
+      showErr('Network error. Please try again.');
+    }
+  }
+
+  async function _toggleEditHistory(customerId) {
+    const content = document.getElementById('edit-history-content');
+    const btn     = document.getElementById('edit-history-toggle-btn');
+    if (!content) return;
+
+    const isVisible = content.style.display !== 'none';
+    if (isVisible) {
+      content.style.display = 'none';
+      btn.textContent = 'Load History';
+      return;
+    }
+
+    content.style.display = 'block';
+    btn.textContent = 'Hide History';
+    content.innerHTML = '<div style="padding:16px 0;color:var(--text-3);font-size:13px;"><span class="spin"></span> Loading…</div>';
+
+    await _loadEditHistory(customerId, content);
+  }
+
+  async function _loadEditHistory(customerId, container) {
+    try {
+      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit-log/`);
+      if (!res.ok) throw new Error();
+      const logs = await res.json();
+
+      if (!logs.length) {
+        container.innerHTML = `
+          <div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px;
+            background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius-sm);">
+            No edits recorded yet.
+          </div>`;
+        return;
+      }
+
+      const fieldLabel = field => ({
+        first_name          : 'First Name',
+        last_name           : 'Last Name',
+        phone               : 'Phone',
+        email               : 'Email',
+        address             : 'Address',
+        company_name        : 'Company / Institution Name',
+        institution_subtype : 'Institution Type',
+      }[field] || field);
+
+      container.innerHTML = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);overflow:hidden;">
+          ${logs.map((log, idx) => {
+            const dt = new Date(log.changed_at);
+            const dateStr = dt.toLocaleDateString('en-GB',
+              { day: 'numeric', month: 'short', year: 'numeric' });
+            const timeStr = dt.toLocaleTimeString('en-GH',
+              { hour: '2-digit', minute: '2-digit' });
+            const isLast = idx === logs.length - 1;
+
+            return `
+              <div style="display:flex;align-items:flex-start;gap:14px;
+                padding:14px 18px;
+                ${!isLast ? 'border-bottom:1px solid var(--border);' : ''}">
+
+                <!-- Field pill -->
+                <div style="flex-shrink:0;margin-top:2px;">
+                  <span style="padding:3px 9px;border-radius:20px;font-size:10px;
+                    font-weight:700;background:var(--bg);color:var(--text-2);
+                    border:1px solid var(--border);">
+                    ${_esc(fieldLabel(log.field_name))}
+                  </span>
+                </div>
+
+                <!-- Change -->
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+                    margin-bottom:5px;">
+                    <span style="font-size:13px;color:var(--red-text);font-weight:500;
+                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
+                      white-space:nowrap;"
+                      title="${_esc(log.old_value || '(empty)')}">
+                      ${_esc(log.old_value || '(empty)')}
+                    </span>
+                    <span style="color:var(--text-3);font-size:12px;">→</span>
+                    <span style="font-size:13px;color:var(--green-text);font-weight:600;
+                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
+                      white-space:nowrap;"
+                      title="${_esc(log.new_value || '(empty)')}">
+                      ${_esc(log.new_value || '(empty)')}
+                    </span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-3);">
+                    By <strong style="color:var(--text-2);">
+                      ${_esc(log.changed_by_name || '—')}
+                    </strong>
+                    · ${dateStr} at ${timeStr}
+                  </div>
+                </div>
+
+              </div>`;
+          }).join('')}
+        </div>`;
+
+    } catch {
+      container.innerHTML = `
+        <div style="padding:16px;color:var(--red-text);font-size:13px;
+          background:var(--red-bg);border:1px solid var(--red-border);
+          border-radius:var(--radius-sm);">
+          Could not load edit history.
+        </div>`;
+    }
   }
 
   function _nominateCredit(customerId) {
     _toast('Credit nomination coming soon.', 'info');
   }
 
-  // ── Add Customer Modal ────────────────────────────────────────────────────
-  let _addCustType = 'INDIVIDUAL';
-
+// ── Add Customer Modal — delegates to CustomerReg ─────────────────────────
   function openAddCustomerModal() {
-    _addCustType = 'INDIVIDUAL';
-    document.getElementById('add-customer-overlay')?.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'add-customer-overlay';
-    overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.55);
-      z-index:2000;display:flex;align-items:center;justify-content:center;padding:24px;`;
-    overlay.onclick = e => { e.stopPropagation(); };
-
-    overlay.innerHTML = `
-      <div style="background:var(--bg);border-radius:var(--radius);
-        width:100%;max-width:560px;max-height:90vh;display:flex;flex-direction:column;
-        border:1px solid var(--border);box-shadow:0 24px 64px rgba(0,0,0,0.2);
-        overflow:hidden;">
-
-        <!-- Header -->
-        <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-          display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
-          background:var(--panel);">
-          <div>
-            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
-              color:var(--text);letter-spacing:-0.2px;">Register Customer</div>
-            <div style="font-size:12px;color:var(--text-3);margin-top:2px;">
-              All fields marked * are required
-            </div>
-          </div>
-          <button onclick="Dashboard._closeAddCustomer()"
-            style="background:none;border:none;font-size:20px;cursor:pointer;
-              color:var(--text-3);padding:4px 8px;">×</button>
-        </div>
-
-        <!-- Type selector -->
-        <div style="padding:16px 24px;border-bottom:1px solid var(--border);
-          background:var(--panel);flex-shrink:0;">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
-            Customer Type
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            ${[
-              ['INDIVIDUAL',  'Individual',  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`],
-              ['BUSINESS',    'Business',    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>`],
-              ['INSTITUTION', 'Institution', `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`],
-            ].map(([type, label, icon]) => `
-              <button id="cust-type-${type}" onclick="Dashboard._setCustType('${type}')"
-                style="display:flex;flex-direction:column;align-items:center;gap:6px;
-                  padding:12px 8px;border-radius:var(--radius-sm);font-size:12px;
-                  font-weight:700;cursor:pointer;transition:all 0.15s;
-                  font-family:'DM Sans',sans-serif;
-                  ${type === 'INDIVIDUAL'
-                    ? 'background:#f0f4fd;color:#2e4a8a;border:2px solid #2e4a8a;'
-                    : 'background:var(--bg);color:var(--text-3);border:2px solid var(--border);'}">
-                ${icon}
-                ${label}
-              </button>`).join('')}
-          </div>
-        </div>
-
-        <!-- Scrollable form body -->
-        <div style="flex:1;overflow-y:auto;padding:20px 24px;" id="add-cust-form-body">
-          ${_buildCustForm('INDIVIDUAL')}
-        </div>
-
-        <!-- Footer -->
-        <div style="padding:16px 24px;border-top:1px solid var(--border);
-          background:var(--panel);flex-shrink:0;">
-          <div id="add-cust-error" style="display:none;font-size:12px;
-            color:var(--red-text);margin-bottom:10px;padding:8px 12px;
-            background:var(--red-bg);border:1px solid var(--red-border);
-            border-radius:var(--radius-sm);"></div>
-          <div style="display:flex;gap:8px;">
-            <button onclick="Dashboard._closeAddCustomer()"
-              style="flex:1;padding:10px;background:none;border:1px solid var(--border);
-                border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-                cursor:pointer;color:var(--text-2);font-family:'DM Sans',sans-serif;">
-              Cancel
-            </button>
-            <button id="add-cust-submit-btn" onclick="Dashboard._submitAddCustomer()"
-              style="flex:2;padding:10px;background:var(--text);color:#fff;border:none;
-                border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-                cursor:pointer;font-family:'DM Sans',sans-serif;">
-              Register Customer
-            </button>
-          </div>
-        </div>
-
-      </div>`;
-
-    document.body.appendChild(overlay);
-    setTimeout(() => document.getElementById('cust-first-name')?.focus(), 100);
+    CustomerReg.open(async function(data) {
+      _toast(`${data.display_name || data.full_name || 'Customer'} registered successfully.`, 'success');
+      await _loadCustomersTab(_customersTab);
+      if (data.id) setTimeout(() => openCustomerDetail(data.id), 300);
+    });
   }
 
   function _buildCustForm(type) {
@@ -7593,12 +7950,12 @@ return {
     closeCustomerProfile,
     _saveCustomerNotes,
     _editCustomer,
+    _renderEditCustomerForm,
+    _saveCustomerEdit,
+    _editPhoneNormalise,
+    _toggleEditHistory,
+    _loadEditHistory,
     _nominateCredit,
-    _closeAddCustomer,
-    _setCustType,
-    _checkCustPhoneDuplicate,
-    _submitAddCustomer,
-    _normalisePhone,
   };
 
 })();
