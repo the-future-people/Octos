@@ -1646,15 +1646,26 @@ class EODSummaryView(APIView):
             for c in branch_cashiers
         ]
 
+        # ── Inventory consumption snapshot ────────────────────────────────
+        inventory_consumption = []
+        try:
+            from apps.inventory.inventory_engine import InventoryEngine
+            inv_snapshot = InventoryEngine(branch).generate_daily_snapshot(sheet.date)
+            inventory_consumption = inv_snapshot.get('items', [])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Daily inventory snapshot failed: {e}", exc_info=True)
+
         return Response({
-            'meta'            : meta,
-            'revenue'         : revenue,
-            'jobs'            : jobs_summary,
-            'cashier_activity': cashier_activity,
-            'float_opened'    : float_opened,
-            'petty_cash'      : petty_cash_list,
-            'credit_sales'    : credit_list,
-            'branch_cashiers' : branch_cashiers_list,
+            'meta'                 : meta,
+            'revenue'              : revenue,
+            'jobs'                 : jobs_summary,
+            'cashier_activity'     : cashier_activity,
+            'float_opened'         : float_opened,
+            'petty_cash'           : petty_cash_list,
+            'credit_sales'         : credit_list,
+            'branch_cashiers'      : branch_cashiers_list,
+            'inventory_consumption': inventory_consumption,
         })
 
 # ─────────────────────────────────────────────────────────────────────────────

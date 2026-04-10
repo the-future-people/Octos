@@ -138,7 +138,17 @@
         </div>
       </div>
 
-      <!-- ══ 7. BM NOTES ════════════════════════════════════════════ -->
+      <!-- ══ 7. INVENTORY CONSUMPTION ══════════════════════════════ -->
+      <div class="eod-section" id="eod-inventory-section" style="display:none;">
+        <div class="eod-section-title">
+          <span style="font-size:16px;margin-right:6px;">📦</span> Inventory Consumed Today
+        </div>
+        <div id="eod-inventory-list">
+          <div class="eod-empty-note">No inventory movements today.</div>
+        </div>
+      </div>
+
+      <!-- ══ 8. BM NOTES ════════════════════════════════════════════ -->
       <div class="eod-section">
         <div class="eod-section-title">
           <span style="font-size:16px;margin-right:6px;">📝</span> Branch Manager Notes
@@ -150,7 +160,7 @@
         </div>
       </div>
 
-      <!-- ══ 8. TOMORROW'S FLOAT ════════════════════════════════════ -->
+      <!-- ══ 9. TOMORROW'S FLOAT ════════════════════════════════════ -->
       <div class="eod-section" id="eod-float-section">
         <div class="eod-section-title">
           <span style="font-size:16px;margin-right:6px;">💰</span> Tomorrow's Opening Float
@@ -168,7 +178,7 @@
         </div>
       </div>
 
-      <!-- ══ 9. ACKNOWLEDGEMENT ═════════════════════════════════════ -->
+      <!-- ══ 10. ACKNOWLEDGEMENT ════════════════════════════════════ -->
       <div class="eod-section eod-ack-section">
         <label class="eod-ack-label">
           <input type="checkbox" id="eod-ack-checkbox" onchange="Dashboard.toggleEODConfirm()">

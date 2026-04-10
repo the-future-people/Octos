@@ -1151,6 +1151,39 @@ function switchPerformanceTab(tab) {
           </div>
         </div>
 
+        <!-- Registration rate strip -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 20px;margin-bottom:10px;
+          display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
+          <div style="padding-right:20px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Registered Jobs</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);"
+              id="sheet-registered-jobs">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              linked to a customer</div>
+          </div>
+          <div style="padding:0 20px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Walk-in Jobs</div>
+            <div style="font-size:18px;font-weight:700;color:var(--green-text);"
+              id="sheet-walkin-jobs">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              no customer linked</div>
+          </div>
+          <div style="padding-left:20px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Registration Rate</div>
+            <div style="font-size:18px;font-weight:700;"
+              id="sheet-reg-rate">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              of jobs have a customer</div>
+          </div>
+        </div>
+
         <!-- Sheet details -->
         <div style="background:var(--panel);border:1px solid var(--border);
           border-radius:var(--radius);padding:16px 20px;
