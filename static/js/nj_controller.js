@@ -77,9 +77,20 @@ const NJ = (() => {
   // ══════════════════════════════════════════════════════════
 
   function setType(type) {
-    currentType    = type;
     currentService = null;
-    cart           = [];
+
+    // Only wipe cart if switching INTO a non-instant tab
+    // and the user has started work there (service selected)
+    // Cart is preserved when switching back to INSTANT
+    if (type !== 'INSTANT' && currentType === 'INSTANT') {
+      // Moving away from instant — preserve cart, don't wipe
+    } else if (type === 'INSTANT' && currentType !== 'INSTANT') {
+      // Coming back to instant — preserve cart
+    } else if (type !== 'INSTANT' && currentType !== 'INSTANT') {
+      // Switching between production/design — reset service only, no cart
+    }
+
+    currentType = type;
 
     document.querySelectorAll('.nj-toggle-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.type === type);
@@ -90,6 +101,8 @@ const NJ = (() => {
 
     if (type === 'INSTANT') {
       _showInstantUI();
+      // Re-render cart with preserved items
+      _renderCart();
     } else {
       _showFormUI(type);
     }
@@ -156,38 +169,86 @@ const NJ = (() => {
         <!-- ── Left panel ── -->
         <div class="nj-pos-left">
 
-          <!-- 1. Customer row -->
-          <div class="nj-customer-row">
-            <div class="nj-customer-display" id="nj-customer-display">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-3);">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-              <span id="nj-customer-label" style="flex:1;font-size:13px;color:var(--text-2);">
-                Walk-in / Unknown
-              </span>
-              <input type="hidden" id="nj-customer" value="">
-            </div>
-            <button type="button" class="nj-customer-action-btn" onclick="NJ._toggleCustomerSearch()"
-              id="nj-customer-search-btn">Search</button>
-          </div>
+          <!-- 1. Customer + Channel row -->
+          <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">
 
-          <!-- Customer search dropdown -->
-          <div id="nj-customer-search-area" style="display:none;margin-bottom:10px;">
-            <input type="text" id="nj-customer-search-input"
-              placeholder="Search by name or phone…"
-              oninput="NJ._filterCustomers(this.value)"
-              style="width:100%;padding:8px 12px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;"
-              onfocus="this.style.borderColor='var(--border-dark)'"
-              onblur="this.style.borderColor='var(--border)'">
-            <div id="nj-customer-results"
-              style="max-height:160px;overflow-y:auto;border:1px solid var(--border);
-                border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                background:var(--panel);">
+            <!-- 70% — Whose job -->
+            <div style="flex:7;">
+              <input type="hidden" id="nj-customer" value="">
+
+              <!-- Default state: red button -->
+              <div id="nj-cust-default">
+                <button type="button" id="nj-cust-who-btn"
+                  onclick="NJ._openCustomerSearch()"
+                  style="width:100%;padding:10px 14px;border:1.5px solid var(--red-border);
+                    border-radius:var(--radius-sm);background:var(--red-bg);
+                    color:var(--red-text);font-size:13px;font-weight:600;
+                    cursor:pointer;text-align:left;font-family:inherit;
+                    box-sizing:border-box;">
+                  Whose job is this?
+                </button>
+              </div>
+
+              <!-- Search state -->
+              <div id="nj-cust-search" style="display:none;">
+                <input type="text" id="nj-customer-search-input"
+                  placeholder="Search by name or phone…"
+                  oninput="NJ._filterCustomers(this.value)"
+                  style="width:100%;padding:10px 14px;
+                    border:1.5px solid var(--red-border);
+                    border-radius:var(--radius-sm);background:var(--bg);
+                    color:var(--text);font-size:13px;font-family:inherit;
+                    outline:none;box-sizing:border-box;">
+                <div id="nj-customer-results"
+                  style="max-height:180px;overflow-y:auto;
+                    border:0.5px solid var(--border);border-top:none;
+                    border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                    background:var(--panel);">
+                </div>
+                <button type="button" onclick="NJ._skipToWalkin()"
+                  style="background:none;border:none;font-size:11px;
+                    color:var(--text-3);cursor:pointer;padding:4px 0;
+                    font-family:inherit;">
+                  Continue as walk-in →
+                </button>
+              </div>
+
+              <!-- Selected state -->
+              <div id="nj-cust-selected" style="display:none;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
+                  border:1.5px solid var(--green-border);border-radius:var(--radius-sm);
+                  background:var(--green-bg);">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="var(--green-text)" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  <span id="nj-customer-label"
+                    style="flex:1;font-size:13px;font-weight:600;
+                      color:var(--green-text);"></span>
+                  <button type="button" onclick="NJ._clearCustomer()"
+                    style="background:none;border:none;font-size:15px;
+                      cursor:pointer;color:var(--green-text);
+                      padding:0;line-height:1;">×</button>
+                </div>
+              </div>
             </div>
+
+            <!-- 20% — Channel -->
+            <div style="flex:2;">
+              <select id="nj-channel" onchange="NJ._onChannelChange()"
+                style="width:100%;height:40px;padding:0 8px;
+                  border-radius:var(--radius-sm);font-size:12px;
+                  font-family:inherit;color:var(--text-2);
+                  background:var(--bg);
+                  border:0.5px solid var(--border);
+                  cursor:pointer;box-sizing:border-box;">
+                <option value="WALK_IN">Walk-in</option>
+                <option value="WHATSAPP">WhatsApp</option>
+                <option value="EMAIL">Email</option>
+                <option value="PHONE">Phone</option>
+              </select>
+            </div>
+
           </div>
 
           <div class="nj-divider"></div>
@@ -243,20 +304,6 @@ const NJ = (() => {
               </svg>
               Add to Cart
             </button>
-          </div>
-
-          <!-- 4. Channel — subtle, bottom -->
-          <div class="nj-channel-row">
-            <span style="font-size:11px;color:var(--text-3);">Channel</span>
-            <select id="nj-channel"
-              style="font-size:11px;color:var(--text-2);background:none;
-                border:0.5px solid var(--border);border-radius:20px;
-                padding:2px 8px;cursor:pointer;font-family:inherit;outline:none;">
-              <option value="WALK_IN">Walk-in</option>
-              <option value="WHATSAPP">WhatsApp</option>
-              <option value="EMAIL">Email</option>
-              <option value="PHONE">Phone</option>
-            </select>
           </div>
 
         </div>
@@ -533,12 +580,13 @@ function _selectRing(mm, btn) {
     const sets     = parseInt(document.getElementById('nj-sets')?.value  || 1);
     const quantity = sets || 1;
 
+    const _svcName = currentService.name.toLowerCase();
     const params = new URLSearchParams({
       service  : currentService.id,
       branch   : State.branchId,
       quantity,
       pages,
-      is_color : 'false',
+      is_color : (_svcName.includes('color') || _svcName.includes('colour')) ? 'true' : 'false',
     });
 
     // Suppress price for binding until ring is selected
@@ -608,7 +656,7 @@ function _selectRing(mm, btn) {
         branch   : State.branchId,
         quantity,
         pages,
-        is_color : 'false',
+        is_color : (currentService.name.toLowerCase().includes('color') || currentService.name.toLowerCase().includes('colour')) ? 'true' : 'false',
       });
       if (isBinding  && ringSize)   params.set('ring_size',   ringSize);
       if (isPassport)               params.set('output_mode', outputMode);
@@ -621,13 +669,16 @@ function _selectRing(mm, btn) {
       }
     } catch { /* silent */ }
 
+    const _nameLC = currentService.name.toLowerCase();
+    const _isColor = _nameLC.includes('color') || _nameLC.includes('colour');
+
     cart.push({
       serviceId   : currentService.id,
       serviceName : currentService.name,
       pages,
       sets,
       quantity,
-      is_color    : false,
+      is_color    : _isColor,
       paper_size  : 'A4',
       sides,
       file_source : 'NA',
@@ -737,19 +788,58 @@ function _resetConfigurator() {
         </div>
       </div>
 
-      <div class="form-row-2">
-        <div class="form-group">
-          <label class="form-label">Customer <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-          <select id="nj-customer" class="form-input">
-            <option value="">Walk-in / Unknown</option>
-            ${State.customers.map(c =>
-              `<option value="${c.id}">${_esc(c.full_name || c.name || c.email || 'Customer ' + c.id)}</option>`
-            ).join('')}
-          </select>
+      <!-- Customer + Channel -->
+      <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;">
+        <div style="flex:7;">
+          <input type="hidden" id="nj-customer" value="">
+          <div id="nj-cust-default">
+            <button type="button" onclick="NJ._openCustomerSearch()"
+              style="width:100%;padding:10px 14px;border:1.5px solid var(--red-border);
+                border-radius:var(--radius-sm);background:var(--red-bg);
+                color:var(--red-text);font-size:13px;font-weight:600;
+                cursor:pointer;text-align:left;font-family:inherit;box-sizing:border-box;">
+              Whose job is this?
+            </button>
+          </div>
+          <div id="nj-cust-search" style="display:none;">
+            <input type="text" id="nj-customer-search-input"
+              placeholder="Search by name or phone…"
+              oninput="NJ._filterCustomers(this.value)"
+              style="width:100%;padding:10px 14px;border:1.5px solid var(--red-border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;">
+            <div id="nj-customer-results"
+              style="max-height:180px;overflow-y:auto;border:0.5px solid var(--border);
+                border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                background:var(--panel);">
+            </div>
+            <button type="button" onclick="NJ._skipToWalkin()"
+              style="background:none;border:none;font-size:11px;color:var(--text-3);
+                cursor:pointer;padding:4px 0;font-family:inherit;">
+              Continue as walk-in →
+            </button>
+          </div>
+          <div id="nj-cust-selected" style="display:none;">
+            <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
+              border:1.5px solid var(--green-border);border-radius:var(--radius-sm);
+              background:var(--green-bg);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="var(--green-text)" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span id="nj-customer-label"
+                style="flex:1;font-size:13px;font-weight:600;color:var(--green-text);"></span>
+              <button type="button" onclick="NJ._clearCustomer()"
+                style="background:none;border:none;font-size:15px;cursor:pointer;
+                  color:var(--green-text);padding:0;line-height:1;">×</button>
+            </div>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Intake Channel</label>
-          <select id="nj-channel" class="form-input">
+        <div style="flex:2;">
+          <select id="nj-channel" onchange="NJ._onChannelChange()"
+            style="width:100%;height:40px;padding:0 8px;border-radius:var(--radius-sm);
+              font-size:12px;font-family:inherit;color:var(--text-2);background:var(--bg);
+              border:0.5px solid var(--border);cursor:pointer;box-sizing:border-box;">
             <option value="WALK_IN">Walk-in</option>
             <option value="WHATSAPP">WhatsApp</option>
             <option value="EMAIL">Email</option>
@@ -1200,15 +1290,44 @@ function _resetConfigurator() {
   }
 
   // ── Inline add customer ───────────────────────────────────
-  function _toggleCustomerSearch() {
-    const area = document.getElementById('nj-customer-search-area');
-    if (!area) return;
-    const isOpen = area.style.display !== 'none';
-    area.style.display = isOpen ? 'none' : 'block';
-    if (!isOpen) {
-      document.getElementById('nj-customer-search-input')?.focus();
-      _filterCustomers('');
+  function _openCustomerSearch() {
+    document.getElementById('nj-cust-default').style.display  = 'none';
+    document.getElementById('nj-cust-search').style.display   = 'block';
+    document.getElementById('nj-cust-selected').style.display = 'none';
+    const input = document.getElementById('nj-customer-search-input');
+    if (input) { input.value = ''; input.focus(); }
+    _filterCustomers('');
+
+    // Click-outside to dismiss
+    setTimeout(() => {
+      document.addEventListener('click', _custClickOutside);
+    }, 0);
+  }
+
+  function _custClickOutside(e) {
+    const search   = document.getElementById('nj-cust-search');
+    const results  = document.getElementById('nj-customer-results');
+    if (!search) { document.removeEventListener('click', _custClickOutside); return; }
+    if (!search.contains(e.target)) {
+      _skipToWalkin();
+      document.removeEventListener('click', _custClickOutside);
     }
+  }
+
+  function _skipToWalkin() {
+    document.removeEventListener('click', _custClickOutside);
+    document.getElementById('nj-cust-search').style.display   = 'none';
+    document.getElementById('nj-cust-default').style.display  = 'block';
+    document.getElementById('nj-cust-selected').style.display = 'none';
+    document.getElementById('nj-customer').value              = '';
+    _onChannelChange();
+  }
+
+  function _clearCustomer() {
+    document.getElementById('nj-cust-selected').style.display = 'none';
+    document.getElementById('nj-cust-default').style.display  = 'block';
+    document.getElementById('nj-customer').value              = '';
+    _onChannelChange();
   }
 
   function _filterCustomers(query) {
@@ -1244,16 +1363,39 @@ function _resetConfigurator() {
   }
 
   function _selectCustomer(id, name) {
-    const input = document.getElementById('nj-customer');
-    const label = document.getElementById('nj-customer-label');
-    if (input) input.value = id;
-    if (label) label.textContent = name;
-    document.getElementById('nj-customer-search-area').style.display = 'none';
+    document.removeEventListener('click', _custClickOutside);
+    document.getElementById('nj-customer').value              = id;
+    document.getElementById('nj-customer-label').textContent  = name;
+    document.getElementById('nj-cust-search').style.display   = 'none';
+    document.getElementById('nj-cust-default').style.display  = 'none';
+    document.getElementById('nj-cust-selected').style.display = 'block';
+    _onChannelChange();
   }
 
   function _closeAddCustomer() {
     const form = document.getElementById('nj-add-customer-form');
     if (form) form.style.display = 'none';
+  }
+
+  function _onChannelChange() {
+    const channel     = document.getElementById('nj-channel')?.value;
+    const row         = document.querySelector('.nj-customer-row');
+    const searchBtn   = document.getElementById('nj-customer-search-btn');
+    const customerVal = document.getElementById('nj-customer')?.value;
+    const needsCustomer = (channel === 'WHATSAPP' || channel === 'EMAIL') && !customerVal;
+
+    if (row) {
+      row.style.borderColor  = needsCustomer ? 'var(--amber-border)' : 'var(--border)';
+      row.style.background   = needsCustomer ? 'var(--amber-bg)'     : '';
+      row.style.borderRadius = needsCustomer ? 'var(--radius-sm)'    : '';
+      row.style.border       = needsCustomer ? '1.5px solid var(--amber-border)' : '';
+    }
+    if (searchBtn) {
+      searchBtn.textContent  = needsCustomer ? 'Who sent this?' : 'Search';
+      searchBtn.style.background   = needsCustomer ? 'var(--amber-text)' : '';
+      searchBtn.style.color        = needsCustomer ? '#fff'              : '';
+      searchBtn.style.borderColor  = needsCustomer ? 'var(--amber-text)' : '';
+    }
   }
 
 return {
@@ -1273,10 +1415,13 @@ return {
     _filterServiceChips,
     _serviceSearchKeydown,
     _selectRing,
-    _toggleCustomerSearch,
+    _openCustomerSearch,
+    _skipToWalkin,
+    _clearCustomer,
     _filterCustomers,
     _selectCustomer,
     _onOutputModeChange,
+    _onChannelChange,
   };
 
 })();

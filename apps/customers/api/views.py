@@ -23,7 +23,8 @@ class CustomerListView(generics.ListAPIView):
     serializer_class   = CustomerListSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [filters.SearchFilter]
-    search_fields      = ['phone', 'first_name', 'last_name', 'email', 'company_name']
+    search_fields      = ['phone', 'secondary_phone', 'first_name', 'last_name', 'email', 'company_name']
+    pagination_class   = None
 
     def get_queryset(self):
         qs     = super().get_queryset()
@@ -332,9 +333,22 @@ class CustomerEditView(APIView):
     permission_classes = [IsAuthenticated]
 
     EDITABLE_FIELDS = {
-        'INDIVIDUAL'  : ['first_name', 'last_name', 'phone', 'email', 'address'],
-        'BUSINESS'    : ['company_name', 'first_name', 'last_name', 'phone', 'email', 'address'],
-        'INSTITUTION' : ['company_name', 'institution_subtype', 'first_name', 'last_name', 'phone', 'email', 'address'],
+        'INDIVIDUAL'  : [
+            'title', 'title_other', 'first_name', 'last_name',
+            'gender', 'date_of_birth', 'phone', 'secondary_phone',
+            'email', 'preferred_contact', 'address',
+        ],
+        'BUSINESS'    : [
+            'title', 'title_other', 'first_name', 'last_name',
+            'gender', 'date_of_birth', 'phone', 'secondary_phone',
+            'email', 'preferred_contact', 'address', 'company_name',
+        ],
+        'INSTITUTION' : [
+            'title', 'title_other', 'first_name', 'last_name',
+            'gender', 'date_of_birth', 'phone', 'secondary_phone',
+            'email', 'preferred_contact', 'address',
+            'company_name', 'institution_subtype',
+        ],
     }
 
     def patch(self, request, pk):

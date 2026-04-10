@@ -289,7 +289,7 @@ const Attendant = (() => {
   function _renderSheetNumber(p) {
     const el = document.getElementById('at-meta-sheet');
     if (!el) return;
-    el.textContent = p.sheet_number ? `#${p.sheet_number}` : (_sheetId ? `#${_sheetId}` : '—');
+    el.textContent = p.sheet_number || (_sheetId ? `#${_sheetId}` : '—');
   }
 
   async function _loadDraftCount() {

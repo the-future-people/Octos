@@ -1102,6 +1102,10 @@ function switchPerformanceTab(tab) {
         <div style="display:flex;align-items:center;justify-content:space-between;
           margin-bottom:16px;">
           <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+              font-weight:700;color:var(--text-3);">
+              ${sheet.sheet_number || ''}
+            </span>
             <span style="font-size:13px;font-weight:600;color:var(--text-2);">
               ${sheet.date}
             </span>
@@ -1523,7 +1527,7 @@ function switchPerformanceTab(tab) {
     const dateStr = new Date(meta.date).toLocaleDateString('en-GH', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
-    document.getElementById('eod-subtitle').textContent = `${dateStr} · ${meta.branch}`;
+    document.getElementById('eod-subtitle').textContent = `${meta.sheet_number || ''} · ${dateStr} · ${meta.branch}`;
     document.getElementById('eod-ack-branch').textContent = meta.branch;
 
     // Set BM name in acknowledgement
@@ -4150,7 +4154,7 @@ async function _renderDailySheets(container) {
                 <!-- Stats -->
                 <div>
                   <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
-                    ${dayName} · ${dateStr}
+                    ${s.sheet_number ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--text-3);margin-right:6px;">${s.sheet_number}</span>` : ''}${dayName} · ${dateStr}
                   </div>
                   <div style="display:flex;align-items:center;gap:16px;">
                     <span style="font-size:12px;color:var(--text-3);">
@@ -7183,6 +7187,61 @@ ${_esc(c.notes || '')}</textarea>
             </select>
           </div>` : ''}
 
+          <!-- Title + Gender row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Title <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-title"
+                onchange="Dashboard._editTitleChange()"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">No title</option>
+                <option value="MR"    ${c.title==='MR'    ?'selected':''}>Mr</option>
+                <option value="MRS"   ${c.title==='MRS'   ?'selected':''}>Mrs</option>
+                <option value="MISS"  ${c.title==='MISS'  ?'selected':''}>Miss</option>
+                <option value="MS"    ${c.title==='MS'    ?'selected':''}>Ms</option>
+                <option value="MADAM" ${c.title==='MADAM' ?'selected':''}>Madam</option>
+                <option value="DR"    ${c.title==='DR'    ?'selected':''}>Dr</option>
+                <option value="PROF"  ${c.title==='PROF'  ?'selected':''}>Prof</option>
+                <option value="REV"   ${c.title==='REV'   ?'selected':''}>Rev</option>
+                <option value="ESQ"   ${c.title==='ESQ'   ?'selected':''}>Esq</option>
+                <option value="OTHER" ${c.title==='OTHER' ?'selected':''}>Other</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Gender <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-gender"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">Not specified</option>
+                <option value="MALE"       ${c.gender==='MALE'       ?'selected':''}>Male</option>
+                <option value="FEMALE"     ${c.gender==='FEMALE'     ?'selected':''}>Female</option>
+                <option value="PREFER_NOT" ${c.gender==='PREFER_NOT' ?'selected':''}>Prefer not to say</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Other title — shows only when OTHER selected -->
+          <div id="edit-title-other-wrap"
+            style="display:${c.title==='OTHER' ? 'block' : 'none'};">
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Custom Title *</label>
+            <input type="text" id="edit-title-other"
+              value="${_esc(c.title_other || '')}"
+              placeholder="e.g. Chief, Pastor…"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+
           <!-- Name row -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
             <div>
@@ -7213,20 +7272,63 @@ ${_esc(c.notes || '')}</textarea>
             </div>
           </div>
 
-          <!-- Phone -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">Phone Number *</label>
-            <input type="tel" id="edit-phone"
-              value="${_esc(c.phone || '')}"
-              onblur="Dashboard._editPhoneNormalise(this)"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-            <div id="edit-phone-feedback"
-              style="font-size:11px;margin-top:5px;"></div>
+          <!-- Phone row: primary + secondary -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Phone Number *</label>
+              <input type="tel" id="edit-phone"
+                value="${_esc(c.phone || '')}"
+                onblur="Dashboard._editPhoneNormalise(this)"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+              <div id="edit-phone-feedback" style="font-size:11px;margin-top:5px;"></div>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Secondary Phone <span style="font-weight:400;">(optional)</span></label>
+              <input type="tel" id="edit-secondary-phone"
+                value="${_esc(c.secondary_phone || '')}"
+                placeholder="e.g. 0201234567"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+          </div>
+
+          <!-- Preferred contact + Email row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Preferred Contact <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-preferred-contact"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">Not specified</option>
+                <option value="WHATSAPP" ${c.preferred_contact==='WHATSAPP'?'selected':''}>WhatsApp</option>
+                <option value="CALL"     ${c.preferred_contact==='CALL'    ?'selected':''}>Call</option>
+                <option value="SMS"      ${c.preferred_contact==='SMS'     ?'selected':''}>SMS</option>
+                <option value="EMAIL"    ${c.preferred_contact==='EMAIL'   ?'selected':''}>Email</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Email <span style="font-weight:400;">(optional)</span></label>
+              <input type="email" id="edit-email"
+                value="${_esc(c.email || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
           </div>
 
           <!-- Email -->
@@ -7307,6 +7409,12 @@ ${_esc(c.notes || '')}</textarea>
       </div>`;
   }
 
+  function _editTitleChange() {
+    const val  = document.getElementById('edit-title')?.value;
+    const wrap = document.getElementById('edit-title-other-wrap');
+    if (wrap) wrap.style.display = val === 'OTHER' ? 'block' : 'none';
+  }
+
   function _editPhoneNormalise(input) {
     const norm = _normalisePhone(input.value);
     input.value = norm;
@@ -7353,6 +7461,11 @@ ${_esc(c.notes || '')}</textarea>
       payload.company_name = company;
     if (subtype !== undefined && document.getElementById('edit-subtype'))
       payload.institution_subtype = subtype;
+    payload.title              = document.getElementById('edit-title')?.value || '';
+    payload.title_other        = document.getElementById('edit-title-other')?.value.trim() || '';
+    payload.gender             = document.getElementById('edit-gender')?.value || '';
+    payload.secondary_phone    = _normalisePhone(document.getElementById('edit-secondary-phone')?.value.trim() || '');
+    payload.preferred_contact  = document.getElementById('edit-preferred-contact')?.value || '';
 
     try {
       const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit/`, {
@@ -7956,6 +8069,8 @@ return {
     _toggleEditHistory,
     _loadEditHistory,
     _nominateCredit,
+    _editTitleChange,
+    _editPhoneNormalise,
   };
 
 })();

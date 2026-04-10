@@ -89,6 +89,7 @@ class SheetEngine:
         )
 
         if created:
+            self._assign_sheet_number(sheet, target_date)
             logger.info(
                 'SheetEngine: opened sheet %s for branch %s on %s',
                 sheet.pk, self.branch.code, target_date,
@@ -132,6 +133,29 @@ class SheetEngine:
                 'SheetEngine: sheet %s opened_by set to user %s (first job)',
                 sheet.pk, user.pk,
             )
+    
+    def _assign_sheet_number(self, sheet, target_date) -> None:
+        """
+        Assign a cumulative per-branch sheet number on creation.
+        Format: {BRANCH_CODE}-{MMDD}-{SEQ:03d}
+        e.g. WLB-0407-015
+        """
+        from apps.finance.models import DailySalesSheet
+        from django.db.models import Count
+
+        seq = DailySalesSheet.objects.filter(
+            branch=self.branch,
+            pk__lte=sheet.pk,
+        ).count()
+
+        month = target_date.strftime('%m')
+        day   = target_date.strftime('%d')
+        sheet.sheet_number = f"{self.branch.code}-{month}{day}-{seq:03d}"
+        sheet.save(update_fields=['sheet_number'])
+        logger.info(
+            'SheetEngine: assigned sheet number %s to sheet %s',
+            sheet.sheet_number, sheet.pk,
+        )
 
     def _link_staged_floats(self, sheet) -> dict:
         """

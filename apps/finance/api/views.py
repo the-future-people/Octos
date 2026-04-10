@@ -245,6 +245,32 @@ class DailySalesSheetCloseView(APIView):
                 f"Resolve before closing."
             )
 
+        # ── Stage tomorrow's floats BEFORE Gate 3 ─────────────
+        from apps.accounts.models import CustomUser
+        from datetime import timedelta
+        from decimal import Decimal
+
+        floats_data = request.data.get('floats', [])
+        tomorrow    = sheet.date + timedelta(days=1)
+        if tomorrow.weekday() == 6:
+            tomorrow = tomorrow + timedelta(days=1)
+
+        for f in floats_data:
+            try:
+                cashier = CustomUser.objects.get(
+                    pk     = f['cashier_id'],
+                    branch = sheet.branch,
+                )
+                FloatEngine.stage_float(
+                    cashier     = cashier,
+                    amount      = Decimal(str(f['opening_float'])),
+                    set_by      = request.user,
+                    target_date = tomorrow,
+                    branch      = sheet.branch,
+                )
+            except Exception:
+                pass
+
         # ── Gate 3: Tomorrow's float set ──────────────────────
         float_gate = FloatEngine.validate_tomorrow_float_gate(sheet)
         if not float_gate['passed']:
@@ -273,8 +299,8 @@ class DailySalesSheetCloseView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from apps.finance.serializers import DailySalesSheetSerializer
-        return Response(DailySalesSheetSerializer(closed).data)
+        from apps.finance.serializers import DailySalesSheetListSerializer
+        return Response(DailySalesSheetListSerializer(closed).data)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cashier Float
@@ -529,6 +555,17 @@ class CashierShiftStatusView(APIView):
             date    = today,
         )
 
+        # ── Resolve sheet_number ───────────────────────────────
+        from apps.finance.models import DailySalesSheet as DSS
+        _sheet_number = ''
+        if float_status.get('sheet_id'):
+            try:
+                _sheet_number = DSS.objects.filter(
+                    pk=float_status['sheet_id']
+                ).values_list('sheet_number', flat=True).first() or ''
+            except Exception:
+                pass
+
         # ── Signed off — return immediately ───────────────────
         if float_status['float_status'] == 'SIGNED_OFF':
             return Response({
@@ -536,6 +573,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'SIGNED_OFF',
                 'float_id'         : float_status['float_id'],
                 'sheet_id'         : float_status['sheet_id'],
+                'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
                 'shift_end'        : None,
@@ -556,6 +594,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'NO_FLOAT',
                 'float_id'         : None,
                 'sheet_id'         : None,
+                'sheet_number'     : '',
                 'opening_float'    : None,
                 'opening_breakdown': None,
                 'shift_end'        : None,
@@ -576,6 +615,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'PENDING_ACK',
                 'float_id'         : float_status['float_id'],
                 'sheet_id'         : float_status['sheet_id'],
+                'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
                 'shift_end'        : None,
@@ -613,6 +653,7 @@ class CashierShiftStatusView(APIView):
                 'sheet_id'         : float_status['sheet_id'],
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
+                'sheet_number'     : _sheet_number,
                 'shift_end'        : float_record.overtime_until.time(),
                 'minutes_remaining': mins_remaining,
                 'should_prompt'    : mins_remaining <= 60,
@@ -642,6 +683,7 @@ class CashierShiftStatusView(APIView):
             'float_status'     : float_status_val,
             'float_id'         : float_status['float_id'],
             'sheet_id'         : float_status['sheet_id'],
+            'sheet_number'     : _sheet_number,
             'opening_float'    : float_status['opening_float'],
             'opening_breakdown': float_status['opening_breakdown'],
             'shift_end'        : shift_end,
@@ -1575,8 +1617,9 @@ class EODSummaryView(APIView):
 
         # ── Sheet meta ────────────────────────────────────────────
         meta = {
-            'sheet_id'  : sheet.pk,
-            'date'      : sheet.date.isoformat(),
+            'sheet_id'     : sheet.pk,
+            'sheet_number' : sheet.sheet_number or f"#{sheet.pk}",
+            'date'         : sheet.date.isoformat(),
             'status'    : sheet.status,
             'branch'    : branch.name,
             'branch_code': branch.code,

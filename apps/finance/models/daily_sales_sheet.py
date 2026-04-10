@@ -70,7 +70,10 @@ class DailySalesSheet(AuditModel):
     # ── VAT (future-proofed, 0 until GRA registered) ─────────
     vat_collected        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
-    # ── Notes (BM only, no number adjustments) ───────────────
+    # ── Sheet number (branch-scoped, cumulative) ──────────────────────────
+    sheet_number         = models.CharField(max_length=20, blank=True, default='')
+
+    # ── Notes (BM only, no number adjustments) ───────────────────────────
     notes                = models.TextField(blank=True)
 
     class Meta:
@@ -80,7 +83,8 @@ class DailySalesSheet(AuditModel):
         verbose_name_plural  = 'Daily Sales Sheets'
 
     def __str__(self):
-        return f"{self.branch.code} — {self.date} [{self.status}]"
+        ref = self.sheet_number or str(self.pk)
+        return f"{ref} — {self.date} [{self.status}]"
 
     @property
     def is_open(self):
