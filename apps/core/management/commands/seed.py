@@ -5,26 +5,26 @@ from apps.accounts.models import Permission, Role
 PERMISSIONS = [
     # Organization
     ('can_view_all_branches', 'View all branches system-wide'),
-    ('can_create_branch', 'Create and edit branches'),
-    ('can_view_belt', 'View belt-level data'),
-    ('can_view_region', 'View region-level data'),
+    ('can_create_branch',     'Create and edit branches'),
+    ('can_view_belt',         'View belt-level data'),
+    ('can_view_region',       'View region-level data'),
 
     # Jobs
-    ('can_create_job', 'Create a new job'),
-    ('can_route_job', 'Route a job to another branch'),
+    ('can_create_job',        'Create a new job'),
+    ('can_route_job',         'Route a job to another branch'),
     ('can_update_job_status', 'Update job status'),
-    ('can_view_all_jobs', 'View jobs across all branches'),
+    ('can_view_all_jobs',     'View jobs across all branches'),
 
     # Finance
-    ('can_confirm_payment', 'Confirm payment as cashier'),
-    ('can_view_financials', 'View financial reports'),
+    ('can_confirm_payment',    'Confirm payment as cashier'),
+    ('can_view_financials',    'View financial reports'),
     ('can_process_settlement', 'Process inter-branch settlements'),
 
     # HR
     ('can_manage_recruitment', 'Manage recruitment pipeline'),
-    ('can_approve_employee', 'Approve new employee access'),
-    ('can_request_transfer', 'Request employee transfer'),
-    ('can_approve_transfer', 'Approve employee transfer'),
+    ('can_approve_employee',   'Approve new employee access'),
+    ('can_request_transfer',   'Request employee transfer'),
+    ('can_approve_transfer',   'Approve employee transfer'),
 
     # Inventory
     ('can_manage_inventory', 'Manage branch inventory'),
@@ -33,14 +33,21 @@ PERMISSIONS = [
     ('can_view_analytics', 'View analytics and reports'),
 
     # Communications
-    ('can_access_inbox', 'Access branch unified inbox'),
-    ('can_send_message', 'Send messages to customers'),
+    ('can_access_inbox',  'Access branch unified inbox'),
+    ('can_send_message',  'Send messages to customers'),
 
     # Design
     ('can_manage_design_jobs', 'Access and manage design jobs'),
 
     # Notifications
     ('can_view_notifications', 'View system notifications'),
+
+    # Procurement & Operations
+    ('can_manage_procurement',  'Generate and manage replenishment orders'),
+    ('can_approve_procurement', 'Approve procurement budgets (Finance)'),
+    ('can_dispatch_delivery',   'Mark orders as dispatched and record delivery'),
+    ('can_accept_delivery',     'Accept deliveries at branch level'),
+    ('can_view_procurement',    'View procurement orders and status'),
 ]
 
 
@@ -49,6 +56,20 @@ ROLES = [
         'name': 'SUPER_ADMIN',
         'display_name': 'Super Admin (CEO)',
         'permissions': [p[0] for p in PERMISSIONS],  # All permissions
+    },
+    {
+        'name': 'OPERATIONS_MANAGER',
+        'display_name': 'Operations & Procurement Manager',
+        'permissions': [
+            'can_manage_procurement',
+            'can_dispatch_delivery',
+            'can_accept_delivery',
+            'can_view_procurement',
+            'can_manage_inventory',
+            'can_view_all_branches',
+            'can_view_analytics',
+            'can_view_notifications',
+        ],
     },
     {
         'name': 'HQ_HR_MANAGER',
@@ -99,6 +120,7 @@ ROLES = [
             'can_view_financials',
             'can_view_analytics',
             'can_request_transfer',
+            'can_view_procurement',
             'can_view_notifications',
         ],
     },
@@ -125,6 +147,8 @@ ROLES = [
             'can_manage_inventory',
             'can_access_inbox',
             'can_send_message',
+            'can_accept_delivery',
+            'can_view_procurement',
             'can_view_notifications',
         ],
     },
@@ -159,6 +183,18 @@ ROLES = [
             'can_view_notifications',
         ],
     },
+    {
+        'name': 'FINANCE',
+        'display_name': 'Finance Reviewer',
+        'permissions': [
+            'can_view_financials',
+            'can_view_all_branches',
+            'can_view_analytics',
+            'can_approve_procurement',
+            'can_view_procurement',
+            'can_view_notifications',
+        ],
+    },
 ]
 
 
@@ -171,24 +207,24 @@ class Command(BaseCommand):
         for codename, description in PERMISSIONS:
             perm, created = Permission.objects.get_or_create(
                 codename=codename,
-                defaults={'description': description}
+                defaults={'description': description},
             )
             permission_map[codename] = perm
             if created:
-                self.stdout.write(f'  ✓ Permission: {codename}')
+                self.stdout.write(f'  ✓ Permission created: {codename}')
 
         self.stdout.write('Seeding roles...')
         for role_data in ROLES:
             role, created = Role.objects.get_or_create(
                 name=role_data['name'],
-                defaults={'display_name': role_data['display_name']}
+                defaults={'display_name': role_data['display_name']},
             )
             role.permissions.set([
                 permission_map[p] for p in role_data['permissions']
             ])
             role.save()
-            status = 'created' if created else 'updated'
-            self.stdout.write(f'  ✓ Role {status}: {role.display_name}')
+            action = 'created' if created else 'updated'
+            self.stdout.write(f'  ✓ Role {action}: {role.display_name}')
 
         self.stdout.write(self.style.SUCCESS(
             f'\nDone. {len(PERMISSIONS)} permissions, {len(ROLES)} roles seeded.'

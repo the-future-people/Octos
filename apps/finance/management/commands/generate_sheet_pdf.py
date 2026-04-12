@@ -188,7 +188,11 @@ class Command(BaseCommand):
         story += self._build_jobs_table(sheet, styles)
         story.append(Spacer(1, 6*mm))
 
-        # ── Closing notes ──────────────────────────────────────────
+        # ── Inventory consumption ───────────────────────────────────────────
+        story += self._build_inventory(sheet, styles)
+        story.append(Spacer(1, 6*mm))
+
+        # ── Closing notes ──────────────────────────────────────────────────
         if sheet.notes:
             story += self._build_notes(sheet, styles)
 
@@ -441,6 +445,80 @@ class Command(BaseCommand):
         ]))
 
         return [section_title, table]
+    
+    # ── Inventory consumption ─────────────────────────────────────────────────
+    def _build_inventory(self, sheet, styles):
+        from apps.inventory.inventory_engine import InventoryEngine
+
+        title = Paragraph('INVENTORY CONSUMED TODAY', ParagraphStyle(
+            'it', fontName='Helvetica-Bold', fontSize=8,
+            textColor=C_LIGHT, leading=10, spaceAfter=4,
+        ))
+
+        try:
+            engine   = InventoryEngine(sheet.branch)
+            snapshot = engine.generate_daily_snapshot(sheet.date)
+            items    = snapshot.get('items', [])
+        except Exception:
+            items = []
+
+        if not items:
+            return [
+                title,
+                Paragraph('No inventory movements recorded for this day.', styles['body']),
+                Spacer(1, 4*mm),
+            ]
+
+        headers = ['CONSUMABLE', 'CATEGORY', 'UNIT', 'CONSUMED', 'CLOSING', 'STATUS']
+        rows    = [headers]
+
+        for item in items:
+            is_low      = item.get('is_low', False)
+            closing     = item.get('closing', 0)
+            consumed    = item.get('consumed', 0)
+            unit        = item.get('unit', '')
+            status_text = 'LOW' if is_low else 'OK'
+            rows.append([
+                item.get('consumable', '—'),
+                item.get('category',  '—'),
+                unit,
+                f"{consumed}",
+                f"{closing} {unit}",
+                status_text,
+            ])
+
+        col_widths = [55*mm, 30*mm, 18*mm, 22*mm, 28*mm, 14*mm]
+        table = Table(rows, colWidths=col_widths, repeatRows=1)
+
+        # Build row styles — highlight LOW rows in red
+        row_styles = [
+            ('BACKGROUND',    (0,0), (-1,0), C_BLACK),
+            ('TEXTCOLOR',     (0,0), (-1,0), C_WHITE),
+            ('FONTNAME',      (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE',      (0,0), (-1,0), 7),
+            ('TOPPADDING',    (0,0), (-1,0), 5),
+            ('BOTTOMPADDING', (0,0), (-1,0), 5),
+            ('LEFTPADDING',   (0,0), (-1,-1), 5),
+            ('FONTNAME',      (0,1), (-1,-1), 'Helvetica'),
+            ('FONTSIZE',      (0,1), (-1,-1), 7.5),
+            ('TOPPADDING',    (0,1), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,1), (-1,-1), 4),
+            ('ROWBACKGROUNDS',(0,1), (-1,-1), [white, C_BG]),
+            ('GRID',          (0,0), (-1,-1), 0.3, C_BORDER),
+            ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGNMENT',     (3,0), (4,-1), 'RIGHT'),
+            ('ALIGNMENT',     (5,0), (5,-1), 'CENTER'),
+        ]
+
+        for i, item in enumerate(items, start=1):
+            if item.get('is_low', False):
+                row_styles.append(('TEXTCOLOR', (5,i), (5,i), C_RED))
+                row_styles.append(('FONTNAME',  (5,i), (5,i), 'Helvetica-Bold'))
+                row_styles.append(('TEXTCOLOR', (4,i), (4,i), C_RED))
+
+        table.setStyle(TableStyle(row_styles))
+
+        return [title, table, Spacer(1, 4*mm)]
 
     # ── Notes block ──────────────────────────────────────────────
     def _build_notes(self, sheet, styles):

@@ -30,7 +30,7 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DailySalesSheet
         fields = [
-            'id', 'sheet_number', 'branch', 'branch_name', 'branch_code',
+            'id', 'branch', 'branch_name', 'branch_code',
             'date', 'status',
             'opened_by_name', 'opened_at',
             'closed_by_name', 'closed_at',
@@ -508,7 +508,7 @@ class WeeklyReportListSerializer(serializers.ModelSerializer):
     class Meta:
         model  = WeeklyReport
         fields = [
-            'id', 'sheet_number', 'branch', 'branch_name', 'branch_code',
+            'id', 'branch', 'branch_name', 'branch_code',
             'week_number', 'year', 'date_from', 'date_to',
             'status',
             'total_cash', 'total_momo', 'total_pos',

@@ -59,6 +59,7 @@ const Auth = {
     SUPER_ADMIN              : '/portal/dashboard/',
     DESIGNER                 : '/portal/attendant/',
     FINANCE                  : '/portal/finance/',
+    OPERATIONS_MANAGER       : '/portal/ops/',
   },
 
   redirectToPortal() {

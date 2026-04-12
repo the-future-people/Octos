@@ -433,23 +433,93 @@ async function loadRecentJobs() {
     }
   }
 
+let _invoicesPeriod = '';
+  let _invoicesPage   = 1;
+
   async function _loadInvoicesContent() {
     const container = document.getElementById('invoices-content');
     if (!container) return;
 
+    _invoicesPeriod = '';
+    _invoicesPage   = 1;
+
+    container.innerHTML = `
+      <!-- Period tabs -->
+      <div class="reports-tabs" id="invoices-period-tabs" style="margin-bottom:16px;">
+        <button class="reports-tab active" data-period=""
+          onclick="Dashboard.setInvoicesPeriod('')">All</button>
+        <button class="reports-tab" data-period="day"
+          onclick="Dashboard.setInvoicesPeriod('day')">Today</button>
+        <button class="reports-tab" data-period="week"
+          onclick="Dashboard.setInvoicesPeriod('week')">This Week</button>
+        <button class="reports-tab" data-period="month"
+          onclick="Dashboard.setInvoicesPeriod('month')">This Month</button>
+      </div>
+
+      <!-- Table -->
+      <div id="invoices-table-wrap">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>
+
+      <!-- Pagination -->
+      <div id="invoices-pagination" style="display:none;align-items:center;
+        justify-content:space-between;padding:12px 4px;margin-top:8px;">
+        <button id="invoices-prev-btn" onclick="Dashboard._invoicesPageChange(-1)"
+          style="padding:6px 14px;font-size:12px;font-weight:600;
+            border:1px solid var(--border);border-radius:var(--radius-sm);
+            background:var(--panel);color:var(--text-2);cursor:pointer;
+            font-family:'DM Sans',sans-serif;">← Prev</button>
+        <span id="invoices-page-info"
+          style="font-size:12px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+        </span>
+        <button id="invoices-next-btn" onclick="Dashboard._invoicesPageChange(1)"
+          style="padding:6px 14px;font-size:12px;font-weight:600;
+            border:1px solid var(--border);border-radius:var(--radius-sm);
+            background:var(--panel);color:var(--text-2);cursor:pointer;
+            font-family:'DM Sans',sans-serif;">Next →</button>
+      </div>`;
+
+    await _fetchInvoices();
+  }
+
+  async function _fetchInvoices() {
+    const wrap = document.getElementById('invoices-table-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
     try {
-      const res      = await Auth.fetch('/api/v1/finance/invoices/');
+      const periodParam = _invoicesPeriod ? `&period=${_invoicesPeriod}` : '';
+      const res      = await Auth.fetch(
+        `/api/v1/finance/invoices/?page=${_invoicesPage}&page_size=10${periodParam}`
+      );
       if (!res.ok) throw new Error();
       const data     = await res.json();
-      const invoices = Array.isArray(data) ? data : (data.results || []);
+      const invoices = data.results || [];
+      const count    = data.count   || 0;
+      const totalPages = Math.ceil(count / 10);
+
+      // Pagination controls
+      const pagination = document.getElementById('invoices-pagination');
+      const pageInfo   = document.getElementById('invoices-page-info');
+      const prevBtn    = document.getElementById('invoices-prev-btn');
+      const nextBtn    = document.getElementById('invoices-next-btn');
+
+      if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+      if (pageInfo) {
+        const from = count === 0 ? 0 : (_invoicesPage - 1) * 10 + 1;
+        const to   = Math.min(_invoicesPage * 10, count);
+        pageInfo.textContent = `${from}–${to} of ${count}`;
+      }
+      if (prevBtn) prevBtn.disabled = _invoicesPage <= 1;
+      if (nextBtn) nextBtn.disabled = _invoicesPage >= totalPages;
 
       if (!invoices.length) {
-        container.innerHTML = `<div style="text-align:center;padding:48px;
-          color:var(--text-3);font-size:13px;">No invoices yet.</div>`;
+        wrap.innerHTML = `<div style="text-align:center;padding:48px;
+          color:var(--text-3);font-size:13px;">No invoices for this period.</div>`;
         return;
       }
 
-      container.innerHTML = `
+      wrap.innerHTML = `
         <div style="background:var(--panel);border:1px solid var(--border);
           border-radius:var(--radius);overflow:hidden;">
           <table class="p-table">
@@ -487,17 +557,36 @@ async function loadRecentJobs() {
           </table>
         </div>`;
     } catch {
-      container.innerHTML = `<div class="loading-cell">Could not load invoices.</div>`;
+      wrap.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
+        Could not load invoices.</div>`;
     }
+  }
+
+  async function setInvoicesPeriod(period) {
+    _invoicesPeriod = period;
+    _invoicesPage   = 1;
+    document.querySelectorAll('#invoices-period-tabs .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    await _fetchInvoices();
+  }
+
+  async function _invoicesPageChange(delta) {
+    _invoicesPage += delta;
+    await _fetchInvoices();
   }
 
  // ── Receipts tab ───────────────────────────────────────────
   let _receiptsPeriod  = 'day';
   let _activeReceiptId = null;
 
-  async function _loadReceiptsContent() {
+ async function _loadReceiptsContent() {
     const container = document.getElementById('receipts-content');
     if (!container) return;
+
+    _receiptsPeriod  = 'day';
+    _receiptsPage    = 1;
+    _activeReceiptId = null;
 
     container.innerHTML = `
       <!-- Period selector -->
@@ -521,11 +610,31 @@ async function loadRecentJobs() {
         border-radius:var(--radius);overflow:hidden;min-height:520px;">
 
         <!-- Left — receipt list -->
-        <div id="receipts-list-panel"
-          style="width:300px;flex-shrink:0;border-right:1px solid var(--border);
-            overflow-y:auto;background:var(--panel);">
-          <div style="padding:20px;text-align:center;color:var(--text-3);">
-            <span class="spin"></span>
+        <div style="width:300px;flex-shrink:0;border-right:1px solid var(--border);
+          display:flex;flex-direction:column;background:var(--panel);">
+          <div id="receipts-list-panel" style="flex:1;overflow-y:auto;">
+            <div style="padding:20px;text-align:center;color:var(--text-3);">
+              <span class="spin"></span>
+            </div>
+          </div>
+          <!-- Pagination -->
+          <div id="receipts-pagination" style="display:none;flex-shrink:0;
+            padding:10px 12px;border-top:1px solid var(--border);
+            background:var(--bg);display:flex;align-items:center;
+            justify-content:space-between;gap:8px;">
+            <button id="receipts-prev-btn" onclick="Dashboard._receiptsPageChange(-1)"
+              style="padding:5px 12px;font-size:12px;font-weight:600;
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                background:var(--panel);color:var(--text-2);cursor:pointer;
+                font-family:'DM Sans',sans-serif;">← Prev</button>
+            <span id="receipts-page-info"
+              style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+            </span>
+            <button id="receipts-next-btn" onclick="Dashboard._receiptsPageChange(1)"
+              style="padding:5px 12px;font-size:12px;font-weight:600;
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                background:var(--panel);color:var(--text-2);cursor:pointer;
+                font-family:'DM Sans',sans-serif;">Next →</button>
           </div>
         </div>
 
@@ -550,7 +659,7 @@ async function loadRecentJobs() {
     await _fetchReceipts();
   }
 
-  async function _fetchReceipts() {
+ async function _fetchReceipts() {
     const listPanel = document.getElementById('receipts-list-panel');
     if (!listPanel) return;
 
@@ -559,11 +668,30 @@ async function loadRecentJobs() {
 
     try {
       const res      = await Auth.fetch(
-        `/api/v1/finance/receipts/?period=${_receiptsPeriod}&page_size=100`
+        `/api/v1/finance/receipts/?period=${_receiptsPeriod}&page=${_receiptsPage}&page_size=10`
       );
       if (!res.ok) throw new Error();
       const data     = await res.json();
-      const receipts = Array.isArray(data) ? data : (data.results || []);
+      const receipts = data.results || [];
+      const count    = data.count || 0;
+      const totalPages = Math.ceil(count / 10);
+
+      // Update pagination controls
+      const pagination  = document.getElementById('receipts-pagination');
+      const pageInfo    = document.getElementById('receipts-page-info');
+      const prevBtn     = document.getElementById('receipts-prev-btn');
+      const nextBtn     = document.getElementById('receipts-next-btn');
+
+      if (pagination) {
+        pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+      }
+      if (pageInfo) {
+        const from = count === 0 ? 0 : (_receiptsPage - 1) * 10 + 1;
+        const to   = Math.min(_receiptsPage * 10, count);
+        pageInfo.textContent = `${from}–${to} of ${count}`;
+      }
+      if (prevBtn) prevBtn.disabled = _receiptsPage <= 1;
+      if (nextBtn) nextBtn.disabled = _receiptsPage >= totalPages;
 
       if (!receipts.length) {
         listPanel.innerHTML = `
@@ -603,8 +731,6 @@ async function loadRecentJobs() {
               transition:background 0.12s;border-left:3px solid ${isActive ? 'var(--text)' : 'transparent'};"
             onmouseover="this.style.background='var(--bg)'"
             onmouseout="this.style.background='${isActive ? 'var(--bg)' : 'var(--panel)'}'">
-
-            <!-- Row top: receipt number + amount -->
             <div style="display:flex;align-items:center;
               justify-content:space-between;margin-bottom:4px;">
               <span style="font-family:'JetBrains Mono',monospace;font-size:11px;
@@ -616,14 +742,10 @@ async function loadRecentJobs() {
                 ${_fmt(r.amount_paid)}
               </span>
             </div>
-
-            <!-- Row mid: customer -->
             <div style="font-size:12px;color:var(--text-2);font-weight:500;
               margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
               ${_esc(r.customer_name || 'Walk-in')}
             </div>
-
-            <!-- Row bottom: method badge + time -->
             <div style="display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:10px;font-weight:700;padding:2px 7px;
                 border-radius:4px;border:1px solid ${mc.border};
@@ -635,12 +757,11 @@ async function loadRecentJobs() {
                 ${date} · ${time}
               </span>
             </div>
-
           </div>`;
       }).join('');
 
-      // Auto-open first receipt
-      if (receipts.length && !_activeReceiptId) {
+      // Auto-open first receipt on page 1 if none active
+      if (receipts.length && !_activeReceiptId && _receiptsPage === 1) {
         openReceipt(receipts[0].id);
       }
 
@@ -648,6 +769,27 @@ async function loadRecentJobs() {
       listPanel.innerHTML = `<div style="padding:24px;text-align:center;
         color:var(--red-text);font-size:13px;">Could not load receipts.</div>`;
     }
+  }
+
+  let _receiptsPage = 1;
+
+  async function _receiptsPageChange(delta) {
+    _receiptsPage    += delta;
+    _activeReceiptId  = null;
+    // Reset detail panel
+    const detail = document.getElementById('receipts-detail-panel');
+    if (detail) detail.innerHTML = `
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:12px;color:var(--text-3);padding:40px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.5" style="opacity:0.3;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div style="font-size:13px;">Select a receipt to view details</div>
+      </div>`;
+    await _fetchReceipts();
   }
 
   async function openReceipt(receiptId) {
@@ -901,6 +1043,7 @@ async function loadRecentJobs() {
 
   function setReceiptsPeriod(period) {
     _receiptsPeriod  = period;
+    _receiptsPage    = 1;
     _activeReceiptId = null;
     document.querySelectorAll('#receipts-period-tabs .reports-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.period === period);
@@ -1773,6 +1916,50 @@ function switchPerformanceTab(tab) {
         </table>`;
     } else {
       creditList.innerHTML = '<div class="eod-empty-note">No credit sales today. ✓</div>';
+    }
+
+    // ── 7. Inventory Consumption ──────────────────────────────
+    const invSection = document.getElementById('eod-inventory-section');
+    const invList    = document.getElementById('eod-inventory-list');
+    if (invSection && invList) {
+      const items = d.inventory_consumption || [];
+      if (items.length) {
+        invSection.style.display = 'block';
+        invList.innerHTML = `
+          <table class="eod-table">
+            <thead>
+              <tr>
+                <th>Consumable</th>
+                <th style="text-align:right;">Consumed</th>
+                <th style="text-align:right;">Closing</th>
+                <th style="text-align:center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(item => {
+                const isToner  = item.unit === '%';
+                const closing  = parseFloat(item.closing);
+                const isLow    = item.is_low;
+                const pctColor = isToner
+                  ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+                  : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+                const badge = isLow
+                  ? `<span style="background:#fee2e2;color:var(--red-text);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">LOW</span>`
+                  : `<span style="background:#dcfce7;color:var(--green-text);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">OK</span>`;
+                return `
+                  <tr>
+                    <td>${_esc(item.consumable)}</td>
+                    <td class="mono" style="text-align:right;">${item.consumed} ${item.unit}</td>
+                    <td class="mono" style="text-align:right;color:${pctColor};font-weight:600;">${item.closing} ${item.unit}</td>
+                    <td style="text-align:center;">${badge}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+      } else {
+        invSection.style.display = 'block';
+        invList.innerHTML = '<div class="eod-empty-note">No inventory movements recorded today.</div>';
+      }
     }
 
     // ── 8. Tomorrow's Float ───────────────────────────────────────
@@ -3879,6 +4066,134 @@ async function _loadReportsTab(tab) {
     } catch { /* silent */ }
   }
 
+function _renderMonthlyCloseDetail(container, data) {
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const snap    = data.summary_snapshot || {};
+    const revenue = snap.revenue || {};
+    const jobs    = snap.jobs    || {};
+    const inv     = snap.inventory || {};
+    const invItems = (inv.items || []).filter(i => i.consumed > 0);
+
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const monthName = monthNames[(data.month||1)-1];
+
+    const statusConfig = {
+      SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
+      FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
+      NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
+      RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
+      FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
+      ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ✓' },
+      LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ✓' },
+      REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
+    };
+    const sc = statusConfig[data.status] || { bg:'var(--bg)', text:'var(--text-3)', label: data.status };
+
+    container.innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:16px;padding:16px 20px;background:var(--panel);
+        border:1px solid var(--border);border-radius:var(--radius);">
+        <div>
+          <div style="font-size:16px;font-weight:700;color:var(--text);">
+            ${monthName} ${data.year}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+            Submitted by ${_esc(data.submitted_by || '—')}
+            ${data.submitted_at ? ' · ' + new Date(data.submitted_at)
+              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+          </div>
+        </div>
+        <span style="padding:4px 14px;border-radius:20px;font-size:11px;
+          font-weight:700;background:${sc.bg};color:${sc.text};">
+          ${sc.label}
+        </span>
+      </div>
+
+      <!-- Revenue strip -->
+      ${revenue.total_collected != null ? `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
+          ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong, var(--green-text))'],
+          ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong, var(--amber-text))'],
+          ['Jobs',            jobs.total || 0,                   'var(--text)'],
+        ].map(([label, val, color]) => `
+          <div style="padding:12px 14px;background:var(--panel);
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              ${label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
+              font-weight:700;color:${color};">${val}</div>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- Inventory consumption -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Inventory Consumed This Month
+        </div>
+        ${invItems.length ? `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+              <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumable</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumed</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Closing</th>
+              <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${invItems.map(item => {
+              const isToner = item.unit === '%';
+              const closing = parseFloat(item.closing);
+              const isLow   = item.is_low;
+              const color   = isToner
+                ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+                : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+              const badge   = isLow
+                ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
+                : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
+              return `
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
+                  <td style="padding:6px 10px;text-align:right;color:var(--text-3);
+                    font-family:'JetBrains Mono',monospace;">${item.consumed} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:right;font-weight:600;
+                    font-family:'JetBrains Mono',monospace;color:${color};">
+                    ${item.closing} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:center;">${badge}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>` : `
+        <div style="font-size:12px;color:var(--text-3);padding:8px 0;">
+          ${data.status === 'OPEN'
+            ? 'Inventory snapshot is generated when the month is submitted.'
+            : 'No consumption recorded for this month.'}
+        </div>`}
+      </div>
+
+      <!-- BM Notes -->
+      ${data.bm_notes ? `
+      <div style="padding:12px 16px;background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius-sm);">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+          Branch Manager Notes</div>
+        <div style="font-size:13px;color:var(--text-2);">${_esc(data.bm_notes)}</div>
+      </div>` : ''}`;
+  }
+
   async function _submitMonthlyClose(month, year) {
     const btn   = document.getElementById('monthly-submit-btn');
     const notes = document.getElementById('monthly-bm-notes')?.value.trim() || '';
@@ -4099,6 +4414,85 @@ async function _renderYearlySummary(container) {
     }
   }
 
+  async function _loadDailySheetInventory(sheetId, sheetDate) {
+    const container = document.getElementById(`daily-inv-${sheetId}`);
+    if (!container) return;
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/eod-summary/`);
+      if (!res.ok) throw new Error();
+      const data  = await res.json();
+      const items = data.inventory_consumption || [];
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Inventory Consumed</div>
+          <div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+            No inventory movements recorded.</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+          Inventory Consumed</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+              <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+                Consumable</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+                Consumed</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+                Closing</th>
+              <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+                Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(item => {
+              const isToner  = item.unit === '%';
+              const closing  = parseFloat(item.closing);
+              const isLow    = item.is_low;
+              const color    = isToner
+                ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+                : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+              const badge    = isLow
+                ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
+                : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
+              return `
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
+                  <td style="padding:6px 10px;text-align:right;color:var(--text-3);
+                    font-family:'JetBrains Mono',monospace;">
+                    ${item.consumed} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:right;font-weight:600;
+                    font-family:'JetBrains Mono',monospace;color:${color};">
+                    ${item.closing} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:center;">${badge}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    } catch {
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+          Inventory Consumed</div>
+        <div style="font-size:12px;color:var(--red-text);">
+          Could not load inventory data.</div>`;
+    }
+  }
+
+
 async function _renderDailySheets(container) {
     if (!container) return;
 
@@ -4265,6 +4659,16 @@ async function _renderDailySheets(container) {
                     </div>`).join('')}
                 </div>
 
+                <!-- Inventory consumption -->
+                <div style="margin-bottom:14px;" id="daily-inv-${s.id}">
+                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                    Inventory Consumed</div>
+                  <div class="loading-cell" style="padding:12px;">
+                    <span class="spin"></span>
+                  </div>
+                </div>
+
                 <!-- Actions -->
                 <div style="display:flex;justify-content:flex-end;gap:8px;">
                   ${s.status !== 'OPEN' ? `
@@ -4319,6 +4723,7 @@ async function _renderDailySheets(container) {
       detail.style.display    = 'block';
       chevron.style.transform = 'rotate(180deg)';
       _openDailySheet         = sheetId;
+      _loadDailySheetInventory(sheetId);
     }
   }
 
@@ -4563,8 +4968,8 @@ async function _renderWeeklyFiling(container) {
         <div style="margin-bottom:14px;">
           <div style="font-size:10px;font-weight:700;color:var(--text-3);
             text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-            Inventory Snapshot</div>
-          ${_renderInventorySnapshot(report.inventory_snapshot)}
+            Inventory Consumed This Week</div>
+          ${_renderWeeklyInventory(report.inventory_snapshot)}
         </div>
 
       <!-- BM Notes -->
@@ -4881,6 +5286,188 @@ function _renderInventoryCards(items, mode = 'snapshot') {
 
         </div>`;
     }).join('');
+  }
+function _renderWeeklyReportDetail(container, report) {
+    const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const total    = parseFloat(report.total_cash||0) + parseFloat(report.total_momo||0) + parseFloat(report.total_pos||0);
+    const dateFrom = new Date(report.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const dateTo   = new Date(report.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    const isLocked = report.status === 'LOCKED';
+    const isDraft  = report.status === 'DRAFT';
+
+    const statusConfig = {
+      DRAFT    : { bg: 'var(--bg)',        text: 'var(--text-3)',    label: 'Draft' },
+      SUBMITTED: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Submitted' },
+      LOCKED   : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: '✓ Locked' },
+    };
+    const sc = statusConfig[report.status] || statusConfig.DRAFT;
+
+    container.innerHTML = `
+      <!-- Header strip -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);margin-bottom:16px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text);">
+            Week ${report.week_number}, ${report.year}
+            <span style="font-size:12px;font-weight:400;color:var(--text-3);margin-left:8px;">
+              ${dateFrom} – ${dateTo}
+            </span>
+          </div>
+          ${report.submitted_at ? `
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+            Submitted ${new Date(report.submitted_at)
+              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
+          </div>` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+            font-weight:700;background:${sc.bg};color:${sc.text};">
+            ${sc.label}
+          </span>
+          ${isLocked ? `
+          <button onclick="Dashboard.weeklyDownloadPDF(${report.id})"
+            style="display:inline-flex;align-items:center;gap:5px;
+              padding:6px 14px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+              cursor:pointer;font-family:'DM Sans',sans-serif;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            PDF
+          </button>` : ''}
+        </div>
+      </div>
+
+      <!-- Revenue cards -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Cash',    fmt(report.total_cash),  'var(--cash-bg,var(--bg))',    'var(--cash-strong,var(--text))'],
+          ['MoMo',    fmt(report.total_momo),  'var(--momo-bg,var(--bg))',    'var(--momo-strong,var(--text))'],
+          ['POS',     fmt(report.total_pos),   'var(--pos-bg,var(--bg))',     'var(--pos-strong,var(--text))'],
+          ['Total',   fmt(total),              'var(--panel)',                'var(--text)'],
+        ].map(([label, val, bg, color]) => `
+          <div style="padding:12px 14px;background:${bg};
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              ${label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
+              font-weight:700;color:${color};">${val}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Jobs summary -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Jobs Created',  report.total_jobs_created  || 0, 'var(--text)'],
+          ['Completed',     report.total_jobs_complete  || 0, 'var(--green-text)'],
+          ['Cancelled',     report.total_jobs_cancelled || 0, 'var(--red-text)'],
+          ['Carry Forward', report.carry_forward_count  || 0, 'var(--amber-text)'],
+        ].map(([label, val, color]) => `
+          <div style="padding:12px 14px;background:var(--panel);
+            border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:${color};">${val}</div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:3px;">${label}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Inventory consumption -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Inventory Consumed This Week
+        </div>
+        ${_renderWeeklyInventory(report.inventory_snapshot)}
+      </div>
+
+      <!-- BM Notes + submit -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+          Branch Manager Notes
+        </div>
+        ${isDraft ? `
+        <textarea id="weekly-notes" rows="3"
+          style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
+            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+            font-size:13px;resize:vertical;box-sizing:border-box;
+            font-family:'DM Sans',sans-serif;outline:none;margin-bottom:12px;"
+          placeholder="Add notes before submitting…">${_esc(report.bm_notes || '')}</textarea>
+        <button id="weekly-submit-btn"
+          onclick="Dashboard.weeklySubmit(${report.id})"
+          style="padding:10px 24px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Submit & Lock Filing
+        </button>` : `
+        <div style="font-size:13px;color:var(--text-2);">
+          ${_esc(report.bm_notes || '—')}
+        </div>`}
+      </div>`;
+  }
+
+  function _renderWeeklyInventory(snapshot) {
+    if (!snapshot || !snapshot.items || !snapshot.items.length) {
+      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+        No inventory data for this week.</div>`;
+    }
+
+    const items = snapshot.items.filter(i => i.consumed > 0);
+    if (!items.length) {
+      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+        No consumption recorded this week.</div>`;
+    }
+
+    return `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+            <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
+              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+              Consumable</th>
+            <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+              Consumed</th>
+            <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+              Closing</th>
+            <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
+              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
+              Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(item => {
+            const isToner = item.unit === '%';
+            const closing = parseFloat(item.closing);
+            const isLow   = item.is_low;
+            const color   = isToner
+              ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+              : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+            const badge   = isLow
+              ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
+                  border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
+              : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
+                  border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
+            return `
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
+                <td style="padding:6px 10px;text-align:right;color:var(--text-3);
+                  font-family:'JetBrains Mono',monospace;">
+                  ${item.consumed} ${item.unit}</td>
+                <td style="padding:6px 10px;text-align:right;font-weight:600;
+                  font-family:'JetBrains Mono',monospace;color:${color};">
+                  ${item.closing} ${item.unit}</td>
+                <td style="padding:6px 10px;text-align:center;">${badge}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
   }
 
   function _toggleCurrentWeek() {
@@ -8026,6 +8613,7 @@ return {
     printReceipt,
     openReceipt,
     setReceiptsPeriod,
+    _receiptsPageChange,
     printReceiptDetail,
     sendReceiptWhatsApp,
     loadInboxTab,
@@ -8077,6 +8665,8 @@ return {
     _recvShowDropdown,
     _recvSelectConsumable,
     downloadInvoicePDF,
+    setInvoicesPeriod,
+    _invoicesPageChange,
     openCreateInvoice,
     openLateJobModal,
     closeLateJobModal,
@@ -8087,6 +8677,7 @@ return {
     _showClosingModal,
     switchPerformanceTab,
     _toggleDailySheet,
+    _loadDailySheetInventory,
     _toggleCurrentWeek,
     _toggleHistoryWeek,
     switchCustomersTab,
@@ -8104,6 +8695,9 @@ return {
     _nominateCredit,
     _editTitleChange,
     _editPhoneNormalise,
+    _renderWeeklyReportDetail,
+    _renderWeeklyInventory,
+    _renderMonthlyCloseDetail,
   };
 
 })();

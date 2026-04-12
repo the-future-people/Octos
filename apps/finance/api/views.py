@@ -49,6 +49,15 @@ from .serializers import (
     WeeklyReportDetailSerializer,
     WeeklyReportNotesSerializer,
 )
+# ─────────────────────────────────────────────────────────────────────────────
+# Pagination
+# ─────────────────────────────────────────────────────────────────────────────
+from rest_framework.pagination import PageNumberPagination
+
+class StandardResultsPagination(PageNumberPagination):
+    page_size            = 10
+    page_size_query_param = 'page_size'
+    max_page_size        = 100
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily Sales Sheet
@@ -1054,13 +1063,14 @@ class ReceiptListView(generics.ListAPIView):
     """
     GET /api/v1/finance/receipts/
     Branch-scoped receipt list. Optional ?period=day|week|month filter.
+    Paginated: 10 per page.
     """
     serializer_class   = ReceiptSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = StandardResultsPagination
 
     def get_queryset(self):
         from django.utils import timezone
-        from datetime import timedelta
         from apps.finance.models import Receipt
 
         branch = getattr(self.request.user, 'branch', None)
@@ -1077,14 +1087,19 @@ class ReceiptListView(generics.ListAPIView):
 
         period = self.request.query_params.get('period')
         now    = timezone.now()
-        since  = {
-            'day'  : now - timedelta(days=1),
-            'week' : now - timedelta(weeks=1),
-            'month': now - timedelta(days=30),
-        }.get(period)
+        today  = now.date()
 
-        if since:
-            qs = qs.filter(created_at__gte=since)
+        if period == 'day':
+            qs = qs.filter(created_at__date=today)
+        elif period == 'week':
+            # Monday → today
+            week_start = today - __import__('datetime').timedelta(days=today.weekday())
+            qs = qs.filter(created_at__date__gte=week_start)
+        elif period == 'month':
+            qs = qs.filter(
+                created_at__year=today.year,
+                created_at__month=today.month,
+            )
 
         return qs
 
@@ -1675,12 +1690,16 @@ class EODSummaryView(APIView):
 class InvoiceListView(generics.ListAPIView):
     """
     GET /api/v1/finance/invoices/
-    Returns all invoices for the requesting user's branch.
+    Returns invoices for the requesting user's branch.
+    Optional ?period=day|week|month, ?type=, ?status= filters.
+    Paginated: 10 per page.
     """
     serializer_class   = InvoiceSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = StandardResultsPagination
 
     def get_queryset(self):
+        from django.utils import timezone
         user = self.request.user
         qs   = Invoice.objects.select_related(
             'branch', 'job', 'generated_by'
@@ -1696,7 +1715,17 @@ class InvoiceListView(generics.ListAPIView):
         if status_param:
             qs = qs.filter(status=status_param)
 
-        return qs
+        period = self.request.query_params.get('period')
+        today  = timezone.now().date()
+        if period == 'day':
+            qs = qs.filter(issue_date=today)
+        elif period == 'week':
+            week_start = today - __import__('datetime').timedelta(days=today.weekday())
+            qs = qs.filter(issue_date__gte=week_start)
+        elif period == 'month':
+            qs = qs.filter(issue_date__year=today.year, issue_date__month=today.month)
+
+        return qs.order_by('-issue_date', '-id')
 
 
 class InvoiceDetailView(generics.RetrieveAPIView):
