@@ -173,7 +173,13 @@ class CustomerProfile(AuditModel):
     )
     
     # ── Engagement ────────────────────────────────────────────
-    visit_count = models.PositiveIntegerField(default=1)
+    visit_count = models.PositiveIntegerField(default=0)
+    total_spend = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text='Lifetime spend across all completed jobs. Auto-updated on job completion.',
+    )
     tier        = models.CharField(
         max_length=20,
         choices=TIER_CHOICES,
@@ -287,7 +293,7 @@ class CustomerEditLog(models.Model):
 @receiver(post_save, sender='jobs.Job')
 def update_customer_confidence(sender, instance, **kwargs):
     """
-    Recomputes the customer's confidence score whenever a job is saved.
+    Updates visit_count, total_spend and confidence score when a job completes.
     Only fires when the job is COMPLETE and linked to a customer.
     If the score crosses the recommendation threshold, notifies the BM.
     """
@@ -299,8 +305,19 @@ def update_customer_confidence(sender, instance, **kwargs):
     try:
         from apps.customers.credit_engine import CreditEngine
         from apps.notifications.services import notify
+        from django.db.models import F
+        from decimal import Decimal
 
         customer = instance.customer
+
+        # Increment visit count and total spend atomically
+        amount = Decimal(str(instance.amount_paid or 0))
+        CustomerProfile.objects.filter(pk=customer.pk).update(
+            visit_count = F('visit_count') + 1,
+            total_spend = F('total_spend') + amount,
+        )
+        customer.refresh_from_db()
+
         new_score = CreditEngine.compute_confidence_score(customer)
 
         # Notify BM if customer just crossed the recommendation threshold

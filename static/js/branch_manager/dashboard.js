@@ -212,35 +212,130 @@ async function loadRecentJobs() {
     document.querySelectorAll('.period-tab').forEach(t => {
       t.classList.toggle('active', t.dataset.period === period);
     });
-    _renderMetrics(period);
+    _renderMetrics(period);  // async — fire and forget
   }
 
-  function _renderMetrics(period) {
+  async function _renderMetrics(period) {
     const grid = document.getElementById('metrics-grid');
     if (!grid) return;
 
-    // For now render with placeholder data
-    // These will be wired to real API when analytics endpoint is ready
-    const metrics = _getMetricData(period);
+    grid.innerHTML = `<div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+      <span class="spin"></span> Loading metrics…</div>`;
 
-    grid.innerHTML = metrics.map(m => `
-      <div class="metric-card">
-        <div class="metric-ring">
-          <svg viewBox="0 0 72 72" width="72" height="72">
-            <circle class="metric-ring-bg" cx="36" cy="36" r="30"/>
-            <circle class="metric-ring-fill"
-              cx="36" cy="36" r="30"
-              stroke="${m.color}"
-              stroke-dasharray="${2 * Math.PI * 30}"
-              stroke-dashoffset="${2 * Math.PI * 30 * (1 - m.value / 100)}"
-            />
-          </svg>
-          <div class="metric-ring-label">${m.value}%</div>
+    try {
+      // Fetch today's sheet for day-scoped data
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      const sheet    = sheetRes.ok ? await sheetRes.json() : null;
+
+      // Fetch job stats — scope by period
+      const paramMap = { day: `daily_sheet=${sheet?.id}`, week: 'period=week', month: 'period=month' };
+      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?${paramMap[period] || paramMap.day}`);
+      const stats    = statsRes.ok ? await statsRes.json() : {};
+
+      const total      = stats.total      || 0;
+      const complete   = stats.complete   || 0;
+      const pending    = stats.pending    || 0;
+      const inProgress = stats.in_progress || 0;
+      const registered = stats.registered || 0;
+      const revenue    = parseFloat(stats.revenue || 0);
+
+      // ── Rates ────────────────────────────────────────────
+      const completionRate   = total > 0 ? Math.round(complete / total * 100)   : 0;
+      const registrationRate = total > 0 ? Math.round(registered / total * 100) : 0;
+      const queueClearance   = total > 0 ? Math.round((total - pending - inProgress) / total * 100) : 0;
+
+      // Collection rate: revenue vs estimated (use sheet totals for day, stats revenue for others)
+      const sheetRevenue = sheet
+        ? parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0)
+        : revenue;
+      const collectionRate = period === 'day' && sheet
+        ? (sheetRevenue > 0 && complete > 0 ? Math.min(100, Math.round((complete / Math.max(total,1)) * 100)) : 0)
+        : (total > 0 ? Math.round(complete / total * 100) : 0);
+
+      // ── Absolute stats ───────────────────────────────────
+      const avgJobValue = complete > 0 ? (revenue / complete) : 0;
+      const displayRevenue = period === 'day' ? sheetRevenue : revenue;
+
+      // ── Render ───────────────────────────────────────────
+      const periodLabel = { day: 'today', week: 'this week', month: 'this month' }[period] || 'today';
+
+      const rings = [
+        { name: 'Completion Rate',   value: completionRate,   color: '#22c98a', sub: `${complete} of ${total} jobs done ${periodLabel}` },
+        { name: 'Registration Rate', value: registrationRate, color: '#3355cc', sub: `${registered} of ${total} jobs linked to a customer` },
+        { name: 'Queue Clearance',   value: queueClearance,   color: '#9b59b6', sub: `${pending + inProgress} job${pending+inProgress!==1?'s':''} still outstanding` },
+        { name: 'Collection Rate',   value: collectionRate,   color: '#e8a820', sub: `Based on completed vs total jobs` },
+      ];
+
+      const ringHtml = rings.map(m => {
+        const circumference = 2 * Math.PI * 30;
+        const offset = circumference * (1 - m.value / 100);
+        const textColor = m.value >= 70 ? m.color : m.value >= 40 ? '#d97706' : '#dc2626';
+        return `
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:20px 16px;display:flex;
+            flex-direction:column;align-items:center;gap:10px;text-align:center;">
+            <div style="position:relative;width:80px;height:80px;">
+              <svg viewBox="0 0 72 72" width="80" height="80" style="transform:rotate(-90deg);">
+                <circle cx="36" cy="36" r="30" fill="none"
+                  stroke="var(--border)" stroke-width="5"/>
+                <circle cx="36" cy="36" r="30" fill="none"
+                  stroke="${m.color}" stroke-width="5"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${offset}"
+                  stroke-linecap="round"
+                  style="transition:stroke-dashoffset 0.6s ease;"/>
+              </svg>
+              <div style="position:absolute;inset:0;display:flex;align-items:center;
+                justify-content:center;font-family:'JetBrains Mono',monospace;
+                font-size:15px;font-weight:800;color:${textColor};">
+                ${m.value}%
+              </div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);">${m.name}</div>
+            <div style="font-size:11px;color:var(--text-3);line-height:1.4;">${m.sub}</div>
+          </div>`;
+      }).join('');
+
+      // Stat cards for absolute values
+      const statHtml = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:20px 16px;display:flex;
+          flex-direction:column;justify-content:center;gap:6px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;">Revenue ${periodLabel}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+            font-weight:800;color:#22c98a;">
+            ${_fmt(displayRevenue)}
+          </div>
+          <div style="font-size:11px;color:var(--text-3);">
+            Cash · MoMo · POS combined
+          </div>
         </div>
-        <div class="metric-name">${m.name}</div>
-        <div class="metric-sub">${m.sub}</div>
-      </div>
-    `).join('');
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:20px 16px;display:flex;
+          flex-direction:column;justify-content:center;gap:6px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;">Avg Job Value</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+            font-weight:800;color:#3355cc;">
+            ${avgJobValue > 0 ? _fmt(avgJobValue) : '—'}
+          </div>
+          <div style="font-size:11px;color:var(--text-3);">
+            Per completed job ${periodLabel}
+          </div>
+        </div>`;
+
+      grid.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+          gap:12px;width:100%;">
+          ${ringHtml}
+          ${statHtml}
+        </div>`;
+
+    } catch {
+      grid.innerHTML = `<div class="loading-cell" style="grid-column:1/-1;color:var(--red-text);">
+        Could not load metrics.</div>`;
+    }
   }
 
   function _getMetricData(period) {
@@ -290,7 +385,7 @@ async function loadRecentJobs() {
     if (paneId === 'performance')                 _loadPerformancePane();
     if (paneId === 'finance') {
       const pane = document.getElementById('pane-finance');
-      if (pane) pane.dataset.loaded = '';
+      if (pane) pane.dataset.loaded = '';  // always bust cache on navigation
       _loadFinancePane();
     }
     if (paneId === 'reports')                     _loadReportsPane();
@@ -1175,9 +1270,9 @@ function switchPerformanceTab(tab) {
             <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
           </div>
         </div>
-        <div class="metrics-section">
-          <div class="metrics-grid" id="metrics-grid">
-            <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+        <div style="width:100%;">
+          <div id="metrics-grid" style="width:100%;">
+            <div class="loading-cell" style="padding:40px;">
               <span class="spin"></span> Loading metrics…
             </div>
           </div>
@@ -1199,31 +1294,18 @@ function switchPerformanceTab(tab) {
   // ── Finance pane ───────────────────────────────────────────
  async function _loadFinancePane() {
     const pane = document.getElementById('pane-finance');
-    if (!pane || pane.dataset.loaded) return;
+    if (!pane) return;
     pane.dataset.loaded = '1';
 
     pane.innerHTML = `
       <div class="section-head">
         <span class="section-title">Day Sheet</span>
       </div>
-      <div class="reports-tabs" id="daysheet-tabs">
-        <button class="reports-tab active" data-tab="today"
-          onclick="Dashboard.switchDaySheetTab('today')">Today's Sheet</button>
-        <button class="reports-tab" data-tab="archive"
-          onclick="Dashboard.switchDaySheetTab('archive')">Archive</button>
-      </div>
       <div id="daysheet-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
 
-    await _loadDaySheetTab('today');
-  }
-
-  async function switchDaySheetTab(tab) {
-    document.querySelectorAll('#daysheet-tabs .reports-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    await _loadDaySheetTab(tab);
+    await _renderTodaySheet(document.getElementById('daysheet-content'));
   }
 
   async function _loadDaySheetTab(tab) {
@@ -1275,7 +1357,11 @@ function switchPerformanceTab(tab) {
         </div>
 
         <!-- Revenue cards -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;">
+          <div class="stat-card" style="background:var(--panel);border:2px solid var(--text);">
+            <div class="stat-num">${_fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}</div>
+            <div class="stat-lbl" style="font-weight:700;">Total Today</div>
+          </div>
           <div class="stat-card green">
             <div class="stat-num">${_fmt(sheet.total_cash)}</div>
             <div class="stat-lbl">Cash</div>
@@ -1362,12 +1448,196 @@ function switchPerformanceTab(tab) {
         </div>
 
         ${sheet.notes ? `
-          <div style="padding:12px 16px;background:var(--bg);border:1px solid var(--border);
-            border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">
-            ${_esc(sheet.notes)}
-          </div>` : ''}`;
+        <div style="padding:12px 16px;background:var(--bg);border:1px solid var(--border);
+          border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">
+          ${_esc(sheet.notes)}
+        </div>` : ''}`;
 
-    } catch {
+    // ── Populate computed fields ──────────────────────────────
+    // Total revenue
+    const totalRevenue = parseFloat(sheet.total_cash||0)
+      + parseFloat(sheet.total_momo||0)
+      + parseFloat(sheet.total_pos||0);
+
+    // Job stats from stats endpoint
+    try {
+      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
+      if (statsRes.ok) {
+        const stats = await statsRes.json();
+        const total     = stats.total || 0;
+        const registered = stats.registered || 0;
+        const walkin     = stats.walkin     || total - registered;
+        const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
+        const rateColor  = rate >= 60 ? 'var(--green-text)'
+          : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
+
+        _set('sheet-registered-jobs', registered);
+        _set('sheet-walkin-jobs',     walkin);
+
+        const rateEl = document.getElementById('sheet-reg-rate');
+        if (rateEl) {
+          rateEl.textContent = `${rate}%`;
+          rateEl.style.color = rateColor;
+        }
+
+        // Outstanding jobs alert
+        const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
+        if (outstanding > 0 && sheet.status === 'OPEN') {
+          const existingAlert = document.getElementById('sheet-outstanding-alert');
+          if (!existingAlert) {
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'sheet-outstanding-alert';
+            alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
+              background:var(--amber-bg);border:1px solid var(--amber-border);
+              border-radius:var(--radius-sm);font-size:13px;
+              color:var(--amber-text);font-weight:600;
+              display:flex;align-items:center;gap:8px;`;
+            alertDiv.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
+              (${stats.pending || 0} pending payment · ${stats.in_progress || 0} in progress)`;
+            container.appendChild(alertDiv);
+          }
+        }
+
+        // Jobs pace indicator
+        if (sheet.status === 'OPEN' && total > 0 && sheet.opened_at) {
+          const hoursOpen = Math.max(
+            (Date.now() - new Date(sheet.opened_at).getTime()) / 3600000, 0.25
+          );
+          const pace = (total / hoursOpen).toFixed(1);
+          const paceDiv = document.getElementById('sheet-pace-strip');
+          if (!paceDiv) {
+            const strip = document.createElement('div');
+            strip.id = 'sheet-pace-strip';
+            strip.style.cssText = `margin-top:10px;padding:10px 16px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:12px;color:var(--text-3);
+              display:flex;align-items:center;justify-content:space-between;`;
+            strip.innerHTML = `
+              <span>Branch pace today</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:700;
+                color:var(--text);font-size:14px;">${pace} jobs/hr</span>`;
+            container.appendChild(strip);
+          }
+        }
+      }
+    } catch { /* silent */ }
+
+    // ── Consumables snapshot ──────────────────────────────────
+    if (sheet.status === 'OPEN') {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const [invRes, movRes] = await Promise.all([
+          Auth.fetch('/api/v1/inventory/stock/'),
+          Auth.fetch(`/api/v1/inventory/movements/?type=OUT&date=${today}&page_size=500`),
+        ]);
+
+        if (invRes.ok) {
+          const invData  = await invRes.json();
+          const movData  = movRes.ok ? await movRes.json() : { results: [] };
+          const items    = (Array.isArray(invData) ? invData : (invData.results || []))
+            .filter(i => i.category !== 'Machinery' && parseFloat(i.quantity) >= 0);
+          const movements = Array.isArray(movData) ? movData : (movData.results || []);
+
+          // Aggregate consumed today per consumable name
+          const consumedToday = {};
+          movements.forEach(m => {
+            const name = m.consumable_name || m.consumable;
+            if (!name) return;
+            consumedToday[name] = (consumedToday[name] || 0) + Math.abs(parseFloat(m.quantity || 0));
+          });
+
+          if (items.length) {
+            const lowItems = items.filter(i =>
+              parseFloat(i.quantity) <= parseFloat(i.reorder_point || 0)
+            );
+            const invDiv = document.createElement('div');
+            invDiv.style.cssText = 'margin-top:16px;';
+            invDiv.innerHTML = `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+                display:flex;align-items:center;gap:8px;">
+                Current Stock Levels
+                ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+                  background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+                  ${lowItems.length} low</span>` : ''}
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+                ${items.map(item => {
+                  const qty      = parseFloat(item.quantity);
+                  const rpt      = parseFloat(item.reorder_point || 0);
+                  const isCrit   = qty === 0;
+                  const isLow    = !isCrit && qty <= rpt;
+                  const isOk     = !isCrit && !isLow;
+                  const isPct    = (item.unit_label || '').includes('%');
+                  const consumed = consumedToday[item.name] || 0;
+                  const fmtQty   = n => isPct
+                    ? `${parseFloat(n).toFixed(1)}%`
+                    : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+                  // Status colour
+                  const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+                  // Fill bar width — how full is the stock relative to a healthy level (3× reorder point)
+                  const maxRef  = rpt > 0 ? rpt * 3 : qty || 1;
+                  const fillPct = isPct
+                    ? Math.min(100, qty)
+                    : Math.min(100, (qty / maxRef) * 100);
+
+                  return `
+                    <div style="position:relative;overflow:hidden;
+                      padding:9px 12px 9px 12px;
+                      background:var(--panel);
+                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                      border-radius:var(--radius-sm);
+                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+                      <!-- Status fill bar on right edge -->
+                      <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                        background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                        <div style="position:absolute;bottom:0;left:0;width:100%;
+                          height:${fillPct.toFixed(1)}%;
+                          background:${statusColor};
+                          border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                          transition:height 0.3s ease;"></div>
+                      </div>
+
+                      <!-- Item name -->
+                      <span style="font-size:11px;font-weight:600;
+                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                        flex:1;min-width:0;"
+                        title="${_esc(item.name)}">${_esc(item.name)}</span>
+
+                      <!-- Stats -->
+                      <div style="display:flex;align-items:center;gap:5px;
+                        flex-shrink:0;padding-right:8px;">
+                        ${consumed > 0 ? `
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                            font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                          <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                          font-weight:700;
+                          color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                          ${fmtQty(qty)}
+                        </span>
+                      </div>
+
+                    </div>`;
+                }).join('')}
+              </div>`;
+            container.appendChild(invDiv);
+          }
+        }
+      } catch { /* silent */ }
+    }
+        } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
     }
   }
@@ -3844,7 +4114,7 @@ async function _loadReportsTab(tab) {
 
   async function setServicesPeriod(period) {
     _servicesPeriod = period;
-    document.querySelectorAll('#pane-reports .reports-tab[data-period]').forEach(btn => {
+    document.querySelectorAll('.reports-tab[data-period]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.period === period);
     });
     await _fetchServicesReport();
@@ -4438,50 +4708,69 @@ async function _renderYearlySummary(container) {
         <div style="font-size:10px;font-weight:700;color:var(--text-3);
           text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
           Inventory Consumed</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <thead>
-            <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
-              <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-                Consumable</th>
-              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-                Consumed</th>
-              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-                Closing</th>
-              <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-                Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items.map(item => {
-              const isToner  = item.unit === '%';
-              const closing  = parseFloat(item.closing);
-              const isLow    = item.is_low;
-              const color    = isToner
-                ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
-                : (isLow ? 'var(--red-text)' : 'var(--text-2)');
-              const badge    = isLow
-                ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
-                    border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
-                : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
-                    border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
-              return `
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
-                  <td style="padding:6px 10px;text-align:right;color:var(--text-3);
-                    font-family:'JetBrains Mono',monospace;">
-                    ${item.consumed} ${item.unit}</td>
-                  <td style="padding:6px 10px;text-align:right;font-weight:600;
-                    font-family:'JetBrains Mono',monospace;color:${color};">
-                    ${item.closing} ${item.unit}</td>
-                  <td style="padding:6px 10px;text-align:center;">${badge}</td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>`;
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+          ${items.map(item => {
+            const closing  = parseFloat(item.closing);
+            const consumed = parseFloat(item.consumed || 0);
+            const isPct    = item.unit === '%';
+            const isCrit   = closing === 0;
+            const isLow    = !isCrit && item.is_low;
+            const isOk     = !isCrit && !isLow;
+
+            const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+            const fmtQty = n => isPct
+              ? `${parseFloat(n).toFixed(1)}%`
+              : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+            // Fill bar — toner uses % directly, others use closing vs closing+consumed as proxy
+            const total   = closing + consumed;
+            const fillPct = total > 0
+              ? Math.min(100, (closing / total) * 100)
+              : isPct ? Math.min(100, closing) : 0;
+
+            return `
+              <div style="position:relative;overflow:hidden;
+                padding:9px 12px;
+                background:var(--panel);
+                border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                border-radius:var(--radius-sm);
+                display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+                <!-- Status fill bar on right edge -->
+                <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                  background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                  <div style="position:absolute;bottom:0;left:0;width:100%;
+                    height:${fillPct.toFixed(1)}%;
+                    background:${statusColor};
+                    border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                    transition:height 0.3s ease;"></div>
+                </div>
+
+                <!-- Item name -->
+                <span style="font-size:11px;font-weight:600;
+                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                  flex:1;min-width:0;"
+                  title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
+
+                <!-- Stats -->
+                <div style="display:flex;align-items:center;gap:5px;
+                  flex-shrink:0;padding-right:8px;">
+                  ${consumed > 0 ? `
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                      font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                    <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                    font-weight:700;
+                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                    ${fmtQty(closing)}
+                  </span>
+                </div>
+
+              </div>`;
+          }).join('')}
+        </div>`;
     } catch {
       container.innerHTML = `
         <div style="font-size:10px;font-weight:700;color:var(--text-3);
@@ -5424,50 +5713,67 @@ function _renderWeeklyReportDetail(container, report) {
     }
 
     return `
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
-            <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
-              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-              Consumable</th>
-            <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-              Consumed</th>
-            <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-              Closing</th>
-            <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
-              color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">
-              Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map(item => {
-            const isToner = item.unit === '%';
-            const closing = parseFloat(item.closing);
-            const isLow   = item.is_low;
-            const color   = isToner
-              ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
-              : (isLow ? 'var(--red-text)' : 'var(--text-2)');
-            const badge   = isLow
-              ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
-                  border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
-              : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
-                  border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
-            return `
-              <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
-                <td style="padding:6px 10px;text-align:right;color:var(--text-3);
-                  font-family:'JetBrains Mono',monospace;">
-                  ${item.consumed} ${item.unit}</td>
-                <td style="padding:6px 10px;text-align:right;font-weight:600;
-                  font-family:'JetBrains Mono',monospace;color:${color};">
-                  ${item.closing} ${item.unit}</td>
-                <td style="padding:6px 10px;text-align:center;">${badge}</td>
-              </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+        ${items.map(item => {
+          const closing  = parseFloat(item.closing);
+          const consumed = parseFloat(item.consumed || 0);
+          const isPct    = item.unit === '%';
+          const isCrit   = closing === 0;
+          const isLow    = !isCrit && item.is_low;
+
+          const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+          const fmtQty = n => isPct
+            ? `${parseFloat(n).toFixed(1)}%`
+            : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+          const total   = closing + consumed;
+          const fillPct = total > 0
+            ? Math.min(100, (closing / total) * 100)
+            : isPct ? Math.min(100, closing) : 0;
+
+          return `
+            <div style="position:relative;overflow:hidden;
+              padding:9px 12px;
+              background:var(--panel);
+              border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+              border-radius:var(--radius-sm);
+              display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+              <!-- Status fill bar on right edge -->
+              <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                <div style="position:absolute;bottom:0;left:0;width:100%;
+                  height:${fillPct.toFixed(1)}%;
+                  background:${statusColor};
+                  border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                  transition:height 0.3s ease;"></div>
+              </div>
+
+              <!-- Item name -->
+              <span style="font-size:11px;font-weight:600;
+                color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                flex:1;min-width:0;"
+                title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
+
+              <!-- Stats -->
+              <div style="display:flex;align-items:center;gap:5px;
+                flex-shrink:0;padding-right:8px;">
+                ${consumed > 0 ? `
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                    font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                  <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                  font-weight:700;
+                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                  ${fmtQty(closing)}
+                </span>
+              </div>
+
+            </div>`;
+        }).join('')}
+      </div>`;
   }
 
   function _toggleCurrentWeek() {
@@ -7198,7 +7504,7 @@ async function openCustomerDetail(customerId) {
       const creditData = creditRes.ok ? await creditRes.json() : { results: [] };
 
       // Filter jobs that are actually linked to this customer
-      const jobs   = (jobsData.results || []).filter(j => j.customer === customerId);
+      const jobs   = (jobsData.results || []).filter(j => j.customer == customerId);
 
       // Filter credit account for this customer
       const credit = (creditData.results || []).find(c => c.customer === customerId) || null;
@@ -8631,7 +8937,6 @@ return {
     sendReply,
     _historyDrill,
     _historyNav,
-    switchDaySheetTab,
     initiateSheetDownload,
     closePinModal,
     _onPinInput,
