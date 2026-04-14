@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Careers - Farhat Printing Press</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/octos.css' %}"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .careers-topbar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 0 40px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .careers-logo { font-size: 15px; font-weight: 800; color: var(--text); letter-spacing: -0.3px; }
+    .careers-logo span { color: var(--text-3); font-weight: 400; }
+    .careers-nav-link { font-size: 12px; color: var(--text-2); text-decoration: none; padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .careers-hero { padding: 64px 40px 48px; max-width: 860px; margin: 0 auto; }
+    .careers-hero h1 { font-size: 32px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; margin-bottom: 12px; }
+    .careers-hero p { font-size: 15px; color: var(--text-2); line-height: 1.6; max-width: 560px; }
+    .careers-body { max-width: 860px; margin: 0 auto; padding: 0 40px 80px; }
+    .section-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+    .branch-group { margin-bottom: 32px; }
+    .branch-group-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .branch-group-name { font-size: 13px; font-weight: 700; color: var(--text); }
+    .branch-group-count { font-size: 11px; color: var(--text-3); background: var(--bg); border: 1px solid var(--border); padding: 1px 8px; border-radius: 20px; }
+    .vacancy-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+    .vacancy-card:hover { border-color: var(--text-3); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .vacancy-info { flex: 1; min-width: 0; }
+    .vacancy-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .vacancy-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .vacancy-tag { font-size: 11px; color: var(--text-3); background: var(--bg); border: 1px solid var(--border); padding: 2px 8px; border-radius: 20px; }
+    .vacancy-cta { font-size: 11px; font-weight: 600; color: var(--text); padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap; transition: all 0.15s; }
+    .vacancy-card:hover .vacancy-cta { background: var(--text); color: var(--panel); border-color: var(--text); }
+    .general-banner { margin: 32px 0; padding: 20px 24px; background: var(--panel); border: 1px dashed var(--border); border-radius: var(--radius); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .general-banner-text h3 { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .general-banner-text p { font-size: 12px; color: var(--text-3); }
+    .general-banner-btn { font-size: 12px; font-weight: 600; padding: 8px 18px; background: var(--text); color: var(--panel); border: none; border-radius: var(--radius-sm); cursor: pointer; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    .modal-head { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+    .modal-head h2 { font-size: 15px; font-weight: 700; color: var(--text); }
+    .modal-head p { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+    .modal-close { background: none; border: none; cursor: pointer; color: var(--text-3); font-size: 18px; line-height: 1; padding: 2px; }
+    .modal-body { padding: 20px 24px 24px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .form-row.single { grid-template-columns: 1fr; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-label { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.4px; }
+    .form-label .req { color: #dc2626; }
+    .form-input { padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text); font-family: inherit; width: 100%; }
+    .form-input:focus { outline: none; border-color: var(--text-3); }
+    .file-label { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; color: var(--text-2); }
+    .file-label input[type=file] { display: none; }
+    .file-chosen { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+    .channel-options { display: flex; gap: 8px; }
+    .channel-opt { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center; cursor: pointer; font-size: 12px; color: var(--text-2); user-select: none; }
+    .channel-opt.active { border-color: var(--text); color: var(--text); font-weight: 600; background: var(--hover); }
+    .channel-opt input { display: none; }
+    .form-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+    .submit-btn { width: 100%; padding: 10px; background: var(--text); color: var(--panel); border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .success-state { text-align: center; padding: 40px 24px; }
+    .success-icon { font-size: 40px; margin-bottom: 16px; }
+    .success-state h3 { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+    .success-state p { font-size: 13px; color: var(--text-3); line-height: 1.5; }
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-3); font-size: 13px; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: var(--panel); padding: 10px 18px; border-radius: var(--radius-sm); font-size: 13px; opacity: 0; transform: translateY(8px); transition: all 0.2s; z-index: 999; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { background: #dc2626; }
+    @media (max-width: 600px) { .careers-hero, .careers-body { padding-left: 20px; padding-right: 20px; } .careers-topbar { padding: 0 20px; } .form-row { grid-template-columns: 1fr; } .general-banner { flex-direction: column; } }
+  </style>
+</head>
+<body>
+<div class="careers-topbar">
+  <div class="careers-logo">Farhat <span>Printing Press</span></div>
+  <a href="/" class="careers-nav-link">Back to Website</a>
+</div>
+<div class="careers-hero">
+  <h1>Join Our Team</h1>
+  <p>We are always looking for driven, reliable people to grow with us across our branches.</p>
+</div>
+<div class="careers-body" id="careers-body">
+  <div class="empty-state">Loading vacancies...</div>
+</div>
+<div class="modal-overlay" id="apply-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <h2 id="modal-title">Apply</h2>
+        <p id="modal-subtitle"></p>
+      </div>
+      <button class="modal-close" onclick="Careers.closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const Careers = (function() {
+  const API = '/api/v1/careers';
+  let _vid = null, _ch = 'WHATSAPP';
+
+  async function init() {
+    try {
+      const res = await fetch(API + '/vacancies/');
+      const data = await res.json();
+      _render(data);
+    } catch {
+      document.getElementById('careers-body').innerHTML = '<div class="empty-state">Could not load vacancies. Please try again later.</div>';
+    }
+  }
+
+  function _render(groups) {
+    const body = document.getElementById('careers-body');
+    if (!groups.length) { body.innerHTML = '<div class="empty-state">No open positions at the moment.</div>'; return; }
+    let html = '<div class="section-label">Open Positions</div>';
+    groups.forEach(g => {
+      html += '<div class="branch-group"><div class="branch-group-header"><span class="branch-group-name">' + _e(g.branch_name) + '</span><span class="branch-group-count">' + g.vacancies.length + ' open</span></div>';
+      g.vacancies.forEach(v => {
+        html += '<div class="vacancy-card" onclick="Careers.openApply(' + v.id + ',\'' + _e(v.title) + '\',\'' + _e(g.branch_name) + '\')"><div class="vacancy-info"><div class="vacancy-title">' + _e(v.title) + '</div><div class="vacancy-meta"><span class="vacancy-tag">' + _ft(v.employment_type) + '</span><span class="vacancy-tag">Closes ' + _fd(v.closes_at) + '</span></div></div><span class="vacancy-cta">Apply Now</span></div>';
+      });
+      html += '</div>';
+    });
+    html += '<div class="general-banner"><div class="general-banner-text"><h3>Don't see a role that fits?</h3><p>Send a general application and we will reach out when something opens up.</p></div><button class="general-banner-btn" onclick="Careers.openGeneral()">General Application</button></div>';
+    body.innerHTML = html;
+  }
+
+  function openApply(id, title, branch) {
+    _vid = id;
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-subtitle').textContent = branch;
+    _form();
+    document.getElementById('apply-modal').classList.add('open');
+  }
+
+  function openGeneral() {
+    _vid = null;
+    document.getElementById('modal-title').textContent = 'General Application';
+    document.getElementById('modal-subtitle').textContent = 'We will match you to a suitable role';
+    _form();
+    document.getElementById('apply-modal').classList.add('open');
+  }
+
+  function closeModal() { document.getElementById('apply-modal').classList.remove('open'); _vid = null; }
+
+  function _form() {
+    document.getElementById('modal-body').innerHTML = '<div class="form-row"><div class="form-group"><label class="form-label">First Name <span class="req">*</span></label><input id="f-first" class="form-input" type="text" placeholder="Kwame"/></div><div class="form-group"><label class="form-label">Last Name <span class="req">*</span></label><input id="f-last" class="form-input" type="text" placeholder="Mensah"/></div></div><div class="form-row"><div class="form-group"><label class="form-label">Email <span class="req">*</span></label><input id="f-email" class="form-input" type="email" placeholder="kwame@email.com"/></div><div class="form-group"><label class="form-label">Phone <span class="req">*</span></label><input id="f-phone" class="form-input" type="tel" placeholder="024 000 0000"/></div></div><div class="form-row single"><div class="form-group"><label class="form-label">Address</label><input id="f-address" class="form-input" type="text" placeholder="Accra, Ghana"/></div></div><div class="form-row single"><div class="form-group"><label class="form-label">Preferred Contact Channel <span class="req">*</span></label><div class="channel-options"><label class="channel-opt active" id="ch-whatsapp" onclick="Careers.setChannel('WHATSAPP')"><input type="radio" name="channel" value="WHATSAPP" checked/>WhatsApp</label><label class="channel-opt" id="ch-sms" onclick="Careers.setChannel('SMS')"><input type="radio" name="channel" value="SMS"/>SMS</label><label class="channel-opt" id="ch-email" onclick="Careers.setChannel('EMAIL')"><input type="radio" name="channel" value="EMAIL"/>Email</label></div></div></div><div class="form-row single"><div class="form-group"><label class="form-label">CV / Resume <span class="req">*</span></label><label class="file-label"><input type="file" id="f-cv" accept=".pdf,.doc,.docx" onchange="Careers.showFile('f-cv','cv-name')"/><span>Choose file (PDF or Word)</span></label><div class="file-chosen" id="cv-name"></div></div></div><div class="form-row single"><div class="form-group"><label class="form-label">Cover Letter <span style="text-transform:none;font-weight:400;font-size:10px;">(optional)</span></label><label class="file-label"><input type="file" id="f-cover" accept=".pdf,.doc,.docx" onchange="Careers.showFile('f-cover','cover-name')"/><span>Choose file (PDF or Word)</span></label><div class="file-chosen" id="cover-name"></div></div></div><hr class="form-divider"/><button class="submit-btn" id="submit-btn" onclick="Careers.submit()">Submit Application</button>';
+  }
+
+  function setChannel(ch) {
+    _ch = ch;
+    ['WHATSAPP','SMS','EMAIL'].forEach(c => { const el = document.getElementById('ch-' + c.toLowerCase()); if (el) el.classList.toggle('active', c === ch); });
+  }
+
+  function showFile(inp, lbl) { const f = document.getElementById(inp).files[0]; const l = document.getElementById(lbl); if (l) l.textContent = f ? f.name : ''; }
+
+  async function submit() {
+    const btn = document.getElementById('submit-btn');
+    const first = document.getElementById('f-first').value.trim();
+    const last  = document.getElementById('f-last').value.trim();
+    const email = document.getElementById('f-email').value.trim();
+    const phone = document.getElementById('f-phone').value.trim();
+    const cv    = document.getElementById('f-cv').files[0];
+    if (!first || !last || !email || !phone || !cv) { _toast('Please fill in all required fields and attach your CV.', true); return; }
+    btn.disabled = true; btn.textContent = 'Submitting...';
+    const fd = new FormData();
+    fd.append('first_name', first); fd.append('last_name', last);
+    fd.append('email', email); fd.append('phone', phone);
+    fd.append('address', document.getElementById('f-address').value.trim());
+    fd.append('preferred_channel', _ch); fd.append('cv', cv);
+    const cover = document.getElementById('f-cover').files[0];
+    if (cover) fd.append('cover_letter', cover);
+    if (_vid) fd.append('vacancy', _vid);
+    try {
+      const res = await fetch(API + '/apply/', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { _toast(Object.values(data).flat().join(' ') || 'Something went wrong.', true); btn.disabled = false; btn.textContent = 'Submit Application'; return; }
+      document.getElementById('modal-body').innerHTML = '<div class="success-state"><div class="success-icon">&#x2705;</div><h3>Application Received!</h3><p>Thank you ' + _e(first) + '. We have received your application and will be in touch via your preferred channel.</p></div>';
+    } catch { _toast('Network error. Please try again.', true); btn.disabled = false; btn.textContent = 'Submit Application'; }
+  }
+
+  function _e(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+  function _ft(t) { return {FULL_TIME:'Full Time',PART_TIME:'Part Time',CONTRACT:'Contract'}[t] || t; }
+  function _fd(d) { if (!d) return ''; return new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); }
+  function _toast(msg, err) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast' + (err ? ' error' : ''); t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3500); }
+
+  document.addEventListener('DOMContentLoaded', init);
+  document.getElementById('apply-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+
+  return { openApply, openGeneral, closeModal, setChannel, showFile, submit };
+})();
+</script>
+</body>
+</html>

@@ -33,3 +33,8 @@ def ops_portal_view(request):
 
 def finance_ops_portal_view(request):
     return render(request, 'portals/finance_ops_portal.html')
+def careers_view(request):
+    return render(request, 'public/careers.html')
+
+def home_view(request):
+    return render(request, 'public/home.html')
