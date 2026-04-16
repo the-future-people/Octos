@@ -8,7 +8,7 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--red:#E8000D;--red-dark:#B50009;--red-light:#FFF0F0;--black:#0D0D0D;--white:#FFFFFF;--off:#F7F4F0;--gray:#6B6B6B;--border:#E8E2DA}
-html,body{height:100%%;overflow:hidden}
+html,body{height:100%;overflow:hidden}
 body{font-family:'DM Sans',system-ui,sans-serif;background:var(--white);color:var(--black)}
 nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:0 56px;height:64px;background:rgba(255,255,255,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
 .nav-logo{display:flex;align-items:center;gap:10px;cursor:pointer}
@@ -49,7 +49,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:cen
 .ticker{background:var(--red);padding:12px 0;overflow:hidden}
 .ticker-inner{display:flex;animation:tick 22s linear infinite;white-space:nowrap}
 .ticker-item{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:rgba(255,255,255,0.9);padding:0 32px;border-right:1px solid rgba(255,255,255,0.15)}
-@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%%)}}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .page-inner{padding:56px}
 .page-eyebrow{font-size:10px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--red);margin-bottom:14px}
 .page-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,6vw,80px);line-height:0.9;margin-bottom:48px}
@@ -57,7 +57,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:cen
 .svc-card{background:var(--white);padding:40px 32px;position:relative;overflow:hidden;transition:background 0.2s}
 .svc-card:hover{background:var(--off)}
 .svc-bar{position:absolute;top:0;left:0;width:3px;height:0;background:var(--red);transition:height 0.3s}
-.svc-card:hover .svc-bar{height:100%%}
+.svc-card:hover .svc-bar{height:100%}
 .svc-num{font-family:'Bebas Neue',sans-serif;font-size:11px;color:var(--red);letter-spacing:3px;margin-bottom:24px}
 .svc-name{font-family:'Bebas Neue',sans-serif;font-size:28px;line-height:1;margin-bottom:12px}
 .svc-desc{font-size:13px;color:var(--gray);line-height:1.6;font-weight:300}
@@ -70,8 +70,8 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:cen
 .also-tag{padding:7px 16px;border:1px solid var(--border);font-size:13px;color:var(--gray)}
 .tender-layout{display:grid;grid-template-columns:5fr 4fr;gap:72px;align-items:start}
 .t-badge{display:inline-flex;align-items:center;gap:8px;background:var(--red-light);border:1px solid rgba(232,0,13,0.15);padding:6px 14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--red);margin-bottom:22px}
-.t-dot{width:5px;height:5px;background:var(--red);border-radius:50%%;animation:p 2s infinite}
-@keyframes p{0%%,100%%{opacity:1}50%%{opacity:0.2}}
+.t-dot{width:5px;height:5px;background:var(--red);border-radius:50%;animation:p 2s infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:0.2}}
 .t-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,5vw,72px);line-height:0.9;margin-bottom:22px}
 .t-title em{font-family:'Playfair Display',serif;font-style:italic;color:var(--red)}
 .t-desc{font-size:15px;color:var(--gray);line-height:1.8;font-weight:300;margin-bottom:32px}
@@ -140,7 +140,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:cen
 .loc-name-sm{font-family:'Bebas Neue',sans-serif;font-size:22px;margin-bottom:6px}
 .loc-addr{font-size:13px;color:var(--gray);line-height:1.6;font-weight:300}
 .loc-open-sm{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#1a9960;margin-top:10px}
-.loc-open-dot{width:5px;height:5px;background:#1a9960;border-radius:50%%}
+.loc-open-dot{width:5px;height:5px;background:#1a9960;border-radius:50%}
 .loc-soon-sm{opacity:0.35}
 .hour-row{display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border)}
 .hour-day{color:var(--gray);font-weight:300}
@@ -165,9 +165,40 @@ nav{padding:0 20px}
 .contact-left,.contact-right{padding:40px 20px}
 .site-footer{padding:20px;flex-direction:column;align-items:flex-start;gap:10px}
 }
+
+.am-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;align-items:center;justify-content:center;padding:20px}
+.am-box{background:#fff;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;position:relative}
+.am-head{padding:24px 28px 20px;border-bottom:1px solid #E8E2DA;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;position:sticky;top:0;background:#fff;z-index:1}
+.am-head h2{font-family:'Bebas Neue',sans-serif;font-size:22px;color:#0D0D0D}
+.am-head p{font-size:12px;color:#6B6B6B;margin-top:2px}
+.am-close{background:none;border:none;font-size:20px;cursor:pointer;color:#6B6B6B;padding:0;line-height:1}
+.am-close:hover{color:#0D0D0D}
+.am-body{padding:24px 28px 28px}
+.am-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.am-row.am-single{grid-template-columns:1fr}
+.am-group{display:flex;flex-direction:column;gap:5px}
+.am-label{font-size:11px;font-weight:600;color:#6B6B6B;text-transform:uppercase;letter-spacing:0.4px}
+.am-req{color:#E8000D}
+.am-input{padding:9px 12px;background:#F7F4F0;border:1px solid #E8E2DA;font-size:13px;color:#0D0D0D;font-family:'DM Sans',sans-serif;width:100%}
+.am-input:focus{outline:none;border-color:#999}
+.am-channels{display:flex;gap:8px}
+.am-ch{flex:1;padding:9px 8px;border:1px solid #E8E2DA;background:#F7F4F0;font-size:13px;font-family:'DM Sans',sans-serif;cursor:pointer;color:#6B6B6B;transition:all 0.15s}
+.am-ch.active{border-color:#0D0D0D;color:#0D0D0D;font-weight:600;background:#fff}
+.am-file{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#F7F4F0;border:1px dashed #E8E2DA;font-size:12px;color:#6B6B6B;cursor:pointer}
+.am-file input{display:none}
+.am-file:hover{border-color:#999}
+.am-file-name{font-size:11px;color:#6B6B6B;margin-top:3px}
+.am-divider{border:none;border-top:1px solid #E8E2DA;margin:20px 0}
+.am-submit{width:100%;padding:13px;background:#E8000D;color:#fff;border:none;font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer}
+.am-submit:hover{background:#B50009}
+.am-submit:disabled{opacity:0.5;cursor:not-allowed}
+.am-success{text-align:center;padding:40px 20px}
+.am-success-icon{font-size:40px;margin-bottom:16px}
+.am-success h3{font-family:'Bebas Neue',sans-serif;font-size:28px;margin-bottom:8px}
+.am-success p{font-size:14px;color:#6B6B6B;line-height:1.6}
 </style>
 <script>
-function goto(page){
+function switchPage(page){
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
   document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active')});
   var p=document.getElementById('page-'+page);
@@ -184,11 +215,18 @@ function loadVacancies(){
     groups.forEach(function(g){
       if(!g.vacancies.length)return;
       total+=g.vacancies.length;
-      html+='<div class="branch-group"><div class="bg-header"><span class="bg-name">'+esc(g.branch_name)+'</span><span class="bg-count">'+g.vacancies.length+' open</span></div>';
+      html+='<div class="branch-group"><div class="bg-header">';
+      html+='<span class="bg-name">'+esc(g.branch_name)+'</span>';
+      html+='<span class="bg-count">'+g.vacancies.length+' open</span></div>';
       g.vacancies.forEach(function(v){
         var ft={FULL_TIME:'Full Time',PART_TIME:'Part Time',CONTRACT:'Contract'};
         var dt=v.closes_at?new Date(v.closes_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
-        html+='<div class="v-card"><div><div class="v-name">'+esc(v.title)+'</div><div class="v-meta"><span class="v-tag">'+(ft[v.employment_type]||v.employment_type)+'</span><span class="v-tag">Closes '+dt+'</span></div></div><button class="v-apply" onclick="window.open(String.fromCharCode(39)+\'https://wa.me/233556244194\'+ String.fromCharCode(39),String.fromCharCode(39)+\'_blank\'+String.fromCharCode(39))">Apply Now</button></div>';
+        html+='<div class="v-card">';
+        html+='<div><div class="v-name">'+esc(v.title)+'</div>';
+        html+='<div class="v-meta"><span class="v-tag">'+(ft[v.employment_type]||v.employment_type)+'</span>';
+        html+='<span class="v-tag">Closes '+dt+'</span></div></div>';
+        html+='<button class="v-apply" onclick="openModal('+v.id+')">Apply Now</button>';
+        html+='</div>';
       });
       html+='</div>';
     });
@@ -203,9 +241,88 @@ function loadVacancies(){
     if(vl)vl.innerHTML='<div class="no-vacancies">Could not load vacancies.</div>';
   });
 }
+function openModal(id){
+  document.getElementById('am-title').textContent='Apply Now';
+  document.getElementById('am-branch').textContent='';
+  document.getElementById('am-form').innerHTML=buildForm(id);
+  document.getElementById('apply-modal').style.display='flex';
+}
+function closeApplyModal(){
+  document.getElementById('apply-modal').style.display='none';
+}
+function buildForm(vacancyId){
+  return [
+    '<div class="am-row">',
+    '<div class="am-group"><label class="am-label">First Name <span class="am-req">*</span></label>',
+    '<input id="af-first" class="am-input" type="text" placeholder="Kwame"/></div>',
+    '<div class="am-group"><label class="am-label">Last Name <span class="am-req">*</span></label>',
+    '<input id="af-last" class="am-input" type="text" placeholder="Mensah"/></div></div>',
+    '<div class="am-row">',
+    '<div class="am-group"><label class="am-label">Email <span class="am-req">*</span></label>',
+    '<input id="af-email" class="am-input" type="email" placeholder="kwame@email.com"/></div>',
+    '<div class="am-group"><label class="am-label">Phone <span class="am-req">*</span></label>',
+    '<input id="af-phone" class="am-input" type="tel" placeholder="024 000 0000"/></div></div>',
+    '<div class="am-row am-single"><div class="am-group"><label class="am-label">Address</label>',
+    '<input id="af-address" class="am-input" type="text" placeholder="Accra, Ghana"/></div></div>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">Preferred Channel <span class="am-req">*</span></label>',
+    '<div class="am-channels">',
+    '<button type="button" class="am-ch active" data-ch="WHATSAPP" onclick="pickCh(this)">WhatsApp</button>',
+    '<button type="button" class="am-ch" data-ch="SMS" onclick="pickCh(this)">SMS</button>',
+    '<button type="button" class="am-ch" data-ch="EMAIL" onclick="pickCh(this)">Email</button>',
+    '</div></div></div>',
+    '<input type="hidden" id="af-vid" value="'+vacancyId+'"/>',
+    '<input type="hidden" id="af-ch" value="WHATSAPP"/>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">CV / Resume <span class="am-req">*</span></label>',
+    '<label class="am-file"><input type="file" id="af-cv" accept=".pdf,.doc,.docx" onchange="showFn(this)"/> Choose file</label>',
+    '<div class="am-file-name" id="cv-name"></div></div></div>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">Cover Letter (optional)</label>',
+    '<label class="am-file"><input type="file" id="af-cover" accept=".pdf,.doc,.docx" onchange="showFn2(this)"/> Choose file</label>',
+    '<div class="am-file-name" id="cover-name"></div></div></div>',
+    '<hr class="am-divider"/>',
+    '<button type="button" class="am-submit" id="am-btn" onclick="submitApp()">Submit Application</button>'
+  ].join('');
+}
+function pickCh(btn){
+  document.querySelectorAll('.am-ch').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+  var h=document.getElementById('af-ch');
+  if(h)h.value=btn.getAttribute('data-ch');
+}
+function showFn(inp){var l=document.getElementById('cv-name');if(l&&inp.files[0])l.textContent=inp.files[0].name;}
+function showFn2(inp){var l=document.getElementById('cover-name');if(l&&inp.files[0])l.textContent=inp.files[0].name;}
+function submitApp(){
+  var first=document.getElementById('af-first').value.trim();
+  var last=document.getElementById('af-last').value.trim();
+  var email=document.getElementById('af-email').value.trim();
+  var phone=document.getElementById('af-phone').value.trim();
+  var cv=document.getElementById('af-cv').files[0];
+  var vid=document.getElementById('af-vid').value;
+  var ch=document.getElementById('af-ch').value;
+  if(!first||!last||!email||!phone||!cv){alert('Please fill in all required fields and attach your CV.');return;}
+  var btn=document.getElementById('am-btn');
+  btn.textContent='Submitting...';btn.disabled=true;
+  var fd=new FormData();
+  fd.append('first_name',first);fd.append('last_name',last);
+  fd.append('email',email);fd.append('phone',phone);
+  fd.append('address',document.getElementById('af-address').value.trim());
+  fd.append('preferred_channel',ch);fd.append('cv',cv);
+  var cover=document.getElementById('af-cover').files[0];
+  if(cover)fd.append('cover_letter',cover);
+  if(vid)fd.append('vacancy',vid);
+  fetch('/api/v1/careers/apply/',{method:'POST',body:fd})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d}})})
+    .then(function(res){
+      if(!res.ok){alert(Object.values(res.data).flat().join(' ')||'Something went wrong.');btn.textContent='Submit Application';btn.disabled=false;return;}
+      document.getElementById('am-form').innerHTML='<div class="am-success"><div class="am-success-icon">&#x2705;</div><h3>Application Received!</h3><p>Thank you '+esc(first)+'. We will be in touch.</p></div>';
+    })
+    .catch(function(){alert('Network error.');btn.textContent='Submit Application';btn.disabled=false;});
+}
 function joinWaitlist(){
   var el=document.getElementById('w-email');
-  if(!el||!el.value.trim()||!el.value.includes('@')){alert('Please enter a valid email address.');return;}
+  if(!el||!el.value.trim()||!el.value.includes('@')){alert('Please enter a valid email.');return;}
   var b=document.querySelector('.w-btn');
   if(b){b.textContent='You are on the list';b.style.background='#1a9960';b.disabled=true;}
 }
@@ -214,21 +331,21 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
 </head>
 <body>
 <nav>
-  <div class="nav-logo" onclick="goto('home')">
+  <div class="nav-logo" onclick="switchPage('home')">
     <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
       <path d="M12 78 Q22 32 58 18 Q38 44 50 56 Q58 24 82 12 Q68 48 72 66 Q52 44 12 78Z" fill="#E8000D"/>
     </svg>
     <span class="nav-brand">FARHAT <span>PRESS</span></span>
   </div>
   <div class="nav-links">
-    <button class="nav-btn active" data-page="home" onclick="goto('home')">Home</button>
-    <button class="nav-btn" data-page="services" onclick="goto('services')">Services</button>
-    <button class="nav-btn" data-page="tender" onclick="goto('tender')">Tender</button>
-    <button class="nav-btn" data-page="partners" onclick="goto('partners')">Partners</button>
-    <button class="nav-btn" data-page="careers" onclick="goto('careers')">Careers</button>
-    <button class="nav-btn" data-page="contact" onclick="goto('contact')">Contact</button>
+    <button class="nav-btn active" data-page="home" onclick="switchPage('home')">Home</button>
+    <button class="nav-btn" data-page="services" onclick="switchPage('services')">Services</button>
+    <button class="nav-btn" data-page="tender" onclick="switchPage('tender')">Tender</button>
+    <button class="nav-btn" data-page="partners" onclick="switchPage('partners')">Partners</button>
+    <button class="nav-btn" data-page="careers" onclick="switchPage('careers')">Careers</button>
+    <button class="nav-btn" data-page="contact" onclick="switchPage('contact')">Contact</button>
   </div>
-  <button class="nav-cta" onclick="goto('contact')">Send a Print Job</button>
+  <button class="nav-cta" onclick="switchPage('contact')">Send a Print Job</button>
 </nav>
 <div class="pages">
   <div class="page active" id="page-home">
@@ -238,8 +355,8 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
         <h1 class="hero-title">LARGE.<br/>BOLD.<br/><span class="red">PRINTED.</span></h1>
         <p class="hero-sub">From large-format banners to full tender packages, custom stickers to branded packaging ? Farhat Printing Press delivers production-quality print across Accra.</p>
         <div class="hero-actions">
-          <button class="btn-red" onclick="goto('contact')">Send Your Job &rarr;</button>
-          <button class="btn-ghost" onclick="goto('services')">See Services</button>
+          <button class="btn-red" onclick="switchPage('contact')">Send Your Job &rarr;</button>
+          <button class="btn-ghost" onclick="switchPage('services')">See Services</button>
         </div>
         <div class="hero-stats">
           <div class="stat"><div class="stat-num">5+</div><div class="stat-label">Years of professional printing</div></div>
@@ -386,6 +503,20 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
         <div class="hour-row"><span class="hour-day">Sunday</span><span class="hour-time">Closed</span></div>
       </div>
     </div>
+  </div>
+</div>
+
+
+<div class="am-overlay" id="apply-modal" onclick="if(event.target===this)closeApplyModal()">
+  <div class="am-box">
+    <div class="am-head">
+      <div>
+        <h2 id="am-title">Apply</h2>
+        <p id="am-branch"></p>
+      </div>
+      <button class="am-close" onclick="closeApplyModal()">&#x2715;</button>
+    </div>
+    <div class="am-body" id="am-form"></div>
   </div>
 </div>
 
