@@ -5,6 +5,11 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.http import FileResponse, Http404
+from rest_framework.authentication import SessionAuthentication
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import TokenError
 
 from apps.hr.models import (
     JobPosition, Applicant, StageScore,
@@ -719,3 +724,56 @@ class OnboardingRecordView(APIView):
         applicant  = get_object_or_404(Applicant, pk=pk)
         onboarding = get_object_or_404(OnboardingRecord, applicant=applicant)
         return Response(OnboardingRecordSerializer(onboarding).data)
+
+from django.views import View
+from django.http import FileResponse, HttpResponseForbidden, Http404
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import TokenError
+
+class ServeCVView(View):
+    """
+    GET /api/v1/recruitment/applications/<id>/cv/?token=<jwt>
+    Plain Django view — bypasses DRF content negotiation.
+    Serves CV as inline PDF for iframe embedding.
+    """
+    def get(self, request, pk):
+        # Authenticate via query param token
+        token_str = request.GET.get('token')
+        user = None
+
+        if token_str:
+            try:
+                token = AccessToken(token_str)
+                from apps.accounts.models import CustomUser
+                user = CustomUser.objects.get(id=token['user_id'])
+            except (TokenError, Exception):
+                return HttpResponseForbidden('Invalid token.')
+
+        if not user:
+            return HttpResponseForbidden('Authentication required.')
+
+        # Role gate
+        allowed_roles = {
+            'HQ_HR_MANAGER', 'REGIONAL_HR_COORDINATOR',
+            'BELT_MANAGER', 'REGIONAL_MANAGER', 'SUPER_ADMIN',
+        }
+        user_role = getattr(user.role, 'name', None)
+        if user_role not in allowed_roles:
+            return HttpResponseForbidden('Not authorised.')
+
+        applicant = get_object_or_404(Applicant, pk=pk)
+
+        if not applicant.cv:
+            raise Http404('No CV on file.')
+
+        try:
+            response = FileResponse(
+                applicant.cv.open('rb'),
+                content_type='application/pdf',
+            )
+            response['Content-Disposition'] = 'inline; filename="cv.pdf"'
+            response['X-Frame-Options']     = 'SAMEORIGIN'
+            response['Cache-Control']       = 'private, no-store'
+            return response
+        except FileNotFoundError:
+            raise Http404('CV file not found.')

@@ -7,12 +7,12 @@ from apps.hr.models import (
 
 
 # ── Public (careers) serializers ──────────────────────────────────────────────
-
 class PublicVacancySerializer(serializers.ModelSerializer):
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     branch_code  = serializers.CharField(source='branch.code', read_only=True)
     role_name    = serializers.CharField(source='role.name', read_only=True)
     is_open      = serializers.BooleanField(read_only=True)
+    applicant_count = serializers.SerializerMethodField()
 
     class Meta:
         model  = JobPosition
@@ -21,7 +21,11 @@ class PublicVacancySerializer(serializers.ModelSerializer):
             'role', 'role_name', 'description', 'requirements',
             'positions_available', 'employment_type', 'status',
             'opens_at', 'closes_at', 'is_open',
+            'applicant_count',
         ]
+
+    def get_applicant_count(self, obj):
+        return obj.applicants.count()
 
 
 class PublicApplicationSerializer(serializers.ModelSerializer):
@@ -94,9 +98,10 @@ class OnboardingFormSerializer(serializers.ModelSerializer):
 # ── HR (authenticated) serializers ────────────────────────────────────────────
 
 class JobPositionSerializer(serializers.ModelSerializer):
-    branch_name = serializers.CharField(source='branch.name', read_only=True)
-    role_name   = serializers.CharField(source='role.name', read_only=True)
-    is_open     = serializers.BooleanField(read_only=True)
+    branch_name     = serializers.CharField(source='branch.name', read_only=True)
+    role_name       = serializers.CharField(source='role.name', read_only=True)
+    is_open         = serializers.BooleanField(read_only=True)
+    applicant_count = serializers.SerializerMethodField()
 
     class Meta:
         model  = JobPosition
@@ -105,9 +110,13 @@ class JobPositionSerializer(serializers.ModelSerializer):
             'track', 'description', 'requirements',
             'positions_available', 'employment_type', 'base_salary',
             'status', 'opens_at', 'closes_at', 'is_open',
+            'applicant_count',
             'created_by', 'created_at',
         ]
         read_only_fields = ['created_by', 'created_at']
+
+    def get_applicant_count(self, obj):
+        return obj.applicants.count()
 
 
 class StageQuestionnaireSerializer(serializers.ModelSerializer):
@@ -235,6 +244,7 @@ class ApplicantDetailSerializer(serializers.ModelSerializer):
         """Return the role-specific questions for the current stage."""
         role = obj.vacancy.role if obj.vacancy else obj.role_interest
         stage_map = {
+            Applicant.RECEIVED:            StageQuestionnaire.SCREENING,
             Applicant.SCREENING:           StageQuestionnaire.SCREENING,
             Applicant.INTERVIEW_SCHEDULED: StageQuestionnaire.INTERVIEW,
             Applicant.INTERVIEW_DONE:      StageQuestionnaire.INTERVIEW,

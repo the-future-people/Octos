@@ -1,5 +1,6 @@
 ﻿from django.urls import path
 from apps.hr.api.views import (
+    ServeCVView,
     VacancyListView,
     VacancyDetailView,
     ApplicationListView,
@@ -38,4 +39,5 @@ urlpatterns = [
     # Special tracks
     path('recommend/',   RecommendCandidateView.as_view(), name='recommend-candidate'),
     path('appoint/',     AppointCandidateView.as_view(),   name='appoint-candidate'),
+    path('applications/<int:pk>/cv/', ServeCVView.as_view(), name='application-cv'),
 ]

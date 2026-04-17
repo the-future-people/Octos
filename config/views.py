@@ -38,3 +38,6 @@ def careers_view(request):
 
 def home_view(request):
     return render(request, 'public/home.html')
+
+def hr_portal_view(request):
+    return render(request, 'portals/hr_portal.html')
