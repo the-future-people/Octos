@@ -437,7 +437,9 @@ function _renderTable() {
           <div class="td-job-title">${_esc(j.title || '—')}</div>
           <div class="td-job-ref">${_esc(j.job_number || '#' + j.id)}</div>
         </td>
-        <td style="font-size:13px;color:var(--text-2);">${_esc(j.customer_name || '—')}</td>
+        <td style="font-size:13px;color:${j.customer_name ? 'var(--text-2)' : 'var(--green-text)'};">
+          ${j.customer_name ? _esc(j.customer_name) : 'Walk-in'}
+        </td>
         <td>${_typeTag(j.job_type)}</td>
         <td><span class="badge ${badgeCls}">${label}</span></td>
         <td style="font-family:'JetBrains Mono',monospace;font-size:12.5px;">${priceStr}</td>
@@ -448,16 +450,82 @@ function _renderTable() {
 
 async function _renderStats(sheetId) {
   try {
-    const res  = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheetId}`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const [statsRes, jobsRes] = await Promise.all([
+      Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheetId}`),
+      Auth.fetch(`/api/v1/jobs/?daily_sheet=${sheetId}&page_size=200`),
+    ]);
 
-    _set('jobs-stat-total',       data.total);
-    _set('jobs-stat-in-progress', data.in_progress);
-    _set('jobs-stat-complete',    data.complete);
-    _set('jobs-stat-revenue',     parseFloat(data.revenue) > 0
-      ? parseFloat(data.revenue).toLocaleString('en-GH', { minimumFractionDigits: 2 })
-      : '0');
+    if (statsRes.ok) {
+      const data = await statsRes.json();
+      _set('jobs-stat-total',       data.total);
+      _set('jobs-stat-in-progress', data.in_progress);
+      _set('jobs-stat-complete',    data.complete);
+      _set('jobs-stat-revenue',     parseFloat(data.revenue) > 0
+        ? parseFloat(data.revenue).toLocaleString('en-GH', { minimumFractionDigits: 2 })
+        : '0');
+    }
+
+    if (jobsRes.ok) {
+      const jobData    = await jobsRes.json();
+      const jobs       = Array.isArray(jobData) ? jobData : (jobData.results || []);
+      const total      = jobs.length;
+      const registered = jobs.filter(j => j.customer).length;
+      const walkin     = total - registered;
+      const rate       = total > 0 ? Math.round((registered / total) * 100) : 0;
+      const rateColor  = rate >= 70 ? 'var(--green-text)'
+                       : rate >= 40 ? 'var(--amber-text)'
+                       : 'var(--red-text)';
+
+      // Inject registration rate strip if not already present
+      const strip = document.getElementById('jobs-reg-strip');
+      if (!strip) {
+        const statStrip = document.querySelector('.jobs-stat-strip');
+        if (statStrip) {
+          const div = document.createElement('div');
+          div.id = 'jobs-reg-strip';
+          div.style.cssText = `display:grid;grid-template-columns:1fr 1fr 1fr;
+            gap:0;background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);margin-bottom:16px;overflow:hidden;`;
+          div.innerHTML = `
+            <div style="padding:12px 16px;border-right:1px solid var(--border);">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                Registered</div>
+              <div id="reg-stat-registered" style="font-size:20px;font-weight:800;
+                color:var(--text);">${registered}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+                linked to customer</div>
+            </div>
+            <div style="padding:12px 16px;border-right:1px solid var(--border);">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                Walk-in</div>
+              <div id="reg-stat-walkin" style="font-size:20px;font-weight:800;
+                color:var(--green-text);">${walkin}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+                no customer linked</div>
+            </div>
+            <div style="padding:12px 16px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                Reg. Rate</div>
+              <div id="reg-stat-rate" style="font-size:20px;font-weight:800;
+                color:${rateColor};">${rate}%</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
+                of jobs have a customer</div>
+            </div>`;
+          statStrip.insertAdjacentElement('afterend', div);
+        }
+      } else {
+        // Update existing
+        const regEl  = document.getElementById('reg-stat-registered');
+        const wkEl   = document.getElementById('reg-stat-walkin');
+        const rateEl = document.getElementById('reg-stat-rate');
+        if (regEl)  regEl.textContent = registered;
+        if (wkEl)   wkEl.textContent  = walkin;
+        if (rateEl) { rateEl.textContent = rate + '%'; rateEl.style.color = rateColor; }
+      }
+    }
   } catch { /* silent */ }
 }
 

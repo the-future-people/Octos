@@ -1,0 +1,235 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HR — Octos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="{% static 'css/hr_portal.css' %}"/>
+</head>
+<body>
+
+<!-- ── Topbar ──────────────────────────────────────────── -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-brand">
+      <span class="brand-logo">Octos</span>
+      <span class="brand-divider"></span>
+      <div style="display:flex;flex-direction:column;line-height:1.1;">
+        <span class="brand-role">HR Portal</span>
+        <span id="hr-scope-label" style="font-size:10px;font-weight:500;color:var(--text-3);">—</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="live-indicator">
+        <div class="live-dot"></div>
+        Active
+      </div>
+      <!-- Notification bell -->
+      <div style="position:relative;">
+        <button id="hr-notif-btn" onclick="HRNotif.toggle()"
+          style="width:34px;height:34px;border-radius:50%;background:none;
+            border:1px solid var(--border);cursor:pointer;display:flex;
+            align-items:center;justify-content:center;color:var(--text-2);transition:all 0.15s;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span id="hr-notif-badge"
+            style="display:none;position:absolute;top:2px;right:2px;width:14px;height:14px;
+              border-radius:50%;background:#e8294a;color:#fff;font-size:8px;font-weight:700;
+              align-items:center;justify-content:center;">0</span>
+        </button>
+      </div>
+      <!-- Profile -->
+      <div style="position:relative;">
+        <button id="hr-profile-btn" onclick="HRProfile.toggle()"
+          style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+            background:none;border:1px solid var(--border);border-radius:20px;cursor:pointer;">
+          <div class="user-avatar" id="hr-user-initials">—</div>
+          <span style="font-size:13px;font-weight:600;color:var(--text);" id="hr-user-name">—</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2.5" id="hr-profile-arrow"
+            style="color:var(--text-3);transition:transform 0.2s;">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div id="hr-profile-dropdown"
+          style="display:none;position:absolute;top:46px;right:0;width:200px;
+            background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+            box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:1000;overflow:hidden;">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+            <div style="font-size:13px;font-weight:700;color:var(--text);" id="hr-profile-name">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Human Resources</div>
+          </div>
+          <div style="padding:6px 0;">
+            <button onclick="Auth.logout()"
+              style="width:100%;padding:9px 16px;text-align:left;background:none;border:none;
+                cursor:pointer;font-size:13px;color:var(--red-text);font-family:inherit;
+                display:flex;align-items:center;gap:10px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Page shell ──────────────────────────────────────── -->
+<div class="page-shell">
+
+  <!-- ── Sidebar ───────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div class="sidebar-section">HR Operations</div>
+
+    <div class="sidebar-item active" data-pane="overview" onclick="HR.switchPane('overview')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      <span class="sidebar-label">Overview</span>
+    </div>
+
+    <div class="sidebar-section">Recruitment</div>
+
+    <div class="sidebar-item" data-pane="vacancies" onclick="HR.switchPane('vacancies')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 13.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.5"/>
+        <path d="M16 2l4 4-8 8H8v-4l8-8z"/>
+      </svg>
+      <span class="sidebar-label">Vacancies</span>
+    </div>
+
+    <div class="sidebar-item" data-pane="applications" onclick="HR.switchPane('applications')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span class="sidebar-label">Applications</span>
+      <span class="sidebar-badge" id="sidebar-apps-badge" style="display:none;">0</span>
+    </div>
+
+    <div class="sidebar-item" data-pane="onboarding" onclick="HR.switchPane('onboarding')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10 9 9 9 8 9"/>
+      </svg>
+      <span class="sidebar-label">Onboarding</span>
+    </div>
+
+    <div class="sidebar-section">People</div>
+
+    <div class="sidebar-item" data-pane="employees" onclick="HR.switchPane('employees')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+      </svg>
+      <span class="sidebar-label">Employees</span>
+    </div>
+
+    <div class="sidebar-item coming-soon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="7" width="20" height="14" rx="2"/>
+        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+      </svg>
+      <span class="sidebar-label">Payroll</span>
+      <span class="soon-pill">Soon</span>
+    </div>
+
+    <div class="sidebar-item coming-soon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      <span class="sidebar-label">Scheduling</span>
+      <span class="soon-pill">Soon</span>
+    </div>
+
+    <div class="sidebar-item coming-soon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span class="sidebar-label">Cases</span>
+      <span class="soon-pill">Soon</span>
+    </div>
+
+  </aside>
+
+  <!-- ── Main content ───────────────────────────────────── -->
+  <div class="main-content" id="hr-main">
+    <div class="loading-cell"><span class="spin"></span> Loading…</div>
+  </div>
+
+</div><!-- /page-shell -->
+
+<!-- ── Scorecard modal ─────────────────────────────────── -->
+<div class="modal-overlay" id="score-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="score-modal-title">Screening Scorecard</div>
+        <div class="modal-sub" id="score-modal-sub">—</div>
+      </div>
+      <button class="modal-close" onclick="HR.closeScoreModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" id="score-modal-body"></div>
+  </div>
+</div>
+
+<!-- ── General modal ───────────────────────────────────── -->
+<div class="modal-overlay" id="gen-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="gen-modal-title">—</div>
+        <div class="modal-sub" id="gen-modal-sub"></div>
+      </div>
+      <button class="modal-close" onclick="HR.closeGenModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" id="gen-modal-body"></div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="{% static 'js/auth.js' %}"></script>
+<script src="{% static 'js/hr_portal.js' %}"></script>
+
+</body>
+</html>

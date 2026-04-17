@@ -85,6 +85,58 @@ class InventoryEngine:
         incident = WasteIncident.objects.create(branch=self.branch, consumable=consumable, quantity=quantity, reason=reason, job=job, reported_by=actor, notes=notes, stock_movement=movement)
         self._check_reorder_alert(stock, actor)
         return incident
+    
+    def generate_daily_snapshot(self, date):
+        from apps.inventory.models import BranchStock, StockMovement
+        snapshot = {
+            'date'     : date.isoformat(),
+            'branch'   : self.branch.code,
+            'items'    : [],
+            'low_stock': [],
+        }
+        stocks = BranchStock.objects.filter(
+            branch=self.branch
+        ).select_related('consumable', 'consumable__category')
+
+        for stock in stocks:
+            day_movements = StockMovement.objects.filter(
+                branch       = self.branch,
+                consumable   = stock.consumable,
+                created_at__date = date,
+            )
+            consumed = sum(
+                float(m.quantity) for m in day_movements
+                if m.movement_type in ['OUT', 'WASTE']
+            )
+            received = sum(
+                float(m.quantity) for m in day_movements
+                if m.movement_type == 'IN'
+            )
+
+            # Skip consumables with zero activity today
+            if consumed == 0 and received == 0:
+                continue
+
+            closing = float(stock.quantity)
+            opening = closing - received + consumed
+
+            snapshot['items'].append({
+                'consumable'   : str(stock.consumable),
+                'category'     : stock.consumable.category.name,
+                'unit'         : stock.consumable.unit_label,
+                'opening'      : round(opening,  2),
+                'received'     : round(received, 2),
+                'consumed'     : round(consumed, 2),
+                'closing'      : round(closing,  2),
+                'is_low'       : stock.is_low,
+                'reorder_point': float(stock.consumable.reorder_point),
+            })
+            if stock.is_low:
+                snapshot['low_stock'].append(str(stock.consumable))
+
+        # Sort by category then name
+        snapshot['items'].sort(key=lambda x: (x['category'], x['consumable']))
+        return snapshot
 
     def generate_weekly_snapshot(self, date_from, date_to):
         from apps.inventory.models import BranchStock, StockMovement

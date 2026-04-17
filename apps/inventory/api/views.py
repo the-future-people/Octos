@@ -67,6 +67,11 @@ class StockMovementListView(generics.ListAPIView):
         if movement_type:
             qs = qs.filter(movement_type=movement_type)
 
+        # Optional filter by date (YYYY-MM-DD)
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            qs = qs.filter(created_at__date=date_param)
+
         return qs
 
 

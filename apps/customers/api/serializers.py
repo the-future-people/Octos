@@ -9,6 +9,8 @@ from apps.finance.models import CreditAccount, CreditPayment
 class CustomerSerializer(serializers.ModelSerializer):
     full_name        = serializers.CharField(read_only=True)
     display_name     = serializers.CharField(read_only=True)
+    titled_name      = serializers.CharField(read_only=True)
+    title_display    = serializers.CharField(read_only=True)
     preferred_branch_name = serializers.CharField(
         source='preferred_branch.name', read_only=True
     )
@@ -16,9 +18,14 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CustomerProfile
         fields = [
-            'id', 'first_name', 'last_name', 'full_name', 'display_name',
-            'phone', 'email', 'company_name', 'address',
+            'id',
+            'title', 'title_other', 'title_display',
+            'first_name', 'last_name', 'full_name', 'display_name', 'titled_name',
+            'gender', 'date_of_birth',
+            'phone', 'secondary_phone', 'email', 'preferred_contact',
+            'company_name', 'address',
             'customer_type', 'institution_subtype',
+            'affiliation', 'affiliation_active',
             'visit_count', 'tier', 'confidence_score',
             'preferred_branch', 'preferred_branch_name',
             'is_priority', 'is_walkin', 'notes', 'created_at',
@@ -29,13 +36,19 @@ class CustomerListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for lists and dropdowns."""
     full_name    = serializers.CharField(read_only=True)
     display_name = serializers.CharField(read_only=True)
+    titled_name  = serializers.CharField(read_only=True)
+    title_display = serializers.CharField(read_only=True)
 
     class Meta:
         model  = CustomerProfile
         fields = [
-            'id', 'full_name', 'display_name', 'phone',
+            'id', 'title', 'title_display', 'titled_name',
+            'full_name', 'display_name', 'phone', 'secondary_phone',
+            'gender', 'preferred_contact',
             'company_name', 'customer_type', 'institution_subtype',
-            'tier', 'is_priority', 'confidence_score',
+            'affiliation', 'affiliation_active',
+            'tier', 'is_priority', 'confidence_score', 'visit_count',
+            'created_at',
         ]
 
 
@@ -45,8 +58,12 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CustomerProfile
         fields = [
-            'first_name', 'last_name', 'phone', 'email',
-            'company_name', 'address', 'customer_type', 'institution_subtype',
+            'title', 'title_other',
+            'first_name', 'last_name',
+            'gender', 'date_of_birth',
+            'phone', 'secondary_phone', 'email', 'preferred_contact',
+            'company_name', 'address',
+            'customer_type', 'institution_subtype',
             'preferred_branch', 'notes',
         ]
 

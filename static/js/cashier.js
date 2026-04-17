@@ -862,7 +862,7 @@ const Cashier = (() => {
     // Sheet number
     const sheetEl = document.getElementById('cs-sheet');
     if (sheetEl) {
-      sheetEl.textContent = s.sheet_id ? `#${s.sheet_id}` : '—';
+      sheetEl.textContent = s.sheet_number || (s.sheet_id ? `#${s.sheet_id}` : '—');
     }
 
     // Opening float

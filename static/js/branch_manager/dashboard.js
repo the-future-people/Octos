@@ -212,35 +212,130 @@ async function loadRecentJobs() {
     document.querySelectorAll('.period-tab').forEach(t => {
       t.classList.toggle('active', t.dataset.period === period);
     });
-    _renderMetrics(period);
+    _renderMetrics(period);  // async — fire and forget
   }
 
-  function _renderMetrics(period) {
+  async function _renderMetrics(period) {
     const grid = document.getElementById('metrics-grid');
     if (!grid) return;
 
-    // For now render with placeholder data
-    // These will be wired to real API when analytics endpoint is ready
-    const metrics = _getMetricData(period);
+    grid.innerHTML = `<div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+      <span class="spin"></span> Loading metrics…</div>`;
 
-    grid.innerHTML = metrics.map(m => `
-      <div class="metric-card">
-        <div class="metric-ring">
-          <svg viewBox="0 0 72 72" width="72" height="72">
-            <circle class="metric-ring-bg" cx="36" cy="36" r="30"/>
-            <circle class="metric-ring-fill"
-              cx="36" cy="36" r="30"
-              stroke="${m.color}"
-              stroke-dasharray="${2 * Math.PI * 30}"
-              stroke-dashoffset="${2 * Math.PI * 30 * (1 - m.value / 100)}"
-            />
-          </svg>
-          <div class="metric-ring-label">${m.value}%</div>
+    try {
+      // Fetch today's sheet for day-scoped data
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      const sheet    = sheetRes.ok ? await sheetRes.json() : null;
+
+      // Fetch job stats — scope by period
+      const paramMap = { day: `daily_sheet=${sheet?.id}`, week: 'period=week', month: 'period=month' };
+      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?${paramMap[period] || paramMap.day}`);
+      const stats    = statsRes.ok ? await statsRes.json() : {};
+
+      const total      = stats.total      || 0;
+      const complete   = stats.complete   || 0;
+      const pending    = stats.pending    || 0;
+      const inProgress = stats.in_progress || 0;
+      const registered = stats.registered || 0;
+      const revenue    = parseFloat(stats.revenue || 0);
+
+      // ── Rates ────────────────────────────────────────────
+      const completionRate   = total > 0 ? Math.round(complete / total * 100)   : 0;
+      const registrationRate = total > 0 ? Math.round(registered / total * 100) : 0;
+      const queueClearance   = total > 0 ? Math.round((total - pending - inProgress) / total * 100) : 0;
+
+      // Collection rate: revenue vs estimated (use sheet totals for day, stats revenue for others)
+      const sheetRevenue = sheet
+        ? parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0)
+        : revenue;
+      const collectionRate = period === 'day' && sheet
+        ? (sheetRevenue > 0 && complete > 0 ? Math.min(100, Math.round((complete / Math.max(total,1)) * 100)) : 0)
+        : (total > 0 ? Math.round(complete / total * 100) : 0);
+
+      // ── Absolute stats ───────────────────────────────────
+      const avgJobValue = complete > 0 ? (revenue / complete) : 0;
+      const displayRevenue = period === 'day' ? sheetRevenue : revenue;
+
+      // ── Render ───────────────────────────────────────────
+      const periodLabel = { day: 'today', week: 'this week', month: 'this month' }[period] || 'today';
+
+      const rings = [
+        { name: 'Completion Rate',   value: completionRate,   color: '#22c98a', sub: `${complete} of ${total} jobs done ${periodLabel}` },
+        { name: 'Registration Rate', value: registrationRate, color: '#3355cc', sub: `${registered} of ${total} jobs linked to a customer` },
+        { name: 'Queue Clearance',   value: queueClearance,   color: '#9b59b6', sub: `${pending + inProgress} job${pending+inProgress!==1?'s':''} still outstanding` },
+        { name: 'Collection Rate',   value: collectionRate,   color: '#e8a820', sub: `Based on completed vs total jobs` },
+      ];
+
+      const ringHtml = rings.map(m => {
+        const circumference = 2 * Math.PI * 30;
+        const offset = circumference * (1 - m.value / 100);
+        const textColor = m.value >= 70 ? m.color : m.value >= 40 ? '#d97706' : '#dc2626';
+        return `
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:20px 16px;display:flex;
+            flex-direction:column;align-items:center;gap:10px;text-align:center;">
+            <div style="position:relative;width:80px;height:80px;">
+              <svg viewBox="0 0 72 72" width="80" height="80" style="transform:rotate(-90deg);">
+                <circle cx="36" cy="36" r="30" fill="none"
+                  stroke="var(--border)" stroke-width="5"/>
+                <circle cx="36" cy="36" r="30" fill="none"
+                  stroke="${m.color}" stroke-width="5"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${offset}"
+                  stroke-linecap="round"
+                  style="transition:stroke-dashoffset 0.6s ease;"/>
+              </svg>
+              <div style="position:absolute;inset:0;display:flex;align-items:center;
+                justify-content:center;font-family:'JetBrains Mono',monospace;
+                font-size:15px;font-weight:800;color:${textColor};">
+                ${m.value}%
+              </div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);">${m.name}</div>
+            <div style="font-size:11px;color:var(--text-3);line-height:1.4;">${m.sub}</div>
+          </div>`;
+      }).join('');
+
+      // Stat cards for absolute values
+      const statHtml = `
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:20px 16px;display:flex;
+          flex-direction:column;justify-content:center;gap:6px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;">Revenue ${periodLabel}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+            font-weight:800;color:#22c98a;">
+            ${_fmt(displayRevenue)}
+          </div>
+          <div style="font-size:11px;color:var(--text-3);">
+            Cash · MoMo · POS combined
+          </div>
         </div>
-        <div class="metric-name">${m.name}</div>
-        <div class="metric-sub">${m.sub}</div>
-      </div>
-    `).join('');
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:20px 16px;display:flex;
+          flex-direction:column;justify-content:center;gap:6px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;">Avg Job Value</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;
+            font-weight:800;color:#3355cc;">
+            ${avgJobValue > 0 ? _fmt(avgJobValue) : '—'}
+          </div>
+          <div style="font-size:11px;color:var(--text-3);">
+            Per completed job ${periodLabel}
+          </div>
+        </div>`;
+
+      grid.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+          gap:12px;width:100%;">
+          ${ringHtml}
+          ${statHtml}
+        </div>`;
+
+    } catch {
+      grid.innerHTML = `<div class="loading-cell" style="grid-column:1/-1;color:var(--red-text);">
+        Could not load metrics.</div>`;
+    }
   }
 
   function _getMetricData(period) {
@@ -290,7 +385,7 @@ async function loadRecentJobs() {
     if (paneId === 'performance')                 _loadPerformancePane();
     if (paneId === 'finance') {
       const pane = document.getElementById('pane-finance');
-      if (pane) pane.dataset.loaded = '';
+      if (pane) pane.dataset.loaded = '';  // always bust cache on navigation
       _loadFinancePane();
     }
     if (paneId === 'reports')                     _loadReportsPane();
@@ -433,23 +528,93 @@ async function loadRecentJobs() {
     }
   }
 
+let _invoicesPeriod = '';
+  let _invoicesPage   = 1;
+
   async function _loadInvoicesContent() {
     const container = document.getElementById('invoices-content');
     if (!container) return;
 
+    _invoicesPeriod = '';
+    _invoicesPage   = 1;
+
+    container.innerHTML = `
+      <!-- Period tabs -->
+      <div class="reports-tabs" id="invoices-period-tabs" style="margin-bottom:16px;">
+        <button class="reports-tab active" data-period=""
+          onclick="Dashboard.setInvoicesPeriod('')">All</button>
+        <button class="reports-tab" data-period="day"
+          onclick="Dashboard.setInvoicesPeriod('day')">Today</button>
+        <button class="reports-tab" data-period="week"
+          onclick="Dashboard.setInvoicesPeriod('week')">This Week</button>
+        <button class="reports-tab" data-period="month"
+          onclick="Dashboard.setInvoicesPeriod('month')">This Month</button>
+      </div>
+
+      <!-- Table -->
+      <div id="invoices-table-wrap">
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
+      </div>
+
+      <!-- Pagination -->
+      <div id="invoices-pagination" style="display:none;align-items:center;
+        justify-content:space-between;padding:12px 4px;margin-top:8px;">
+        <button id="invoices-prev-btn" onclick="Dashboard._invoicesPageChange(-1)"
+          style="padding:6px 14px;font-size:12px;font-weight:600;
+            border:1px solid var(--border);border-radius:var(--radius-sm);
+            background:var(--panel);color:var(--text-2);cursor:pointer;
+            font-family:'DM Sans',sans-serif;">← Prev</button>
+        <span id="invoices-page-info"
+          style="font-size:12px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+        </span>
+        <button id="invoices-next-btn" onclick="Dashboard._invoicesPageChange(1)"
+          style="padding:6px 14px;font-size:12px;font-weight:600;
+            border:1px solid var(--border);border-radius:var(--radius-sm);
+            background:var(--panel);color:var(--text-2);cursor:pointer;
+            font-family:'DM Sans',sans-serif;">Next →</button>
+      </div>`;
+
+    await _fetchInvoices();
+  }
+
+  async function _fetchInvoices() {
+    const wrap = document.getElementById('invoices-table-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading…</div>';
+
     try {
-      const res      = await Auth.fetch('/api/v1/finance/invoices/');
+      const periodParam = _invoicesPeriod ? `&period=${_invoicesPeriod}` : '';
+      const res      = await Auth.fetch(
+        `/api/v1/finance/invoices/?page=${_invoicesPage}&page_size=10${periodParam}`
+      );
       if (!res.ok) throw new Error();
       const data     = await res.json();
-      const invoices = Array.isArray(data) ? data : (data.results || []);
+      const invoices = data.results || [];
+      const count    = data.count   || 0;
+      const totalPages = Math.ceil(count / 10);
+
+      // Pagination controls
+      const pagination = document.getElementById('invoices-pagination');
+      const pageInfo   = document.getElementById('invoices-page-info');
+      const prevBtn    = document.getElementById('invoices-prev-btn');
+      const nextBtn    = document.getElementById('invoices-next-btn');
+
+      if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+      if (pageInfo) {
+        const from = count === 0 ? 0 : (_invoicesPage - 1) * 10 + 1;
+        const to   = Math.min(_invoicesPage * 10, count);
+        pageInfo.textContent = `${from}–${to} of ${count}`;
+      }
+      if (prevBtn) prevBtn.disabled = _invoicesPage <= 1;
+      if (nextBtn) nextBtn.disabled = _invoicesPage >= totalPages;
 
       if (!invoices.length) {
-        container.innerHTML = `<div style="text-align:center;padding:48px;
-          color:var(--text-3);font-size:13px;">No invoices yet.</div>`;
+        wrap.innerHTML = `<div style="text-align:center;padding:48px;
+          color:var(--text-3);font-size:13px;">No invoices for this period.</div>`;
         return;
       }
 
-      container.innerHTML = `
+      wrap.innerHTML = `
         <div style="background:var(--panel);border:1px solid var(--border);
           border-radius:var(--radius);overflow:hidden;">
           <table class="p-table">
@@ -487,17 +652,36 @@ async function loadRecentJobs() {
           </table>
         </div>`;
     } catch {
-      container.innerHTML = `<div class="loading-cell">Could not load invoices.</div>`;
+      wrap.innerHTML = `<div class="loading-cell" style="color:var(--red-text);">
+        Could not load invoices.</div>`;
     }
+  }
+
+  async function setInvoicesPeriod(period) {
+    _invoicesPeriod = period;
+    _invoicesPage   = 1;
+    document.querySelectorAll('#invoices-period-tabs .reports-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    await _fetchInvoices();
+  }
+
+  async function _invoicesPageChange(delta) {
+    _invoicesPage += delta;
+    await _fetchInvoices();
   }
 
  // ── Receipts tab ───────────────────────────────────────────
   let _receiptsPeriod  = 'day';
   let _activeReceiptId = null;
 
-  async function _loadReceiptsContent() {
+ async function _loadReceiptsContent() {
     const container = document.getElementById('receipts-content');
     if (!container) return;
+
+    _receiptsPeriod  = 'day';
+    _receiptsPage    = 1;
+    _activeReceiptId = null;
 
     container.innerHTML = `
       <!-- Period selector -->
@@ -521,11 +705,31 @@ async function loadRecentJobs() {
         border-radius:var(--radius);overflow:hidden;min-height:520px;">
 
         <!-- Left — receipt list -->
-        <div id="receipts-list-panel"
-          style="width:300px;flex-shrink:0;border-right:1px solid var(--border);
-            overflow-y:auto;background:var(--panel);">
-          <div style="padding:20px;text-align:center;color:var(--text-3);">
-            <span class="spin"></span>
+        <div style="width:300px;flex-shrink:0;border-right:1px solid var(--border);
+          display:flex;flex-direction:column;background:var(--panel);">
+          <div id="receipts-list-panel" style="flex:1;overflow-y:auto;">
+            <div style="padding:20px;text-align:center;color:var(--text-3);">
+              <span class="spin"></span>
+            </div>
+          </div>
+          <!-- Pagination -->
+          <div id="receipts-pagination" style="display:none;flex-shrink:0;
+            padding:10px 12px;border-top:1px solid var(--border);
+            background:var(--bg);display:flex;align-items:center;
+            justify-content:space-between;gap:8px;">
+            <button id="receipts-prev-btn" onclick="Dashboard._receiptsPageChange(-1)"
+              style="padding:5px 12px;font-size:12px;font-weight:600;
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                background:var(--panel);color:var(--text-2);cursor:pointer;
+                font-family:'DM Sans',sans-serif;">← Prev</button>
+            <span id="receipts-page-info"
+              style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+            </span>
+            <button id="receipts-next-btn" onclick="Dashboard._receiptsPageChange(1)"
+              style="padding:5px 12px;font-size:12px;font-weight:600;
+                border:1px solid var(--border);border-radius:var(--radius-sm);
+                background:var(--panel);color:var(--text-2);cursor:pointer;
+                font-family:'DM Sans',sans-serif;">Next →</button>
           </div>
         </div>
 
@@ -550,7 +754,7 @@ async function loadRecentJobs() {
     await _fetchReceipts();
   }
 
-  async function _fetchReceipts() {
+ async function _fetchReceipts() {
     const listPanel = document.getElementById('receipts-list-panel');
     if (!listPanel) return;
 
@@ -559,11 +763,30 @@ async function loadRecentJobs() {
 
     try {
       const res      = await Auth.fetch(
-        `/api/v1/finance/receipts/?period=${_receiptsPeriod}&page_size=100`
+        `/api/v1/finance/receipts/?period=${_receiptsPeriod}&page=${_receiptsPage}&page_size=10`
       );
       if (!res.ok) throw new Error();
       const data     = await res.json();
-      const receipts = Array.isArray(data) ? data : (data.results || []);
+      const receipts = data.results || [];
+      const count    = data.count || 0;
+      const totalPages = Math.ceil(count / 10);
+
+      // Update pagination controls
+      const pagination  = document.getElementById('receipts-pagination');
+      const pageInfo    = document.getElementById('receipts-page-info');
+      const prevBtn     = document.getElementById('receipts-prev-btn');
+      const nextBtn     = document.getElementById('receipts-next-btn');
+
+      if (pagination) {
+        pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+      }
+      if (pageInfo) {
+        const from = count === 0 ? 0 : (_receiptsPage - 1) * 10 + 1;
+        const to   = Math.min(_receiptsPage * 10, count);
+        pageInfo.textContent = `${from}–${to} of ${count}`;
+      }
+      if (prevBtn) prevBtn.disabled = _receiptsPage <= 1;
+      if (nextBtn) nextBtn.disabled = _receiptsPage >= totalPages;
 
       if (!receipts.length) {
         listPanel.innerHTML = `
@@ -603,8 +826,6 @@ async function loadRecentJobs() {
               transition:background 0.12s;border-left:3px solid ${isActive ? 'var(--text)' : 'transparent'};"
             onmouseover="this.style.background='var(--bg)'"
             onmouseout="this.style.background='${isActive ? 'var(--bg)' : 'var(--panel)'}'">
-
-            <!-- Row top: receipt number + amount -->
             <div style="display:flex;align-items:center;
               justify-content:space-between;margin-bottom:4px;">
               <span style="font-family:'JetBrains Mono',monospace;font-size:11px;
@@ -616,14 +837,10 @@ async function loadRecentJobs() {
                 ${_fmt(r.amount_paid)}
               </span>
             </div>
-
-            <!-- Row mid: customer -->
             <div style="font-size:12px;color:var(--text-2);font-weight:500;
               margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
               ${_esc(r.customer_name || 'Walk-in')}
             </div>
-
-            <!-- Row bottom: method badge + time -->
             <div style="display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:10px;font-weight:700;padding:2px 7px;
                 border-radius:4px;border:1px solid ${mc.border};
@@ -635,12 +852,11 @@ async function loadRecentJobs() {
                 ${date} · ${time}
               </span>
             </div>
-
           </div>`;
       }).join('');
 
-      // Auto-open first receipt
-      if (receipts.length && !_activeReceiptId) {
+      // Auto-open first receipt on page 1 if none active
+      if (receipts.length && !_activeReceiptId && _receiptsPage === 1) {
         openReceipt(receipts[0].id);
       }
 
@@ -648,6 +864,27 @@ async function loadRecentJobs() {
       listPanel.innerHTML = `<div style="padding:24px;text-align:center;
         color:var(--red-text);font-size:13px;">Could not load receipts.</div>`;
     }
+  }
+
+  let _receiptsPage = 1;
+
+  async function _receiptsPageChange(delta) {
+    _receiptsPage    += delta;
+    _activeReceiptId  = null;
+    // Reset detail panel
+    const detail = document.getElementById('receipts-detail-panel');
+    if (detail) detail.innerHTML = `
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:12px;color:var(--text-3);padding:40px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.5" style="opacity:0.3;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div style="font-size:13px;">Select a receipt to view details</div>
+      </div>`;
+    await _fetchReceipts();
   }
 
   async function openReceipt(receiptId) {
@@ -901,6 +1138,7 @@ async function loadRecentJobs() {
 
   function setReceiptsPeriod(period) {
     _receiptsPeriod  = period;
+    _receiptsPage    = 1;
     _activeReceiptId = null;
     document.querySelectorAll('#receipts-period-tabs .reports-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.period === period);
@@ -1032,9 +1270,9 @@ function switchPerformanceTab(tab) {
             <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
           </div>
         </div>
-        <div class="metrics-section">
-          <div class="metrics-grid" id="metrics-grid">
-            <div class="loading-cell" style="grid-column:1/-1;padding:40px !important;">
+        <div style="width:100%;">
+          <div id="metrics-grid" style="width:100%;">
+            <div class="loading-cell" style="padding:40px;">
               <span class="spin"></span> Loading metrics…
             </div>
           </div>
@@ -1056,31 +1294,18 @@ function switchPerformanceTab(tab) {
   // ── Finance pane ───────────────────────────────────────────
  async function _loadFinancePane() {
     const pane = document.getElementById('pane-finance');
-    if (!pane || pane.dataset.loaded) return;
+    if (!pane) return;
     pane.dataset.loaded = '1';
 
     pane.innerHTML = `
       <div class="section-head">
         <span class="section-title">Day Sheet</span>
       </div>
-      <div class="reports-tabs" id="daysheet-tabs">
-        <button class="reports-tab active" data-tab="today"
-          onclick="Dashboard.switchDaySheetTab('today')">Today's Sheet</button>
-        <button class="reports-tab" data-tab="archive"
-          onclick="Dashboard.switchDaySheetTab('archive')">Archive</button>
-      </div>
       <div id="daysheet-content">
         <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
 
-    await _loadDaySheetTab('today');
-  }
-
-  async function switchDaySheetTab(tab) {
-    document.querySelectorAll('#daysheet-tabs .reports-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    await _loadDaySheetTab(tab);
+    await _renderTodaySheet(document.getElementById('daysheet-content'));
   }
 
   async function _loadDaySheetTab(tab) {
@@ -1102,6 +1327,10 @@ function switchPerformanceTab(tab) {
         <div style="display:flex;align-items:center;justify-content:space-between;
           margin-bottom:16px;">
           <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+              font-weight:700;color:var(--text-3);">
+              ${sheet.sheet_number || ''}
+            </span>
             <span style="font-size:13px;font-weight:600;color:var(--text-2);">
               ${sheet.date}
             </span>
@@ -1128,7 +1357,11 @@ function switchPerformanceTab(tab) {
         </div>
 
         <!-- Revenue cards -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;">
+          <div class="stat-card" style="background:var(--panel);border:2px solid var(--text);">
+            <div class="stat-num">${_fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}</div>
+            <div class="stat-lbl" style="font-weight:700;">Total Today</div>
+          </div>
           <div class="stat-card green">
             <div class="stat-num">${_fmt(sheet.total_cash)}</div>
             <div class="stat-lbl">Cash</div>
@@ -1144,6 +1377,39 @@ function switchPerformanceTab(tab) {
           <div class="stat-card purple">
             <div class="stat-num">${_fmt(sheet.net_cash_in_till)}</div>
             <div class="stat-lbl">Net Cash In Till</div>
+          </div>
+        </div>
+
+        <!-- Registration rate strip -->
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:14px 20px;margin-bottom:10px;
+          display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
+          <div style="padding-right:20px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Registered Jobs</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text);"
+              id="sheet-registered-jobs">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              linked to a customer</div>
+          </div>
+          <div style="padding:0 20px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Walk-in Jobs</div>
+            <div style="font-size:18px;font-weight:700;color:var(--green-text);"
+              id="sheet-walkin-jobs">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              no customer linked</div>
+          </div>
+          <div style="padding-left:20px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Registration Rate</div>
+            <div style="font-size:18px;font-weight:700;"
+              id="sheet-reg-rate">—</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+              of jobs have a customer</div>
           </div>
         </div>
 
@@ -1182,12 +1448,196 @@ function switchPerformanceTab(tab) {
         </div>
 
         ${sheet.notes ? `
-          <div style="padding:12px 16px;background:var(--bg);border:1px solid var(--border);
-            border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">
-            ${_esc(sheet.notes)}
-          </div>` : ''}`;
+        <div style="padding:12px 16px;background:var(--bg);border:1px solid var(--border);
+          border-radius:var(--radius-sm);font-size:13px;color:var(--text-2);">
+          ${_esc(sheet.notes)}
+        </div>` : ''}`;
 
-    } catch {
+    // ── Populate computed fields ──────────────────────────────
+    // Total revenue
+    const totalRevenue = parseFloat(sheet.total_cash||0)
+      + parseFloat(sheet.total_momo||0)
+      + parseFloat(sheet.total_pos||0);
+
+    // Job stats from stats endpoint
+    try {
+      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
+      if (statsRes.ok) {
+        const stats = await statsRes.json();
+        const total     = stats.total || 0;
+        const registered = stats.registered || 0;
+        const walkin     = stats.walkin     || total - registered;
+        const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
+        const rateColor  = rate >= 60 ? 'var(--green-text)'
+          : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
+
+        _set('sheet-registered-jobs', registered);
+        _set('sheet-walkin-jobs',     walkin);
+
+        const rateEl = document.getElementById('sheet-reg-rate');
+        if (rateEl) {
+          rateEl.textContent = `${rate}%`;
+          rateEl.style.color = rateColor;
+        }
+
+        // Outstanding jobs alert
+        const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
+        if (outstanding > 0 && sheet.status === 'OPEN') {
+          const existingAlert = document.getElementById('sheet-outstanding-alert');
+          if (!existingAlert) {
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'sheet-outstanding-alert';
+            alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
+              background:var(--amber-bg);border:1px solid var(--amber-border);
+              border-radius:var(--radius-sm);font-size:13px;
+              color:var(--amber-text);font-weight:600;
+              display:flex;align-items:center;gap:8px;`;
+            alertDiv.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
+              (${stats.pending || 0} pending payment · ${stats.in_progress || 0} in progress)`;
+            container.appendChild(alertDiv);
+          }
+        }
+
+        // Jobs pace indicator
+        if (sheet.status === 'OPEN' && total > 0 && sheet.opened_at) {
+          const hoursOpen = Math.max(
+            (Date.now() - new Date(sheet.opened_at).getTime()) / 3600000, 0.25
+          );
+          const pace = (total / hoursOpen).toFixed(1);
+          const paceDiv = document.getElementById('sheet-pace-strip');
+          if (!paceDiv) {
+            const strip = document.createElement('div');
+            strip.id = 'sheet-pace-strip';
+            strip.style.cssText = `margin-top:10px;padding:10px 16px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:var(--radius-sm);font-size:12px;color:var(--text-3);
+              display:flex;align-items:center;justify-content:space-between;`;
+            strip.innerHTML = `
+              <span>Branch pace today</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:700;
+                color:var(--text);font-size:14px;">${pace} jobs/hr</span>`;
+            container.appendChild(strip);
+          }
+        }
+      }
+    } catch { /* silent */ }
+
+    // ── Consumables snapshot ──────────────────────────────────
+    if (sheet.status === 'OPEN') {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const [invRes, movRes] = await Promise.all([
+          Auth.fetch('/api/v1/inventory/stock/'),
+          Auth.fetch(`/api/v1/inventory/movements/?type=OUT&date=${today}&page_size=500`),
+        ]);
+
+        if (invRes.ok) {
+          const invData  = await invRes.json();
+          const movData  = movRes.ok ? await movRes.json() : { results: [] };
+          const items    = (Array.isArray(invData) ? invData : (invData.results || []))
+            .filter(i => i.category !== 'Machinery' && parseFloat(i.quantity) >= 0);
+          const movements = Array.isArray(movData) ? movData : (movData.results || []);
+
+          // Aggregate consumed today per consumable name
+          const consumedToday = {};
+          movements.forEach(m => {
+            const name = m.consumable_name || m.consumable;
+            if (!name) return;
+            consumedToday[name] = (consumedToday[name] || 0) + Math.abs(parseFloat(m.quantity || 0));
+          });
+
+          if (items.length) {
+            const lowItems = items.filter(i =>
+              parseFloat(i.quantity) <= parseFloat(i.reorder_point || 0)
+            );
+            const invDiv = document.createElement('div');
+            invDiv.style.cssText = 'margin-top:16px;';
+            invDiv.innerHTML = `
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+                display:flex;align-items:center;gap:8px;">
+                Current Stock Levels
+                ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+                  background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+                  ${lowItems.length} low</span>` : ''}
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+                ${items.map(item => {
+                  const qty      = parseFloat(item.quantity);
+                  const rpt      = parseFloat(item.reorder_point || 0);
+                  const isCrit   = qty === 0;
+                  const isLow    = !isCrit && qty <= rpt;
+                  const isOk     = !isCrit && !isLow;
+                  const isPct    = (item.unit_label || '').includes('%');
+                  const consumed = consumedToday[item.name] || 0;
+                  const fmtQty   = n => isPct
+                    ? `${parseFloat(n).toFixed(1)}%`
+                    : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+                  // Status colour
+                  const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+                  // Fill bar width — how full is the stock relative to a healthy level (3× reorder point)
+                  const maxRef  = rpt > 0 ? rpt * 3 : qty || 1;
+                  const fillPct = isPct
+                    ? Math.min(100, qty)
+                    : Math.min(100, (qty / maxRef) * 100);
+
+                  return `
+                    <div style="position:relative;overflow:hidden;
+                      padding:9px 12px 9px 12px;
+                      background:var(--panel);
+                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                      border-radius:var(--radius-sm);
+                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+                      <!-- Status fill bar on right edge -->
+                      <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                        background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                        <div style="position:absolute;bottom:0;left:0;width:100%;
+                          height:${fillPct.toFixed(1)}%;
+                          background:${statusColor};
+                          border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                          transition:height 0.3s ease;"></div>
+                      </div>
+
+                      <!-- Item name -->
+                      <span style="font-size:11px;font-weight:600;
+                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                        flex:1;min-width:0;"
+                        title="${_esc(item.name)}">${_esc(item.name)}</span>
+
+                      <!-- Stats -->
+                      <div style="display:flex;align-items:center;gap:5px;
+                        flex-shrink:0;padding-right:8px;">
+                        ${consumed > 0 ? `
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                            font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                          <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                          font-weight:700;
+                          color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                          ${fmtQty(qty)}
+                        </span>
+                      </div>
+
+                    </div>`;
+                }).join('')}
+              </div>`;
+            container.appendChild(invDiv);
+          }
+        }
+      } catch { /* silent */ }
+    }
+        } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
     }
   }
@@ -1523,7 +1973,7 @@ function switchPerformanceTab(tab) {
     const dateStr = new Date(meta.date).toLocaleDateString('en-GH', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
-    document.getElementById('eod-subtitle').textContent = `${dateStr} · ${meta.branch}`;
+    document.getElementById('eod-subtitle').textContent = `${meta.sheet_number || ''} · ${dateStr} · ${meta.branch}`;
     document.getElementById('eod-ack-branch').textContent = meta.branch;
 
     // Set BM name in acknowledgement
@@ -1736,6 +2186,50 @@ function switchPerformanceTab(tab) {
         </table>`;
     } else {
       creditList.innerHTML = '<div class="eod-empty-note">No credit sales today. ✓</div>';
+    }
+
+    // ── 7. Inventory Consumption ──────────────────────────────
+    const invSection = document.getElementById('eod-inventory-section');
+    const invList    = document.getElementById('eod-inventory-list');
+    if (invSection && invList) {
+      const items = d.inventory_consumption || [];
+      if (items.length) {
+        invSection.style.display = 'block';
+        invList.innerHTML = `
+          <table class="eod-table">
+            <thead>
+              <tr>
+                <th>Consumable</th>
+                <th style="text-align:right;">Consumed</th>
+                <th style="text-align:right;">Closing</th>
+                <th style="text-align:center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(item => {
+                const isToner  = item.unit === '%';
+                const closing  = parseFloat(item.closing);
+                const isLow    = item.is_low;
+                const pctColor = isToner
+                  ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+                  : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+                const badge = isLow
+                  ? `<span style="background:#fee2e2;color:var(--red-text);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">LOW</span>`
+                  : `<span style="background:#dcfce7;color:var(--green-text);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">OK</span>`;
+                return `
+                  <tr>
+                    <td>${_esc(item.consumable)}</td>
+                    <td class="mono" style="text-align:right;">${item.consumed} ${item.unit}</td>
+                    <td class="mono" style="text-align:right;color:${pctColor};font-weight:600;">${item.closing} ${item.unit}</td>
+                    <td style="text-align:center;">${badge}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+      } else {
+        invSection.style.display = 'block';
+        invList.innerHTML = '<div class="eod-empty-note">No inventory movements recorded today.</div>';
+      }
     }
 
     // ── 8. Tomorrow's Float ───────────────────────────────────────
@@ -3620,7 +4114,7 @@ async function _loadReportsTab(tab) {
 
   async function setServicesPeriod(period) {
     _servicesPeriod = period;
-    document.querySelectorAll('#pane-reports .reports-tab[data-period]').forEach(btn => {
+    document.querySelectorAll('.reports-tab[data-period]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.period === period);
     });
     await _fetchServicesReport();
@@ -3840,6 +4334,134 @@ async function _loadReportsTab(tab) {
         }).join('')}`;
 
     } catch { /* silent */ }
+  }
+
+function _renderMonthlyCloseDetail(container, data) {
+    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const snap    = data.summary_snapshot || {};
+    const revenue = snap.revenue || {};
+    const jobs    = snap.jobs    || {};
+    const inv     = snap.inventory || {};
+    const invItems = (inv.items || []).filter(i => i.consumed > 0);
+
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const monthName = monthNames[(data.month||1)-1];
+
+    const statusConfig = {
+      SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
+      FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
+      NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
+      RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
+      FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
+      ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ✓' },
+      LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ✓' },
+      REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
+    };
+    const sc = statusConfig[data.status] || { bg:'var(--bg)', text:'var(--text-3)', label: data.status };
+
+    container.innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:16px;padding:16px 20px;background:var(--panel);
+        border:1px solid var(--border);border-radius:var(--radius);">
+        <div>
+          <div style="font-size:16px;font-weight:700;color:var(--text);">
+            ${monthName} ${data.year}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+            Submitted by ${_esc(data.submitted_by || '—')}
+            ${data.submitted_at ? ' · ' + new Date(data.submitted_at)
+              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+          </div>
+        </div>
+        <span style="padding:4px 14px;border-radius:20px;font-size:11px;
+          font-weight:700;background:${sc.bg};color:${sc.text};">
+          ${sc.label}
+        </span>
+      </div>
+
+      <!-- Revenue strip -->
+      ${revenue.total_collected != null ? `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
+          ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong, var(--green-text))'],
+          ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong, var(--amber-text))'],
+          ['Jobs',            jobs.total || 0,                   'var(--text)'],
+        ].map(([label, val, color]) => `
+          <div style="padding:12px 14px;background:var(--panel);
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              ${label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
+              font-weight:700;color:${color};">${val}</div>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- Inventory consumption -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Inventory Consumed This Month
+        </div>
+        ${invItems.length ? `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+              <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumable</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumed</th>
+              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Closing</th>
+              <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
+                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${invItems.map(item => {
+              const isToner = item.unit === '%';
+              const closing = parseFloat(item.closing);
+              const isLow   = item.is_low;
+              const color   = isToner
+                ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
+                : (isLow ? 'var(--red-text)' : 'var(--text-2)');
+              const badge   = isLow
+                ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
+                : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
+                    border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
+              return `
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
+                  <td style="padding:6px 10px;text-align:right;color:var(--text-3);
+                    font-family:'JetBrains Mono',monospace;">${item.consumed} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:right;font-weight:600;
+                    font-family:'JetBrains Mono',monospace;color:${color};">
+                    ${item.closing} ${item.unit}</td>
+                  <td style="padding:6px 10px;text-align:center;">${badge}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>` : `
+        <div style="font-size:12px;color:var(--text-3);padding:8px 0;">
+          ${data.status === 'OPEN'
+            ? 'Inventory snapshot is generated when the month is submitted.'
+            : 'No consumption recorded for this month.'}
+        </div>`}
+      </div>
+
+      <!-- BM Notes -->
+      ${data.bm_notes ? `
+      <div style="padding:12px 16px;background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius-sm);">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+          Branch Manager Notes</div>
+        <div style="font-size:13px;color:var(--text-2);">${_esc(data.bm_notes)}</div>
+      </div>` : ''}`;
   }
 
   async function _submitMonthlyClose(month, year) {
@@ -4062,6 +4684,104 @@ async function _renderYearlySummary(container) {
     }
   }
 
+  async function _loadDailySheetInventory(sheetId, sheetDate) {
+    const container = document.getElementById(`daily-inv-${sheetId}`);
+    if (!container) return;
+
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/eod-summary/`);
+      if (!res.ok) throw new Error();
+      const data  = await res.json();
+      const items = data.inventory_consumption || [];
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Inventory Consumed</div>
+          <div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+            No inventory movements recorded.</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+          Inventory Consumed</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+          ${items.map(item => {
+            const closing  = parseFloat(item.closing);
+            const consumed = parseFloat(item.consumed || 0);
+            const isPct    = item.unit === '%';
+            const isCrit   = closing === 0;
+            const isLow    = !isCrit && item.is_low;
+            const isOk     = !isCrit && !isLow;
+
+            const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+            const fmtQty = n => isPct
+              ? `${parseFloat(n).toFixed(1)}%`
+              : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+            // Fill bar — toner uses % directly, others use closing vs closing+consumed as proxy
+            const total   = closing + consumed;
+            const fillPct = total > 0
+              ? Math.min(100, (closing / total) * 100)
+              : isPct ? Math.min(100, closing) : 0;
+
+            return `
+              <div style="position:relative;overflow:hidden;
+                padding:9px 12px;
+                background:var(--panel);
+                border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                border-radius:var(--radius-sm);
+                display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+                <!-- Status fill bar on right edge -->
+                <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                  background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                  <div style="position:absolute;bottom:0;left:0;width:100%;
+                    height:${fillPct.toFixed(1)}%;
+                    background:${statusColor};
+                    border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                    transition:height 0.3s ease;"></div>
+                </div>
+
+                <!-- Item name -->
+                <span style="font-size:11px;font-weight:600;
+                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                  flex:1;min-width:0;"
+                  title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
+
+                <!-- Stats -->
+                <div style="display:flex;align-items:center;gap:5px;
+                  flex-shrink:0;padding-right:8px;">
+                  ${consumed > 0 ? `
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                      font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                    <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                    font-weight:700;
+                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                    ${fmtQty(closing)}
+                  </span>
+                </div>
+
+              </div>`;
+          }).join('')}
+        </div>`;
+    } catch {
+      container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+          Inventory Consumed</div>
+        <div style="font-size:12px;color:var(--red-text);">
+          Could not load inventory data.</div>`;
+    }
+  }
+
+
 async function _renderDailySheets(container) {
     if (!container) return;
 
@@ -4150,7 +4870,7 @@ async function _renderDailySheets(container) {
                 <!-- Stats -->
                 <div>
                   <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
-                    ${dayName} · ${dateStr}
+                    ${s.sheet_number ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--text-3);margin-right:6px;">${s.sheet_number}</span>` : ''}${dayName} · ${dateStr}
                   </div>
                   <div style="display:flex;align-items:center;gap:16px;">
                     <span style="font-size:12px;color:var(--text-3);">
@@ -4228,6 +4948,16 @@ async function _renderDailySheets(container) {
                     </div>`).join('')}
                 </div>
 
+                <!-- Inventory consumption -->
+                <div style="margin-bottom:14px;" id="daily-inv-${s.id}">
+                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                    Inventory Consumed</div>
+                  <div class="loading-cell" style="padding:12px;">
+                    <span class="spin"></span>
+                  </div>
+                </div>
+
                 <!-- Actions -->
                 <div style="display:flex;justify-content:flex-end;gap:8px;">
                   ${s.status !== 'OPEN' ? `
@@ -4282,6 +5012,7 @@ async function _renderDailySheets(container) {
       detail.style.display    = 'block';
       chevron.style.transform = 'rotate(180deg)';
       _openDailySheet         = sheetId;
+      _loadDailySheetInventory(sheetId);
     }
   }
 
@@ -4526,8 +5257,8 @@ async function _renderWeeklyFiling(container) {
         <div style="margin-bottom:14px;">
           <div style="font-size:10px;font-weight:700;color:var(--text-3);
             text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-            Inventory Snapshot</div>
-          ${_renderInventorySnapshot(report.inventory_snapshot)}
+            Inventory Consumed This Week</div>
+          ${_renderWeeklyInventory(report.inventory_snapshot)}
         </div>
 
       <!-- BM Notes -->
@@ -4844,6 +5575,205 @@ function _renderInventoryCards(items, mode = 'snapshot') {
 
         </div>`;
     }).join('');
+  }
+function _renderWeeklyReportDetail(container, report) {
+    const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const total    = parseFloat(report.total_cash||0) + parseFloat(report.total_momo||0) + parseFloat(report.total_pos||0);
+    const dateFrom = new Date(report.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const dateTo   = new Date(report.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    const isLocked = report.status === 'LOCKED';
+    const isDraft  = report.status === 'DRAFT';
+
+    const statusConfig = {
+      DRAFT    : { bg: 'var(--bg)',        text: 'var(--text-3)',    label: 'Draft' },
+      SUBMITTED: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Submitted' },
+      LOCKED   : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: '✓ Locked' },
+    };
+    const sc = statusConfig[report.status] || statusConfig.DRAFT;
+
+    container.innerHTML = `
+      <!-- Header strip -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);margin-bottom:16px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text);">
+            Week ${report.week_number}, ${report.year}
+            <span style="font-size:12px;font-weight:400;color:var(--text-3);margin-left:8px;">
+              ${dateFrom} – ${dateTo}
+            </span>
+          </div>
+          ${report.submitted_at ? `
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+            Submitted ${new Date(report.submitted_at)
+              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
+          </div>` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+            font-weight:700;background:${sc.bg};color:${sc.text};">
+            ${sc.label}
+          </span>
+          ${isLocked ? `
+          <button onclick="Dashboard.weeklyDownloadPDF(${report.id})"
+            style="display:inline-flex;align-items:center;gap:5px;
+              padding:6px 14px;background:var(--text);color:#fff;border:none;
+              border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+              cursor:pointer;font-family:'DM Sans',sans-serif;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            PDF
+          </button>` : ''}
+        </div>
+      </div>
+
+      <!-- Revenue cards -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Cash',    fmt(report.total_cash),  'var(--cash-bg,var(--bg))',    'var(--cash-strong,var(--text))'],
+          ['MoMo',    fmt(report.total_momo),  'var(--momo-bg,var(--bg))',    'var(--momo-strong,var(--text))'],
+          ['POS',     fmt(report.total_pos),   'var(--pos-bg,var(--bg))',     'var(--pos-strong,var(--text))'],
+          ['Total',   fmt(total),              'var(--panel)',                'var(--text)'],
+        ].map(([label, val, bg, color]) => `
+          <div style="padding:12px 14px;background:${bg};
+            border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              ${label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
+              font-weight:700;color:${color};">${val}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Jobs summary -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+        ${[
+          ['Jobs Created',  report.total_jobs_created  || 0, 'var(--text)'],
+          ['Completed',     report.total_jobs_complete  || 0, 'var(--green-text)'],
+          ['Cancelled',     report.total_jobs_cancelled || 0, 'var(--red-text)'],
+          ['Carry Forward', report.carry_forward_count  || 0, 'var(--amber-text)'],
+        ].map(([label, val, color]) => `
+          <div style="padding:12px 14px;background:var(--panel);
+            border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:${color};">${val}</div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:3px;">${label}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Inventory consumption -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Inventory Consumed This Week
+        </div>
+        ${_renderWeeklyInventory(report.inventory_snapshot)}
+      </div>
+
+      <!-- BM Notes + submit -->
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:16px 20px;">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+          Branch Manager Notes
+        </div>
+        ${isDraft ? `
+        <textarea id="weekly-notes" rows="3"
+          style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
+            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+            font-size:13px;resize:vertical;box-sizing:border-box;
+            font-family:'DM Sans',sans-serif;outline:none;margin-bottom:12px;"
+          placeholder="Add notes before submitting…">${_esc(report.bm_notes || '')}</textarea>
+        <button id="weekly-submit-btn"
+          onclick="Dashboard.weeklySubmit(${report.id})"
+          style="padding:10px 24px;background:var(--text);color:#fff;border:none;
+            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+            cursor:pointer;font-family:'DM Sans',sans-serif;">
+          Submit & Lock Filing
+        </button>` : `
+        <div style="font-size:13px;color:var(--text-2);">
+          ${_esc(report.bm_notes || '—')}
+        </div>`}
+      </div>`;
+  }
+
+  function _renderWeeklyInventory(snapshot) {
+    if (!snapshot || !snapshot.items || !snapshot.items.length) {
+      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+        No inventory data for this week.</div>`;
+    }
+
+    const items = snapshot.items.filter(i => i.consumed > 0);
+    if (!items.length) {
+      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
+        No consumption recorded this week.</div>`;
+    }
+
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+        ${items.map(item => {
+          const closing  = parseFloat(item.closing);
+          const consumed = parseFloat(item.consumed || 0);
+          const isPct    = item.unit === '%';
+          const isCrit   = closing === 0;
+          const isLow    = !isCrit && item.is_low;
+
+          const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+
+          const fmtQty = n => isPct
+            ? `${parseFloat(n).toFixed(1)}%`
+            : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+
+          const total   = closing + consumed;
+          const fillPct = total > 0
+            ? Math.min(100, (closing / total) * 100)
+            : isPct ? Math.min(100, closing) : 0;
+
+          return `
+            <div style="position:relative;overflow:hidden;
+              padding:9px 12px;
+              background:var(--panel);
+              border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+              border-radius:var(--radius-sm);
+              display:flex;align-items:center;justify-content:space-between;gap:8px;">
+
+              <!-- Status fill bar on right edge -->
+              <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                <div style="position:absolute;bottom:0;left:0;width:100%;
+                  height:${fillPct.toFixed(1)}%;
+                  background:${statusColor};
+                  border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                  transition:height 0.3s ease;"></div>
+              </div>
+
+              <!-- Item name -->
+              <span style="font-size:11px;font-weight:600;
+                color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                flex:1;min-width:0;"
+                title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
+
+              <!-- Stats -->
+              <div style="display:flex;align-items:center;gap:5px;
+                flex-shrink:0;padding-right:8px;">
+                ${consumed > 0 ? `
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                    font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                  <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                  font-weight:700;
+                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                  ${fmtQty(closing)}
+                </span>
+              </div>
+
+            </div>`;
+        }).join('')}
+      </div>`;
   }
 
   function _toggleCurrentWeek() {
@@ -6574,7 +7504,7 @@ async function openCustomerDetail(customerId) {
       const creditData = creditRes.ok ? await creditRes.json() : { results: [] };
 
       // Filter jobs that are actually linked to this customer
-      const jobs   = (jobsData.results || []).filter(j => j.customer === customerId);
+      const jobs   = (jobsData.results || []).filter(j => j.customer == customerId);
 
       // Filter credit account for this customer
       const credit = (creditData.results || []).find(c => c.customer === customerId) || null;
@@ -7183,6 +8113,61 @@ ${_esc(c.notes || '')}</textarea>
             </select>
           </div>` : ''}
 
+          <!-- Title + Gender row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Title <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-title"
+                onchange="Dashboard._editTitleChange()"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">No title</option>
+                <option value="MR"    ${c.title==='MR'    ?'selected':''}>Mr</option>
+                <option value="MRS"   ${c.title==='MRS'   ?'selected':''}>Mrs</option>
+                <option value="MISS"  ${c.title==='MISS'  ?'selected':''}>Miss</option>
+                <option value="MS"    ${c.title==='MS'    ?'selected':''}>Ms</option>
+                <option value="MADAM" ${c.title==='MADAM' ?'selected':''}>Madam</option>
+                <option value="DR"    ${c.title==='DR'    ?'selected':''}>Dr</option>
+                <option value="PROF"  ${c.title==='PROF'  ?'selected':''}>Prof</option>
+                <option value="REV"   ${c.title==='REV'   ?'selected':''}>Rev</option>
+                <option value="ESQ"   ${c.title==='ESQ'   ?'selected':''}>Esq</option>
+                <option value="OTHER" ${c.title==='OTHER' ?'selected':''}>Other</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Gender <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-gender"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">Not specified</option>
+                <option value="MALE"       ${c.gender==='MALE'       ?'selected':''}>Male</option>
+                <option value="FEMALE"     ${c.gender==='FEMALE'     ?'selected':''}>Female</option>
+                <option value="PREFER_NOT" ${c.gender==='PREFER_NOT' ?'selected':''}>Prefer not to say</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Other title — shows only when OTHER selected -->
+          <div id="edit-title-other-wrap"
+            style="display:${c.title==='OTHER' ? 'block' : 'none'};">
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;
+              margin-bottom:7px;">Custom Title *</label>
+            <input type="text" id="edit-title-other"
+              value="${_esc(c.title_other || '')}"
+              placeholder="e.g. Chief, Pastor…"
+              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
+
           <!-- Name row -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
             <div>
@@ -7213,20 +8198,63 @@ ${_esc(c.notes || '')}</textarea>
             </div>
           </div>
 
-          <!-- Phone -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">Phone Number *</label>
-            <input type="tel" id="edit-phone"
-              value="${_esc(c.phone || '')}"
-              onblur="Dashboard._editPhoneNormalise(this)"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-            <div id="edit-phone-feedback"
-              style="font-size:11px;margin-top:5px;"></div>
+          <!-- Phone row: primary + secondary -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Phone Number *</label>
+              <input type="tel" id="edit-phone"
+                value="${_esc(c.phone || '')}"
+                onblur="Dashboard._editPhoneNormalise(this)"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+              <div id="edit-phone-feedback" style="font-size:11px;margin-top:5px;"></div>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Secondary Phone <span style="font-weight:400;">(optional)</span></label>
+              <input type="tel" id="edit-secondary-phone"
+                value="${_esc(c.secondary_phone || '')}"
+                placeholder="e.g. 0201234567"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
+          </div>
+
+          <!-- Preferred contact + Email row -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Preferred Contact <span style="font-weight:400;">(optional)</span></label>
+              <select id="edit-preferred-contact"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+                <option value="">Not specified</option>
+                <option value="WHATSAPP" ${c.preferred_contact==='WHATSAPP'?'selected':''}>WhatsApp</option>
+                <option value="CALL"     ${c.preferred_contact==='CALL'    ?'selected':''}>Call</option>
+                <option value="SMS"      ${c.preferred_contact==='SMS'     ?'selected':''}>SMS</option>
+                <option value="EMAIL"    ${c.preferred_contact==='EMAIL'   ?'selected':''}>Email</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;display:block;
+                margin-bottom:7px;">Email <span style="font-weight:400;">(optional)</span></label>
+              <input type="email" id="edit-email"
+                value="${_esc(c.email || '')}"
+                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
+                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                  box-sizing:border-box;">
+            </div>
           </div>
 
           <!-- Email -->
@@ -7307,6 +8335,12 @@ ${_esc(c.notes || '')}</textarea>
       </div>`;
   }
 
+  function _editTitleChange() {
+    const val  = document.getElementById('edit-title')?.value;
+    const wrap = document.getElementById('edit-title-other-wrap');
+    if (wrap) wrap.style.display = val === 'OTHER' ? 'block' : 'none';
+  }
+
   function _editPhoneNormalise(input) {
     const norm = _normalisePhone(input.value);
     input.value = norm;
@@ -7353,6 +8387,11 @@ ${_esc(c.notes || '')}</textarea>
       payload.company_name = company;
     if (subtype !== undefined && document.getElementById('edit-subtype'))
       payload.institution_subtype = subtype;
+    payload.title              = document.getElementById('edit-title')?.value || '';
+    payload.title_other        = document.getElementById('edit-title-other')?.value.trim() || '';
+    payload.gender             = document.getElementById('edit-gender')?.value || '';
+    payload.secondary_phone    = _normalisePhone(document.getElementById('edit-secondary-phone')?.value.trim() || '');
+    payload.preferred_contact  = document.getElementById('edit-preferred-contact')?.value || '';
 
     try {
       const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit/`, {
@@ -7880,6 +8919,7 @@ return {
     printReceipt,
     openReceipt,
     setReceiptsPeriod,
+    _receiptsPageChange,
     printReceiptDetail,
     sendReceiptWhatsApp,
     loadInboxTab,
@@ -7897,7 +8937,6 @@ return {
     sendReply,
     _historyDrill,
     _historyNav,
-    switchDaySheetTab,
     initiateSheetDownload,
     closePinModal,
     _onPinInput,
@@ -7931,6 +8970,8 @@ return {
     _recvShowDropdown,
     _recvSelectConsumable,
     downloadInvoicePDF,
+    setInvoicesPeriod,
+    _invoicesPageChange,
     openCreateInvoice,
     openLateJobModal,
     closeLateJobModal,
@@ -7941,6 +8982,7 @@ return {
     _showClosingModal,
     switchPerformanceTab,
     _toggleDailySheet,
+    _loadDailySheetInventory,
     _toggleCurrentWeek,
     _toggleHistoryWeek,
     switchCustomersTab,
@@ -7956,6 +8998,11 @@ return {
     _toggleEditHistory,
     _loadEditHistory,
     _nominateCredit,
+    _editTitleChange,
+    _editPhoneNormalise,
+    _renderWeeklyReportDetail,
+    _renderWeeklyInventory,
+    _renderMonthlyCloseDetail,
   };
 
 })();

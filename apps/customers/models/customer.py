@@ -47,11 +47,106 @@ class CustomerProfile(AuditModel):
         (VIP,       'VIP'),
     ]
 
+    # ── Title choices ─────────────────────────────────────────
+    MR          = 'MR'
+    MRS         = 'MRS'
+    MISS        = 'MISS'
+    MS          = 'MS'
+    MADAM       = 'MADAM'
+    DR          = 'DR'
+    PROF        = 'PROF'
+    REV         = 'REV'
+    ESQ         = 'ESQ'
+    OTHER_TITLE = 'OTHER'
+
+    TITLE_CHOICES = [
+        (MR,          'Mr'),
+        (MRS,         'Mrs'),
+        (MISS,        'Miss'),
+        (MS,          'Ms'),
+        (MADAM,       'Madam'),
+        (DR,          'Dr'),
+        (PROF,        'Prof'),
+        (REV,         'Rev'),
+        (ESQ,         'Esq'),
+        (OTHER_TITLE, 'Other'),
+    ]
+
+    # ── Gender choices ────────────────────────────────────────
+    MALE       = 'MALE'
+    FEMALE     = 'FEMALE'
+    PREFER_NOT = 'PREFER_NOT'
+
+    GENDER_CHOICES = [
+        (MALE,       'Male'),
+        (FEMALE,     'Female'),
+        (PREFER_NOT, 'Prefer not to say'),
+    ]
+
+    # ── Preferred contact choices ─────────────────────────────
+    CONTACT_WHATSAPP = 'WHATSAPP'
+    CONTACT_CALL     = 'CALL'
+    CONTACT_SMS      = 'SMS'
+    CONTACT_EMAIL    = 'EMAIL'
+
+    PREFERRED_CONTACT_CHOICES = [
+        (CONTACT_WHATSAPP, 'WhatsApp'),
+        (CONTACT_CALL,     'Call'),
+        (CONTACT_SMS,      'SMS'),
+        (CONTACT_EMAIL,    'Email'),
+    ]
+
     # ── Core identity ─────────────────────────────────────────
+    title = models.CharField(
+        max_length=10,
+        choices=TITLE_CHOICES,
+        blank=True,
+        help_text='Honorific title e.g. Mr, Dr, Prof',
+    )
+    title_other = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='Custom title when title=OTHER',
+    )
     first_name  = models.CharField(max_length=100, blank=True)
     last_name   = models.CharField(max_length=100, blank=True)
-    phone       = models.CharField(max_length=20, unique=True)
-    email       = models.EmailField(blank=True)
+    gender      = models.CharField(
+        max_length=10,
+        choices=GENDER_CHOICES,
+        blank=True,
+    )
+    date_of_birth = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Optional — used for birthday messages',
+    )
+    phone = models.CharField(max_length=20, unique=True)
+    secondary_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Alternative number — searchable but not used for payments or automated messages',
+    )
+    email = models.EmailField(blank=True)
+    preferred_contact = models.CharField(
+        max_length=10,
+        choices=PREFERRED_CONTACT_CHOICES,
+        blank=True,
+        help_text='How this customer prefers to be contacted',
+    )
+
+    # ── Affiliation ───────────────────────────────────────────
+    affiliation = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='affiliated_individuals',
+        help_text='Institution or business this individual is affiliated with',
+    )
+    affiliation_active = models.BooleanField(
+        default=True,
+        help_text='Set to False if individual has left the affiliated organisation',
+    )
 
     # ── Organisation details ──────────────────────────────────
     company_name = models.CharField(
@@ -78,7 +173,13 @@ class CustomerProfile(AuditModel):
     )
     
     # ── Engagement ────────────────────────────────────────────
-    visit_count = models.PositiveIntegerField(default=1)
+    visit_count = models.PositiveIntegerField(default=0)
+    total_spend = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text='Lifetime spend across all completed jobs. Auto-updated on job completion.',
+    )
     tier        = models.CharField(
         max_length=20,
         choices=TIER_CHOICES,
@@ -127,8 +228,23 @@ class CustomerProfile(AuditModel):
         return f"{name} ({self.phone})" if name else self.phone
 
     @property
+    def title_display(self) -> str:
+        """Returns the display label for the title."""
+        if not self.title:
+            return ''
+        if self.title == self.OTHER_TITLE:
+            return self.title_other or ''
+        return dict(self.TITLE_CHOICES).get(self.title, '')
+
+    @property
     def full_name(self) -> str:
         return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def titled_name(self) -> str:
+        """Title + last name for formal addressing e.g. receipts, messages."""
+        parts = [self.title_display, self.last_name]
+        return ' '.join(p for p in parts if p).strip() or self.full_name
 
     @property
     def display_name(self) -> str:
@@ -177,7 +293,7 @@ class CustomerEditLog(models.Model):
 @receiver(post_save, sender='jobs.Job')
 def update_customer_confidence(sender, instance, **kwargs):
     """
-    Recomputes the customer's confidence score whenever a job is saved.
+    Updates visit_count, total_spend and confidence score when a job completes.
     Only fires when the job is COMPLETE and linked to a customer.
     If the score crosses the recommendation threshold, notifies the BM.
     """
@@ -189,8 +305,19 @@ def update_customer_confidence(sender, instance, **kwargs):
     try:
         from apps.customers.credit_engine import CreditEngine
         from apps.notifications.services import notify
+        from django.db.models import F
+        from decimal import Decimal
 
         customer = instance.customer
+
+        # Increment visit count and total spend atomically
+        amount = Decimal(str(instance.amount_paid or 0))
+        CustomerProfile.objects.filter(pk=customer.pk).update(
+            visit_count = F('visit_count') + 1,
+            total_spend = F('total_spend') + amount,
+        )
+        customer.refresh_from_db()
+
         new_score = CreditEngine.compute_confidence_score(customer)
 
         # Notify BM if customer just crossed the recommendation threshold

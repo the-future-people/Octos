@@ -1,151 +1,310 @@
-from django.db import models
+﻿from django.db import models
+from django.utils.crypto import get_random_string
 from apps.core.models import AuditModel
 
 
-class Applicant(AuditModel):
-    """
-    A person who has applied for a position.
-    Can apply via public website or branch manager recommendation.
-    """
+class JobPosition(AuditModel):
+    OPEN    = 'OPEN'
+    PAUSED  = 'PAUSED'
+    CLOSED  = 'CLOSED'
+    FILLED  = 'FILLED'
 
-    # Application Channel
-    WEBSITE = 'WEBSITE'
+    STATUS_CHOICES = [
+        (OPEN,   'Open'),
+        (PAUSED, 'Paused'),
+        (CLOSED, 'Closed'),
+        (FILLED, 'Filled'),
+    ]
+
+    PUBLIC         = 'PUBLIC'
     RECOMMENDATION = 'RECOMMENDATION'
-    INTERNAL = 'INTERNAL'
+    APPOINTMENT    = 'APPOINTMENT'
 
-    CHANNEL_CHOICES = [
-        (WEBSITE, 'Public Website'),
-        (RECOMMENDATION, 'Branch Manager Recommendation'),
-        (INTERNAL, 'Internal Transfer'),
+    TRACK_CHOICES = [
+        (PUBLIC,         'Public Application'),
+        (RECOMMENDATION, 'BM Recommendation'),
+        (APPOINTMENT,    'CEO Direct Appointment'),
     ]
 
-    # Pipeline Stage
-    APPLICATION_REVIEW = 'APPLICATION_REVIEW'
-    SCREENING = 'SCREENING'
-    INTERVIEW = 'INTERVIEW'
-    FINAL_REVIEW = 'FINAL_REVIEW'
-    DECISION = 'DECISION'
-    ONBOARDING = 'ONBOARDING'
-    HIRED = 'HIRED'
-    REJECTED = 'REJECTED'
-    WITHDRAWN = 'WITHDRAWN'
-    OFFER_DECLINED = 'OFFER_DECLINED'
-
-    STAGE_CHOICES = [
-        (APPLICATION_REVIEW, 'Application Review'),
-        (SCREENING, 'Screening'),
-        (INTERVIEW, 'Interview'),
-        (FINAL_REVIEW, 'Final Review'),
-        (DECISION, 'Decision'),
-        (ONBOARDING, 'Onboarding'),
-        (HIRED, 'Hired'),
-        (REJECTED, 'Rejected'),
-        (WITHDRAWN, 'Withdrawn'),
-        (OFFER_DECLINED, 'Offer Declined'),
-    ]
-
-    # Personal details
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone = models.CharField(max_length=20)
-    address = models.TextField(blank=True)
-    date_of_birth = models.DateField(null=True, blank=True)
-    gender = models.CharField(max_length=20, blank=True)
-
-    # Application details
-    position = models.ForeignKey(
-        'hr.JobPosition',
+    title               = models.CharField(max_length=150)
+    branch              = models.ForeignKey(
+        'organization.Branch',
         on_delete=models.PROTECT,
-        related_name='applicants'
+        related_name='vacancies',
+        null=True,
+        blank=True,
     )
-    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default=WEBSITE)
-    stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default=APPLICATION_REVIEW)
-    cv = models.FileField(upload_to='recruitment/cvs/%Y/%m/', null=True, blank=True)
-    cover_letter = models.FileField(upload_to='recruitment/cover_letters/%Y/%m/', null=True, blank=True)
-
-    # Recommendation
-    recommended_by = models.ForeignKey(
+    role                = models.ForeignKey(
+        'accounts.Role',
+        on_delete=models.PROTECT,
+        related_name='vacancies',
+    )
+    track               = models.CharField(max_length=20, choices=TRACK_CHOICES, default=PUBLIC)
+    description         = models.TextField(blank=True)
+    requirements        = models.TextField(blank=True)
+    positions_available = models.PositiveIntegerField(default=1)
+    employment_type     = models.CharField(
+        max_length=20,
+        choices=[
+            ('FULL_TIME', 'Full Time'),
+            ('PART_TIME', 'Part Time'),
+            ('CONTRACT',  'Contract'),
+        ],
+        default='FULL_TIME',
+    )
+    base_salary  = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default=OPEN)
+    opens_at     = models.DateField()
+    closes_at    = models.DateField()
+    created_by   = models.ForeignKey(
         'accounts.CustomUser',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='recommended_applicants'
-    )
-    recommendation_note = models.TextField(blank=True)
-    is_priority = models.BooleanField(default=False)
-
-    # Internal transfer
-    existing_employee = models.ForeignKey(
-        'hr.Employee',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='transfer_applications'
-    )
-
-    # Offer
-    offer_sent_at = models.DateTimeField(null=True, blank=True)
-    offer_expires_at = models.DateTimeField(null=True, blank=True)
-    offer_accepted = models.BooleanField(null=True, blank=True)
-    offer_responded_at = models.DateTimeField(null=True, blank=True)
-
-    # Rejection
-    rejection_reason = models.TextField(blank=True)
-    rejected_at = models.DateTimeField(null=True, blank=True)
-
-    # Assigned HR
-    assigned_hr = models.ForeignKey(
-        'accounts.CustomUser',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='assigned_applicants'
+        on_delete=models.PROTECT,
+        related_name='created_vacancies',
     )
 
     class Meta:
-        ordering = ['-is_priority', '-created_at']
-        unique_together = [['email', 'position']]
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.full_name} → {self.position.title} ({self.stage})"
+        branch = self.branch.name if self.branch else 'General'
+        return f"{self.title} - {branch} ({self.status})"
+
+    @property
+    def is_open(self):
+        from django.utils import timezone
+        today = timezone.now().date()
+        return self.status == self.OPEN and self.opens_at <= today <= self.closes_at
+
+
+class Applicant(AuditModel):
+    WEBSITE        = 'WEBSITE'
+    RECOMMENDATION = 'RECOMMENDATION'
+    APPOINTMENT    = 'APPOINTMENT'
+    INTERNAL       = 'INTERNAL'
+
+    TRACK_CHOICES = [
+        (WEBSITE,        'Public Website'),
+        (RECOMMENDATION, 'BM Recommendation'),
+        (APPOINTMENT,    'CEO Direct Appointment'),
+        (INTERNAL,       'Internal Transfer'),
+    ]
+
+    WHATSAPP = 'WHATSAPP'
+    SMS      = 'SMS'
+    EMAIL    = 'EMAIL'
+
+    CHANNEL_CHOICES = [
+        (WHATSAPP, 'WhatsApp'),
+        (SMS,      'SMS'),
+        (EMAIL,    'Email'),
+    ]
+
+    RECEIVED            = 'RECEIVED'
+    SCREENING           = 'SCREENING'
+    INTERVIEW_SCHEDULED = 'INTERVIEW_SCHEDULED'
+    INTERVIEW_DONE      = 'INTERVIEW_DONE'
+    FINAL_REVIEW        = 'FINAL_REVIEW'
+    HIRED               = 'HIRED'
+    REJECTED            = 'REJECTED'
+    WITHDRAWN           = 'WITHDRAWN'
+    APPOINTED           = 'APPOINTED'
+    AWAITING_ACCEPTANCE   = 'AWAITING_ACCEPTANCE'
+    ACCEPTED              = 'ACCEPTED'
+    DECLINED              = 'DECLINED'
+    ONBOARDING            = 'ONBOARDING'
+    INFORMATION_SUBMITTED = 'INFORMATION_SUBMITTED'
+    INFORMATION_VERIFIED  = 'INFORMATION_VERIFIED'
+    OFFER_ISSUED          = 'OFFER_ISSUED'
+    ACTIVE                = 'ACTIVE'
+
+    STATUS_CHOICES = [
+        (RECEIVED,            'Received'),
+        (SCREENING,           'Screening'),
+        (INTERVIEW_SCHEDULED, 'Interview Scheduled'),
+        (INTERVIEW_DONE,      'Interview Done'),
+        (FINAL_REVIEW,        'Final Review'),
+        (HIRED,               'Hired'),
+        (REJECTED,            'Rejected'),
+        (WITHDRAWN,           'Withdrawn'),
+        (APPOINTED,           'Appointed'),
+        (AWAITING_ACCEPTANCE,   'Awaiting Acceptance'),
+        (ACCEPTED,              'Accepted'),
+        (DECLINED,              'Declined'),
+        (ONBOARDING,            'Onboarding'),
+        (INFORMATION_SUBMITTED, 'Information Submitted'),
+        (INFORMATION_VERIFIED,  'Information Verified'),
+        (OFFER_ISSUED,          'Offer Issued'),
+        (ACTIVE,                'Active'),
+    ]
+
+    first_name    = models.CharField(max_length=100)
+    last_name     = models.CharField(max_length=100)
+    email         = models.EmailField()
+    phone         = models.CharField(max_length=20)
+    address       = models.TextField(blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    gender        = models.CharField(max_length=20, blank=True)
+
+    preferred_channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default=WHATSAPP)
+
+    vacancy           = models.ForeignKey(
+        'hr.JobPosition',
+        on_delete=models.PROTECT,
+        related_name='applicants',
+        null=True,
+        blank=True,
+    )
+    branch_preference = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='preferred_applicants',
+    )
+    branch_assigned   = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='assigned_applicants',
+    )
+    role_interest     = models.ForeignKey(
+        'accounts.Role',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='interested_applicants',
+    )
+
+    track  = models.CharField(max_length=20, choices=TRACK_CHOICES, default=WEBSITE)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=RECEIVED)
+
+    cv           = models.FileField(upload_to='recruitment/cvs/%Y/%m/', null=True, blank=True)
+    cover_letter = models.FileField(upload_to='recruitment/cover_letters/%Y/%m/', null=True, blank=True)
+
+    recommended_by      = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='recommended_applicants',
+    )
+    recommendation_note = models.TextField(blank=True)
+    is_priority         = models.BooleanField(default=False)
+
+    appointed_by     = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='appointed_applicants',
+    )
+    appointment_note = models.TextField(blank=True)
+
+    existing_employee = models.ForeignKey(
+        'hr.Employee',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transfer_applications',
+    )
+
+    assigned_hr = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='assigned_applicants',
+    )
+
+    rejection_reason = models.TextField(blank=True)
+    rejected_at      = models.DateTimeField(null=True, blank=True)
+
+    onboarding_token            = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    onboarding_token_expires_at = models.DateTimeField(null=True, blank=True)
+
+    offer_sent_at      = models.DateTimeField(null=True, blank=True)
+    offer_accepted     = models.BooleanField(null=True, blank=True)
+    offer_responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-is_priority', '-created_at']
+
+    def __str__(self):
+        position = self.vacancy.title if self.vacancy else (self.role_interest.name if self.role_interest else 'General')
+        return f"{self.full_name} -> {position} ({self.status})"
 
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
 
+    def generate_onboarding_token(self):
+        from django.utils import timezone
+        import datetime
+        self.onboarding_token = get_random_string(64)
+        self.onboarding_token_expires_at = timezone.now() + datetime.timedelta(days=7)
+        self.save(update_fields=['onboarding_token', 'onboarding_token_expires_at'])
+        return self.onboarding_token
 
-class StageScore(AuditModel):
-    """
-    Score recorded by HR for an applicant at a specific stage.
-    Each stage has 5 questions, each scored 1-5.
-    Total = 25 max, normalized to 10 for display.
-    Pass threshold = 6.0/10
-    """
+    @property
+    def onboarding_token_valid(self):
+        from django.utils import timezone
+        return (
+            self.onboarding_token is not None
+            and self.onboarding_token_expires_at is not None
+            and self.onboarding_token_expires_at > timezone.now()
+        )
 
-    SCREENING = 'SCREENING'
-    INTERVIEW = 'INTERVIEW'
+
+class StageQuestionnaire(AuditModel):
+    SCREENING    = 'SCREENING'
+    INTERVIEW    = 'INTERVIEW'
     FINAL_REVIEW = 'FINAL_REVIEW'
 
     STAGE_CHOICES = [
-        (SCREENING, 'Screening'),
-        (INTERVIEW, 'Interview'),
+        (SCREENING,    'Screening'),
+        (INTERVIEW,    'Interview'),
         (FINAL_REVIEW, 'Final Review'),
     ]
 
-    applicant = models.ForeignKey(
+    role            = models.ForeignKey(
+        'accounts.Role',
+        on_delete=models.PROTECT,
+        related_name='interview_questions',
+        null=True, blank=True,
+    )
+    stage           = models.CharField(max_length=20, choices=STAGE_CHOICES)
+    question_number = models.PositiveSmallIntegerField()
+    question_text   = models.TextField()
+    guidance        = models.TextField(blank=True)
+    pass_threshold  = models.PositiveSmallIntegerField(default=15)
+    is_active       = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['role', 'stage', 'question_number']
+        unique_together = [['role', 'stage', 'question_number']]
+
+    def __str__(self):
+        role = self.role.name if self.role else 'All Roles'
+        return f"{role} - {self.stage} Q{self.question_number}: {self.question_text[:60]}"
+
+
+class StageScore(AuditModel):
+    SCREENING    = 'SCREENING'
+    INTERVIEW    = 'INTERVIEW'
+    FINAL_REVIEW = 'FINAL_REVIEW'
+
+    STAGE_CHOICES = [
+        (SCREENING,    'Screening'),
+        (INTERVIEW,    'Interview'),
+        (FINAL_REVIEW, 'Final Review'),
+    ]
+
+    applicant  = models.ForeignKey(
         'hr.Applicant',
         on_delete=models.CASCADE,
-        related_name='stage_scores'
+        related_name='stage_scores',
     )
-    stage = models.CharField(max_length=20, choices=STAGE_CHOICES)
-    scored_by = models.ForeignKey(
+    stage      = models.CharField(max_length=20, choices=STAGE_CHOICES)
+    scored_by  = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.PROTECT,
-        related_name='scored_applicants'
+        related_name='scored_applicants',
     )
 
-    # 5 questions, each scored 1-5
     q1_score = models.PositiveSmallIntegerField(default=0)
     q2_score = models.PositiveSmallIntegerField(default=0)
     q3_score = models.PositiveSmallIntegerField(default=0)
@@ -160,22 +319,22 @@ class StageScore(AuditModel):
 
     general_comment = models.TextField(blank=True)
 
-    # Interview scheduling (only relevant for INTERVIEW stage)
-    interview_date = models.DateTimeField(null=True, blank=True)
-    interviewer = models.ForeignKey(
+    interview_scheduled_at = models.DateTimeField(null=True, blank=True)
+    interview_conducted_at = models.DateTimeField(null=True, blank=True)
+    interviewer            = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='interviews_conducted'
+        null=True, blank=True,
+        related_name='interviews_conducted',
     )
+    interview_location = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ['-created_at']
         unique_together = [['applicant', 'stage']]
 
     def __str__(self):
-        return f"{self.applicant.full_name} — {self.stage} — {self.normalized_score}/10"
+        return f"{self.applicant.full_name} - {self.stage} - {self.raw_score}/25"
 
     @property
     def raw_score(self):
@@ -187,34 +346,21 @@ class StageScore(AuditModel):
 
     @property
     def passed(self):
-        return self.normalized_score >= 6.0
+        role = None
+        if self.applicant.vacancy:
+            role = self.applicant.vacancy.role
+        elif self.applicant.role_interest:
+            role = self.applicant.role_interest
 
+        threshold = 15
+        qs = StageQuestionnaire.objects.filter(
+            stage=self.stage,
+            is_active=True,
+        ).filter(
+            models.Q(role=role) | models.Q(role__isnull=True)
+        ).order_by('-role')
 
-class StageQuestionnaire(AuditModel):
-    """
-    The set of questions used at each stage.
-    Questions are company-wide and managed by HQ HR Manager.
-    """
+        if qs.exists():
+            threshold = qs.first().pass_threshold
 
-    SCREENING = 'SCREENING'
-    INTERVIEW = 'INTERVIEW'
-    FINAL_REVIEW = 'FINAL_REVIEW'
-
-    STAGE_CHOICES = [
-        (SCREENING, 'Screening'),
-        (INTERVIEW, 'Interview'),
-        (FINAL_REVIEW, 'Final Review'),
-    ]
-
-    stage = models.CharField(max_length=20, choices=STAGE_CHOICES)
-    question_number = models.PositiveSmallIntegerField()
-    question_text = models.TextField()
-    guidance = models.TextField(blank=True, help_text='Guidance for HR on what to look for')
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        ordering = ['stage', 'question_number']
-        unique_together = [['stage', 'question_number']]
-
-    def __str__(self):
-        return f"{self.stage} — Q{self.question_number}: {self.question_text[:60]}"
+        return self.raw_score >= threshold

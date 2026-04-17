@@ -521,6 +521,7 @@ class FloatEngine:
                 'float_status'     : 'NO_FLOAT',
                 'float_id'         : None,
                 'sheet_id'         : None,
+                'sheet_number'     : '',
                 'opening_float'    : None,
                 'opening_breakdown': None,
                 'shift_sequence'   : 0,

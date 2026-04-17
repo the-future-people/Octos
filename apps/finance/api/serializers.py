@@ -108,6 +108,7 @@ class CashierFloatSerializer(serializers.ModelSerializer):
             'opening_float', 'closing_cash',
             'expected_cash', 'variance', 'variance_notes',
             'is_signed_off', 'signed_off_by_name', 'signed_off_at',
+            'is_overtime', 'overtime_until',
             'created_at',
         ]
         read_only_fields = [

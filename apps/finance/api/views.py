@@ -49,6 +49,15 @@ from .serializers import (
     WeeklyReportDetailSerializer,
     WeeklyReportNotesSerializer,
 )
+# ─────────────────────────────────────────────────────────────────────────────
+# Pagination
+# ─────────────────────────────────────────────────────────────────────────────
+from rest_framework.pagination import PageNumberPagination
+
+class StandardResultsPagination(PageNumberPagination):
+    page_size            = 10
+    page_size_query_param = 'page_size'
+    max_page_size        = 100
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily Sales Sheet
@@ -245,6 +254,32 @@ class DailySalesSheetCloseView(APIView):
                 f"Resolve before closing."
             )
 
+        # ── Stage tomorrow's floats BEFORE Gate 3 ─────────────
+        from apps.accounts.models import CustomUser
+        from datetime import timedelta
+        from decimal import Decimal
+
+        floats_data = request.data.get('floats', [])
+        tomorrow    = sheet.date + timedelta(days=1)
+        if tomorrow.weekday() == 6:
+            tomorrow = tomorrow + timedelta(days=1)
+
+        for f in floats_data:
+            try:
+                cashier = CustomUser.objects.get(
+                    pk     = f['cashier_id'],
+                    branch = sheet.branch,
+                )
+                FloatEngine.stage_float(
+                    cashier     = cashier,
+                    amount      = Decimal(str(f['opening_float'])),
+                    set_by      = request.user,
+                    target_date = tomorrow,
+                    branch      = sheet.branch,
+                )
+            except Exception:
+                pass
+
         # ── Gate 3: Tomorrow's float set ──────────────────────
         float_gate = FloatEngine.validate_tomorrow_float_gate(sheet)
         if not float_gate['passed']:
@@ -273,8 +308,8 @@ class DailySalesSheetCloseView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from apps.finance.serializers import DailySalesSheetSerializer
-        return Response(DailySalesSheetSerializer(closed).data)
+        from apps.finance.serializers import DailySalesSheetListSerializer
+        return Response(DailySalesSheetListSerializer(closed).data)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cashier Float
@@ -529,6 +564,17 @@ class CashierShiftStatusView(APIView):
             date    = today,
         )
 
+        # ── Resolve sheet_number ───────────────────────────────
+        from apps.finance.models import DailySalesSheet as DSS
+        _sheet_number = ''
+        if float_status.get('sheet_id'):
+            try:
+                _sheet_number = DSS.objects.filter(
+                    pk=float_status['sheet_id']
+                ).values_list('sheet_number', flat=True).first() or ''
+            except Exception:
+                pass
+
         # ── Signed off — return immediately ───────────────────
         if float_status['float_status'] == 'SIGNED_OFF':
             return Response({
@@ -536,6 +582,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'SIGNED_OFF',
                 'float_id'         : float_status['float_id'],
                 'sheet_id'         : float_status['sheet_id'],
+                'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
                 'shift_end'        : None,
@@ -556,6 +603,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'NO_FLOAT',
                 'float_id'         : None,
                 'sheet_id'         : None,
+                'sheet_number'     : '',
                 'opening_float'    : None,
                 'opening_breakdown': None,
                 'shift_end'        : None,
@@ -576,6 +624,7 @@ class CashierShiftStatusView(APIView):
                 'float_status'     : 'PENDING_ACK',
                 'float_id'         : float_status['float_id'],
                 'sheet_id'         : float_status['sheet_id'],
+                'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
                 'shift_end'        : None,
@@ -613,6 +662,7 @@ class CashierShiftStatusView(APIView):
                 'sheet_id'         : float_status['sheet_id'],
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
+                'sheet_number'     : _sheet_number,
                 'shift_end'        : float_record.overtime_until.time(),
                 'minutes_remaining': mins_remaining,
                 'should_prompt'    : mins_remaining <= 60,
@@ -642,6 +692,7 @@ class CashierShiftStatusView(APIView):
             'float_status'     : float_status_val,
             'float_id'         : float_status['float_id'],
             'sheet_id'         : float_status['sheet_id'],
+            'sheet_number'     : _sheet_number,
             'opening_float'    : float_status['opening_float'],
             'opening_breakdown': float_status['opening_breakdown'],
             'shift_end'        : shift_end,
@@ -1012,13 +1063,14 @@ class ReceiptListView(generics.ListAPIView):
     """
     GET /api/v1/finance/receipts/
     Branch-scoped receipt list. Optional ?period=day|week|month filter.
+    Paginated: 10 per page.
     """
     serializer_class   = ReceiptSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = StandardResultsPagination
 
     def get_queryset(self):
         from django.utils import timezone
-        from datetime import timedelta
         from apps.finance.models import Receipt
 
         branch = getattr(self.request.user, 'branch', None)
@@ -1035,14 +1087,19 @@ class ReceiptListView(generics.ListAPIView):
 
         period = self.request.query_params.get('period')
         now    = timezone.now()
-        since  = {
-            'day'  : now - timedelta(days=1),
-            'week' : now - timedelta(weeks=1),
-            'month': now - timedelta(days=30),
-        }.get(period)
+        today  = now.date()
 
-        if since:
-            qs = qs.filter(created_at__gte=since)
+        if period == 'day':
+            qs = qs.filter(created_at__date=today)
+        elif period == 'week':
+            # Monday → today
+            week_start = today - __import__('datetime').timedelta(days=today.weekday())
+            qs = qs.filter(created_at__date__gte=week_start)
+        elif period == 'month':
+            qs = qs.filter(
+                created_at__year=today.year,
+                created_at__month=today.month,
+            )
 
         return qs
 
@@ -1575,8 +1632,9 @@ class EODSummaryView(APIView):
 
         # ── Sheet meta ────────────────────────────────────────────
         meta = {
-            'sheet_id'  : sheet.pk,
-            'date'      : sheet.date.isoformat(),
+            'sheet_id'     : sheet.pk,
+            'sheet_number' : sheet.sheet_number or f"#{sheet.pk}",
+            'date'         : sheet.date.isoformat(),
             'status'    : sheet.status,
             'branch'    : branch.name,
             'branch_code': branch.code,
@@ -1603,15 +1661,26 @@ class EODSummaryView(APIView):
             for c in branch_cashiers
         ]
 
+        # ── Inventory consumption snapshot ────────────────────────────────
+        inventory_consumption = []
+        try:
+            from apps.inventory.inventory_engine import InventoryEngine
+            inv_snapshot = InventoryEngine(branch).generate_daily_snapshot(sheet.date)
+            inventory_consumption = inv_snapshot.get('items', [])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Daily inventory snapshot failed: {e}", exc_info=True)
+
         return Response({
-            'meta'            : meta,
-            'revenue'         : revenue,
-            'jobs'            : jobs_summary,
-            'cashier_activity': cashier_activity,
-            'float_opened'    : float_opened,
-            'petty_cash'      : petty_cash_list,
-            'credit_sales'    : credit_list,
-            'branch_cashiers' : branch_cashiers_list,
+            'meta'                 : meta,
+            'revenue'              : revenue,
+            'jobs'                 : jobs_summary,
+            'cashier_activity'     : cashier_activity,
+            'float_opened'         : float_opened,
+            'petty_cash'           : petty_cash_list,
+            'credit_sales'         : credit_list,
+            'branch_cashiers'      : branch_cashiers_list,
+            'inventory_consumption': inventory_consumption,
         })
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1621,12 +1690,16 @@ class EODSummaryView(APIView):
 class InvoiceListView(generics.ListAPIView):
     """
     GET /api/v1/finance/invoices/
-    Returns all invoices for the requesting user's branch.
+    Returns invoices for the requesting user's branch.
+    Optional ?period=day|week|month, ?type=, ?status= filters.
+    Paginated: 10 per page.
     """
     serializer_class   = InvoiceSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = StandardResultsPagination
 
     def get_queryset(self):
+        from django.utils import timezone
         user = self.request.user
         qs   = Invoice.objects.select_related(
             'branch', 'job', 'generated_by'
@@ -1642,7 +1715,17 @@ class InvoiceListView(generics.ListAPIView):
         if status_param:
             qs = qs.filter(status=status_param)
 
-        return qs
+        period = self.request.query_params.get('period')
+        today  = timezone.now().date()
+        if period == 'day':
+            qs = qs.filter(issue_date=today)
+        elif period == 'week':
+            week_start = today - __import__('datetime').timedelta(days=today.weekday())
+            qs = qs.filter(issue_date__gte=week_start)
+        elif period == 'month':
+            qs = qs.filter(issue_date__year=today.year, issue_date__month=today.month)
+
+        return qs.order_by('-issue_date', '-id')
 
 
 class InvoiceDetailView(generics.RetrieveAPIView):

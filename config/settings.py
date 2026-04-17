@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
 
+
 import os
 from decouple import config as decouple_config
 # Override decouple with actual OS env vars (for Docker)
@@ -52,6 +53,7 @@ LOCAL_APPS = [
     'apps.hr',
     'apps.finance',
     'apps.inventory',
+    'apps.procurement',
     'apps.notifications',
     'apps.analytics',
 ]
@@ -69,7 +71,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'config.urls'
-
+X_FRAME_OPTIONS = 'SAMEORIGIN'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

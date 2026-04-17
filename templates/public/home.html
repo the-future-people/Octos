@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Farhat Printing Press ? Ghana's Most Reliable Print Partner</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Playfair+Display:ital@1&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--red:#E8000D;--red-dark:#B50009;--red-light:#FFF0F0;--black:#0D0D0D;--white:#FFFFFF;--off:#F7F4F0;--gray:#6B6B6B;--border:#E8E2DA}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--white);color:var(--black)}
+nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:0 56px;height:64px;background:rgba(255,255,255,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.nav-logo{display:flex;align-items:center;gap:10px;cursor:pointer}
+.nav-brand{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--black)}
+.nav-brand span{color:var(--red)}
+.nav-links{display:flex;align-items:center;gap:4px}
+.nav-btn{background:none;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;color:var(--gray);cursor:pointer;padding:8px 14px;position:relative;transition:color 0.2s}
+.nav-btn:hover{color:var(--black)}
+.nav-btn.active{color:var(--black)}
+.nav-btn.active::after{content:'';position:absolute;bottom:-1px;left:14px;right:14px;height:2px;background:var(--red)}
+.nav-cta{background:var(--red);color:var(--white);border:none;padding:10px 22px;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:background 0.2s}
+.nav-cta:hover{background:var(--red-dark)}
+.pages{position:fixed;top:64px;left:0;right:0;bottom:0;overflow:hidden}
+.page{position:absolute;inset:0;overflow-y:auto;opacity:0;pointer-events:none;transform:translateY(12px);transition:opacity 0.3s ease,transform 0.3s ease}
+.page.active{opacity:1;pointer-events:all;transform:translateY(0)}
+.home-hero{min-height:calc(100vh - 64px);display:grid;grid-template-columns:1fr 1fr}
+.home-left{display:flex;flex-direction:column;justify-content:center;padding:72px 56px}
+.hero-eyebrow{font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:var(--red);margin-bottom:22px;display:flex;align-items:center;gap:10px}
+.hero-eyebrow::before{content:'';width:28px;height:1px;background:var(--red)}
+.hero-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(72px,9vw,120px);line-height:0.88;letter-spacing:-1px;margin-bottom:28px}
+.hero-title .red{color:var(--red)}
+.hero-sub{font-size:15px;font-weight:300;color:var(--gray);line-height:1.75;max-width:380px;margin-bottom:40px}
+.hero-actions{display:flex;gap:12px;margin-bottom:48px}
+.btn-red{background:var(--red);color:var(--white);border:none;padding:14px 28px;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:background 0.2s}
+.btn-red:hover{background:var(--red-dark)}
+.btn-ghost{background:transparent;color:var(--black);border:1.5px solid var(--border);padding:14px 28px;font-size:13px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;transition:border-color 0.2s}
+.btn-ghost:hover{border-color:var(--black)}
+.hero-stats{display:flex;border-top:1px solid var(--border);padding-top:32px}
+.stat{flex:1;padding-right:24px;border-right:1px solid var(--border)}
+.stat:last-child{border-right:none;padding-right:0;padding-left:24px}
+.stat-num{font-family:'Bebas Neue',sans-serif;font-size:38px;color:var(--red);line-height:1}
+.stat-label{font-size:12px;color:var(--gray);margin-top:3px;font-weight:300;line-height:1.4}
+.home-right{background:var(--red);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.hero-pattern{position:absolute;inset:0;opacity:0.07;background-image:radial-gradient(circle,#fff 1.5px,transparent 1.5px);background-size:28px 28px}
+.hero-bird-wrap{position:relative;z-index:2}
+.hero-bird-wrap svg{width:320px;height:320px}
+.hero-stamp{position:absolute;bottom:36px;left:36px;z-index:3;font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:3px;color:rgba(255,255,255,0.45)}
+.ticker{background:var(--red);padding:12px 0;overflow:hidden}
+.ticker-inner{display:flex;animation:tick 22s linear infinite;white-space:nowrap}
+.ticker-item{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:rgba(255,255,255,0.9);padding:0 32px;border-right:1px solid rgba(255,255,255,0.15)}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.page-inner{padding:56px}
+.page-eyebrow{font-size:10px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--red);margin-bottom:14px}
+.page-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,6vw,80px);line-height:0.9;margin-bottom:48px}
+.services-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);margin-bottom:48px}
+.svc-card{background:var(--white);padding:40px 32px;position:relative;overflow:hidden;transition:background 0.2s}
+.svc-card:hover{background:var(--off)}
+.svc-bar{position:absolute;top:0;left:0;width:3px;height:0;background:var(--red);transition:height 0.3s}
+.svc-card:hover .svc-bar{height:100%}
+.svc-num{font-family:'Bebas Neue',sans-serif;font-size:11px;color:var(--red);letter-spacing:3px;margin-bottom:24px}
+.svc-name{font-family:'Bebas Neue',sans-serif;font-size:28px;line-height:1;margin-bottom:12px}
+.svc-desc{font-size:13px;color:var(--gray);line-height:1.6;font-weight:300}
+.svc-card.featured{background:var(--red)}
+.svc-card.featured:hover{background:var(--red-dark)}
+.svc-card.featured .svc-num,.svc-card.featured .svc-name{color:var(--white)}
+.svc-card.featured .svc-desc{color:rgba(255,255,255,0.65)}
+.also-label{font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gray);margin-bottom:14px}
+.also-tags{display:flex;flex-wrap:wrap;gap:8px}
+.also-tag{padding:7px 16px;border:1px solid var(--border);font-size:13px;color:var(--gray)}
+.tender-layout{display:grid;grid-template-columns:5fr 4fr;gap:72px;align-items:start}
+.t-badge{display:inline-flex;align-items:center;gap:8px;background:var(--red-light);border:1px solid rgba(232,0,13,0.15);padding:6px 14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--red);margin-bottom:22px}
+.t-dot{width:5px;height:5px;background:var(--red);border-radius:50%;animation:p 2s infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:0.2}}
+.t-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,5vw,72px);line-height:0.9;margin-bottom:22px}
+.t-title em{font-family:'Playfair Display',serif;font-style:italic;color:var(--red)}
+.t-desc{font-size:15px;color:var(--gray);line-height:1.8;font-weight:300;margin-bottom:32px}
+.t-feats{display:flex;flex-direction:column;gap:11px;margin-bottom:36px}
+.t-feat{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--black)}
+.t-check{width:22px;height:22px;background:var(--red);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--white);font-size:11px;font-weight:700}
+.t-visual{background:var(--off);border:1px solid var(--border);padding:36px}
+.tv-lbl{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--gray);margin-bottom:24px}
+.t-steps{display:flex;flex-direction:column}
+.t-step{display:flex;gap:18px;padding:18px 0;border-bottom:1px solid var(--border)}
+.t-step:last-child{border-bottom:none}
+.t-snum{font-family:'Bebas Neue',sans-serif;font-size:34px;color:rgba(232,0,13,0.15);line-height:1;flex-shrink:0;width:42px}
+.t-sinfo h4{font-size:13px;font-weight:600;margin-bottom:3px}
+.t-sinfo p{font-size:12px;color:var(--gray);line-height:1.5;font-weight:300}
+.partners-layout{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+.coming-pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);padding:6px 14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--gray);margin-bottom:22px}
+.p-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(48px,5vw,68px);line-height:0.9;margin-bottom:22px}
+.p-title .dim{color:var(--border)}
+.p-desc{font-size:15px;color:var(--gray);line-height:1.8;font-weight:300;margin-bottom:32px}
+.waitlist-row{display:flex}
+.w-input{flex:1;background:var(--off);border:1px solid var(--border);border-right:none;padding:13px 18px;font-size:13px;color:var(--black);font-family:'DM Sans',sans-serif}
+.w-input::placeholder{color:#bbb}
+.w-input:focus{outline:none;border-color:#ccc}
+.w-btn{background:var(--black);color:var(--white);border:1px solid var(--black);padding:13px 20px;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.p-slots{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
+.p-slot{background:var(--white);padding:30px 26px}
+.p-slot-icon{font-size:18px;margin-bottom:8px;opacity:0.35}
+.p-slot-name{font-size:12px;font-weight:600;color:var(--black);margin-bottom:3px}
+.p-slot-sub{font-size:11px;color:var(--gray)}
+.p-slot.live{background:var(--red-light)}
+.p-slot.live .p-slot-icon{opacity:1}
+.p-slot.live .p-slot-name{color:var(--red)}
+.p-slot.live .p-slot-sub{color:rgba(232,0,13,0.5)}
+.careers-hero{background:var(--red);padding:56px;display:grid;grid-template-columns:1fr auto;align-items:end;gap:40px}
+.c-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(56px,7vw,90px);line-height:0.88;color:var(--white)}
+.c-sub{font-size:15px;color:rgba(255,255,255,0.65);font-weight:300;max-width:340px;line-height:1.7;margin-top:16px}
+.c-num{font-family:'Bebas Neue',sans-serif;font-size:120px;color:rgba(255,255,255,0.12);line-height:1;flex-shrink:0}
+.vacancies-list{padding:0 56px 56px}
+.v-loading{padding:40px 0;color:var(--gray);font-size:14px}
+.branch-group{margin-bottom:36px}
+.bg-header{display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-top:36px;border-top:1px solid var(--border)}
+.bg-name{font-family:'Bebas Neue',sans-serif;font-size:22px}
+.bg-count{font-size:12px;color:var(--gray);background:var(--off);border:1px solid var(--border);padding:2px 10px}
+.v-card{display:flex;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid var(--border);gap:20px}
+.v-name{font-size:15px;font-weight:600;margin-bottom:4px}
+.v-meta{display:flex;gap:10px;flex-wrap:wrap}
+.v-tag{font-size:11px;color:var(--gray);background:var(--off);border:1px solid var(--border);padding:2px 10px}
+.v-apply{background:var(--red);color:var(--white);border:none;padding:10px 22px;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.v-apply:hover{background:var(--red-dark)}
+.no-vacancies{padding:60px 0;text-align:center;color:var(--gray);font-size:14px}
+.contact-layout{display:grid;grid-template-columns:1fr 1fr;min-height:calc(100vh - 64px)}
+.contact-left{background:var(--red);padding:72px 56px;display:flex;flex-direction:column;justify-content:center}
+.contact-left h2{font-family:'Bebas Neue',sans-serif;font-size:clamp(52px,6vw,80px);line-height:0.9;color:var(--white);margin-bottom:24px}
+.contact-left p{font-size:15px;color:rgba(255,255,255,0.65);line-height:1.8;font-weight:300;margin-bottom:48px;max-width:360px}
+.contact-ways{display:flex;flex-direction:column;gap:16px}
+.contact-way{display:flex;align-items:center;gap:16px;padding:18px 20px;background:rgba(255,255,255,0.1);cursor:pointer;transition:background 0.2s;text-decoration:none}
+.contact-way:hover{background:rgba(255,255,255,0.18)}
+.cw-icon{font-size:18px;flex-shrink:0}
+.cw-text h4{font-size:13px;font-weight:600;color:var(--white);margin-bottom:2px}
+.cw-text p{font-size:12px;color:rgba(255,255,255,0.55)}
+.contact-right{padding:72px 56px;display:flex;flex-direction:column;justify-content:center}
+.contact-right h3{font-family:'Bebas Neue',sans-serif;font-size:32px;margin-bottom:32px}
+.locations-list{display:flex;flex-direction:column;gap:1px;background:var(--border);margin-bottom:40px}
+.loc-item{background:var(--white);padding:24px 28px}
+.loc-region{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--red);margin-bottom:8px}
+.loc-name-sm{font-family:'Bebas Neue',sans-serif;font-size:22px;margin-bottom:6px}
+.loc-addr{font-size:13px;color:var(--gray);line-height:1.6;font-weight:300}
+.loc-open-sm{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#1a9960;margin-top:10px}
+.loc-open-dot{width:5px;height:5px;background:#1a9960;border-radius:50%}
+.loc-soon-sm{opacity:0.35}
+.hour-row{display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border)}
+.hour-day{color:var(--gray);font-weight:300}
+.hour-time{font-weight:500}
+.hours-lbl{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--gray);margin-bottom:12px}
+.site-footer{background:var(--black);padding:28px 56px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.footer-brand{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1.5px;color:var(--white)}
+.footer-brand span{color:var(--red)}
+.footer-copy{font-size:12px;color:rgba(255,255,255,0.25)}
+@media(max-width:900px){
+nav{padding:0 20px}
+.nav-links{gap:0}
+.nav-btn{padding:8px 9px;font-size:12px}
+.page-inner{padding:28px 20px}
+.home-hero{grid-template-columns:1fr}
+.home-left{padding:36px 20px}
+.home-right{height:220px}
+.services-grid{grid-template-columns:1fr 1fr}
+.tender-layout,.partners-layout,.contact-layout{grid-template-columns:1fr}
+.careers-hero{padding:32px 20px;grid-template-columns:1fr}
+.vacancies-list{padding:0 20px 40px}
+.contact-left,.contact-right{padding:40px 20px}
+.site-footer{padding:20px;flex-direction:column;align-items:flex-start;gap:10px}
+}
+
+.am-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;align-items:center;justify-content:center;padding:20px}
+.am-box{background:#fff;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;position:relative}
+.am-head{padding:24px 28px 20px;border-bottom:1px solid #E8E2DA;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;position:sticky;top:0;background:#fff;z-index:1}
+.am-head h2{font-family:'Bebas Neue',sans-serif;font-size:22px;color:#0D0D0D}
+.am-head p{font-size:12px;color:#6B6B6B;margin-top:2px}
+.am-close{background:none;border:none;font-size:20px;cursor:pointer;color:#6B6B6B;padding:0;line-height:1}
+.am-close:hover{color:#0D0D0D}
+.am-body{padding:24px 28px 28px}
+.am-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.am-row.am-single{grid-template-columns:1fr}
+.am-group{display:flex;flex-direction:column;gap:5px}
+.am-label{font-size:11px;font-weight:600;color:#6B6B6B;text-transform:uppercase;letter-spacing:0.4px}
+.am-req{color:#E8000D}
+.am-input{padding:9px 12px;background:#F7F4F0;border:1px solid #E8E2DA;font-size:13px;color:#0D0D0D;font-family:'DM Sans',sans-serif;width:100%}
+.am-input:focus{outline:none;border-color:#999}
+.am-channels{display:flex;gap:8px}
+.am-ch{flex:1;padding:9px 8px;border:1px solid #E8E2DA;background:#F7F4F0;font-size:13px;font-family:'DM Sans',sans-serif;cursor:pointer;color:#6B6B6B;transition:all 0.15s}
+.am-ch.active{border-color:#0D0D0D;color:#0D0D0D;font-weight:600;background:#fff}
+.am-file{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#F7F4F0;border:1px dashed #E8E2DA;font-size:12px;color:#6B6B6B;cursor:pointer}
+.am-file input{display:none}
+.am-file:hover{border-color:#999}
+.am-file-name{font-size:11px;color:#6B6B6B;margin-top:3px}
+.am-divider{border:none;border-top:1px solid #E8E2DA;margin:20px 0}
+.am-submit{width:100%;padding:13px;background:#E8000D;color:#fff;border:none;font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer}
+.am-submit:hover{background:#B50009}
+.am-submit:disabled{opacity:0.5;cursor:not-allowed}
+.am-success{text-align:center;padding:40px 20px}
+.am-success-icon{font-size:40px;margin-bottom:16px}
+.am-success h3{font-family:'Bebas Neue',sans-serif;font-size:28px;margin-bottom:8px}
+.am-success p{font-size:14px;color:#6B6B6B;line-height:1.6}
+</style>
+<script>
+function switchPage(page){
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active')});
+  var p=document.getElementById('page-'+page);
+  if(p){p.classList.add('active');p.scrollTop=0;}
+  var b=document.querySelector('.nav-btn[data-page="'+page+'"]');
+  if(b)b.classList.add('active');
+  if(page==='careers')loadVacancies();
+}
+var vacanciesLoaded=false;
+function loadVacancies(){
+  if(vacanciesLoaded)return;
+  fetch('/api/v1/careers/vacancies/').then(function(r){return r.json()}).then(function(groups){
+    var total=0,html='';
+    groups.forEach(function(g){
+      if(!g.vacancies.length)return;
+      total+=g.vacancies.length;
+      html+='<div class="branch-group"><div class="bg-header">';
+      html+='<span class="bg-name">'+esc(g.branch_name)+'</span>';
+      html+='<span class="bg-count">'+g.vacancies.length+' open</span></div>';
+      g.vacancies.forEach(function(v){
+        var ft={FULL_TIME:'Full Time',PART_TIME:'Part Time',CONTRACT:'Contract'};
+        var dt=v.closes_at?new Date(v.closes_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
+        html+='<div class="v-card">';
+        html+='<div><div class="v-name">'+esc(v.title)+'</div>';
+        html+='<div class="v-meta"><span class="v-tag">'+(ft[v.employment_type]||v.employment_type)+'</span>';
+        html+='<span class="v-tag">Closes '+dt+'</span></div></div>';
+        html+='<button class="v-apply" onclick="openModal('+v.id+')">Apply Now</button>';
+        html+='</div>';
+      });
+      html+='</div>';
+    });
+    if(!total)html='<div class="no-vacancies">No open positions at the moment.</div>';
+    var vl=document.getElementById('vacancies-list');
+    if(vl)vl.innerHTML=html;
+    var el=document.getElementById('c-count');
+    if(el)el.textContent=total||'0';
+    vacanciesLoaded=true;
+  }).catch(function(){
+    var vl=document.getElementById('vacancies-list');
+    if(vl)vl.innerHTML='<div class="no-vacancies">Could not load vacancies.</div>';
+  });
+}
+function openModal(id){
+  document.getElementById('am-title').textContent='Apply Now';
+  document.getElementById('am-branch').textContent='';
+  document.getElementById('am-form').innerHTML=buildForm(id);
+  document.getElementById('apply-modal').style.display='flex';
+}
+function closeApplyModal(){
+  document.getElementById('apply-modal').style.display='none';
+}
+function buildForm(vacancyId){
+  return [
+    '<div class="am-row">',
+    '<div class="am-group"><label class="am-label">First Name <span class="am-req">*</span></label>',
+    '<input id="af-first" class="am-input" type="text" placeholder="Kwame"/></div>',
+    '<div class="am-group"><label class="am-label">Last Name <span class="am-req">*</span></label>',
+    '<input id="af-last" class="am-input" type="text" placeholder="Mensah"/></div></div>',
+    '<div class="am-row">',
+    '<div class="am-group"><label class="am-label">Email <span class="am-req">*</span></label>',
+    '<input id="af-email" class="am-input" type="email" placeholder="kwame@email.com"/></div>',
+    '<div class="am-group"><label class="am-label">Phone <span class="am-req">*</span></label>',
+    '<input id="af-phone" class="am-input" type="tel" placeholder="024 000 0000"/></div></div>',
+    '<div class="am-row am-single"><div class="am-group"><label class="am-label">Address</label>',
+    '<input id="af-address" class="am-input" type="text" placeholder="Accra, Ghana"/></div></div>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">Preferred Channel <span class="am-req">*</span></label>',
+    '<div class="am-channels">',
+    '<button type="button" class="am-ch active" data-ch="WHATSAPP" onclick="pickCh(this)">WhatsApp</button>',
+    '<button type="button" class="am-ch" data-ch="SMS" onclick="pickCh(this)">SMS</button>',
+    '<button type="button" class="am-ch" data-ch="EMAIL" onclick="pickCh(this)">Email</button>',
+    '</div></div></div>',
+    '<input type="hidden" id="af-vid" value="'+vacancyId+'"/>',
+    '<input type="hidden" id="af-ch" value="WHATSAPP"/>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">CV / Resume <span class="am-req">*</span></label>',
+    '<label class="am-file"><input type="file" id="af-cv" accept=".pdf,.doc,.docx" onchange="showFn(this)"/> Choose file</label>',
+    '<div class="am-file-name" id="cv-name"></div></div></div>',
+    '<div class="am-row am-single"><div class="am-group">',
+    '<label class="am-label">Cover Letter (optional)</label>',
+    '<label class="am-file"><input type="file" id="af-cover" accept=".pdf,.doc,.docx" onchange="showFn2(this)"/> Choose file</label>',
+    '<div class="am-file-name" id="cover-name"></div></div></div>',
+    '<hr class="am-divider"/>',
+    '<button type="button" class="am-submit" id="am-btn" onclick="submitApp()">Submit Application</button>'
+  ].join('');
+}
+function pickCh(btn){
+  document.querySelectorAll('.am-ch').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+  var h=document.getElementById('af-ch');
+  if(h)h.value=btn.getAttribute('data-ch');
+}
+function showFn(inp){var l=document.getElementById('cv-name');if(l&&inp.files[0])l.textContent=inp.files[0].name;}
+function showFn2(inp){var l=document.getElementById('cover-name');if(l&&inp.files[0])l.textContent=inp.files[0].name;}
+function submitApp(){
+  var first=document.getElementById('af-first').value.trim();
+  var last=document.getElementById('af-last').value.trim();
+  var email=document.getElementById('af-email').value.trim();
+  var phone=document.getElementById('af-phone').value.trim();
+  var cv=document.getElementById('af-cv').files[0];
+  var vid=document.getElementById('af-vid').value;
+  var ch=document.getElementById('af-ch').value;
+  if(!first||!last||!email||!phone||!cv){alert('Please fill in all required fields and attach your CV.');return;}
+  var btn=document.getElementById('am-btn');
+  btn.textContent='Submitting...';btn.disabled=true;
+  var fd=new FormData();
+  fd.append('first_name',first);fd.append('last_name',last);
+  fd.append('email',email);fd.append('phone',phone);
+  fd.append('address',document.getElementById('af-address').value.trim());
+  fd.append('preferred_channel',ch);fd.append('cv',cv);
+  var cover=document.getElementById('af-cover').files[0];
+  if(cover)fd.append('cover_letter',cover);
+  if(vid)fd.append('vacancy',vid);
+  fetch('/api/v1/careers/apply/',{method:'POST',body:fd})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d}})})
+    .then(function(res){
+      if(!res.ok){alert(Object.values(res.data).flat().join(' ')||'Something went wrong.');btn.textContent='Submit Application';btn.disabled=false;return;}
+      document.getElementById('am-form').innerHTML='<div class="am-success"><div class="am-success-icon">&#x2705;</div><h3>Application Received!</h3><p>Thank you '+esc(first)+'. We will be in touch.</p></div>';
+    })
+    .catch(function(){alert('Network error.');btn.textContent='Submit Application';btn.disabled=false;});
+}
+function joinWaitlist(){
+  var el=document.getElementById('w-email');
+  if(!el||!el.value.trim()||!el.value.includes('@')){alert('Please enter a valid email.');return;}
+  var b=document.querySelector('.w-btn');
+  if(b){b.textContent='You are on the list';b.style.background='#1a9960';b.disabled=true;}
+}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+</script>
+</head>
+<body>
+<nav>
+  <div class="nav-logo" onclick="switchPage('home')">
+    <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+      <path d="M12 78 Q22 32 58 18 Q38 44 50 56 Q58 24 82 12 Q68 48 72 66 Q52 44 12 78Z" fill="#E8000D"/>
+    </svg>
+    <span class="nav-brand">FARHAT <span>PRESS</span></span>
+  </div>
+  <div class="nav-links">
+    <button class="nav-btn active" data-page="home" onclick="switchPage('home')">Home</button>
+    <button class="nav-btn" data-page="services" onclick="switchPage('services')">Services</button>
+    <button class="nav-btn" data-page="tender" onclick="switchPage('tender')">Tender</button>
+    <button class="nav-btn" data-page="partners" onclick="switchPage('partners')">Partners</button>
+    <button class="nav-btn" data-page="careers" onclick="switchPage('careers')">Careers</button>
+    <button class="nav-btn" data-page="contact" onclick="switchPage('contact')">Contact</button>
+  </div>
+  <button class="nav-cta" onclick="switchPage('contact')">Send a Print Job</button>
+</nav>
+<div class="pages">
+  <div class="page active" id="page-home">
+    <div class="home-hero">
+      <div class="home-left">
+        <div class="hero-eyebrow">Ghana's most reliable print partner</div>
+        <h1 class="hero-title">LARGE.<br/>BOLD.<br/><span class="red">PRINTED.</span></h1>
+        <p class="hero-sub">From large-format banners to full tender packages, custom stickers to branded packaging ? Farhat Printing Press delivers production-quality print across Accra.</p>
+        <div class="hero-actions">
+          <button class="btn-red" onclick="switchPage('contact')">Send Your Job &rarr;</button>
+          <button class="btn-ghost" onclick="switchPage('services')">See Services</button>
+        </div>
+        <div class="hero-stats">
+          <div class="stat"><div class="stat-num">5+</div><div class="stat-label">Years of professional printing</div></div>
+          <div class="stat"><div class="stat-num">1K+</div><div class="stat-label">Jobs completed monthly</div></div>
+        </div>
+      </div>
+      <div class="home-right">
+        <div class="hero-pattern"></div>
+        <div class="hero-bird-wrap">
+          <svg viewBox="0 0 500 500" fill="none">
+            <path d="M50 400 Q90 160 270 70 Q160 210 195 250 Q230 100 400 50 Q320 230 345 330 Q240 210 50 400Z" fill="white" opacity="0.95"/>
+            <path d="M50 400 Q120 320 195 250 Q160 340 50 400Z" fill="rgba(255,255,255,0.35)"/>
+          </svg>
+        </div>
+        <div class="hero-stamp">PROFESSIONAL PRINTING HOUSE &trade;</div>
+      </div>
+    </div>
+    <div class="ticker">
+      <div class="ticker-inner">
+        <div class="ticker-item">Large Format Printing</div>
+        <div class="ticker-item">Banner Printing &amp; Installation</div>
+        <div class="ticker-item">Sticker Print &amp; Cut</div>
+        <div class="ticker-item">Branding &amp; Design</div>
+        <div class="ticker-item">Packaging Design, Print &amp; Cut</div>
+        <div class="ticker-item">Tender &amp; Document Services</div>
+        <div class="ticker-item">Large Format Printing</div>
+        <div class="ticker-item">Banner Printing &amp; Installation</div>
+        <div class="ticker-item">Sticker Print &amp; Cut</div>
+        <div class="ticker-item">Branding &amp; Design</div>
+        <div class="ticker-item">Packaging Design, Print &amp; Cut</div>
+        <div class="ticker-item">Tender &amp; Document Services</div>
+      </div>
+    </div>
+    <div class="site-footer"><div class="footer-brand">FARHAT <span>PRINTING PRESS</span> &trade;</div><div class="footer-copy">&copy; 2026 Farhat Printing Press. All rights reserved.</div></div>
+  </div>
+  <div class="page" id="page-services">
+    <div class="page-inner">
+      <div class="page-eyebrow">Production Services</div>
+      <h2 class="page-title">WHAT WE PRODUCE</h2>
+      <div class="services-grid">
+        <div class="svc-card featured"><div class="svc-bar"></div><div class="svc-num">01</div><div class="svc-name">Large Format Printing</div><p class="svc-desc">Posters, roll-ups, flex banners, backdrops ? printed large and vivid. Any size, any quantity.</p></div>
+        <div class="svc-card"><div class="svc-bar"></div><div class="svc-num">02</div><div class="svc-name">Banner Print &amp; Installation</div><p class="svc-desc">We print your banners and install them. Indoor and outdoor. Events, promotions, storefronts.</p></div>
+        <div class="svc-card"><div class="svc-bar"></div><div class="svc-num">03</div><div class="svc-name">Sticker Print &amp; Cut</div><p class="svc-desc">Custom stickers in any shape. Die-cut precision on vinyl, paper, or clear stock. Bulk orders welcome.</p></div>
+        <div class="svc-card"><div class="svc-bar"></div><div class="svc-num">04</div><div class="svc-name">Branding &amp; Design</div><p class="svc-desc">Full brand identity ? logos, stationery, signage, uniforms. Designed and produced under one roof.</p></div>
+        <div class="svc-card"><div class="svc-bar"></div><div class="svc-num">05</div><div class="svc-name">Packaging Design, Print &amp; Cut</div><p class="svc-desc">Custom boxes, bags, and product packaging. Structural design, print, and cutting ? ready to fill.</p></div>
+        <div class="svc-card"><div class="svc-bar"></div><div class="svc-num">06</div><div class="svc-name">All Types of Printing</div><p class="svc-desc">Business cards, flyers, booklets, calendars, certificates ? if it can be printed, we print it.</p></div>
+      </div>
+      <div class="also-label">Also Available</div>
+      <div class="also-tags">
+        <div class="also-tag">Photocopying</div><div class="also-tag">Typing &amp; Word Processing</div><div class="also-tag">Lamination</div><div class="also-tag">Scanning</div><div class="also-tag">Spiral Binding</div><div class="also-tag">Passport Photos</div><div class="also-tag">Document Printing</div>
+      </div>
+    </div>
+    <div class="site-footer"><div class="footer-brand">FARHAT <span>PRINTING PRESS</span> &trade;</div><div class="footer-copy">&copy; 2026 Farhat Printing Press. All rights reserved.</div></div>
+  </div>
+  <div class="page" id="page-tender">
+    <div class="page-inner">
+      <div class="tender-layout">
+        <div>
+          <div class="t-badge"><div class="t-dot"></div>Specialist Service</div>
+          <h2 class="t-title">TENDER &amp;<br/><em>Document</em><br/>SERVICES</h2>
+          <p class="t-desc">Winning a tender starts with a professional submission. We help businesses prepare, print, and package their tender documents to the highest standard.</p>
+          <div class="t-feats">
+            <div class="t-feat"><div class="t-check">&#x2713;</div>Document formatting and professional layout</div>
+            <div class="t-feat"><div class="t-check">&#x2713;</div>High-quality colour and B&amp;W printing</div>
+            <div class="t-feat"><div class="t-check">&#x2713;</div>Professional binding and finishing</div>
+            <div class="t-feat"><div class="t-check">&#x2713;</div>Submission-ready packaging and labelling</div>
+            <div class="t-feat"><div class="t-check">&#x2713;</div>Same-day and urgent orders accepted</div>
+          </div>
+          <button class="btn-red" onclick="window.open('https://wa.me/233556244194?text=I need help with a tender document','_blank')">Enquire via WhatsApp &rarr;</button>
+        </div>
+        <div class="t-visual">
+          <div class="tv-lbl">How it works</div>
+          <div class="t-steps">
+            <div class="t-step"><div class="t-snum">01</div><div class="t-sinfo"><h4>Send Your Files</h4><p>WhatsApp or walk in with your documents. We confirm scope and turnaround.</p></div></div>
+            <div class="t-step"><div class="t-snum">02</div><div class="t-sinfo"><h4>We Format &amp; Print</h4><p>Our team handles layout, pagination, and production-quality printing to spec.</p></div></div>
+            <div class="t-step"><div class="t-snum">03</div><div class="t-sinfo"><h4>Binding &amp; Packaging</h4><p>Professional binding and submission-ready packaging exactly as required.</p></div></div>
+            <div class="t-step"><div class="t-snum">04</div><div class="t-sinfo"><h4>Collect or Deliver</h4><p>Pick up from branch or we arrange delivery to your submission address.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="site-footer"><div class="footer-brand">FARHAT <span>PRINTING PRESS</span> &trade;</div><div class="footer-copy">&copy; 2026 Farhat Printing Press. All rights reserved.</div></div>
+  </div>
+  <div class="page" id="page-partners">
+    <div class="page-inner">
+      <div class="partners-layout">
+        <div>
+          <div class="coming-pill">Coming Soon</div>
+          <h2 class="p-title">BECOME A<br/><span class="dim">FARHAT</span><br/>PARTNER</h2>
+          <p class="p-desc">Own a print shop? Join the Farhat Partner Network and access our job routing system. Receive overflow jobs, grow your capacity, and serve customers better.</p>
+          <div class="waitlist-row">
+            <input class="w-input" type="email" placeholder="Your business email" id="w-email"/>
+            <button class="w-btn" onclick="joinWaitlist()">Join Waitlist</button>
+          </div>
+          <p style="font-size:12px;color:#bbb;margin-top:10px">We will notify you when the partner portal opens.</p>
+        </div>
+        <div class="p-slots">
+          <div class="p-slot live"><div class="p-slot-icon">&#x1F3EA;</div><div class="p-slot-name">Westland Branch</div><div class="p-slot-sub">Accra &middot; Active</div></div>
+          <div class="p-slot"><div class="p-slot-icon">+</div><div class="p-slot-name">Your Shop</div><div class="p-slot-sub">Slot available</div></div>
+          <div class="p-slot"><div class="p-slot-icon">+</div><div class="p-slot-name">Available</div><div class="p-slot-sub">Slot available</div></div>
+          <div class="p-slot"><div class="p-slot-icon">+</div><div class="p-slot-name">Available</div><div class="p-slot-sub">Slot available</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="site-footer"><div class="footer-brand">FARHAT <span>PRINTING PRESS</span> &trade;</div><div class="footer-copy">&copy; 2026 Farhat Printing Press. All rights reserved.</div></div>
+  </div>
+  <div class="page" id="page-careers">
+    <div class="careers-hero">
+      <div><h2 class="c-title">JOIN THE<br/>TEAM</h2><p class="c-sub">We are growing. Open positions across all Farhat branches.</p></div>
+      <div class="c-num" id="c-count">?</div>
+    </div>
+    <div class="vacancies-list" id="vacancies-list"><div class="v-loading">Loading open positions...</div></div>
+    <div class="site-footer"><div class="footer-brand">FARHAT <span>PRINTING PRESS</span> &trade;</div><div class="footer-copy">&copy; 2026 Farhat Printing Press. All rights reserved.</div></div>
+  </div>
+  <div class="page" id="page-contact">
+    <div class="contact-layout">
+      <div class="contact-left">
+        <h2>SEND YOUR<br/>PRINT JOB.</h2>
+        <p>Walk into any branch or send your files directly. We will confirm, produce, and deliver ? fast.</p>
+        <div class="contact-ways">
+          <a class="contact-way" href="https://wa.me/233556244194" target="_blank"><div class="cw-icon">&#x1F4AC;</div><div class="cw-text"><h4>WhatsApp</h4><p>0556 244 194 &middot; Fastest response</p></div></a>
+          <a class="contact-way" href="mailto:info@farhatprintingpress.com"><div class="cw-icon">&#x2709;</div><div class="cw-text"><h4>Email</h4><p>info@farhatprintingpress.com</p></div></a>
+          <a class="contact-way" href="tel:+233556244194"><div class="cw-icon">&#x1F4DE;</div><div class="cw-text"><h4>Call Us</h4><p>0556 244 194</p></div></a>
+        </div>
+      </div>
+      <div class="contact-right">
+        <h3>OUR BRANCHES</h3>
+        <div class="locations-list">
+          <div class="loc-item">
+            <div class="loc-region">Accra &middot; Westlands</div>
+            <div class="loc-name-sm">WESTLAND BRANCH</div>
+            <p class="loc-addr">54 Westland Avenue, Opposite Brainy School, Accra</p>
+            <div class="loc-open-sm"><div class="loc-open-dot"></div>Open &middot; Monday &ndash; Saturday</div>
+          </div>
+          <div class="loc-item loc-soon-sm">
+            <div class="loc-region">Coming Soon</div>
+            <div class="loc-name-sm">BRANCH TWO</div>
+            <p class="loc-addr">Location to be announced</p>
+          </div>
+        </div>
+        <div class="hours-lbl">Opening Hours</div>
+        <div class="hour-row"><span class="hour-day">Monday &ndash; Friday</span><span class="hour-time">8:00 &ndash; 18:00</span></div>
+        <div class="hour-row"><span class="hour-day">Saturday</span><span class="hour-time">8:30 &ndash; 15:00</span></div>
+        <div class="hour-row"><span class="hour-day">Sunday</span><span class="hour-time">Closed</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div class="am-overlay" id="apply-modal" onclick="if(event.target===this)closeApplyModal()">
+  <div class="am-box">
+    <div class="am-head">
+      <div>
+        <h2 id="am-title">Apply</h2>
+        <p id="am-branch"></p>
+      </div>
+      <button class="am-close" onclick="closeApplyModal()">&#x2715;</button>
+    </div>
+    <div class="am-body" id="am-form"></div>
+  </div>
+</div>
+
+</body>
+</html>

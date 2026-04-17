@@ -52,6 +52,10 @@ class JobListView(generics.ListAPIView):
         if daily_sheet:
             qs = qs.filter(daily_sheet_id=daily_sheet)
 
+        customer = self.request.query_params.get('customer')
+        if customer:
+            qs = qs.filter(customer_id=customer)
+
         intake_by = self.request.query_params.get('intake_by')
         if intake_by == 'me':
             qs = qs.filter(intake_by=user)
@@ -1355,6 +1359,10 @@ class JobStatsView(APIView):
         except Exception:
             pass  # never let personal stats break the branch stats
 
+        # Registered (linked to a customer) vs walk-in
+        registered = qs.filter(customer__isnull=False).count()
+        walkin     = (totals['total'] or 0) - registered
+
         response = {
             'total'       : totals['total']       or 0,
             'complete'    : totals['complete']     or 0,
@@ -1362,6 +1370,8 @@ class JobStatsView(APIView):
             'pending'     : totals['pending']      or 0,
             'routed'      : totals['routed']       or 0,
             'revenue'     : str(totals['revenue']  or 0),
+            'registered'  : registered,
+            'walkin'      : walkin,
             'personal'    : personal,
         }
         return Response(response)

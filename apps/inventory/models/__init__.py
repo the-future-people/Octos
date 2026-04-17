@@ -1,6 +1,7 @@
 from .consumables import ConsumableCategory, ConsumableItem, ServiceConsumable
 from .stock import BranchStock, StockMovement, WasteIncident
 from .equipment import BranchEquipment, MaintenanceLog
+from .delivery_unit import DeliveryUnit
 
 __all__ = [
     # Consumables
@@ -14,4 +15,5 @@ __all__ = [
     # Equipment
     'BranchEquipment',
     'MaintenanceLog',
+    'DeliveryUnit',
 ]

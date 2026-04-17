@@ -101,7 +101,7 @@ const CustomerReg = (() => {
         </div>
 
         <!-- Scrollable form body -->
-        <div style="flex:1;overflow-y:auto;padding:20px 24px;" id="add-cust-form-body">
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;background:#f0fdf4;" id="add-cust-form-body">
           ${_buildForm('INDIVIDUAL')}
         </div>
 
@@ -176,6 +176,62 @@ const CustomerReg = (() => {
               box-sizing:border-box;">
         </div>` : ''}
 
+        <!-- Title + Gender row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Title <span style="font-weight:400;">(optional)</span>
+            </label>
+            <select id="cust-title"
+              onchange="CustomerReg._onTitleChange()"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">Select title…</option>
+              <option value="MR">Mr</option>
+              <option value="MRS">Mrs</option>
+              <option value="MISS">Miss</option>
+              <option value="MS">Ms</option>
+              <option value="MADAM">Madam</option>
+              <option value="DR">Dr</option>
+              <option value="PROF">Prof</option>
+              <option value="REV">Rev</option>
+              <option value="ESQ">Esq</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Gender <span style="font-weight:400;">(optional)</span>
+            </label>
+            <select id="cust-gender"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">Select gender…</option>
+              <option value="MALE">Male</option>
+              <option value="FEMALE">Female</option>
+              <option value="PREFER_NOT">Prefer not to say</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Other title field — hidden unless OTHER selected -->
+        <div id="cust-title-other-wrap" style="display:none;">
+          <label style="font-size:11px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+            Custom Title *
+          </label>
+          <input type="text" id="cust-title-other" placeholder="e.g. Chief, Pastor…"
+            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+              box-sizing:border-box;">
+        </div>
+
+        <!-- Name row -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div>
             <label style="font-size:11px;font-weight:700;color:var(--text-3);
@@ -203,30 +259,63 @@ const CustomerReg = (() => {
           </div>
         </div>
 
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Phone Number *
-          </label>
-          <input type="tel" id="cust-phone" placeholder="e.g. 0244123456"
-            onblur="CustomerReg._checkPhoneDuplicate()"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              box-sizing:border-box;">
-          <div id="cust-phone-feedback" style="font-size:11px;margin-top:4px;"></div>
+        <!-- Phone row: primary + secondary -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Phone Number *
+            </label>
+            <input type="tel" id="cust-phone" placeholder="e.g. 0244123456"
+              onblur="CustomerReg._checkPhoneDuplicate()"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+            <div id="cust-phone-feedback" style="font-size:11px;margin-top:4px;"></div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Secondary Phone <span style="font-weight:400;">(optional)</span>
+            </label>
+            <input type="tel" id="cust-secondary-phone" placeholder="e.g. 0201234567"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
         </div>
 
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Email <span style="font-weight:400;color:var(--text-3);">(optional)</span>
-          </label>
-          <input type="email" id="cust-email" placeholder="e.g. info@example.com"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              box-sizing:border-box;">
+        <!-- Preferred contact + Email row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Preferred Contact <span style="font-weight:400;">(optional)</span>
+            </label>
+            <select id="cust-preferred-contact"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">Select preference…</option>
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="CALL">Call</option>
+              <option value="SMS">SMS</option>
+              <option value="EMAIL">Email</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Email <span style="font-weight:400;">(optional)</span>
+            </label>
+            <input type="email" id="cust-email" placeholder="e.g. info@example.com"
+              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
+                box-sizing:border-box;">
+          </div>
         </div>
 
         <div>
@@ -258,6 +347,13 @@ const CustomerReg = (() => {
         </div>
 
       </div>`;
+  }
+
+  // ── Title other toggle ─────────────────────────────────────
+  function _onTitleChange() {
+    const val  = document.getElementById('cust-title')?.value;
+    const wrap = document.getElementById('cust-title-other-wrap');
+    if (wrap) wrap.style.display = val === 'OTHER' ? 'block' : 'none';
   }
 
   // ── Type switcher ──────────────────────────────────────────
@@ -443,9 +539,14 @@ const CustomerReg = (() => {
         headers: { 'Content-Type': 'application/json' },
         body   : JSON.stringify({
           customer_type       : type,
+          title               : document.getElementById('cust-title')?.value || '',
+          title_other         : document.getElementById('cust-title-other')?.value.trim() || '',
           first_name          : firstName,
           last_name           : lastName,
+          gender              : document.getElementById('cust-gender')?.value || '',
           phone,
+          secondary_phone     : _normalisePhone(document.getElementById('cust-secondary-phone')?.value.trim() || ''),
+          preferred_contact   : document.getElementById('cust-preferred-contact')?.value || '',
           email               : email  || '',
           address             : address || '',
           company_name        : company || '',
@@ -483,6 +584,7 @@ const CustomerReg = (() => {
     open,
     _close,
     _setType,
+    _onTitleChange,
     _checkPhoneDuplicate,
     _submit,
     _normalisePhone,
