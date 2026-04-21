@@ -1,4 +1,8 @@
-﻿from django.utils import timezone
+﻿import secrets
+import string
+
+from django.contrib.auth.hashers import make_password
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.views import APIView
@@ -27,6 +31,7 @@ from apps.hr.api.serializers import (
     AppointSerializer,
     DecideSerializer,
     VerifyInfoSerializer,
+    EmploymentDetailsSerializer,
     IssueOfferSerializer,
     OfferLetterSerializer,
     OnboardingRecordSerializer,
@@ -49,7 +54,6 @@ class PublicVacancyListView(APIView):
             status=JobPosition.OPEN,
         ).select_related('branch', 'role').order_by('branch__name', 'title')
 
-        # Group by branch
         grouped = {}
         general = []
         for v in vacancies:
@@ -146,12 +150,12 @@ class PublicOnboardingFormView(APIView):
         if err:
             return err
         return Response({
-            'applicant_name'     : record.applicant.full_name,
-            'role'               : record._get_role_name(),
+            'applicant_name'      : record.applicant.full_name,
+            'role'                : record._get_role_name(),
             'requires_guarantor_1': record.requires_guarantor_1(),
             'requires_guarantor_2': record.requires_guarantor_2(),
-            'requires_reference' : record.requires_reference(),
-            'form'               : OnboardingFormSerializer(record).data,
+            'requires_reference'  : record.requires_reference(),
+            'form'                : OnboardingFormSerializer(record).data,
         })
 
     def post(self, request, token):
@@ -165,7 +169,6 @@ class PublicOnboardingFormView(APIView):
 
         serializer.save()
 
-        # Validate completeness before marking submitted
         complete, errors = record.is_form_complete()
         if not complete:
             return Response(
@@ -177,7 +180,6 @@ class PublicOnboardingFormView(APIView):
         record.submitted_at = timezone.now()
         record.save(update_fields=['status', 'submitted_at', 'updated_at'])
 
-        # Advance applicant status
         record.applicant.status = Applicant.INFORMATION_SUBMITTED
         record.applicant.save(update_fields=['status', 'updated_at'])
 
@@ -236,10 +238,10 @@ class ApplicationListView(APIView):
             'branch_assigned', 'role_interest', 'assigned_hr',
         ).all()
 
-        status_filter = request.query_params.get('status')
-        track_filter  = request.query_params.get('track')
+        status_filter  = request.query_params.get('status')
+        track_filter   = request.query_params.get('track')
         vacancy_filter = request.query_params.get('vacancy')
-        branch_filter = request.query_params.get('branch')
+        branch_filter  = request.query_params.get('branch')
 
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -248,12 +250,10 @@ class ApplicationListView(APIView):
         if vacancy_filter:
             qs = qs.filter(vacancy_id=vacancy_filter)
         if branch_filter:
+            from django.db.models import Q
             qs = qs.filter(
-                __import__('django.db.models', fromlist=['Q']).Q(
-                    vacancy__branch_id=branch_filter
-                ) | __import__('django.db.models', fromlist=['Q']).Q(
-                    branch_assigned_id=branch_filter
-                )
+                Q(vacancy__branch_id=branch_filter) |
+                Q(branch_assigned_id=branch_filter)
             )
 
         return Response(ApplicantListSerializer(qs, many=True).data)
@@ -278,7 +278,7 @@ class ScreenApplicationView(APIView):
     """
     POST /api/v1/recruitment/applications/<id>/screen/
     HR submits CV screening scores.
-    Advances applicant from RECEIVED → SCREENING (opens case).
+    Advances applicant from RECEIVED → SCREENING.
     """
     permission_classes = [IsAuthenticated]
 
@@ -330,7 +330,6 @@ class InviteToInterviewView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check screening passed
         screening = StageScore.objects.filter(
             applicant=applicant,
             stage=StageQuestionnaire.SCREENING,
@@ -348,8 +347,8 @@ class InviteToInterviewView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        scheduled_at = request.data.get('interview_scheduled_at')
-        location     = request.data.get('interview_location', '')
+        scheduled_at   = request.data.get('interview_scheduled_at')
+        location       = request.data.get('interview_location', '')
         interviewer_id = request.data.get('interviewer')
 
         if not scheduled_at:
@@ -358,7 +357,6 @@ class InviteToInterviewView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Create interview score placeholder with scheduling info
         interview_score, _ = StageScore.objects.get_or_create(
             applicant=applicant,
             stage=StageQuestionnaire.INTERVIEW,
@@ -422,8 +420,6 @@ class DecideApplicationView(APIView):
     """
     POST /api/v1/recruitment/applications/<id>/decide/
     HR makes final decision: HIRE or REJECT.
-    HIRE → AWAITING_ACCEPTANCE (congratulations sent via preferred channel)
-    REJECT → REJECTED (rejection SMS sent)
     """
     permission_classes = [IsAuthenticated]
 
@@ -433,7 +429,7 @@ class DecideApplicationView(APIView):
         if applicant.status not in (
             Applicant.INTERVIEW_DONE,
             Applicant.FINAL_REVIEW,
-            Applicant.APPOINTED,   # CEO track can also be decided here
+            Applicant.APPOINTED,
         ):
             return Response(
                 {'detail': f'Cannot decide application in status: {applicant.status}'},
@@ -449,24 +445,21 @@ class DecideApplicationView(APIView):
         if decision == 'HIRE':
             applicant.status = Applicant.AWAITING_ACCEPTANCE
             applicant.save(update_fields=['status', 'updated_at'])
-            # TODO Phase 7: send congratulations via preferred_channel
             return Response({
                 'message' : 'Applicant marked as hired. Awaiting their acceptance.',
                 'status'  : applicant.status,
             })
 
-        else:  # REJECT
-            applicant.status          = Applicant.REJECTED
+        else:
+            applicant.status           = Applicant.REJECTED
             applicant.rejection_reason = serializer.validated_data.get('rejection_reason', '')
-            applicant.rejected_at     = timezone.now()
+            applicant.rejected_at      = timezone.now()
             applicant.save(update_fields=['status', 'rejection_reason', 'rejected_at', 'updated_at'])
 
-            # Reopen vacancy if filled count drops
             if applicant.vacancy:
                 applicant.vacancy.status = JobPosition.OPEN
                 applicant.vacancy.save(update_fields=['status', 'updated_at'])
 
-            # TODO Phase 7: send rejection SMS
             return Response({
                 'message' : 'Applicant rejected. Vacancy reopened.',
                 'status'  : applicant.status,
@@ -477,7 +470,7 @@ class AcceptOfferView(APIView):
     """
     POST /api/v1/recruitment/applications/<id>/accept/
     Records candidate acceptance. Creates OnboardingRecord and sends form link.
-    AWAITING_ACCEPTANCE → ACCEPTED → ONBOARDING
+    AWAITING_ACCEPTANCE → ONBOARDING
     """
     permission_classes = [IsAuthenticated]
 
@@ -493,9 +486,8 @@ class AcceptOfferView(APIView):
         accepted = request.data.get('accepted', True)
 
         if not accepted:
-            # Candidate declined — mark declined, reopen vacancy
-            applicant.status           = Applicant.DECLINED
-            applicant.offer_accepted   = False
+            applicant.status             = Applicant.DECLINED
+            applicant.offer_accepted     = False
             applicant.offer_responded_at = timezone.now()
             applicant.save(update_fields=['status', 'offer_accepted', 'offer_responded_at', 'updated_at'])
 
@@ -505,7 +497,6 @@ class AcceptOfferView(APIView):
 
             return Response({'message': 'Offer declined. Vacancy reopened.', 'status': applicant.status})
 
-        # Accepted — create OnboardingRecord and generate token
         applicant.status             = Applicant.ONBOARDING
         applicant.offer_accepted     = True
         applicant.offer_responded_at = timezone.now()
@@ -518,8 +509,6 @@ class AcceptOfferView(APIView):
 
         token = applicant.generate_onboarding_token()
 
-        # TODO Phase 7: send onboarding link via preferred_channel
-
         return Response({
             'message'          : 'Offer accepted. Onboarding form link generated.',
             'status'           : applicant.status,
@@ -531,13 +520,27 @@ class AcceptOfferView(APIView):
 class VerifyOnboardingInfoView(APIView):
     """
     POST /api/v1/recruitment/applications/<id>/verify-info/
-    HR verifies the submitted onboarding form.
+
+    Extended flow:
+      1. Validates onboarding info (existing behaviour)
+      2. Validates employment details (new)
+      3. Checks for role conflicts (new)
+      4. Creates CustomUser account with SHADOW status (new)
+      5. Creates PendingActivation record (new)
+      6. Returns generated credentials — shown once, never stored in plaintext (new)
+
     INFORMATION_SUBMITTED → INFORMATION_VERIFIED
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        applicant = get_object_or_404(Applicant, pk=pk)
+        from django.db import transaction
+        from apps.accounts.models import CustomUser, Role, StaffAssignment, PendingActivation
+        from apps.accounts.assignment_service import AssignmentService, ConflictError
+        from apps.organization.models import Branch, Region
+
+        applicant  = get_object_or_404(Applicant, pk=pk)
+        onboarding = get_object_or_404(OnboardingRecord, applicant=applicant)
 
         if applicant.status != Applicant.INFORMATION_SUBMITTED:
             return Response(
@@ -545,27 +548,224 @@ class VerifyOnboardingInfoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        onboarding = get_object_or_404(OnboardingRecord, applicant=applicant)
+        # ── Validate both sections together ──────────────────
+        verify_serializer = VerifyInfoSerializer(data=request.data)
+        employ_serializer = EmploymentDetailsSerializer(data=request.data)
 
-        serializer = VerifyInfoSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        verify_valid = verify_serializer.is_valid()
+        employ_valid = employ_serializer.is_valid()
 
-        onboarding.status             = OnboardingRecord.VERIFIED
-        onboarding.verified_at        = timezone.now()
-        onboarding.verified_by        = request.user
-        onboarding.verification_notes = serializer.validated_data.get('verification_notes', '')
-        onboarding.save(update_fields=[
-            'status', 'verified_at', 'verified_by', 'verification_notes', 'updated_at'
-        ])
+        if not verify_valid or not employ_valid:
+            errors = {}
+            if not verify_valid:
+                errors.update(verify_serializer.errors)
+            if not employ_valid:
+                errors.update(employ_serializer.errors)
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
-        applicant.status = Applicant.INFORMATION_VERIFIED
-        applicant.save(update_fields=['status', 'updated_at'])
+        employ_data = employ_serializer.validated_data
+        role        = employ_data['role']
+        branch      = employ_data.get('branch')
+        region      = employ_data.get('region')
+        designation = employ_data['designation']
+        start_date  = employ_data['start_date']
+        shadow_days = employ_data.get('shadow_days', 7)
+
+        # ── Conflict check ────────────────────────────────────
+        conflict = AssignmentService.check_conflict(
+            role=role,
+            designation=designation,
+            branch=branch,
+            region=region,
+        )
+
+        conflict_user_id      = employ_data.get('conflict_user')
+        conflict_resolution   = employ_data.get('conflict_resolution')
+        conflict_new_branch   = employ_data.get('conflict_new_branch')
+        conflict_new_role     = employ_data.get('conflict_new_role')
+        conflict_new_desig    = employ_data.get('conflict_new_designation')
+
+        if conflict and not conflict_resolution:
+            # Return conflict details so the frontend can show resolution UI
+            return Response({
+                'conflict': True,
+                'conflict_user': {
+                    'id'        : conflict.user.id,
+                    'full_name' : conflict.user.full_name,
+                    'email'     : conflict.user.email,
+                    'role'      : conflict.role.display_name,
+                    'designation': conflict.designation,
+                },
+                'detail': (
+                    f'{conflict.user.full_name} currently holds '
+                    f'{conflict.role.display_name} ({conflict.designation}) '
+                    f'at this location. Please specify how to handle this.'
+                ),
+            }, status=status.HTTP_409_CONFLICT)
+
+        # ── Generate credentials ──────────────────────────────
+        first_initial = applicant.first_name[0].lower()
+        last_clean    = applicant.last_name.lower().replace(' ', '')
+        username      = f"{first_initial}{last_clean}"
+        email         = f"{username}@farhatprintingpress.com"
+
+        # Ensure email uniqueness — append digit if taken
+        base_email = email
+        counter    = 1
+        while CustomUser.objects.filter(email=email).exists():
+            email = base_email.replace('@', f'{counter}@')
+            counter += 1
+
+        # Generate a secure 12-char temp password
+        alphabet  = string.ascii_letters + string.digits + '!@#$%'
+        temp_pass = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        # ── Create everything atomically ──────────────────────
+        with transaction.atomic():
+            # 1. Mark onboarding verified
+            onboarding.status             = OnboardingRecord.VERIFIED
+            onboarding.verified_at        = timezone.now()
+            onboarding.verified_by        = request.user
+            onboarding.verification_notes = verify_serializer.validated_data.get(
+                'verification_notes', ''
+            )
+            onboarding.save(update_fields=[
+                'status', 'verified_at', 'verified_by',
+                'verification_notes', 'updated_at',
+            ])
+
+            applicant.status = Applicant.INFORMATION_VERIFIED
+            applicant.save(update_fields=['status', 'updated_at'])
+
+            # 2. Create CustomUser with SHADOW status
+            # Use a temporary unique employee_id — replaced with EMP-{pk} after save
+            import uuid
+            new_user = CustomUser.objects.create_user(
+                email                = email,
+                password             = temp_pass,
+                first_name           = applicant.first_name,
+                last_name            = applicant.last_name,
+                phone                = applicant.phone or '',
+                role                 = role,
+                branch               = branch,
+                region               = region,
+                employment_status    = CustomUser.SHADOW,
+                must_change_password = True,
+                employee_id          = f"TMP-{uuid.uuid4().hex[:8].upper()}",
+            )
+
+            # Replace temp ID with permanent EMP-{pk}
+            new_user.employee_id = f"EMP-{new_user.pk:04d}"
+            new_user.save(update_fields=['employee_id', 'updated_at'])
+
+            # 3. Create PendingActivation
+            activation = PendingActivation.objects.create(
+                user                     = new_user,
+                applicant                = applicant,
+                role                     = role,
+                designation              = designation,
+                branch                   = branch,
+                region                   = region,
+                start_date               = start_date,
+                shadow_days              = shadow_days,
+                conflict_user_id         = conflict_user_id.id if conflict_user_id else None,
+                conflict_resolution      = conflict_resolution or '',
+                conflict_new_branch      = conflict_new_branch,
+                conflict_new_role        = conflict_new_role,
+                conflict_new_designation = conflict_new_desig or '',
+                conflict_new_region      = employ_data.get('conflict_new_region'),
+                generated_email          = email,
+                generated_username       = username,
+                temp_password_hash       = make_password(temp_pass),
+                status                   = PendingActivation.SHADOW,
+                created_by               = request.user,
+            )
 
         return Response({
-            'message' : 'Onboarding information verified. Ready to issue offer letter.',
-            'status'  : applicant.status,
-        })
+            'message'    : 'Onboarding verified. Employee account created with shadow access.',
+            'status'     : applicant.status,
+            'activation' : {
+                'id'           : activation.id,
+                'start_date'   : str(start_date),
+                'shadow_days'  : shadow_days,
+                'days_until_start': activation.days_until_start,
+            },
+            'credentials': {
+                'email'     : email,
+                'username'  : username,
+                'temp_password': temp_pass,  # shown once — never stored in plaintext
+            },
+        }, status=status.HTTP_201_CREATED)
+
+
+class ConflictCheckView(APIView):
+    """
+    GET /api/v1/recruitment/conflict-check/
+    Check if a constrained role slot is already occupied.
+    Called by the HR modal when role + branch/region + designation are selected.
+
+    Query params:
+      role        — role id
+      designation — MAIN or DEPUTY
+      branch      — branch id (optional)
+      region      — region id (optional)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import Role, StaffAssignment
+        from apps.accounts.assignment_service import AssignmentService
+
+        role_id     = request.query_params.get('role')
+        designation = request.query_params.get('designation', 'MAIN')
+        branch_id   = request.query_params.get('branch')
+        region_id   = request.query_params.get('region')
+
+        if not role_id:
+            return Response(
+                {'detail': 'role is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            role = Role.objects.get(pk=role_id)
+        except Role.DoesNotExist:
+            return Response({'detail': 'Role not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not role.is_constrained:
+            return Response({'conflict': False, 'constrained': False})
+
+        branch = None
+        region = None
+        if branch_id:
+            from apps.organization.models import Branch
+            branch = Branch.objects.filter(pk=branch_id).first()
+        if region_id:
+            from apps.organization.models import Region
+            region = Region.objects.filter(pk=region_id).first()
+
+        conflict = AssignmentService.check_conflict(
+            role=role,
+            designation=designation,
+            branch=branch,
+            region=region,
+        )
+
+        if conflict:
+            return Response({
+                'conflict'     : True,
+                'constrained'  : True,
+                'conflict_user': {
+                    'id'         : conflict.user.id,
+                    'full_name'  : conflict.user.full_name,
+                    'email'      : conflict.user.email,
+                    'employee_id': conflict.user.employee_id,
+                    'role'       : conflict.role.display_name,
+                    'designation': conflict.designation,
+                },
+            })
+
+        return Response({'conflict': False, 'constrained': True})
 
 
 class IssueOfferLetterView(APIView):
@@ -617,25 +817,20 @@ class IssueOfferLetterView(APIView):
         )
 
         if not created:
-            # Update existing
             for field, value in data.items():
                 setattr(offer, field, value)
             offer.role         = role
             offer.generated_by = request.user
             offer.save()
 
-        # TODO Phase 4: generate PDF via ReportLab
-
-        offer.status  = OfferLetter.SENT
-        offer.sent_at = timezone.now()
+        offer.status   = OfferLetter.SENT
+        offer.sent_at  = timezone.now()
         offer.sent_via = applicant.preferred_channel
         offer.save(update_fields=['status', 'sent_at', 'sent_via', 'updated_at'])
 
-        applicant.status      = Applicant.OFFER_ISSUED
+        applicant.status        = Applicant.OFFER_ISSUED
         applicant.offer_sent_at = timezone.now()
         applicant.save(update_fields=['status', 'offer_sent_at', 'updated_at'])
-
-        # TODO Phase 7: deliver offer letter via preferred_channel
 
         return Response({
             'message'  : 'Offer letter issued.',
@@ -645,10 +840,6 @@ class IssueOfferLetterView(APIView):
 
 
 class RecommendCandidateView(APIView):
-    """
-    POST /api/v1/recruitment/recommend/
-    BM or authorised user recommends a candidate for a vacancy.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -679,10 +870,6 @@ class RecommendCandidateView(APIView):
 
 
 class AppointCandidateView(APIView):
-    """
-    POST /api/v1/recruitment/appoint/
-    CEO directly appoints someone — skips processing, goes straight to onboarding.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -725,10 +912,12 @@ class OnboardingRecordView(APIView):
         onboarding = get_object_or_404(OnboardingRecord, applicant=applicant)
         return Response(OnboardingRecordSerializer(onboarding).data)
 
+
 from django.views import View
 from django.http import FileResponse, HttpResponseForbidden, Http404
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
+
 
 class ServeCVView(View):
     """
@@ -737,7 +926,6 @@ class ServeCVView(View):
     Serves CV as inline PDF for iframe embedding.
     """
     def get(self, request, pk):
-        # Authenticate via query param token
         token_str = request.GET.get('token')
         user = None
 
@@ -752,7 +940,6 @@ class ServeCVView(View):
         if not user:
             return HttpResponseForbidden('Authentication required.')
 
-        # Role gate
         allowed_roles = {
             'HQ_HR_MANAGER', 'REGIONAL_HR_COORDINATOR',
             'BELT_MANAGER', 'REGIONAL_MANAGER', 'SUPER_ADMIN',

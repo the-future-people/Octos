@@ -21,8 +21,8 @@ class RoleSerializer(serializers.ModelSerializer):
 class RoleListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for dropdowns."""
     class Meta:
-        model = Role
-        fields = ['id', 'name']
+        model  = Role
+        fields = ['id', 'name', 'display_name', 'is_constrained', 'scope']
 
 
 class BranchMinimalSerializer(serializers.ModelSerializer):

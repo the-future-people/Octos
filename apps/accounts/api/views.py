@@ -70,6 +70,7 @@ class RoleDropdownView(generics.ListAPIView):
     queryset = Role.objects.all()
     serializer_class = RoleListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
 
 class PermissionListView(generics.ListAPIView):
