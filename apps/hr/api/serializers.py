@@ -218,6 +218,7 @@ class ApplicantDetailSerializer(serializers.ModelSerializer):
             'appointed_by', 'appointment_note',
             'offer_sent_at', 'offer_accepted', 'offer_responded_at',
             'rejection_reason', 'rejected_at',
+            'onboarding_token',
             'onboarding_token_expires_at',
             'assigned_hr',
             'stage_scores', 'questions',

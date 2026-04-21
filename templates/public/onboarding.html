@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Onboarding Form — Farhat Printing Press</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet"/>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --red:#E8000D;--red-dark:#B50009;--black:#0D0D0D;--white:#FFFFFF;
+      --off:#F7F4F0;--gray:#6B6B6B;--border:#E8E2DA;--green:#1a6640;--green-bg:#edfaf4;
+    }
+    body{font-family:'DM Sans',system-ui,sans-serif;background:var(--off);color:var(--black);min-height:100vh;}
+
+    /* ── Header ── */
+    .ob-header{background:var(--black);padding:16px 28px;display:flex;align-items:center;gap:12px;}
+    .ob-logo{display:flex;align-items:center;gap:8px;}
+    .ob-brand{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;color:var(--white);}
+    .ob-brand span{color:var(--red);}
+    .ob-header-right{margin-left:auto;font-size:12px;color:rgba(255,255,255,0.4);}
+
+    /* ── Main ── */
+    .ob-main{max-width:720px;margin:0 auto;padding:40px 20px 80px;}
+
+    /* ── Hero ── */
+    .ob-hero{background:var(--red);padding:32px 36px;margin-bottom:32px;}
+    .ob-hero-eyebrow{font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);margin-bottom:10px;}
+    .ob-hero-title{font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--white);line-height:1;margin-bottom:8px;}
+    .ob-hero-name{font-size:15px;color:rgba(255,255,255,0.8);font-weight:300;}
+    .ob-hero-sub{font-size:13px;color:rgba(255,255,255,0.55);margin-top:12px;line-height:1.6;max-width:480px;}
+
+    /* ── Progress ── */
+    .ob-progress{background:var(--white);border:1px solid var(--border);padding:20px 28px;margin-bottom:24px;}
+    .ob-progress-label{font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:var(--gray);margin-bottom:12px;}
+    .ob-steps{display:flex;gap:0;}
+    .ob-step{flex:1;display:flex;flex-direction:column;align-items:center;position:relative;}
+    .ob-step:not(:last-child)::after{content:'';position:absolute;top:10px;left:50%;width:100%;height:2px;background:var(--border);z-index:0;}
+    .ob-step-dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--border);background:var(--white);z-index:1;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--gray);}
+    .ob-step-dot.active{border-color:var(--red);background:var(--red);color:var(--white);}
+    .ob-step-dot.done{border-color:var(--green);background:var(--green);color:var(--white);}
+    .ob-step-label{font-size:9px;color:var(--gray);margin-top:5px;text-align:center;font-weight:500;}
+    .ob-step-label.active{color:var(--red);font-weight:700;}
+    .ob-step-label.done{color:var(--green);font-weight:600;}
+
+    /* ── Section ── */
+    .ob-section{background:var(--white);border:1px solid var(--border);margin-bottom:16px;display:none;}
+    .ob-section.active{display:block;}
+    .ob-section-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+    .ob-section-num{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--red);line-height:1;min-width:32px;}
+    .ob-section-title{font-family:'Bebas Neue',sans-serif;font-size:20px;line-height:1;}
+    .ob-section-sub{font-size:12px;color:var(--gray);margin-top:2px;}
+    .ob-section-body{padding:24px;}
+
+    /* ── Fields ── */
+    .ob-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+    .ob-grid.single{grid-template-columns:1fr;}
+    .ob-grid.three{grid-template-columns:1fr 1fr 1fr;}
+    .ob-field{display:flex;flex-direction:column;gap:5px;}
+    .ob-label{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:0.4px;}
+    .ob-req{color:var(--red);}
+    .ob-input,.ob-select{padding:10px 14px;background:var(--off);border:1px solid var(--border);font-size:13px;color:var(--black);font-family:'DM Sans',sans-serif;width:100%;transition:border-color 0.15s;}
+    .ob-input:focus,.ob-select:focus{outline:none;border-color:#999;}
+    .ob-input::placeholder{color:#bbb;}
+    .ob-file-wrap{display:flex;flex-direction:column;gap:4px;}
+    .ob-file-label{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--off);border:1px dashed var(--border);font-size:12px;color:var(--gray);cursor:pointer;transition:border-color 0.15s;}
+    .ob-file-label:hover{border-color:#999;}
+    .ob-file-label input{display:none;}
+    .ob-file-name{font-size:11px;color:var(--gray);}
+
+    /* ── Nav buttons ── */
+    .ob-nav{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-top:1px solid var(--border);background:var(--white);}
+    .ob-btn-back{background:transparent;border:1px solid var(--border);padding:11px 24px;font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;color:var(--gray);transition:border-color 0.15s;}
+    .ob-btn-back:hover{border-color:#999;}
+    .ob-btn-next{background:var(--black);color:var(--white);border:none;padding:11px 28px;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;transition:background 0.15s;}
+    .ob-btn-next:hover{background:#333;}
+    .ob-btn-next.submit{background:var(--red);}
+    .ob-btn-next.submit:hover{background:var(--red-dark);}
+    .ob-btn-next:disabled{opacity:0.4;cursor:not-allowed;}
+
+    /* ── Loading / Error / Success ── */
+    .ob-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;gap:16px;}
+    .ob-state-icon{font-size:48px;}
+    .ob-state-title{font-family:'Bebas Neue',sans-serif;font-size:32px;}
+    .ob-state-sub{font-size:14px;color:var(--gray);max-width:400px;line-height:1.6;}
+    .ob-success-banner{background:var(--green-bg);border:1px solid #a8dfc0;padding:32px 36px;text-align:center;margin-bottom:24px;}
+    .ob-success-title{font-family:'Bebas Neue',sans-serif;font-size:36px;color:var(--green);margin-bottom:8px;}
+    .ob-success-sub{font-size:14px;color:var(--green);opacity:0.8;line-height:1.6;}
+
+    /* ── Required note ── */
+    .ob-required-note{font-size:11px;color:var(--gray);margin-bottom:20px;}
+
+    @media(max-width:600px){
+      .ob-grid{grid-template-columns:1fr;}
+      .ob-grid.three{grid-template-columns:1fr;}
+      .ob-hero{padding:24px 20px;}
+      .ob-section-body{padding:16px;}
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="ob-header">
+  <div class="ob-logo">
+    <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
+      <path d="M12 78 Q22 32 58 18 Q38 44 50 56 Q58 24 82 12 Q68 48 72 66 Q52 44 12 78Z" fill="#E8000D"/>
+    </svg>
+    <span class="ob-brand">FARHAT <span>PRESS</span></span>
+  </div>
+  <div class="ob-header-right">Secure Onboarding Portal</div>
+</div>
+
+<div class="ob-main" id="ob-main">
+  <div class="ob-state">
+    <div class="ob-state-icon">⏳</div>
+    <div class="ob-state-title">Loading your form...</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const TOKEN = '{{ token }}';
+  const API   = '/api/v1/careers/onboarding/' + TOKEN + '/';
+
+  let _formData  = {};
+  let _context   = {};
+  let _currentStep = 0;
+  let _steps     = [];
+  let _files     = {};
+
+  // ── Fetch form context ──
+  async function init() {
+    try {
+      const res  = await fetch(API);
+      const data = await res.json();
+
+      if (!res.ok) {
+        showError(data.detail || 'This link is invalid or has expired.');
+        return;
+      }
+
+      _context = data;
+      buildSteps();
+      render();
+    } catch(e) {
+      showError('Could not load your onboarding form. Please try again later.');
+    }
+  }
+
+  // ── Build steps based on role requirements ──
+  function buildSteps() {
+    _steps = [
+      { id:'personal',   title:'Personal Information',  sub:'Identity and contact details' },
+      { id:'kin',        title:'Next of Kin',           sub:'Emergency and family contact' },
+      { id:'payment',    title:'Payment Details',       sub:'Bank and mobile money information' },
+    ];
+
+    if (_context.requires_guarantor_1) {
+      _steps.push({ id:'guarantor1', title:'Guarantor', sub:'First guarantor details' });
+    }
+    if (_context.requires_guarantor_2) {
+      _steps.push({ id:'guarantor2', title:'Guarantor 2', sub:'Second guarantor details' });
+    }
+    if (_context.requires_reference) {
+      _steps.push({ id:'reference', title:'Reference', sub:'Professional reference details' });
+    }
+
+    _steps.push({ id:'review', title:'Review & Submit', sub:'Confirm and submit your form' });
+  }
+
+  // ── Render current state ──
+  function render() {
+    const main = document.getElementById('ob-main');
+    const step = _steps[_currentStep];
+
+    main.innerHTML =
+      heroHtml() +
+      progressHtml() +
+      '<p class="ob-required-note">Fields marked <span style="color:var(--red);">*</span> are required.</p>' +
+      sectionHtml(step) +
+      navHtml();
+  }
+
+  // ── Hero ──
+  function heroHtml() {
+    return '<div class="ob-hero">' +
+      '<div class="ob-hero-eyebrow">Employee Onboarding</div>' +
+      '<div class="ob-hero-title">Welcome to the Team</div>' +
+      '<div class="ob-hero-name">' + esc(_context.applicant_name || '') + ' &mdash; ' + esc(_context.role || '') + '</div>' +
+      '<div class="ob-hero-sub">Please complete all sections carefully. Your information is secure and used only for employment purposes.</div>' +
+    '</div>';
+  }
+
+  // ── Progress stepper ──
+  function progressHtml() {
+    return '<div class="ob-progress">' +
+      '<div class="ob-progress-label">Progress &mdash; Step ' + (_currentStep+1) + ' of ' + _steps.length + '</div>' +
+      '<div class="ob-steps">' +
+        _steps.map(function(s, i){
+          const cls = i < _currentStep ? 'done' : i === _currentStep ? 'active' : '';
+          const lbl = i < _currentStep ? '✓' : (i+1);
+          return '<div class="ob-step">' +
+            '<div class="ob-step-dot ' + cls + '">' + lbl + '</div>' +
+            '<div class="ob-step-label ' + cls + '">' + s.title.split(' ')[0] + '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── Section content ──
+  function sectionHtml(step) {
+    const s = '<div class="ob-section active">' +
+      '<div class="ob-section-head">' +
+        '<div class="ob-section-num">0' + (_currentStep+1) + '</div>' +
+        '<div><div class="ob-section-title">' + step.title + '</div>' +
+        '<div class="ob-section-sub">' + step.sub + '</div></div>' +
+      '</div>' +
+      '<div class="ob-section-body">' + sectionBody(step.id) + '</div>' +
+    '</div>';
+    return s;
+  }
+
+  function sectionBody(id) {
+    const v = _formData;
+
+    if (id === 'personal') return '' +
+      grid([
+        field('Ghana Card Number', 'ghana_card_number', 'GHA-XXXXXXXXX-X', true),
+        field('SSNIT Number', 'ssnit_number', 'SSNIT-XXXXXXXX'),
+      ]) +
+      grid([
+        dateField('Date of Birth', 'date_of_birth', true),
+        selectField('Gender', 'gender', [['','Select...'],['M','Male'],['F','Female'],['O','Other']], true),
+      ]) +
+      grid([field('Residential Address', 'address', '123 Main Street, Accra', true)], 'single') +
+      grid([
+        fileField('Profile Photo', 'profile_photo', 'image/*'),
+        fileField('Ghana Card Scan', 'ghana_card_scan', 'image/*,.pdf'),
+      ]);
+
+    if (id === 'kin') return '' +
+      grid([
+        field('Full Name', 'next_of_kin_name', 'Jane Doe', true),
+        field('Phone Number', 'next_of_kin_phone', '024 000 0000', true),
+      ]) +
+      grid([field('Relationship', 'next_of_kin_relationship', 'Sister, Father, Spouse...', true)], 'single') +
+      '<div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border);">' +
+        '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray);margin-bottom:16px;">Emergency Contact</div>' +
+        grid([
+          field('Full Name', 'emergency_contact_name', 'John Doe', true),
+          field('Phone Number', 'emergency_contact_phone', '024 000 0000', true),
+        ]) +
+        grid([field('Relationship', 'emergency_contact_relationship', 'Brother, Mother, Friend...', true)], 'single') +
+      '</div>';
+
+    if (id === 'payment') return '' +
+      grid([
+        field('Bank Name', 'bank_name', 'GCB Bank, Ecobank...'),
+        field('Account Number', 'bank_account_number', '1234567890'),
+      ]) +
+      grid([
+        field('Bank Branch', 'bank_branch', 'Westlands Branch'),
+        field('Mobile Money Number', 'mobile_money_number', '024 000 0000'),
+      ]);
+
+    if (id === 'guarantor1') return '' +
+      grid([
+        field('Full Name', 'guarantor_1_name', 'John Mensah', true),
+        field('Phone Number', 'guarantor_1_phone', '024 000 0000', true),
+      ]) +
+      grid([field('Residential Address', 'guarantor_1_address', '123 Main Street, Accra', true)], 'single') +
+      grid([
+        field('Employer / Organisation', 'guarantor_1_employer', 'Company or School name'),
+        field('Relationship to You', 'guarantor_1_relationship', 'Uncle, Pastor, Employer...', true),
+      ]) +
+      grid([field('National ID Number', 'guarantor_1_id_number', 'GHA-XXXXXXXXX-X')], 'single');
+
+    if (id === 'guarantor2') return '' +
+      grid([
+        field('Full Name', 'guarantor_2_name', 'Jane Asante', true),
+        field('Phone Number', 'guarantor_2_phone', '024 000 0000', true),
+      ]) +
+      grid([field('Residential Address', 'guarantor_2_address', '123 Main Street, Accra', true)], 'single') +
+      grid([
+        field('Employer / Organisation', 'guarantor_2_employer', 'Company or School name'),
+        field('Relationship to You', 'guarantor_2_relationship', 'Uncle, Pastor, Employer...', true),
+      ]) +
+      grid([field('National ID Number', 'guarantor_2_id_number', 'GHA-XXXXXXXXX-X')], 'single');
+
+    if (id === 'reference') return '' +
+      grid([
+        field('Full Name', 'reference_name', 'Dr. Kwame Mensah', true),
+        field('Phone Number', 'reference_phone', '024 000 0000', true),
+      ]) +
+      grid([
+        field('Employer / Organisation', 'reference_employer', 'Company name', true),
+        field('Their Position / Title', 'reference_position', 'Manager, Director...', true),
+      ]) +
+      grid([field('Relationship to You', 'reference_relationship', 'Former Manager, Lecturer...', true)], 'single');
+
+    if (id === 'review') {
+      return '<div style="display:flex;flex-direction:column;gap:16px;">' +
+        '<div style="padding:16px;background:var(--off);border:1px solid var(--border);">' +
+          '<div style="font-size:13px;color:var(--gray);line-height:1.7;">Please review your information before submitting. Once submitted, you will not be able to edit this form. If you need to make changes, go back using the Previous button.</div>' +
+        '</div>' +
+        reviewSummary() +
+        '<div style="padding:16px;background:#edfaf4;border:1px solid #a8dfc0;">' +
+          '<div style="font-size:12px;color:#1a6640;line-height:1.6;font-weight:600;">By submitting this form, you confirm that all information provided is accurate and complete to the best of your knowledge.</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    return '';
+  }
+
+  function reviewSummary() {
+    const fields = [
+      ['Ghana Card', _formData.ghana_card_number],
+      ['SSNIT', _formData.ssnit_number],
+      ['Date of Birth', _formData.date_of_birth],
+      ['Gender', _formData.gender],
+      ['Address', _formData.address],
+      ['Next of Kin', _formData.next_of_kin_name],
+      ['Emergency Contact', _formData.emergency_contact_name],
+      ['Bank', _formData.bank_name],
+      ['Mobile Money', _formData.mobile_money_number],
+    ];
+    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);">' +
+      fields.filter(function(f){return f[1];}).map(function(f){
+        return '<div style="background:var(--white);padding:10px 14px;">' +
+          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--gray);margin-bottom:3px;">' + esc(f[0]) + '</div>' +
+          '<div style="font-size:13px;color:var(--black);">' + esc(f[1]) + '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+
+  // ── Nav ──
+  function navHtml() {
+    const isFirst  = _currentStep === 0;
+    const isLast   = _currentStep === _steps.length - 1;
+    return '<div class="ob-nav">' +
+      '<button class="ob-btn-back" onclick="OB.prev()" ' + (isFirst?'style="visibility:hidden;"':'') + '>← Previous</button>' +
+      (isLast
+        ? '<button class="ob-btn-next submit" id="ob-submit-btn" onclick="OB.submit()">Submit Form →</button>'
+        : '<button class="ob-btn-next" onclick="OB.next()">Next →</button>') +
+    '</div>';
+  }
+
+  // ── Field helpers ──
+  function grid(fields, variant) {
+    return '<div class="ob-grid ' + (variant||'') + '">' + fields.join('') + '</div>';
+  }
+
+  function field(label, key, placeholder, required) {
+    const val = _formData[key] || '';
+    return '<div class="ob-field">' +
+      '<label class="ob-label">' + label + (required?' <span class="ob-req">*</span>':'') + '</label>' +
+      '<input class="ob-input" type="text" placeholder="' + esc(placeholder||'') + '" ' +
+        'value="' + esc(val) + '" ' +
+        'onchange="OB.save(\'' + key + '\',this.value)"/>' +
+    '</div>';
+  }
+
+  function dateField(label, key, required) {
+    const val = _formData[key] || '';
+    return '<div class="ob-field">' +
+      '<label class="ob-label">' + label + (required?' <span class="ob-req">*</span>':'') + '</label>' +
+      '<input class="ob-input" type="date" value="' + esc(val) + '" ' +
+        'onchange="OB.save(\'' + key + '\',this.value)"/>' +
+    '</div>';
+  }
+
+  function selectField(label, key, options, required) {
+    const val = _formData[key] || '';
+    return '<div class="ob-field">' +
+      '<label class="ob-label">' + label + (required?' <span class="ob-req">*</span>':'') + '</label>' +
+      '<select class="ob-select" onchange="OB.save(\'' + key + '\',this.value)">' +
+        options.map(function(o){ return '<option value="' + o[0] + '" ' + (val===o[0]?'selected':'') + '>' + o[1] + '</option>'; }).join('') +
+      '</select>' +
+    '</div>';
+  }
+
+  function fileField(label, key, accept) {
+    return '<div class="ob-field">' +
+      '<label class="ob-label">' + label + '</label>' +
+      '<div class="ob-file-wrap">' +
+        '<label class="ob-file-label">' +
+          '<input type="file" accept="' + (accept||'*') + '" onchange="OB.saveFile(\'' + key + '\',this)"/>' +
+          '📎 Choose file' +
+        '</label>' +
+        '<div class="ob-file-name" id="fn-' + key + '">' + (_files[key] ? _files[key].name : 'No file chosen') + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── Save field value ──
+  function save(key, val) { _formData[key] = val; }
+
+  function saveFile(key, input) {
+    if (input.files[0]) {
+      _files[key] = input.files[0];
+      const el = document.getElementById('fn-' + key);
+      if (el) el.textContent = input.files[0].name;
+    }
+  }
+
+  // ── Navigation ──
+  function next() {
+    if (!validateStep()) return;
+    if (_currentStep < _steps.length - 1) {
+      _currentStep++;
+      render();
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function validateStep() {
+    const step = _steps[_currentStep];
+    const required = {
+      personal:   ['ghana_card_number','date_of_birth','gender','address'],
+      kin:        ['next_of_kin_name','next_of_kin_phone','next_of_kin_relationship',
+                   'emergency_contact_name','emergency_contact_phone','emergency_contact_relationship'],
+      payment:    [],
+      guarantor1: ['guarantor_1_name','guarantor_1_phone','guarantor_1_address','guarantor_1_relationship'],
+      guarantor2: ['guarantor_2_name','guarantor_2_phone','guarantor_2_address','guarantor_2_relationship'],
+      reference:  ['reference_name','reference_phone','reference_employer','reference_position','reference_relationship'],
+      review:     [],
+    };
+
+    const fields = required[step.id] || [];
+    const missing = fields.filter(function(f){ return !_formData[f] || !_formData[f].trim(); });
+
+    if (missing.length > 0) {
+      // Highlight missing fields
+      missing.forEach(function(key) {
+        const inputs = document.querySelectorAll('input[onchange*="' + key + '"], select[onchange*="' + key + '"]');
+        inputs.forEach(function(el){
+          el.style.borderColor = '#E8000D';
+          el.style.background  = '#fff0f0';
+        });
+      });
+      // Show error message
+      const existing = document.getElementById('ob-validation-msg');
+      if (existing) existing.remove();
+      const msg = document.createElement('div');
+      msg.id = 'ob-validation-msg';
+      msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+        'background:#E8000D;color:white;padding:12px 24px;font-size:13px;font-weight:600;' +
+        'font-family:DM Sans,sans-serif;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
+      msg.textContent = 'Please fill in all required fields before continuing.';
+      document.body.appendChild(msg);
+      setTimeout(function(){ msg.remove(); }, 3000);
+      return false;
+    }
+
+    // Clear any red borders on valid step
+    document.querySelectorAll('.ob-input,.ob-select').forEach(function(el){
+      el.style.borderColor = '';
+      el.style.background  = '';
+    });
+    return true;
+  }
+
+  function prev() {
+    if (_currentStep > 0) {
+      _currentStep--;
+      render();
+      window.scrollTo(0, 0);
+    }
+  }
+
+  // ── Submit ──
+  async function submit() {
+    const btn = document.getElementById('ob-submit-btn');
+    if (btn) { btn.textContent = 'Submitting...'; btn.disabled = true; }
+
+    const fd = new FormData();
+    Object.entries(_formData).forEach(function(e){ if(e[1]) fd.append(e[0], e[1]); });
+    Object.entries(_files).forEach(function(e){ fd.append(e[0], e[1]); });
+
+    try {
+      const res  = await fetch(API, { method:'POST', body:fd });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = Object.values(data).flat().join(' ');
+        alert(msg || 'Something went wrong. Please check your entries and try again.');
+        if (btn) { btn.textContent = 'Submit Form →'; btn.disabled = false; }
+        return;
+      }
+
+      showSuccess();
+    } catch(e) {
+      alert('Network error. Please try again.');
+      if (btn) { btn.textContent = 'Submit Form →'; btn.disabled = false; }
+    }
+  }
+
+  // ── Success screen ──
+  function showSuccess() {
+    const main = document.getElementById('ob-main');
+    main.innerHTML =
+      '<div class="ob-success-banner">' +
+        '<div style="font-size:48px;margin-bottom:16px;">✅</div>' +
+        '<div class="ob-success-title">Form Submitted!</div>' +
+        '<div class="ob-success-sub">Thank you ' + esc(_context.applicant_name||'') + '. Your onboarding information has been received.<br/>HR will review and be in touch with next steps.</div>' +
+      '</div>' +
+      '<div style="background:var(--white);border:1px solid var(--border);padding:24px;text-align:center;">' +
+        '<div style="font-size:13px;color:var(--gray);line-height:1.7;">You may now close this page.<br/>If you have any questions, contact HR at <strong>hr@farhatprintingpress.com</strong></div>' +
+      '</div>';
+    window.scrollTo(0,0);
+  }
+
+  // ── Error screen ──
+  function showError(msg) {
+    const main = document.getElementById('ob-main');
+    main.innerHTML =
+      '<div class="ob-state">' +
+        '<div class="ob-state-icon">⚠️</div>' +
+        '<div class="ob-state-title">Link Unavailable</div>' +
+        '<div class="ob-state-sub">' + esc(msg) + '</div>' +
+        '<div style="font-size:13px;color:var(--gray);margin-top:8px;">Please contact HR for assistance.</div>' +
+      '</div>';
+  }
+
+  function esc(s) {
+    if(!s)return'';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Public API ──
+  window.OB = { next, prev, submit, save, saveFile };
+
+  // Boot
+  init();
+})();
+</script>
+</body>
+</html>
