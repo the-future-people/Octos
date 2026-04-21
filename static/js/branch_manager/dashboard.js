@@ -86,63 +86,103 @@ const Dashboard = (() => {
         }
       }
     } catch { /* silent */ }
+    _checkHandoverBanners();
+  }
+
+// ── Handover / Shadow banners ──────────────────────────────
+  async function _checkHandoverBanners() {
+    try {
+      const res  = await Auth.fetch('/api/v1/accounts/me/');
+      if (!res.ok) return;
+      const user = await res.json();
+
+      // ── Shadow banner — incoming employee ──────────────────
+      if (user.employment_status === 'SHADOW') {
+        const paRes = await Auth.fetch('/api/v1/recruitment/pending-activation/me/');
+        if (paRes.ok) {
+          const pa       = await paRes.json();
+          const daysLeft = pa.days_until_start;
+          const dateStr  = new Date(pa.start_date).toLocaleDateString('en-GB', {
+            day: 'numeric', month: 'short', year: 'numeric',
+          });
+          _injectBanner({
+            id      : 'shadow-banner',
+            color   : '#1a3599',
+            bg      : '#eef3ff',
+            border  : '#b0c4f8',
+            icon    : '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+            message : `You go live in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> — Assumption date: ${dateStr}`,
+            sub     : 'You currently have read-only shadow access. Full access activates on your start date.',
+          });
+        }
+        return; // shadow users don't see outgoing handover banner
+      }
+
+      // ── Outgoing BM banner — being replaced ────────────────
+      const dispRes = await Auth.fetch('/api/v1/recruitment/pending-activation/displacing-me/');
+      if (dispRes.ok) {
+        const pa       = await dispRes.json();
+        const daysLeft = pa.days_until_start;
+        const dateStr  = new Date(pa.start_date).toLocaleDateString('en-GB', {
+          day: 'numeric', month: 'short', year: 'numeric',
+        });
+        const urgency  = daysLeft <= 3 ? '#b91c1c' : daysLeft <= 7 ? '#7a5c00' : '#1a6640';
+        const urgencyBg = daysLeft <= 3 ? '#fff0f0' : daysLeft <= 7 ? '#fffbec' : '#edfaf4';
+        const urgencyBorder = daysLeft <= 3 ? '#fca5a5' : daysLeft <= 7 ? '#f0d878' : '#a8dfc0';
+        _injectBanner({
+          id      : 'handover-banner',
+          color   : urgency,
+          bg      : urgencyBg,
+          border  : urgencyBorder,
+          icon    : '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+          message : `Handover in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> — ${pa.incoming_name} assumes on ${dateStr}`,
+          sub     : 'Ensure open jobs are resolved, sheets are closed, and floats are reconciled before handover.',
+        });
+      }
+    } catch { /* silent — banners are non-critical */ }
+  }
+
+  function _injectBanner({ id, color, bg, border, icon, message, sub }) {
+    // Remove existing banner of same id
+    document.getElementById(id)?.remove();
+
+    const banner = document.createElement('div');
+    banner.id    = id;
+    banner.style.cssText = `
+      display:flex;align-items:flex-start;gap:12px;
+      padding:12px 18px;margin-bottom:12px;
+      background:${bg};border:1px solid ${border};
+      border-radius:var(--radius-sm);
+      animation:fadeIn 0.3s ease;`;
+
+    banner.innerHTML = `
+      <div style="flex-shrink:0;width:32px;height:32px;border-radius:8px;
+        background:${bg};border:1px solid ${border};
+        display:flex;align-items:center;justify-content:center;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+          viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2">
+          ${icon}
+        </svg>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:600;color:${color};margin-bottom:3px;">
+          ${message}
+        </div>
+        <div style="font-size:11px;color:${color};opacity:0.8;line-height:1.5;">
+          ${sub}
+        </div>
+      </div>
+      <button onclick="document.getElementById('${id}').remove()"
+        style="flex-shrink:0;background:none;border:none;cursor:pointer;
+          color:${color};opacity:0.5;font-size:16px;padding:0;line-height:1;">×</button>`;
+
+    // Inject at top of main content area, below the meta strip
+    const main = document.getElementById('db-main') || document.querySelector('.db-main') || document.body;
+    main.insertBefore(banner, main.firstChild);
   }
 
   // ── Stats ──────────────────────────────────────────────────
  async function loadStats() {
-    try {
-      // Scope everything to today's open sheet
-      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
-      if (!sheetRes.ok) {
-        _setStats(0, 0, 0, 0, 0);
-        return;
-      }
-      const sheet = await sheetRes.json();
-
-      if (sheet.status !== 'OPEN') {
-        _setStats(0, 0, 0, 0, 0);
-        _set('meta-load', '0%');
-        return;
-      }
-
-      const res  = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-
-      _setStats(data.total, data.in_progress, data.complete, data.pending, data.routed);
-
-      // Sidebar badge — today's total only
-      const jobsBadge = document.getElementById('sidebar-badge-jobs');
-      if (jobsBadge) {
-        jobsBadge.textContent   = data.total;
-        jobsBadge.style.display = data.total > 0 ? 'flex' : 'none';
-      }
-
-      // Branch load
-      const load = data.total > 0
-        ? Math.round((data.in_progress / data.total) * 100) + '%'
-        : '0%';
-      _set('meta-load', load);
-
-    } catch { /* silent */ }
-
-    // Unread messages — not sheet-scoped, always live
-    try {
-      const res    = await Auth.fetch('/api/v1/communications/');
-      if (!res.ok) throw new Error();
-      const data   = await res.json();
-      const convos = Array.isArray(data) ? data : (data.results || []);
-      const unread = convos.reduce((sum, c) => sum + (c.unread_count || 0), 0);
-
-      _set('stat-unread', unread);
-
-      const inboxBadge = document.getElementById('sidebar-badge-inbox');
-      if (inboxBadge) {
-        inboxBadge.textContent   = unread;
-        inboxBadge.style.display = unread > 0 ? 'flex' : 'none';
-      }
-    } catch { /* silent */ }
-  }
 
   function _setStats(total, inProgress, complete, pending, routed) {
     _set('stat-total-jobs',      total);
