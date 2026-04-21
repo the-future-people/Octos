@@ -98,7 +98,7 @@ const Dashboard = (() => {
 
       // ── Shadow banner — incoming employee ──────────────────
       if (user.employment_status === 'SHADOW') {
-        const paRes = await Auth.fetch('/api/v1/recruitment/pending-activation/me/');
+        const paRes = await Auth.fetch('/api/v1/accounts/pending-activation/me/');
         if (paRes.ok) {
           const pa       = await paRes.json();
           const daysLeft = pa.days_until_start;
@@ -119,7 +119,7 @@ const Dashboard = (() => {
       }
 
       // ── Outgoing BM banner — being replaced ────────────────
-      const dispRes = await Auth.fetch('/api/v1/recruitment/pending-activation/displacing-me/');
+      const dispRes = await Auth.fetch('/api/v1/accounts/pending-activation/displacing-me/');
       if (dispRes.ok) {
         const pa       = await dispRes.json();
         const daysLeft = pa.days_until_start;
@@ -183,6 +183,7 @@ const Dashboard = (() => {
 
   // ── Stats ──────────────────────────────────────────────────
  async function loadStats() {
+  }
 
   function _setStats(total, inProgress, complete, pending, routed) {
     _set('stat-total-jobs',      total);
@@ -9157,4 +9158,3 @@ const Notifications = (() => {
   return { toggle, close, markRead, markAllRead, loadCount, startPolling };
 
 })();
-
