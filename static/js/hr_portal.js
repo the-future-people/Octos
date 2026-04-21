@@ -23,12 +23,17 @@ const HR = (function () {
 
   function _stageIndex(status) {
     const map = {
-      RECEIVED:            0,
-      SCREENING:           1,
-      INTERVIEW_SCHEDULED: 2,
-      INTERVIEW_DONE:      2,
-      FINAL_REVIEW:        3,
-      HIRED:               4,
+      RECEIVED:             0,
+      SCREENING:            1,
+      INTERVIEW_SCHEDULED:  2,
+      INTERVIEW_DONE:       2,
+      FINAL_REVIEW:         3,
+      HIRED:                4,
+      AWAITING_ACCEPTANCE:  4,
+      ONBOARDING:           4,
+      INFORMATION_SUBMITTED:4,
+      INFORMATION_VERIFIED: 4,
+      OFFER_ISSUED:         4,
     };
     return map[status] !== undefined ? map[status] : 0;
   }
@@ -672,7 +677,7 @@ async function _loadOverview() {
 
   function _appCard(a) {
     const currentIdx = _stageIndex(a.status);
-    const isTerminal = ['HIRED','REJECTED','WITHDRAWN','DECLINED'].includes(a.status);
+    const isTerminal = ['REJECTED','WITHDRAWN','DECLINED'].includes(a.status);
     const scMap = {
       RECEIVED:            { bg:'#eef3ff', color:'#1a3599' },
       SCREENING:           { bg:'#fffbec', color:'#7a5c00' },
@@ -771,7 +776,7 @@ function _renderCandidateView(a, returnPane) {
     if (!main) return;
 
     const currentIdx = _stageIndex(a.status);
-    const isTerminal = ['HIRED','REJECTED','WITHDRAWN','DECLINED'].includes(a.status);
+    const isTerminal = ['REJECTED','WITHDRAWN','DECLINED'].includes(a.status);
     const scores     = a.stage_scores || [];
     const screening  = scores.find(function (s) { return s.stage === 'SCREENING'; });
     const interview  = scores.find(function (s) { return s.stage === 'INTERVIEW'; });
@@ -930,6 +935,51 @@ function _renderCandidateView(a, returnPane) {
         '<button class="btn-danger" onclick="HR.recordAcceptance(false)">Record Decline</button>'
       );
     }
+    if (s === 'ONBOARDING') {
+      const token   = a.onboarding_token;
+      const baseUrl = window.location.origin;
+      const formLink = token ? baseUrl + '/onboarding/' + token + '/' : null;
+      const tokenExpiry = a.onboarding_token_expires_at ? _fmtDate(a.onboarding_token_expires_at) : '—';
+      return box('Onboarding — Form Link',
+        '<div style="display:flex;flex-direction:column;gap:16px;">' +
+          '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;' +
+            'background:#edfaf4;border:1px solid #a8dfc0;border-radius:var(--radius-sm);">' +
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" ' +
+              'fill="none" stroke="#1a6640" stroke-width="2">' +
+              '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>' +
+            '</svg>' +
+            '<div>' +
+              '<div style="font-size:12px;font-weight:700;color:#1a6640;">Candidate has accepted the offer</div>' +
+              '<div style="font-size:11px;color:#1a6640;opacity:0.8;">Onboarding form has been generated and is ready to share</div>' +
+            '</div>' +
+          '</div>' +
+          (formLink
+            ? '<div style="display:flex;flex-direction:column;gap:6px;">' +
+                '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);">Onboarding Form Link</div>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                  '<div style="flex:1;padding:10px 12px;background:var(--bg);border:1px solid var(--border);' +
+                    'border-radius:var(--radius-sm);font-size:11px;color:var(--text-2);' +
+                    'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:\'JetBrains Mono\',monospace;">' +
+                    _esc(formLink) +
+                  '</div>' +
+                  '<button onclick="HR.copyOnboardingLink(\'' + _esc(formLink) + '\')" ' +
+                    'class="btn-secondary" style="font-size:11px;padding:8px 14px;white-space:nowrap;flex-shrink:0;">' +
+                    'Copy Link' +
+                  '</button>' +
+                '</div>' +
+                '<div style="font-size:11px;color:var(--text-3);">Link expires: <strong>' + tokenExpiry + '</strong> · Share via candidate\'s preferred channel</div>' +
+              '</div>'
+            : '<div style="padding:12px 14px;background:#fff0f0;border:1px solid #fca5a5;border-radius:var(--radius-sm);font-size:12px;color:#b91c1c;">No onboarding token found.</div>') +
+          '<div style="padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">' +
+            '<div style="font-size:11px;color:var(--text-2);line-height:1.5;">' +
+              '<strong>Preferred channel:</strong> ' + _esc(a.preferred_channel||'—') + '<br/>' +
+              'Send the link above to the candidate via their preferred channel.' +
+            '</div>' +
+          '</div>' +
+        '</div>',
+        ''
+      );
+    }
     if (s === 'INFORMATION_SUBMITTED') {
       return box('Onboarding — Information Submitted',
         p('The candidate has submitted their onboarding form. Verify all information before issuing the offer letter.'),
@@ -952,6 +1002,14 @@ function _renderCandidateView(a, returnPane) {
       return box('Rejected', '<p style="font-size:13px;color:var(--red-text);">Application was rejected.' + (a.rejection_reason ? ' Reason: ' + _esc(a.rejection_reason) : '') + '</p>', '');
     }
     return box(s.replace(/_/g,' '), p('No actions available at this stage.'), '');
+  }
+
+  function copyOnboardingLink(link) {
+    navigator.clipboard.writeText(link).then(function() {
+      _toast('Onboarding link copied to clipboard.', 'success');
+    }).catch(function() {
+      _toast('Could not copy — please copy manually.', 'error');
+    });
   }
 
   function _scoreDisplay(score) {
@@ -1618,6 +1676,7 @@ function _renderCandidateView(a, returnPane) {
     submitVacancy,
     closeGenModal,
     closeDetail,
+    copyOnboardingLink,
   };
 
 })();
