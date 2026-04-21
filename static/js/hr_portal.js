@@ -1460,13 +1460,97 @@ function _renderCandidateView(a, returnPane) {
     } catch(e) { _toast('Network error.','error'); }
   }
 
-  function verifyInfo() {
+  async function verifyInfo() {
+    if (!_currentAppId) return;
+
+    // Fetch onboarding record
+    let rec = null;
+    try {
+      const res = await Auth.fetch('/api/v1/recruitment/applications/' + _currentAppId + '/onboarding/');
+      if (res.ok) rec = await res.json();
+    } catch(e) {}
+
+    function row(label, val) {
+      if (!val) return '';
+      return '<div style="display:flex;border-bottom:1px solid var(--border);">' +
+        '<div style="width:160px;flex-shrink:0;padding:9px 12px;font-size:11px;font-weight:700;' +
+          'text-transform:uppercase;letter-spacing:0.4px;color:var(--text-3);background:var(--bg);">' + label + '</div>' +
+        '<div style="flex:1;padding:9px 12px;font-size:13px;color:var(--text);font-weight:500;">' + _esc(String(val)) + '</div>' +
+      '</div>';
+    }
+
+    function section(title, rows) {
+      const content = rows.join('');
+      if (!content) return '';
+      return '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;' +
+          'color:var(--text-3);margin-bottom:6px;">' + title + '</div>' +
+        '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">' +
+          content +
+        '</div>' +
+      '</div>';
+    }
+
+    const infoHtml = rec ? (
+      section('Personal Information', [
+        row('Ghana Card',   rec.ghana_card_number),
+        row('SSNIT',        rec.ssnit_number),
+        row('Date of Birth',rec.date_of_birth),
+        row('Gender',       rec.gender === 'M' ? 'Male' : rec.gender === 'F' ? 'Female' : rec.gender),
+        row('Address',      rec.address),
+      ]) +
+      section('Next of Kin', [
+        row('Name',         rec.next_of_kin_name),
+        row('Phone',        rec.next_of_kin_phone),
+        row('Relationship', rec.next_of_kin_relationship),
+      ]) +
+      section('Emergency Contact', [
+        row('Name',         rec.emergency_contact_name),
+        row('Phone',        rec.emergency_contact_phone),
+        row('Relationship', rec.emergency_contact_relationship),
+      ]) +
+      section('Payment Details', [
+        row('Bank',         rec.bank_name),
+        row('Account No.',  rec.bank_account_number),
+        row('Bank Branch',  rec.bank_branch),
+        row('Mobile Money', rec.mobile_money_number),
+      ]) +
+      (rec.guarantor_1_name ? section('Guarantor', [
+        row('Name',         rec.guarantor_1_name),
+        row('Phone',        rec.guarantor_1_phone),
+        row('Address',      rec.guarantor_1_address),
+        row('Employer',     rec.guarantor_1_employer),
+        row('Relationship', rec.guarantor_1_relationship),
+        row('ID Number',    rec.guarantor_1_id_number),
+      ]) : '') +
+      (rec.reference_name ? section('Reference', [
+        row('Name',         rec.reference_name),
+        row('Phone',        rec.reference_phone),
+        row('Employer',     rec.reference_employer),
+        row('Position',     rec.reference_position),
+        row('Relationship', rec.reference_relationship),
+      ]) : '') +
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;' +
+          'color:var(--text-3);margin-bottom:6px;">Verification Notes (Optional)</div>' +
+        '<textarea class="form-textarea" id="verify-notes" placeholder="Any discrepancies or notes..." ' +
+          'style="min-height:72px;"></textarea>' +
+      '</div>' +
+      '<button class="btn-green" style="width:100%;" onclick="HR.submitVerify()">Confirm Verified →</button>'
+    ) : (
+      '<div style="padding:20px;color:var(--text-3);font-size:13px;">Could not load onboarding data.</div>' +
+      '<textarea class="form-textarea" id="verify-notes" placeholder="Any notes..."></textarea>' +
+      '<button class="btn-green" style="width:100%;margin-top:12px;" onclick="HR.submitVerify()">Confirm Verified →</button>'
+    );
+
     document.getElementById('gen-modal-title').textContent = 'Verify Onboarding Information';
-    document.getElementById('gen-modal-sub').textContent   = 'Confirm all submitted information is accurate';
-    document.getElementById('gen-modal-body').innerHTML =
-      '<div class="form-group"><label class="form-label">Verification Notes (optional)</label>' +
-        '<textarea class="form-textarea" id="verify-notes" placeholder="Any notes..."></textarea></div>' +
-      '<button class="btn-green" style="width:100%;" onclick="HR.submitVerify()">Confirm Verified</button>';
+    document.getElementById('gen-modal-sub').textContent   = 'Review all submitted information carefully before confirming';
+    document.getElementById('gen-modal-body').innerHTML    = infoHtml;
+
+    // Make modal wider and taller for the data
+    const box = document.querySelector('#gen-modal .modal-box');
+    if (box) { box.style.maxWidth = '640px'; box.style.maxHeight = '88vh'; box.style.overflowY = 'auto'; }
+
     document.getElementById('gen-modal').classList.add('open');
   }
 
@@ -1611,7 +1695,11 @@ function _renderCandidateView(a, returnPane) {
     } catch(e) { _toast('Network error.','error'); }
   }
 
-  function closeGenModal() { document.getElementById('gen-modal').classList.remove('open'); }
+  function closeGenModal() {
+    document.getElementById('gen-modal').classList.remove('open');
+    const box = document.querySelector('#gen-modal .modal-box');
+    if (box) { box.style.maxWidth = ''; box.style.maxHeight = ''; box.style.overflowY = ''; }
+  }
   function closeDetail() {}
 
   async function _loadAppsBadge() {

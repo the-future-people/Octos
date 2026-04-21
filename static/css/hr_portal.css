@@ -814,7 +814,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 }
 .modal-close:hover { background: var(--border); }
 
-.modal-body { padding: 20px 24px 24px; flex: 1; overflow: hidden; }
+.modal-body { padding: 20px 24px 24px; flex: 1; overflow-y: auto; }
 
 /* Score question row */
 .score-q {
