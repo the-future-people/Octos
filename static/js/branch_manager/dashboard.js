@@ -61,6 +61,11 @@ const Dashboard = (() => {
 
       _set('db-user-name',     fullName);
       _set('db-user-initials', initials);
+      if (user.employment_status === 'SHADOW') {
+        document.querySelectorAll('.hero-btn, .btn-dark, #late-job-btn').forEach(el => {
+          el.style.display = 'none';
+        });
+      }
 
    if (user.branch_detail) {
         const b = user.branch_detail;
