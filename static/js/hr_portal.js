@@ -1010,24 +1010,136 @@ function _renderCandidateView(a, returnPane) {
       ? '/api/v1/recruitment/applications/' + _currentAppId + '/cv/?token=' + _token
       : null;
 
-    const cvPanel =
-      '<div style="flex:1;min-width:0;display:flex;flex-direction:column;height:100%;">' +
-        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:10px;">Candidate CV</div>' +
-        (cvUrl
-          ? '<iframe src="' + cvSrc + '" ' +
-              'style="width:100%;height:100%;border:1px solid var(--border);' +
-              'border-radius:var(--radius-sm);background:var(--bg);display:block;" ' +
-              'frameborder="0" ' +
-              'title="Candidate CV">' +
-            '</iframe>'
-          : '<div style="height:540px;border:1px solid var(--border);border-radius:var(--radius-sm);' +
-              'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-              'gap:8px;background:var(--bg);color:var(--text-3);">' +
-              '<div style="font-size:32px;">📄</div>' +
-              '<div style="font-size:13px;">No CV uploaded</div>' +
-              '<div style="font-size:11px;">Proceed with scoring based on available information</div>' +
-            '</div>') +
-      '</div>';
+    // Left panel — CV for screening, interview context card for interview
+    const cvPanel = stage === 'SCREENING'
+      ? // ── CV viewer ──
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;">' +
+          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:10px;">Candidate CV</div>' +
+          (cvUrl
+            ? '<iframe src="' + cvSrc + '" ' +
+                'style="width:100%;height:100%;border:1px solid var(--border);' +
+                'border-radius:var(--radius-sm);background:var(--bg);display:block;" ' +
+                'frameborder="0" title="Candidate CV"></iframe>'
+            : '<div style="height:100%;border:1px solid var(--border);border-radius:var(--radius-sm);' +
+                'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+                'gap:8px;background:var(--bg);color:var(--text-3);">' +
+                '<div style="font-size:32px;">📄</div>' +
+                '<div style="font-size:13px;">No CV uploaded</div>' +
+              '</div>') +
+        '</div>'
+
+      : // ── Interview context card ──
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;">' +
+          '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:10px;">Interview Session</div>' +
+          '<div style="flex:1;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;' +
+            'display:flex;flex-direction:column;">' +
+
+            // Illustration
+            '<div style="flex:1;display:flex;align-items:center;justify-content:center;' +
+              'background:linear-gradient(135deg,#eef3ff 0%,#f5f0ff 100%);padding:40px;">' +
+              '<svg viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;">' +
+
+                // Table
+                '<rect x="60" y="160" width="280" height="12" rx="6" fill="#c8c5bf"/>' +
+                '<rect x="90" y="172" width="12" height="60" rx="4" fill="#c8c5bf"/>' +
+                '<rect x="298" y="172" width="12" height="60" rx="4" fill="#c8c5bf"/>' +
+
+                // Interviewer (left) — body
+                '<ellipse cx="120" cy="148" rx="22" ry="28" fill="#1a3599" opacity="0.15"/>' +
+                '<circle cx="120" cy="108" r="22" fill="#1a3599" opacity="0.2"/>' +
+                // Interviewer head
+                '<circle cx="120" cy="100" r="18" fill="#e8c8a0"/>' +
+                '<ellipse cx="120" cy="96" rx="10" ry="8" fill="#8B6914"/>' +
+                // Interviewer body
+                '<path d="M90 148 Q120 130 150 148" fill="#1a3599" opacity="0.7"/>' +
+                '<rect x="95" y="148" width="50" height="40" rx="8" fill="#1a3599" opacity="0.7"/>' +
+                // Interviewer arm — writing
+                '<path d="M140 165 Q160 158 168 155" stroke="#e8c8a0" stroke-width="6" stroke-linecap="round" fill="none"/>' +
+                // Notepad
+                '<rect x="162" y="148" width="30" height="22" rx="3" fill="white" stroke="#e8e5df" stroke-width="1"/>' +
+                '<line x1="166" y1="154" x2="188" y2="154" stroke="#e8e5df" stroke-width="1"/>' +
+                '<line x1="166" y1="158" x2="188" y2="158" stroke="#e8e5df" stroke-width="1"/>' +
+                '<line x1="166" y1="162" x2="182" y2="162" stroke="#e8e5df" stroke-width="1"/>' +
+                // Pen
+                '<line x1="188" y1="148" x2="196" y2="140" stroke="#1a3599" stroke-width="2.5" stroke-linecap="round"/>' +
+
+                // Candidate (right) — body
+                '<circle cx="280" cy="100" r="18" fill="#d4a870"/>' +
+                '<ellipse cx="280" cy="95" rx="9" ry="7" fill="#4a2800"/>' +
+                '<path d="M250 148 Q280 130 310 148" fill="#22c98a" opacity="0.5"/>' +
+                '<rect x="255" y="148" width="50" height="40" rx="8" fill="#22c98a" opacity="0.5"/>' +
+                // Candidate arm — on table
+                '<path d="M260 165 Q240 162 230 160" stroke="#d4a870" stroke-width="6" stroke-linecap="round" fill="none"/>' +
+                '<path d="M300 165 Q320 162 330 160" stroke="#d4a870" stroke-width="6" stroke-linecap="round" fill="none"/>' +
+
+                // Speech bubble from candidate
+                '<ellipse cx="310" cy="72" rx="42" ry="22" fill="white" stroke="#e8e5df" stroke-width="1.5"/>' +
+                '<path d="M288 90 L282 100 L296 88" fill="white" stroke="#e8e5df" stroke-width="1.5" stroke-linejoin="round"/>' +
+                '<circle cx="298" cy="72" r="3" fill="#e8e5df"/>' +
+                '<circle cx="310" cy="72" r="3" fill="#c8c5bf"/>' +
+                '<circle cx="322" cy="72" r="3" fill="#e8e5df"/>' +
+
+                // Subtle background circles
+                '<circle cx="50" cy="50" r="30" fill="#1a3599" opacity="0.04"/>' +
+                '<circle cx="360" cy="220" r="40" fill="#22c98a" opacity="0.04"/>' +
+
+              '</svg>' +
+            '</div>' +
+
+            // Candidate info strip
+            '<div style="border-top:1px solid var(--border);padding:20px 24px;background:var(--panel);">' +
+              '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">' +
+                '<div class="user-avatar" style="width:40px;height:40px;font-size:14px;flex-shrink:0;background:#1a3599;">' +
+                  ((_currentApp && _currentApp.full_name) ? _currentApp.full_name.split(' ').map(function(n){return n[0]||'';}).join('').slice(0,2).toUpperCase() : '?') +
+                '</div>' +
+                '<div>' +
+                  '<div style="font-size:15px;font-weight:700;color:var(--text);">' + _esc((_currentApp && _currentApp.full_name) || '—') + '</div>' +
+                  '<div style="font-size:12px;color:var(--text-3);">' + _esc((_currentApp && _currentApp.vacancy_title) || 'General Application') + ((_currentApp && _currentApp.branch_name) ? ' · ' + _esc(_currentApp.branch_name) : '') + '</div>' +
+                '</div>' +
+              '</div>' +
+
+              // Interview details
+              (function(){
+                const scores = (_currentApp && _currentApp.stage_scores) || [];
+                const interviewScore = scores.find(function(s){ return s.stage === 'INTERVIEW'; });
+                const scheduledAt = interviewScore && interviewScore.interview_scheduled_at;
+                const location   = interviewScore && interviewScore.interview_location;
+                return '<div style="display:flex;flex-direction:column;gap:8px;">' +
+                  (scheduledAt
+                    ? '<div style="display:flex;align-items:center;gap:10px;">' +
+                        '<div style="width:28px;height:28px;border-radius:6px;background:#eef3ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                          '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1a3599" stroke-width="2">' +
+                            '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>' +
+                          '</svg>' +
+                        '</div>' +
+                        '<div>' +
+                          '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);">Scheduled</div>' +
+                          '<div style="font-size:12px;font-weight:600;color:var(--text);">' + _fmtDate(scheduledAt) + '</div>' +
+                        '</div>' +
+                      '</div>'
+                    : '') +
+                  (location
+                    ? '<div style="display:flex;align-items:center;gap:10px;">' +
+                        '<div style="width:28px;height:28px;border-radius:6px;background:#edf9f4;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                          '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1a6640" stroke-width="2">' +
+                            '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>' +
+                          '</svg>' +
+                        '</div>' +
+                        '<div>' +
+                          '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);">Location</div>' +
+                          '<div style="font-size:12px;font-weight:600;color:var(--text);">' + _esc(location) + '</div>' +
+                        '</div>' +
+                      '</div>'
+                    : '') +
+                  '<div style="margin-top:4px;padding:8px 12px;background:#fffbec;border:1px solid #f0d878;border-radius:6px;font-size:11px;color:#7a5c00;line-height:1.5;">' +
+                    '🎯 Score based on verbal responses only — not the CV.' +
+                  '</div>' +
+                '</div>';
+              })() +
+
+            '</div>' +
+          '</div>' +
+        '</div>';
 
     const scorePanel =
       '<div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;height:100%;overflow-y:auto;padding-right:4px;">' +
