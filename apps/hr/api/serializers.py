@@ -414,3 +414,101 @@ class PayrollRecordSerializer(serializers.ModelSerializer):
             'paid_at', 'approved_by', 'notes', 'created_at',
         ]
         read_only_fields = ['net_pay', 'created_at']
+
+
+class EmploymentDetailsSerializer(serializers.Serializer):
+    """
+    Validates the Employment Details section of the verify-info endpoint.
+    Submitted alongside VerifyInfoSerializer when HR confirms onboarding.
+    """
+    from apps.accounts.models import Role
+    from apps.organization.models import Branch, Region
+
+    role        = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(),
+    )
+    designation = serializers.ChoiceField(
+        choices=['MAIN', 'DEPUTY', 'MEMBER'],
+        default='MAIN',
+    )
+    branch = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.organization.models', fromlist=['Branch']
+        ).Branch.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    region = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.organization.models', fromlist=['Region']
+        ).Region.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    start_date  = serializers.DateField()
+    shadow_days = serializers.IntegerField(default=7, min_value=0, max_value=90)
+
+    # Conflict resolution — only required when a conflict exists
+    conflict_user = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.accounts.models', fromlist=['CustomUser']
+        ).CustomUser.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    conflict_resolution = serializers.ChoiceField(
+        choices=['DEACTIVATE', 'REASSIGN', 'ROLE_CHANGE'],
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+    conflict_new_branch = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.organization.models', fromlist=['Branch']
+        ).Branch.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    conflict_new_role = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.accounts.models', fromlist=['Role']
+        ).Role.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    conflict_new_designation = serializers.ChoiceField(
+        choices=['MAIN', 'DEPUTY', 'MEMBER'],
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
+    def validate(self, data):
+        role        = data.get('role')
+        designation = data.get('designation', 'MAIN')
+        branch      = data.get('branch')
+        region      = data.get('region')
+
+        # Scope validation — ensure the right unit FK is provided
+        if role:
+            if role.scope == 'BRANCH' and not branch:
+                raise serializers.ValidationError(
+                    {'branch': 'Branch is required for this role.'}
+                )
+            if role.scope == 'REGION' and not region:
+                raise serializers.ValidationError(
+                    {'region': 'Region is required for this role.'}
+                )
+
+        # Conflict resolution completeness
+        resolution = data.get('conflict_resolution')
+        if resolution == 'REASSIGN' and not data.get('conflict_new_branch'):
+            raise serializers.ValidationError(
+                {'conflict_new_branch': 'New branch is required for REASSIGN.'}
+            )
+        if resolution == 'ROLE_CHANGE' and not data.get('conflict_new_role'):
+            raise serializers.ValidationError(
+                {'conflict_new_role': 'New role is required for ROLE_CHANGE.'}
+            )
+
+        return data
