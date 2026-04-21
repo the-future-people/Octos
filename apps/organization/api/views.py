@@ -16,6 +16,7 @@ class RegionListView(generics.ListAPIView):
     queryset = Region.objects.select_related('belt').all()
     serializer_class = RegionSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
     filterset_fields = ['belt']
 
     def get_queryset(self):
@@ -30,6 +31,7 @@ class BranchListView(generics.ListAPIView):
     queryset = Branch.objects.select_related('region', 'region__belt').all()
     serializer_class = BranchSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'code']
 
@@ -55,6 +57,7 @@ class BranchDropdownView(generics.ListAPIView):
     queryset = Branch.objects.filter(is_active=True).all()
     serializer_class = BranchListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
 
 class RegionalDashboardView(APIView):

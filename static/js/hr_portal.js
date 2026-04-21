@@ -1463,11 +1463,19 @@ function _renderCandidateView(a, returnPane) {
   async function verifyInfo() {
     if (!_currentAppId) return;
 
-    // Fetch onboarding record
-    let rec = null;
+    // ── Fetch onboarding record + supporting data in parallel ──
+    let rec = null, branches = [], roles = [], regions = [];
     try {
-      const res = await Auth.fetch('/api/v1/recruitment/applications/' + _currentAppId + '/onboarding/');
-      if (res.ok) rec = await res.json();
+      const [recRes, branchRes, roleRes, regionRes] = await Promise.all([
+        Auth.fetch('/api/v1/recruitment/applications/' + _currentAppId + '/onboarding/'),
+        Auth.fetch('/api/v1/organization/branches/dropdown/'),
+        Auth.fetch('/api/v1/accounts/roles/dropdown/'),
+        Auth.fetch('/api/v1/organization/regions/'),
+      ]);
+      if (recRes.ok)    rec      = await recRes.json();
+      if (branchRes.ok) branches = await branchRes.json();
+      if (roleRes.ok)   roles    = await roleRes.json();
+      if (regionRes.ok) regions  = await regionRes.json();
     } catch(e) {}
 
     function row(label, val) {
@@ -1490,6 +1498,120 @@ function _renderCandidateView(a, returnPane) {
         '</div>' +
       '</div>';
     }
+
+    const branchOptions = branches.map(function(b) {
+      return '<option value="' + b.id + '">' + _esc(b.name) + '</option>';
+    }).join('');
+
+    const roleOptions = roles.map(function(r) {
+      return '<option value="' + r.id + '" data-constrained="' + (r.is_constrained ? '1' : '0') + '" data-scope="' + _esc(r.scope||'BRANCH') + '">' + _esc(r.display_name) + '</option>';
+    }).join('');
+
+    const regionOptions = regions.map(function(r) {
+      return '<option value="' + r.id + '">' + _esc(r.name) + '</option>';
+    }).join('');
+
+    const employmentSection =
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;' +
+          'color:var(--text-3);margin-bottom:6px;">Employment Details</div>' +
+        '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;padding:16px;display:flex;flex-direction:column;gap:12px;">' +
+
+          // Role + Designation
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+            '<div class="form-group" style="margin:0;">' +
+              '<label class="form-label">Role</label>' +
+              '<select class="form-select" id="emp-role" onchange="HR._onRoleChange()">' +
+                '<option value="">— Select role —</option>' + roleOptions +
+              '</select>' +
+            '</div>' +
+            '<div class="form-group" style="margin:0;">' +
+              '<label class="form-label">Designation</label>' +
+              '<select class="form-select" id="emp-designation" onchange="HR._onRoleChange()">' +
+                '<option value="MAIN">Main</option>' +
+                '<option value="DEPUTY">Deputy</option>' +
+                '<option value="MEMBER">Member</option>' +
+              '</select>' +
+            '</div>' +
+          '</div>' +
+
+          // Branch (shown for BRANCH scope roles)
+          '<div id="emp-branch-wrap" class="form-group" style="margin:0;">' +
+            '<label class="form-label">Branch</label>' +
+            '<select class="form-select" id="emp-branch" onchange="HR._onRoleChange()">' +
+              '<option value="">— Select branch —</option>' + branchOptions +
+            '</select>' +
+          '</div>' +
+
+          // Start date + Shadow days
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+            '<div class="form-group" style="margin:0;">' +
+              '<label class="form-label">Start Date</label>' +
+              '<input class="form-input" type="date" id="emp-start"/>' +
+            '</div>' +
+            '<div class="form-group" style="margin:0;">' +
+              '<label class="form-label">Shadow Period (days)</label>' +
+              '<input class="form-input" type="number" id="emp-shadow" value="7" min="0" max="90"/>' +
+            '</div>' +
+          '</div>' +
+
+          // Generated credentials (shown after role+branch selected)
+          '<div id="emp-credentials" style="display:none;padding:12px;background:#eef3ff;' +
+            'border:1px solid #b0c4f8;border-radius:var(--radius-sm);">' +
+            '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;' +
+              'color:#1a3599;margin-bottom:8px;">Generated Credentials</div>' +
+            '<div style="display:flex;flex-direction:column;gap:4px;">' +
+              '<div style="font-size:12px;color:#1a3599;">Email: <strong id="emp-cred-email">—</strong></div>' +
+              '<div style="font-size:12px;color:#1a3599;">Username: <strong id="emp-cred-username">—</strong></div>' +
+            '</div>' +
+            '<div style="margin-top:6px;font-size:11px;color:#1a3599;opacity:0.8;">A temporary password will be generated and shown once on confirmation.</div>' +
+          '</div>' +
+
+          // Conflict banner (hidden until conflict detected)
+          '<div id="emp-conflict-banner" style="display:none;padding:12px;background:#fff0f0;' +
+            'border:1px solid #fca5a5;border-radius:var(--radius-sm);">' +
+            '<div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:8px;" id="emp-conflict-msg"></div>' +
+            '<div class="form-group" style="margin:0;">' +
+              '<label class="form-label" style="color:#b91c1c;">Action for displaced staff</label>' +
+              '<select class="form-select" id="emp-conflict-resolution" onchange="HR._onResolutionChange()">' +
+                '<option value="">— Choose action —</option>' +
+                '<option value="DEACTIVATE">Deactivate their account</option>' +
+                '<option value="REASSIGN">Reassign to another branch</option>' +
+                '<option value="ROLE_CHANGE">Change their role</option>' +
+              '</select>' +
+            '</div>' +
+            '<div id="emp-conflict-reassign" style="display:none;margin-top:10px;" class="form-group">' +
+              '<label class="form-label">New Branch</label>' +
+              '<select class="form-select" id="emp-conflict-new-branch">' +
+                '<option value="">— Select branch —</option>' + branchOptions +
+              '</select>' +
+            '</div>' +
+            '<div id="emp-conflict-rolechange" style="display:none;margin-top:10px;display:flex;flex-direction:column;gap:10px;">' +
+              '<div class="form-group" style="margin:0;">' +
+                '<label class="form-label">New Role</label>' +
+                '<select class="form-select" id="emp-conflict-new-role" onchange="HR._onConflictRoleChange()">' +
+                  '<option value="">— Select role —</option>' + roleOptions +
+                '</select>' +
+              '</div>' +
+              '<div id="emp-conflict-region-wrap" style="display:none;" class="form-group">' +
+                '<label class="form-label">New Region</label>' +
+                '<select class="form-select" id="emp-conflict-new-region">' +
+                  '<option value="">— Select region —</option>' + regionOptions +
+                '</select>' +
+              '</div>' +
+              '<div class="form-group" style="margin:0;">' +
+                '<label class="form-label">New Designation</label>' +
+                '<select class="form-select" id="emp-conflict-new-designation">' +
+                  '<option value="MAIN">Main</option>' +
+                  '<option value="DEPUTY">Deputy</option>' +
+                  '<option value="MEMBER">Member</option>' +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+        '</div>' +
+      '</div>';
 
     const infoHtml = rec ? (
       section('Personal Information', [
@@ -1530,6 +1652,7 @@ function _renderCandidateView(a, returnPane) {
         row('Position',     rec.reference_position),
         row('Relationship', rec.reference_relationship),
       ]) : '') +
+      employmentSection +
       '<div style="margin-bottom:16px;">' +
         '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;' +
           'color:var(--text-3);margin-bottom:6px;">Verification Notes (Optional)</div>' +
@@ -1539,6 +1662,7 @@ function _renderCandidateView(a, returnPane) {
       '<button class="btn-green" style="width:100%;" onclick="HR.submitVerify()">Confirm Verified →</button>'
     ) : (
       '<div style="padding:20px;color:var(--text-3);font-size:13px;">Could not load onboarding data.</div>' +
+      employmentSection +
       '<textarea class="form-textarea" id="verify-notes" placeholder="Any notes..."></textarea>' +
       '<button class="btn-green" style="width:100%;margin-top:12px;" onclick="HR.submitVerify()">Confirm Verified →</button>'
     );
@@ -1547,24 +1671,238 @@ function _renderCandidateView(a, returnPane) {
     document.getElementById('gen-modal-sub').textContent   = 'Review all submitted information carefully before confirming';
     document.getElementById('gen-modal-body').innerHTML    = infoHtml;
 
-    // Make modal wider and taller for the data
     const box = document.querySelector('#gen-modal .modal-box');
-    if (box) { box.style.maxWidth = '640px'; box.style.maxHeight = '88vh'; box.style.overflowY = 'auto'; }
+    if (box) { box.style.maxWidth = '680px'; box.style.maxHeight = '92vh'; box.style.overflowY = 'auto'; }
 
     document.getElementById('gen-modal').classList.add('open');
   }
 
-  async function submitVerify() {
-    const notes = document.getElementById('verify-notes')?.value || '';
-    try {
-      const res  = await Auth.fetch('/api/v1/recruitment/applications/' + _currentAppId + '/verify-info/', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({verification_notes:notes}) });
-      const data = await res.json();
-      if (!res.ok) { _toast(Object.values(data).flat().join(' ')||'Error.','error'); return; }
-      closeGenModal();
-      _toast('Information verified. Ready to issue offer letter.','success');
-      await openCandidateView(_currentAppId,'onboarding');
-    } catch(e) { _toast('Network error.','error'); }
+  // ── Role change handler — preview credentials + trigger conflict check ──
+  let _conflictCheckTimer = null;
+  let _conflictUser       = null;
+
+  function _onRoleChange() {
+    const roleEl   = document.getElementById('emp-role');
+    const branchEl = document.getElementById('emp-branch');
+    const desigEl  = document.getElementById('emp-designation');
+    const wrapEl   = document.getElementById('emp-branch-wrap');
+    const credEl   = document.getElementById('emp-credentials');
+
+    if (!roleEl) return;
+
+    const selected = roleEl.options[roleEl.selectedIndex];
+    const scope    = selected ? (selected.dataset.scope || 'BRANCH') : 'BRANCH';
+
+    // Show/hide branch based on scope
+    if (wrapEl) wrapEl.style.display = scope === 'BRANCH' ? '' : 'none';
+
+    // Preview generated credentials
+    const app = _currentApp;
+    if (app && roleEl.value) {
+      const first    = (app.first_name || '')[0] || '';
+      const last     = (app.last_name  || '').toLowerCase().replace(/\s+/g, '');
+      const username = first.toLowerCase() + last;
+      const email    = username + '@farhatprintingpress.com';
+      const credEl2  = document.getElementById('emp-credentials');
+      const emailEl  = document.getElementById('emp-cred-email');
+      const userEl   = document.getElementById('emp-cred-username');
+      if (credEl2) credEl2.style.display = '';
+      if (emailEl) emailEl.textContent   = email;
+      if (userEl)  userEl.textContent    = username;
+    }
+
+    // Debounce conflict check
+    if (_conflictCheckTimer) clearTimeout(_conflictCheckTimer);
+    _conflictCheckTimer = setTimeout(_checkConflict, 400);
   }
+
+  async function _checkConflict() {
+    const roleEl   = document.getElementById('emp-role');
+    const branchEl = document.getElementById('emp-branch');
+    const desigEl  = document.getElementById('emp-designation');
+    const banner   = document.getElementById('emp-conflict-banner');
+    const msgEl    = document.getElementById('emp-conflict-msg');
+
+    if (!roleEl || !roleEl.value) return;
+
+    const selected     = roleEl.options[roleEl.selectedIndex];
+    const isConstrained = selected && selected.dataset.constrained === '1';
+
+    if (!isConstrained) {
+      if (banner) banner.style.display = 'none';
+      _conflictUser = null;
+      return;
+    }
+
+    const params = new URLSearchParams({
+      role       : roleEl.value,
+      designation: desigEl ? desigEl.value : 'MAIN',
+    });
+    if (branchEl && branchEl.value) params.append('branch', branchEl.value);
+
+    try {
+      const res  = await Auth.fetch('/api/v1/recruitment/conflict-check/?' + params.toString());
+      const data = await res.json();
+
+      if (data.conflict) {
+        _conflictUser = data.conflict_user;
+        if (banner) banner.style.display = '';
+        if (msgEl)  msgEl.textContent =
+          data.conflict_user.full_name + ' currently holds this role at this branch. ' +
+          'Specify what should happen to them on the new hire\'s start date.';
+        // Store conflict user id for submission
+        banner.dataset.conflictUserId = data.conflict_user.id;
+      } else {
+        _conflictUser = null;
+        if (banner) banner.style.display = 'none';
+      }
+    } catch(e) {
+      // Silently ignore — don't block the form
+    }
+  }
+
+  function _onResolutionChange() {
+    const val        = document.getElementById('emp-conflict-resolution')?.value;
+    const reassign   = document.getElementById('emp-conflict-reassign');
+    const roleChange = document.getElementById('emp-conflict-rolechange');
+    if (reassign)   reassign.style.display   = val === 'REASSIGN'    ? '' : 'none';
+    if (roleChange) roleChange.style.display = val === 'ROLE_CHANGE' ? 'flex' : 'none';
+  }
+
+  function _onConflictRoleChange() {
+    const roleEl  = document.getElementById('emp-conflict-new-role');
+    const wrap    = document.getElementById('emp-conflict-region-wrap');
+    if (!roleEl || !wrap) return;
+    const selected = roleEl.options[roleEl.selectedIndex];
+    const scope    = selected ? (selected.dataset.scope || 'BRANCH') : 'BRANCH';
+    wrap.style.display = scope === 'REGION' ? '' : 'none';
+  }
+
+  async function submitVerify() {
+    const notes      = document.getElementById('verify-notes')?.value || '';
+    const roleEl     = document.getElementById('emp-role');
+    const branchEl   = document.getElementById('emp-branch');
+    const desigEl    = document.getElementById('emp-designation');
+    const startEl    = document.getElementById('emp-start');
+    const shadowEl   = document.getElementById('emp-shadow');
+    const banner     = document.getElementById('emp-conflict-banner');
+
+    if (!roleEl?.value)  { _toast('Please select a role.', 'error'); return; }
+    if (!startEl?.value) { _toast('Please set a start date.', 'error'); return; }
+
+    const payload = {
+      verification_notes : notes,
+      role               : parseInt(roleEl.value),
+      designation        : desigEl?.value || 'MAIN',
+      start_date         : startEl.value,
+      shadow_days        : parseInt(shadowEl?.value || '7'),
+    };
+
+    if (branchEl?.value) payload.branch = parseInt(branchEl.value);
+
+    // Attach conflict resolution if banner is visible
+    if (banner && banner.style.display !== 'none') {
+      const resolution = document.getElementById('emp-conflict-resolution')?.value;
+      if (!resolution) { _toast('Please specify what happens to the current role holder.', 'error'); return; }
+      payload.conflict_user       = parseInt(banner.dataset.conflictUserId);
+      payload.conflict_resolution = resolution;
+      if (resolution === 'REASSIGN') {
+        const nb = document.getElementById('emp-conflict-new-branch')?.value;
+        if (!nb) { _toast('Please select a new branch for the displaced staff.', 'error'); return; }
+        payload.conflict_new_branch = parseInt(nb);
+      }
+      if (resolution === 'ROLE_CHANGE') {
+        const nr = document.getElementById('emp-conflict-new-role')?.value;
+        if (!nr) { _toast('Please select a new role for the displaced staff.', 'error'); return; }
+        payload.conflict_new_role        = parseInt(nr);
+        payload.conflict_new_designation = document.getElementById('emp-conflict-new-designation')?.value || 'MAIN';
+        const conflictRegion = document.getElementById('emp-conflict-new-region')?.value;
+        if (conflictRegion) payload.conflict_new_region = parseInt(conflictRegion);
+      }
+    }
+
+    try {
+      const res  = await Auth.fetch(
+        '/api/v1/recruitment/applications/' + _currentAppId + '/verify-info/',
+        { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) }
+      );
+      const data = await res.json();
+
+      // Conflict detected server-side (shouldn't happen if client-side check worked, but handle it)
+      if (res.status === 409) {
+        _toast('Role conflict detected — please resolve before submitting.', 'error');
+        return;
+      }
+
+      if (!res.ok) { _toast(Object.values(data).flat().join(' ') || 'Error.', 'error'); return; }
+
+      closeGenModal();
+
+      // Show credentials toast — this is the one-time display
+      const creds = data.credentials;
+      if (creds) {
+        _toast(
+          '✓ Account created. Email: ' + creds.email + ' · Temp password: ' + creds.temp_password,
+          'success'
+        );
+        // Also show in a dedicated modal so HR can copy it properly
+        _showCredentialsModal(creds, data.activation);
+      } else {
+        _toast('Information verified. Employee account created.', 'success');
+      }
+
+      await openCandidateView(_currentAppId, 'onboarding');
+    } catch(e) { _toast('Network error.', 'error'); }
+  }
+
+  function _showCredentialsModal(creds, activation) {
+    document.getElementById('gen-modal-title').textContent = '✓ Account Created';
+    document.getElementById('gen-modal-sub').textContent   = 'Save these credentials — the password will not be shown again';
+    document.getElementById('gen-modal-body').innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:12px;">' +
+
+        '<div style="padding:14px;background:#edfaf4;border:1px solid #a8dfc0;border-radius:var(--radius-sm);">' +
+          '<div style="font-size:12px;font-weight:700;color:#1a6640;margin-bottom:4px;">Employee account created with shadow access</div>' +
+          '<div style="font-size:11px;color:#1a6640;">Full access activates on ' + (activation ? activation.start_date : '—') + ' (' + (activation ? activation.days_until_start : '—') + ' days)</div>' +
+        '</div>' +
+
+        _credRow('Email',    creds.email) +
+        _credRow('Username', creds.username) +
+        _credRow('Temp Password', creds.temp_password, true) +
+
+        '<div style="padding:10px 12px;background:#fffbec;border:1px solid #f0d878;border-radius:var(--radius-sm);font-size:11px;color:#7a5c00;line-height:1.5;">' +
+          '⚠ This password will not be shown again. Share it with the employee securely and ask them to change it on first login.' +
+        '</div>' +
+
+        '<button class="btn-primary" style="width:100%;" onclick="HR.closeGenModal()">Done — I have noted the credentials</button>' +
+      '</div>';
+
+    const box = document.querySelector('#gen-modal .modal-box');
+    if (box) { box.style.maxWidth = '480px'; box.style.maxHeight = ''; box.style.overflowY = ''; }
+
+    document.getElementById('gen-modal').classList.add('open');
+  }
+
+  function _credRow(label, val, highlight) {
+    return '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">' +
+      '<div style="display:flex;align-items:stretch;">' +
+        '<div style="width:120px;flex-shrink:0;padding:10px 12px;font-size:11px;font-weight:700;' +
+          'text-transform:uppercase;letter-spacing:0.4px;color:var(--text-3);background:var(--bg);' +
+          'display:flex;align-items:center;">' + label + '</div>' +
+        '<div style="flex:1;padding:10px 12px;font-family:\'JetBrains Mono\',monospace;font-size:13px;' +
+          'font-weight:700;color:' + (highlight ? '#b91c1c' : 'var(--text)') + ';' +
+          'background:' + (highlight ? '#fff0f0' : 'var(--panel)') + ';display:flex;align-items:center;">' +
+          _esc(val) +
+        '</div>' +
+        '<button onclick="navigator.clipboard.writeText(\'' + _esc(val) + '\').then(function(){HR._toast(\'Copied\',\'success\')})" ' +
+          'style="padding:0 12px;background:var(--bg);border:none;border-left:1px solid var(--border);' +
+          'cursor:pointer;font-size:11px;color:var(--text-3);font-family:inherit;font-weight:600;">Copy</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // expose _toast for use in inline onclick handlers
+  function _toastPublic(msg, type) { _toast(msg, type); }
 
   function openOfferModal() {
     document.getElementById('gen-modal-title').textContent = 'Issue Offer Letter';
@@ -1711,6 +2049,16 @@ function _renderCandidateView(a, returnPane) {
     } catch(e) {}
   }
 
+  function _closeSortMenuOutside(e) {
+    const menu = document.getElementById('sort-menu');
+    const btn  = document.getElementById('sort-btn');
+    if (menu && menu.style.display === 'block') {
+      if (!menu.contains(e.target) && !(btn && btn.contains(e.target))) {
+        menu.style.display = 'none';
+      }
+    }
+  }
+
   function _esc(s) { if(!s)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function _fmtDate(d) { if(!d)return'—'; return new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); }
   function _setEl(id,text) { const el=document.getElementById(id); if(el)el.textContent=text; }
@@ -1765,6 +2113,11 @@ function _renderCandidateView(a, returnPane) {
     closeGenModal,
     closeDetail,
     copyOnboardingLink,
+    _onRoleChange,
+    _onResolutionChange,
+    _showCredentialsModal,
+    _credRow,
+    _onConflictRoleChange,
   };
 
 })();

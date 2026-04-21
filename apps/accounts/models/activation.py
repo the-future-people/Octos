@@ -130,6 +130,12 @@ class PendingActivation(AuditModel):
         related_name='conflict_role_changes',
         null=True, blank=True,
     )
+    conflict_new_region = models.ForeignKey(
+        'organization.Region',
+        on_delete=models.PROTECT,
+        related_name='conflict_reassignments_region',
+        null=True, blank=True,
+    )
     conflict_new_designation = models.CharField(
         max_length=10,
         choices=[

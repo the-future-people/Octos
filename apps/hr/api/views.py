@@ -638,6 +638,8 @@ class VerifyOnboardingInfoView(APIView):
             applicant.save(update_fields=['status', 'updated_at'])
 
             # 2. Create CustomUser with SHADOW status
+            # Use a temporary unique employee_id — replaced with EMP-{pk} after save
+            import uuid
             new_user = CustomUser.objects.create_user(
                 email                = email,
                 password             = temp_pass,
@@ -649,9 +651,10 @@ class VerifyOnboardingInfoView(APIView):
                 region               = region,
                 employment_status    = CustomUser.SHADOW,
                 must_change_password = True,
+                employee_id          = f"TMP-{uuid.uuid4().hex[:8].upper()}",
             )
 
-            # Auto-generate employee ID
+            # Replace temp ID with permanent EMP-{pk}
             new_user.employee_id = f"EMP-{new_user.pk:04d}"
             new_user.save(update_fields=['employee_id', 'updated_at'])
 
@@ -670,6 +673,7 @@ class VerifyOnboardingInfoView(APIView):
                 conflict_new_branch      = conflict_new_branch,
                 conflict_new_role        = conflict_new_role,
                 conflict_new_designation = conflict_new_desig or '',
+                conflict_new_region      = employ_data.get('conflict_new_region'),
                 generated_email          = email,
                 generated_username       = username,
                 temp_password_hash       = make_password(temp_pass),

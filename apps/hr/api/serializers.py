@@ -476,6 +476,13 @@ class EmploymentDetailsSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    conflict_new_region = serializers.PrimaryKeyRelatedField(
+        queryset=__import__(
+            'apps.organization.models', fromlist=['Region']
+        ).Region.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     conflict_new_designation = serializers.ChoiceField(
         choices=['MAIN', 'DEPUTY', 'MEMBER'],
         required=False,

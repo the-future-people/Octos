@@ -159,15 +159,20 @@ def _resolve_conflict(activation, today):
                 f"has no conflict_new_role set."
             )
         new_designation = activation.conflict_new_designation or StaffAssignment.MEMBER
+        new_role   = activation.conflict_new_role
+        new_region = activation.conflict_new_region
+        new_branch = conflict_user.branch if new_role.scope == 'BRANCH' else None
+        new_region = new_region if new_role.scope == 'REGION' else None
+
         AssignmentService.assign(
             user           = conflict_user,
-            role           = activation.conflict_new_role,
+            role           = new_role,
             designation    = new_designation,
-            branch         = conflict_user.branch,
-            region         = conflict_user.region,
+            branch         = new_branch,
+            region         = new_region,
             effective_from = today,
             acted_by       = activation.created_by,
-            ended_reason   = StaffAssignment.REASON_DEMOTION,
+            ended_reason   = StaffAssignment.REASON_PROMOTION,
             force          = True,
         )
         logger.info(
