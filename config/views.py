@@ -41,3 +41,6 @@ def home_view(request):
 
 def hr_portal_view(request):
     return render(request, 'portals/hr_portal.html')
+
+def onboarding_view(request, token):
+    return render(request, 'public/onboarding.html', {'token': token})

@@ -26,7 +26,26 @@ class CustomUser(AbstractBaseUser, AuditModel):
     Operational staff (BM, cashier, attendant) have branch set.
     Regional Managers have region set, branch null.
     Belt Managers and above have both null.
+
+    employment_status tracks the operational state of the employee,
+    separate from is_active (which controls login access entirely).
+
+      SHADOW   — pre-start-date, read-only portal access granted
+      ACTIVE   — full access, normal operations
+      INACTIVE — departed or suspended; is_active should also be False
     """
+
+    # ── Employment status ────────────────────────────────────
+    SHADOW   = 'SHADOW'
+    ACTIVE   = 'ACTIVE'
+    INACTIVE = 'INACTIVE'
+
+    EMPLOYMENT_STATUS_CHOICES = [
+        (SHADOW,   'Shadow'),
+        (ACTIVE,   'Active'),
+        (INACTIVE, 'Inactive'),
+    ]
+
     employee_id = models.CharField(max_length=20, unique=True, blank=True)
     first_name  = models.CharField(max_length=100)
     last_name   = models.CharField(max_length=100)
@@ -51,6 +70,18 @@ class CustomUser(AbstractBaseUser, AuditModel):
         on_delete=models.PROTECT,
         related_name='users',
         null=True, blank=True,
+    )
+
+    employment_status = models.CharField(
+        max_length=10,
+        choices=EMPLOYMENT_STATUS_CHOICES,
+        default=ACTIVE,
+        help_text=(
+            'Operational state of the employee. '
+            'SHADOW = read-only pre-start access. '
+            'ACTIVE = full access. '
+            'INACTIVE = departed or suspended.'
+        ),
     )
 
     is_active      = models.BooleanField(default=True)
@@ -84,6 +115,10 @@ class CustomUser(AbstractBaseUser, AuditModel):
     @property
     def is_approved(self):
         return self.approved_at is not None
+
+    @property
+    def is_shadow(self):
+        return self.employment_status == self.SHADOW
 
     def set_download_pin(self, raw_pin):
         """Hash and store the 4-digit PIN."""
