@@ -120,6 +120,23 @@ const Auth = {
 
     let res = await fetch(url, { ...options, headers });
 
+    if (res.status === 403) {
+      try {
+        const data = await res.clone().json();
+        if (data.detail && data.detail.includes('shadow access')) {
+          const container = document.getElementById('toast-container');
+          if (container) {
+            const el = document.createElement('div');
+            el.className = 'toast error';
+            el.textContent = data.detail;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 4000);
+          }
+        }
+      } catch { /* silent */ }
+      return res;
+    }
+
     if (res.status === 401) {
       const newToken = await this.refresh();
       if (!newToken) return null;
