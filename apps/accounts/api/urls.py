@@ -12,4 +12,6 @@ urlpatterns = [
     path('roles/', views.RoleListView.as_view(), name='role-list'),
     path('roles/dropdown/', views.RoleDropdownView.as_view(), name='role-dropdown'),
     path('permissions/', views.PermissionListView.as_view(), name='permission-list'),
+    path('pending-activation/me/', views.PendingActivationMeView.as_view(), name='pending-activation-me'),
+    path('pending-activation/displacing-me/', views.PendingActivationDisplacingMeView.as_view(), name='pending-activation-displacing-me'),
 ]

@@ -227,3 +227,59 @@ class AuditedTokenObtainPairView(TokenObtainPairView):
                 pass
 
         return response
+
+class PendingActivationMeView(APIView):
+    """
+    GET /api/v1/accounts/pending-activation/me/
+    Returns the current user's own PendingActivation (for shadow employees).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import PendingActivation
+        try:
+            pa = PendingActivation.objects.select_related(
+                'role', 'branch', 'region'
+            ).get(user=request.user)
+        except PendingActivation.DoesNotExist:
+            return Response({'detail': 'No pending activation found.'}, status=404)
+
+        return Response({
+            'id'              : pa.id,
+            'start_date'      : str(pa.start_date),
+            'days_until_start': pa.days_until_start,
+            'role'            : pa.role.display_name,
+            'designation'     : pa.designation,
+            'status'          : pa.status,
+            'shadow_days'     : pa.shadow_days,
+        })
+
+
+class PendingActivationDisplacingMeView(APIView):
+    """
+    GET /api/v1/accounts/pending-activation/displacing-me/
+    Returns activation details for the incoming employee who will
+    replace the current user (for outgoing BM countdown banner).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import PendingActivation
+        pa = PendingActivation.objects.select_related(
+            'user', 'role', 'branch',
+        ).filter(
+            conflict_user=request.user,
+            status__in=[PendingActivation.PENDING, PendingActivation.SHADOW],
+        ).order_by('start_date').first()
+
+        if not pa:
+            return Response({'detail': 'No incoming replacement found.'}, status=404)
+
+        return Response({
+            'id'              : pa.id,
+            'start_date'      : str(pa.start_date),
+            'days_until_start': pa.days_until_start,
+            'incoming_name'   : pa.user.full_name,
+            'role'            : pa.role.display_name,
+            'status'          : pa.status,
+        })
