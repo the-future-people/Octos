@@ -365,15 +365,6 @@ class MonthlyCloseEngine:
         # Assign Finance reviewer immediately
         reviewer = self._assign_finance_reviewer(close)
         if reviewer:
-            close.finance_reviewer   = reviewer
-            close.finance_assigned_at = timezone.now()
-            close.status             = MonthlyClose.Status.FINANCE_REVIEWING
-            close.save(update_fields=['finance_reviewer', 'finance_assigned_at', 'status'])
-            self._notify_finance_reviewer(close)
-
-        # Assign Finance reviewer immediately
-        reviewer = self._assign_finance_reviewer(close)
-        if reviewer:
             close.finance_reviewer    = reviewer
             close.finance_assigned_at = timezone.now()
             close.status              = MonthlyClose.Status.FINANCE_REVIEWING
@@ -556,6 +547,7 @@ class MonthlyCloseEngine:
             rm_users = CustomUser.objects.filter(
                 role__name='REGIONAL_MANAGER',
                 is_active=True,
+                region=self.branch.region,
             )
             for rm in rm_users:
                 notify(
@@ -638,6 +630,7 @@ class MonthlyCloseEngine:
             rm_users = CustomUser.objects.filter(
                 role__name='REGIONAL_MANAGER',
                 is_active=True,
+                region=self.branch.region,
             )
             for rm in rm_users:
                 notify(
