@@ -59,6 +59,12 @@ const Auth = {
     SUPER_ADMIN              : '/portal/dashboard/',
     DESIGNER                 : '/portal/attendant/',
     FINANCE                  : '/portal/finance/',
+    NATIONAL_FINANCE_HEAD    : '/portal/finance/',
+    NATIONAL_FINANCE_DEPUTY  : '/portal/finance/',
+    BELT_FINANCE_OFFICER     : '/portal/finance/',
+    BELT_FINANCE_DEPUTY      : '/portal/finance/',
+    REGIONAL_FINANCE_OFFICER : '/portal/finance/',
+    REGIONAL_FINANCE_DEPUTY  : '/portal/finance/',
     OPERATIONS_MANAGER       : '/portal/ops/',
   },
 
