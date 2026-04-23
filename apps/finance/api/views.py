@@ -24,6 +24,17 @@ from apps.finance.credit_engine import CreditEngine
 from apps.finance.models import MonthlyClose
 from apps.finance.monthly_close_engine import MonthlyCloseEngine
 
+FINANCE_ROLES = (
+    'FINANCE',
+    'NATIONAL_FINANCE_HEAD',
+    'NATIONAL_FINANCE_DEPUTY',
+    'BELT_FINANCE_OFFICER',
+    'BELT_FINANCE_DEPUTY',
+    'REGIONAL_FINANCE_OFFICER',
+    'REGIONAL_FINANCE_DEPUTY',
+    'SUPER_ADMIN',
+)
+
 from .serializers import (
     DailySalesSheetListSerializer,
     DailySalesSheetDetailSerializer,
@@ -2821,7 +2832,7 @@ class MonthlyCloseMyQueueView(APIView):
         from apps.analytics.models import MonthlyCloseSummary
 
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -2905,7 +2916,9 @@ class MonthlyCloseMyHistoryView(APIView):
 
     def get(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -2954,7 +2967,9 @@ class MonthlyCloseMyBranchesView(APIView):
 
     def get(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -3059,7 +3074,7 @@ class MonthlyCloseClearView(APIView):
 
     def post(self, request, pk):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Only Finance reviewers can clear monthly closes.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -3101,7 +3116,7 @@ class MonthlyCloseRequestClarificationView(APIView):
 
     def post(self, request, pk):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Only Finance reviewers can request clarification.'},
                 status=status.HTTP_403_FORBIDDEN,

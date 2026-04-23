@@ -28,7 +28,9 @@ class AnnualBudgetListView(APIView):
 
     def post(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Only Finance can propose a budget.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -143,7 +145,9 @@ class VendorListView(APIView):
 
     def post(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Only Finance can manage vendors.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -260,7 +264,9 @@ class ReceiptVerifyView(APIView):
         from decimal import Decimal
 
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Only Finance can verify receipts.'},
                 status=status.HTTP_403_FORBIDDEN,
