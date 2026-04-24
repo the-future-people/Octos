@@ -168,15 +168,31 @@ class DailySalesSheetTodayView(APIView):
 
        # If sheet is still open, inject live totals from actual jobs
         if sheet.status == DailySalesSheet.Status.OPEN:
+            from apps.finance.models import PaymentLeg
+            from decimal import Decimal
             jobs = Job.objects.filter(
                 daily_sheet=sheet,
                 status=Job.COMPLETE,
             )
-            data['total_cash']         = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
-            data['total_momo']         = str(jobs.filter(payment_method='MOMO').aggregate(t=Sum('amount_paid'))['t'] or 0)
-            data['total_pos']          = str(jobs.filter(payment_method='POS').aggregate(t=Sum('amount_paid'))['t'] or 0)
+            split_jobs = jobs.filter(payment_method='SPLIT')
+
+            def _live(method):
+                direct = jobs.filter(payment_method=method).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0')
+                legs   = PaymentLeg.objects.filter(
+                    job__in=split_jobs,
+                    payment_method=method,
+                ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+                return direct + legs
+
+            live_cash = _live('CASH')
+            live_momo = _live('MOMO')
+            live_pos  = _live('POS')
+
+            data['total_cash']         = str(live_cash)
+            data['total_momo']         = str(live_momo)
+            data['total_pos']          = str(live_pos)
             data['total_jobs_created'] = jobs.count()
-            data['net_cash_in_till']   = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
+            data['net_cash_in_till']   = str(live_cash)
 
         return Response(data)
 

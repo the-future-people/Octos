@@ -25,11 +25,20 @@ class EODService:
 
         # ── Revenue ───────────────────────────────────────────────────
         def _sum_method(method):
-            return jobs.filter(
+            from apps.finance.models import PaymentLeg
+            direct = jobs.filter(
                 status='COMPLETE',
                 payment_method=method,
                 amount_paid__isnull=False,
             ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
+
+            split_jobs = jobs.filter(status='COMPLETE', payment_method='SPLIT')
+            leg_total  = PaymentLeg.objects.filter(
+                job__in=split_jobs,
+                payment_method=method,
+            ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+
+            return direct + leg_total
 
         live_cash    = _sum_method('CASH')
         live_momo    = _sum_method('MOMO')

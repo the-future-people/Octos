@@ -189,13 +189,25 @@ class CashierSummaryView(APIView):
         )
 
         def _total(method):
+            from apps.finance.models import PaymentLeg
+            # Direct payments
             result = jobs.filter(payment_method=method).aggregate(
                 total = Sum('amount_paid'),
                 count = Count('id'),
             )
+            direct_total = result['total'] or 0
+            direct_count = result['count'] or 0
+
+            # SPLIT leg contributions
+            split_jobs = jobs.filter(payment_method='SPLIT')
+            leg_total = PaymentLeg.objects.filter(
+                job__in=split_jobs,
+                payment_method=method,
+            ).aggregate(t=Sum('amount'))['t'] or 0
+
             return {
-                'total': str(result['total'] or 0),
-                'count': result['count'] or 0,
+                'total': str(direct_total + leg_total),
+                'count': direct_count,
             }
 
         # ── Credit settlements today ──────────────────────────
