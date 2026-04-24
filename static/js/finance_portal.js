@@ -69,6 +69,7 @@ const FinancePortal = (() => {
       'SUPER_ADMIN',
     ]);
     await _loadContext();
+    _applyRoleUI();
     await _loadStrip();
     switchSection('home');
   }
@@ -92,14 +93,42 @@ const FinancePortal = (() => {
     } catch { /* silent */ }
   }
 
+  // ── Role-based UI ─────────────────────────────────────────
+  function _applyRoleUI() {
+    const role = _user?.role_detail?.name || _user?.role?.name || '';
+    const isRegional = role.includes('REGIONAL');
+    const isBelt     = role.includes('BELT');
+
+    // Regional and Belt Finance: hide HQ-only sections
+    if (isRegional || isBelt) {
+      ['nav-budget', 'nav-procurement', 'nav-vendors'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      // Also hide the Finance section header if all items under it are hidden
+      document.querySelectorAll('.fin-nav-section').forEach(el => {
+        if (el.textContent.trim() === 'Finance') {
+          // Check if any siblings are visible
+          let next = el.nextElementSibling;
+          let allHidden = true;
+          while (next && !next.classList.contains('fin-nav-section')) {
+            if (next.style.display !== 'none') { allHidden = false; break; }
+            next = next.nextElementSibling;
+          }
+          if (allHidden) el.style.display = 'none';
+        }
+      });
+    }
+  }
+
   // ── Info strip ────────────────────────────────────────────
   async function _loadStrip() {
     try {
       // Scope label
       const role = _user?.role_detail?.name || _user?.role?.name || '';
       let scopeLabel = 'National';
-      if (role.includes('BELT'))     scopeLabel = _user?.belt_name   || 'Belt';
-      if (role.includes('REGIONAL')) scopeLabel = _user?.region_name || 'Region';
+      if (role.includes('BELT'))     scopeLabel = _user?.belt_detail?.name   || _user?.belt_name   || 'Belt';
+      if (role.includes('REGIONAL')) scopeLabel = _user?.region_detail?.name || _user?.region_name || 'Region';
       _set('strip-scope', scopeLabel);
 
       // Reviews pending

@@ -24,6 +24,8 @@ from apps.finance.credit_engine import CreditEngine
 from apps.finance.models import MonthlyClose
 from apps.finance.monthly_close_engine import MonthlyCloseEngine
 
+from apps.core.finance_scope import get_finance_scope, REGIONAL_ROLES, NATIONAL_ROLES
+
 FINANCE_ROLES = (
     'FINANCE',
     'NATIONAL_FINANCE_HEAD',
@@ -2854,15 +2856,30 @@ class MonthlyCloseMyQueueView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-            status__in=[
-                MonthlyClose.Status.FINANCE_REVIEWING,
-                MonthlyClose.Status.RESUBMITTED,
-            ],
-        ).select_related(
-            'branch', 'submitted_by', 'finance_reviewer'
-        ).order_by('-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            # Regional Finance sees all closes in their region
+            closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+                status__in=[
+                    MonthlyClose.Status.FINANCE_REVIEWING,
+                    MonthlyClose.Status.RESUBMITTED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('-year', '-month')
+        else:
+            # National Finance sees only closes assigned to them
+            closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+                status__in=[
+                    MonthlyClose.Status.FINANCE_REVIEWING,
+                    MonthlyClose.Status.RESUBMITTED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('-year', '-month')
 
         # Attach risk scores where available
         data = []
@@ -2940,16 +2957,30 @@ class MonthlyCloseMyHistoryView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-            status__in=[
-                MonthlyClose.Status.FINANCE_CLEARED,
-                MonthlyClose.Status.ENDORSED,
-                MonthlyClose.Status.LOCKED,
-            ],
-        ).select_related(
-            'branch', 'submitted_by'
-        ).order_by('-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+                status__in=[
+                    MonthlyClose.Status.FINANCE_CLEARED,
+                    MonthlyClose.Status.ENDORSED,
+                    MonthlyClose.Status.LOCKED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by'
+            ).order_by('-year', '-month')
+        else:
+            closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+                status__in=[
+                    MonthlyClose.Status.FINANCE_CLEARED,
+                    MonthlyClose.Status.ENDORSED,
+                    MonthlyClose.Status.LOCKED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by'
+            ).order_by('-year', '-month')
 
         data = [
             {
@@ -2991,11 +3022,20 @@ class MonthlyCloseMyBranchesView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        all_closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-        ).select_related(
-            'branch', 'submitted_by', 'finance_reviewer'
-        ).order_by('branch__name', '-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            all_closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('branch__name', '-year', '-month')
+        else:
+            all_closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('branch__name', '-year', '-month')
 
         # Group by branch
         from collections import defaultdict

@@ -1,4 +1,4 @@
-# apps/finance/services/eod_service.py
+﻿# apps/finance/services/eod_service.py
 
 import logging
 from decimal import Decimal
@@ -23,26 +23,15 @@ class EODService:
             'intake_by', 'customer', 'assigned_to'
         )
 
-        # ── Revenue ───────────────────────────────────────────────────
-        def _sum_method(method):
-            from apps.finance.models import PaymentLeg
-            direct = jobs.filter(
-                status='COMPLETE',
-                payment_method=method,
-                amount_paid__isnull=False,
-            ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
-
-            split_jobs = jobs.filter(status='COMPLETE', payment_method='SPLIT')
-            leg_total  = PaymentLeg.objects.filter(
-                job__in=split_jobs,
-                payment_method=method,
-            ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
-
-            return direct + leg_total
-
-        live_cash    = _sum_method('CASH')
-        live_momo    = _sum_method('MOMO')
-        live_pos     = _sum_method('POS')
+        # ── Revenue ─────────────────────────────────────────────────────
+        from apps.jobs.selectors.revenue_selectors import get_method_total
+        completed_jobs_qs = jobs.filter(
+            status='COMPLETE',
+            amount_paid__isnull=False,
+        )
+        live_cash = get_method_total(completed_jobs_qs, 'CASH')
+        live_momo = get_method_total(completed_jobs_qs, 'MOMO')
+        live_pos  = get_method_total(completed_jobs_qs, 'POS')
         live_credit  = jobs.filter(
             status='COMPLETE',
             payment_method='CREDIT',
