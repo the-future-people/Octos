@@ -170,6 +170,26 @@ def approve_order(order, actor, approved_budget, finance_notes='', line_adjustme
     order.approved_budget = approved_budget
     order.finance_notes = finance_notes
     order.save(update_fields=['status', 'approved_by', 'approved_at', 'approved_budget', 'finance_notes', 'updated_at'])
+
+    # Deduct from active STOCK envelope
+    try:
+        from apps.procurement.services.budget_service import BudgetService
+        from django.utils import timezone as tz
+        envelope = BudgetService.get_active_envelope(
+            year     = tz.localdate().year,
+            category = 'STOCK',
+        )
+        if envelope:
+            envelope.deduct(approved_budget)
+            logger.info(
+                'approve_order: deducted GHS %s from %s %s envelope',
+                approved_budget, envelope.period, envelope.category,
+            )
+        else:
+            logger.warning('approve_order: no active STOCK envelope found — deduction skipped')
+    except Exception:
+        logger.exception('approve_order: budget deduction failed for order %s', order.order_number)
+
     _notify_operations_approved(order)
     return order
 

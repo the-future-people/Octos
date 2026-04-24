@@ -65,6 +65,12 @@ class CustomUser(AbstractBaseUser, AuditModel):
         related_name='user_accounts',
         null=True, blank=True,
     )
+    belt = models.ForeignKey(
+        'organization.Belt',
+        on_delete=models.PROTECT,
+        related_name='user_accounts',
+        null=True, blank=True,
+    )
     role = models.ForeignKey(
         'accounts.Role',
         on_delete=models.PROTECT,
