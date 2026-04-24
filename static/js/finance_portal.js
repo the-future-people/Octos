@@ -98,8 +98,8 @@ const FinancePortal = (() => {
       // Scope label
       const role = _user?.role_detail?.name || _user?.role?.name || '';
       let scopeLabel = 'National';
-      if (role.includes('BELT'))     scopeLabel = _user?.belt_name   || 'Belt';
-      if (role.includes('REGIONAL')) scopeLabel = _user?.region_name || 'Region';
+      if (role.includes('BELT'))     scopeLabel = _user?.belt_detail?.name   || _user?.belt_name   || 'Belt';
+      if (role.includes('REGIONAL')) scopeLabel = _user?.region_detail?.name || _user?.region_name || 'Region';
       _set('strip-scope', scopeLabel);
 
       // Reviews pending
