@@ -1,4 +1,4 @@
-from rest_framework import generics, filters, status
+﻿from rest_framework import generics, filters, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -164,13 +164,12 @@ class CashierSummaryView(APIView):
     """
     GET /api/v1/jobs/cashier/summary/
     Returns today's payment totals per method for the cashier's branch.
-    Used to populate the summary strip on page load.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Sum, Count
         from django.utils import timezone
+        from apps.jobs.selectors.revenue_selectors import get_cashier_summary
 
         user = request.user
         if not hasattr(user, 'branch') or not user.branch:
@@ -179,93 +178,9 @@ class CashierSummaryView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        today = timezone.localdate()
-
-        jobs = Job.objects.filter(
-            branch       = user.branch,
-            status       = Job.COMPLETE,
-            updated_at__date = today,
-            amount_paid__isnull = False,
-        )
-
-        def _total(method):
-            from apps.finance.models import PaymentLeg
-            # Direct payments
-            result = jobs.filter(payment_method=method).aggregate(
-                total = Sum('amount_paid'),
-                count = Count('id'),
-            )
-            direct_total = result['total'] or 0
-            direct_count = result['count'] or 0
-
-            # SPLIT leg contributions
-            split_jobs = jobs.filter(payment_method='SPLIT')
-            leg_total = PaymentLeg.objects.filter(
-                job__in=split_jobs,
-                payment_method=method,
-            ).aggregate(t=Sum('amount'))['t'] or 0
-
-            return {
-                'total': str(direct_total + leg_total),
-                'count': direct_count,
-            }
-
-        # ── Credit settlements today ──────────────────────────
-        from apps.finance.models import CreditPayment, DailySalesSheet
-        try:
-            sheet = DailySalesSheet.objects.get(
-                branch=user.branch, date=today, status='OPEN'
-            )
-            settlements = CreditPayment.objects.filter(daily_sheet=sheet)
-
-            def _settle_total(method):
-                result = settlements.filter(payment_method=method).aggregate(
-                    total=Sum('amount'),
-                    count=Count('id'),
-                )
-                return {
-                    'total': result['total'] or 0,
-                    'count': result['count'] or 0,
-                }
-
-            settle_cash = _settle_total('CASH')
-            settle_momo = _settle_total('MOMO')
-            settle_pos  = _settle_total('POS')
-        except DailySalesSheet.DoesNotExist:
-            settle_cash = settle_momo = settle_pos = {'total': 0, 'count': 0}
-
-        # ── Combine job payments + settlements ────────────────
-        job_cash  = _total('CASH')
-        job_momo  = _total('MOMO')
-        job_pos   = _total('POS')
-
-        def _combine(job_t, settle_t):
-            return {
-                'total': str(Decimal(str(job_t['total'])) + Decimal(str(settle_t['total']))),
-                'count': job_t['count'] + settle_t['count'],
-            }
-
-        from decimal import Decimal
-        cash_combined  = _combine(job_cash,  settle_cash)
-        momo_combined  = _combine(job_momo,  settle_momo)
-        pos_combined   = _combine(job_pos,   settle_pos)
-        grand_total    = (
-            Decimal(cash_combined['total']) +
-            Decimal(momo_combined['total']) +
-            Decimal(pos_combined['total'])
-        )
-        grand_count = cash_combined['count'] + momo_combined['count'] + pos_combined['count']
-
-        return Response({
-            'CASH' : cash_combined,
-            'MOMO' : momo_combined,
-            'POS'  : pos_combined,
-            'total': {
-                'total': str(grand_total),
-                'count': grand_count,
-            },
-        })
-    
+        data = get_cashier_summary(user.branch, timezone.localdate())
+        return Response(data)
+       
 class CashierConfirmPaymentView(APIView):
     """
     POST /api/v1/jobs/<id>/cashier/confirm/
@@ -277,6 +192,8 @@ class CashierConfirmPaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        from apps.jobs.services.cashier_service import confirm_payment
+
         try:
             job = Job.objects.get(pk=pk, status=Job.PENDING_PAYMENT)
         except Job.DoesNotExist:
@@ -289,173 +206,12 @@ class CashierConfirmPaymentView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        deposit_pct    = serializer.validated_data['deposit_percentage']
-        notes          = serializer.validated_data.get('notes', '')
-        payment_method = serializer.validated_data.get('payment_method', 'CASH')
-        split_legs     = serializer.validated_data.get('split_legs', [])
-
-        # ── Calculate amount paid ─────────────────────────────────────
-        if job.estimated_cost:
-            amount_paid = (job.estimated_cost * deposit_pct) / 100
-        else:
-            amount_paid = None
-
-        # ── Validate split legs sum ───────────────────────────────────
-        if payment_method == 'SPLIT' and split_legs:
-            legs_total = sum(float(leg['amount']) for leg in split_legs)
-            if amount_paid and abs(legs_total - float(amount_paid)) > 0.01:
-                return Response(
-                    {'detail': f'Split legs total (GHS {legs_total:.2f}) must equal amount due (GHS {float(amount_paid):.2f}).'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        # ── Persist payment info on job ───────────────────────────────
-        job.deposit_percentage = deposit_pct
-        job.amount_paid        = amount_paid
-        job.payment_method     = 'SPLIT' if payment_method == 'SPLIT' else payment_method
-        job.momo_reference     = serializer.validated_data.get('momo_reference', '')
-        job.pos_approval_code  = serializer.validated_data.get('pos_approval_code', '')
-        job.cash_tendered      = serializer.validated_data.get('cash_tendered')
-        job.change_given       = serializer.validated_data.get('change_given')
-        job.save(update_fields=[
-            'deposit_percentage', 'amount_paid',
-            'payment_method', 'momo_reference',
-            'pos_approval_code', 'cash_tendered',
-            'change_given', 'updated_at',
-        ])
-
-        # ── Advance FSM to COMPLETE ───────────────────────────────────
         try:
-            result = JobStatusEngine.advance(
-                job       = job,
-                to_status = Job.COMPLETE,
-                actor     = request.user,
-                notes     = notes or f"Payment confirmed: {deposit_pct}% deposit",
-            )
+            result = confirm_payment(job, serializer.validated_data, request.user)
         except (ValueError, PermissionError) as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        result['deposit_percentage'] = deposit_pct
-        result['amount_paid']        = str(amount_paid) if amount_paid else None
-        result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
-        result['payment_method']     = payment_method
-
-        # ── Issue receipt ─────────────────────────────────────────────
-        try:
-            from apps.finance.receipt_engine import ReceiptEngine
-            from apps.finance.models import DailySalesSheet, PaymentLeg
-
-            daily_sheet = DailySalesSheet.objects.filter(
-                branch = job.branch,
-                status = DailySalesSheet.Status.OPEN,
-            ).order_by('-date').first()
-
-            if daily_sheet:
-                engine = ReceiptEngine(job.branch)
-
-                if payment_method == 'SPLIT' and split_legs:
-                    # Issue receipt for split payment
-                    receipt = engine.issue(
-                        job               = job,
-                        cashier           = request.user,
-                        daily_sheet       = daily_sheet,
-                        payment_method    = 'SPLIT',
-                        amount_paid       = amount_paid,
-                        balance_due       = job.balance_due or 0,
-                        customer_phone    = serializer.validated_data.get('customer_phone', ''),
-                        company_name      = serializer.validated_data.get('company_name', ''),
-                        split_legs        = split_legs,
-                    )
-                    # Create PaymentLeg records
-                    for i, leg in enumerate(split_legs, 1):
-                        PaymentLeg.objects.create(
-                            job               = job,
-                            receipt           = receipt,
-                            payment_method    = leg['method'],
-                            amount            = leg['amount'],
-                            momo_reference    = leg.get('reference', '') if leg['method'] == 'MOMO' else '',
-                            pos_approval_code = leg.get('reference', '') if leg['method'] == 'POS'  else '',
-                            sequence          = i,
-                        )
-                else:
-                    receipt = engine.issue(
-                        job               = job,
-                        cashier           = request.user,
-                        daily_sheet       = daily_sheet,
-                        payment_method    = payment_method,
-                        amount_paid       = amount_paid,
-                        balance_due       = job.balance_due or 0,
-                        momo_reference    = serializer.validated_data.get('momo_reference', ''),
-                        pos_approval_code = serializer.validated_data.get('pos_approval_code', ''),
-                        customer_phone    = serializer.validated_data.get('customer_phone', ''),
-                        company_name      = serializer.validated_data.get('company_name', ''),
-                    )
-
-                result['receipt_number'] = receipt.receipt_number
-                result['receipt_id']     = receipt.id
-            else:
-                result['receipt_number'] = None
-                result['receipt_id']     = None
-
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"ReceiptEngine failed: {e}", exc_info=True)
-            result['receipt_number'] = None
-            result['receipt_id']     = None
-
-        # ── Partial credit handling ───────────────────────────
-        partial_credit_amount  = serializer.validated_data.get('partial_credit_amount')
-        partial_credit_account_id = serializer.validated_data.get('partial_credit_account')
-
-        if partial_credit_amount and partial_credit_account_id:
-            try:
-                from apps.finance.models import CreditAccount, DailySalesSheet
-                from apps.customers.credit_engine import CreditEngine
-                from decimal import Decimal
-
-                credit_account = CreditAccount.objects.get(pk=partial_credit_account_id)
-
-                # Get today's open sheet
-                sheet = DailySalesSheet.objects.filter(
-                    branch=job.branch, status='OPEN'
-                ).order_by('-date').first()
-
-                if sheet:
-                    # Deduct from credit account — increase balance
-                    credit_amount = Decimal(str(partial_credit_amount))
-                    CreditEngine.check_eligibility(credit_account, credit_amount)
-
-                    credit_account.current_balance += credit_amount
-                    credit_account.save(update_fields=['current_balance', 'updated_at'])
-
-                    # Update sheet credit issued
-                    from django.db.models import F
-                    DailySalesSheet.objects.filter(pk=sheet.pk).update(
-                        total_credit_issued=F('total_credit_issued') + credit_amount
-                    )
-
-                    # Link to job
-                    job.partial_credit_amount  = credit_amount
-                    job.partial_credit_account = credit_account
-                    job.save(update_fields=[
-                        'partial_credit_amount', 'partial_credit_account', 'updated_at'
-                    ])
-
-                    result['partial_credit_amount']  = str(credit_amount)
-                    result['partial_credit_account'] = credit_account.id
-
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).error(
-                    f"Partial credit failed: {e}", exc_info=True
-                )
-
         return Response(result)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Files
-# ─────────────────────────────────────────────────────────────────────────────
-
 class JobFileUploadView(APIView):
     """
     POST /api/v1/jobs/<id>/files/
@@ -592,227 +348,27 @@ class ServiceCreateView(APIView):
     """
     POST /api/v1/jobs/services/create/
     Create a new service with pricing rule and optional consumable mappings.
-    Temporarily accessible by Branch Manager — will move to HQ/Belt role later.
     """
     permission_classes = [IsAuthenticated]
     parser_classes     = [MultiPartParser, FormParser]
 
     def post(self, request):
         from apps.jobs.api.serializers import ServiceCreateSerializer
-        from apps.jobs.models import Service, PricingRule
-        from apps.inventory.models import ConsumableItem, ServiceConsumable
-        import json
+        from apps.jobs.services.job_service import create_service
 
         serializer = ServiceCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        d      = serializer.validated_data
         branch = getattr(request.user, 'branch', None)
-
-        # ── Create service ────────────────────────────────────
-        sides = d.get('sides', 'SINGLE')
-        service = Service.objects.create(
-            name           = d['name'],
-            code           = d['code'],
-            category       = d['category'],
-            unit           = d['unit'],
-            description    = d['description'],
-            image          = d.get('image'),
-            is_active      = True,
-            smart_defaults = {
-                'sides'   : sides,
-                'pages'   : 1,
-                'sets'    : 1,
-                'is_color': 'color' in d['name'].lower() or 'colour' in d['name'].lower(),
-            },
+        service = create_service(
+            user              = request.user,
+            branch            = branch,
+            validated_data    = serializer.validated_data,
+            raw_mappings_json = request.data.get('consumable_mappings'),
         )
 
-        # ── Create pricing rule for this branch ───────────────
-        if branch:
-            PricingRule.objects.create(
-                service    = service,
-                branch     = branch,
-                base_price = d['base_price'],
-                is_active  = True,
-            )
-
-        # ── Resolve consumable mappings ───────────────────────
-        # Serializer can't deserialize JSON string from multipart
-        # so we always parse from raw request data
-        raw_mappings  = request.data.get('consumable_mappings')
-        mappings_data = []
-        if raw_mappings and isinstance(raw_mappings, str):
-            try:
-                mappings_data = json.loads(raw_mappings)
-            except json.JSONDecodeError:
-                mappings_data = []
-
-        # ── Create consumable mappings ────────────────────────
-        for mapping in mappings_data:
-            try:
-                consumable = ConsumableItem.objects.get(pk=mapping['consumable_id'])
-                ServiceConsumable.objects.get_or_create(
-                    service    = service,
-                    consumable = consumable,
-                    defaults   = {
-                        'quantity_per_unit': mapping['quantity_per_unit'],
-                        'applies_to_color' : mapping.get('applies_to_color', True),
-                        'applies_to_bw'    : mapping.get('applies_to_bw', True),
-                    }
-                )
-            except ConsumableItem.DoesNotExist:
-                pass
-
-        # ── Auto-map toner based on paper size ────────────────
-        _auto_map_toner_for_service(service, mappings_data, sides=d.get('sides', 'SINGLE'))
-
-        return Response(
-            ServiceSerializer(service).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
-def _auto_map_toner_for_service(service, manual_mappings):
-    """
-    Auto-create toner ServiceConsumable mappings based on
-    paper consumables selected by the BM.
-
-    Rules:
-      A5 paper → 0.005% toner per page
-      A4 paper → 0.01% toner per page
-      A3 paper → 0.02% toner per page
-      Color services → all 4 toners (CMYK)
-      B&W services   → black toner only
-      Ambiguous name → both color and B&W
-    """
-    from apps.inventory.models import ConsumableItem, ServiceConsumable
-
-    selected_ids = [m['consumable_id'] for m in (manual_mappings or [])]
-    if not selected_ids:
-        return
-
-    paper_consumables = ConsumableItem.objects.filter(
-        id__in         = selected_ids,
-        category__name = 'Paper',
-    ).exclude(unit_type='PERCENT')
-
-    if not paper_consumables.exists():
-        return
-
-    TONER_RATES = {
-        'A5': 0.005,
-        'A4': 0.01,
-        'A3': 0.02,
-        'A2': 0.04,
-    }
-
-    name_lower    = service.name.lower()
-    is_color_name = 'color' in name_lower or 'colour' in name_lower
-    is_bw_name    = 'b&w' in name_lower or 'bw' in name_lower or 'black' in name_lower
-
-    if is_color_name and not is_bw_name:
-        applies_color, applies_bw = True, False
-    elif is_bw_name and not is_color_name:
-        applies_color, applies_bw = False, True
-    else:
-        applies_color, applies_bw = True, True
-
-    black_toner   = ConsumableItem.objects.filter(name__icontains='Toner Black').first()
-    cyan_toner    = ConsumableItem.objects.filter(name__icontains='Toner Cyan').first()
-    magenta_toner = ConsumableItem.objects.filter(name__icontains='Toner Magenta').first()
-    yellow_toner  = ConsumableItem.objects.filter(name__icontains='Toner Yellow').first()
-
-    for paper in paper_consumables:
-        rate   = TONER_RATES.get(paper.paper_size, 0.01)
-        if sides == 'DOUBLE':
-            rate = rate * 2
-        toners = [black_toner]
-        if applies_color:
-            toners = [black_toner, cyan_toner, magenta_toner, yellow_toner]
-
-        for toner in toners:
-            if not toner:
-                continue
-            ServiceConsumable.objects.get_or_create(
-                service    = service,
-                consumable = toner,
-                defaults   = {
-                    'quantity_per_unit': rate,
-                    'applies_to_color' : applies_color,
-                    'applies_to_bw'    : applies_bw,
-                }
-            )
-
-def _auto_map_toner_for_service(service, manual_mappings, sides='SINGLE'):
-    """
-    Auto-create toner ServiceConsumable mappings based on
-    paper consumables selected by the BM.
-
-    Rules:
-      A5 paper → 0.005% toner per page
-      A4 paper → 0.01% toner per page
-      A3 paper → 0.02% toner per page
-      Color services → all 4 toners (CMYK)
-      B&W services   → black toner only
-      Ambiguous name → both color and B&W
-    """
-    from apps.inventory.models import ConsumableItem, ServiceConsumable
-
-    selected_ids = [m['consumable_id'] for m in (manual_mappings or [])]
-    if not selected_ids:
-        return
-
-    paper_consumables = ConsumableItem.objects.filter(
-        id__in         = selected_ids,
-        category__name = 'Paper',
-    ).exclude(unit_type='PERCENT')
-
-    if not paper_consumables.exists():
-        return
-
-    TONER_RATES = {
-        'A5': 0.005,
-        'A4': 0.01,
-        'A3': 0.02,
-        'A2': 0.04,
-    }
-
-    name_lower    = service.name.lower()
-    is_color_name = 'color' in name_lower or 'colour' in name_lower
-    is_bw_name    = 'b&w' in name_lower or 'bw' in name_lower or 'black' in name_lower
-
-    if is_color_name and not is_bw_name:
-        applies_color, applies_bw = True, False
-    elif is_bw_name and not is_color_name:
-        applies_color, applies_bw = False, True
-    else:
-        applies_color, applies_bw = True, True
-
-    black_toner   = ConsumableItem.objects.filter(name__icontains='Toner Black').first()
-    cyan_toner    = ConsumableItem.objects.filter(name__icontains='Toner Cyan').first()
-    magenta_toner = ConsumableItem.objects.filter(name__icontains='Toner Magenta').first()
-    yellow_toner  = ConsumableItem.objects.filter(name__icontains='Toner Yellow').first()
-
-    for paper in paper_consumables:
-        rate = TONER_RATES.get(paper.paper_size, 0.01)
-        toners = [black_toner]
-        if applies_color:
-            toners = [black_toner, cyan_toner, magenta_toner, yellow_toner]
-
-        for toner in toners:
-            if not toner:
-                continue
-            ServiceConsumable.objects.get_or_create(
-                service    = service,
-                consumable = toner,
-                defaults   = {
-                    'quantity_per_unit': rate,
-                    'applies_to_color' : applies_color,
-                    'applies_to_bw'    : applies_bw,
-                }
-            )
-            
+        return Response(ServiceSerializer(service).data, status=status.HTTP_201_CREATED)
 class PricingRuleListView(generics.ListAPIView):
     serializer_class   = PricingRuleSerializer
     permission_classes = [IsAuthenticated]
@@ -887,153 +443,22 @@ class SaveDraftView(APIView):
     POST /api/v1/jobs/drafts/save/
     Auto-saves an in-progress job as a DRAFT.
     Called when attendant closes the NJ modal with items in cart.
-    Creates a new DRAFT job with line items.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        from apps.jobs.models import Job, JobLineItem, Service
-        from apps.jobs.pricing_engine import PricingEngine
-        from apps.finance.sheet_engine import SheetEngine
-        from django.utils import timezone
-        from datetime import timedelta
-        from decimal import Decimal
+        from apps.jobs.services.job_service import save_draft
 
-        user   = request.user
-        branch = getattr(user, 'branch', None)
+        branch = getattr(request.user, 'branch', None)
         if not branch:
-            return Response(
-                {'detail': 'User has no branch assigned.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({'detail': 'User has no branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Sunday block — no drafts on Sunday
-        if timezone.localdate().weekday() == 6:
-            return Response(
-                {'detail': 'Branch is closed on Sundays. No jobs can be recorded.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        try:
+            result = save_draft(request.user, branch, request.data)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Branch lock — no drafts past closing time
-        lock = SheetEngine(branch).get_branch_lock_status()
-        if not lock['can_create_jobs']:
-            return Response(
-                {'detail': lock['lock_reason']},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        line_items_data = request.data.get('line_items', [])
-        customer_id     = request.data.get('customer')
-        channel         = request.data.get('channel', 'WALK_IN')
-
-        if not line_items_data:
-            return Response(
-                {'detail': 'No line items to save.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Build title from services
-        names = []
-        total = Decimal('0.00')
-        priced_items = []
-
-        for item in line_items_data:
-            try:
-                svc = Service.objects.get(pk=item['service'])
-            except Service.DoesNotExist:
-                continue
-            pg       = int(item.get('pages', 1))
-            sets     = int(item.get('sets', 1))
-            is_color = bool(item.get('is_color', False))
-            pricing  = PricingEngine.get_price(
-                service  = svc,
-                branch   = branch,
-                quantity = sets,
-                is_color = is_color,
-                pages    = pg,
-            )
-            line_total = Decimal(str(pricing.get('total', 0)))
-            unit_price = Decimal(str(pricing.get('base_price', 0)))
-            total     += line_total
-            names.append(svc.name)
-            priced_items.append({
-                'service'   : svc,
-                'pages'     : pg,
-                'sets'      : sets,
-                'quantity'  : sets,
-                'is_color'  : is_color,
-                'paper_size': item.get('paper_size', 'A4'),
-                'sides'     : item.get('sides', 'SINGLE'),
-                'unit_price': unit_price,
-                'line_total': line_total,
-                'label'     : svc.name,
-            })
-
-        if not priced_items:
-            return Response(
-                {'detail': 'No valid line items.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if len(names) == 1:
-            title = names[0]
-        elif len(names) <= 3:
-            title = ', '.join(names)
-        else:
-            title = ', '.join(names[:3]) + f' +{len(names)-3} more'
-
-        # Get or open today's sheet
-        sheet, _ = SheetEngine(branch).get_or_open_today()
-
-        now     = timezone.now()
-        expires = now + timedelta(days=3)
-
-        # Customer
-        from apps.customers.models import CustomerProfile
-        customer = None
-        if customer_id:
-            try:
-                customer = CustomerProfile.objects.get(pk=customer_id)
-            except CustomerProfile.DoesNotExist:
-                pass
-
-        job = Job.objects.create(
-            branch           = branch,
-            intake_by        = user,
-            customer         = customer,
-            title            = title,
-            job_type         = 'INSTANT',
-            status           = Job.DRAFT,
-            estimated_cost   = total,
-            daily_sheet      = sheet,
-            draft_expires_at = expires,
-        )
-
-        # Create line items
-        for i, item in enumerate(priced_items):
-            JobLineItem.objects.create(
-                job        = job,
-                service    = item['service'],
-                quantity   = item['quantity'],
-                pages      = item['pages'],
-                sets       = item['sets'],
-                is_color   = item['is_color'],
-                paper_size = item['paper_size'],
-                sides      = item['sides'],
-                unit_price = item['unit_price'],
-                line_total = item['line_total'],
-                label      = item['label'],
-                position   = i,
-            )
-
-        return Response({
-            'id'         : job.id,
-            'job_number' : job.job_number,
-            'title'      : job.title,
-            'total'      : str(total),
-            'expires_at' : expires.isoformat(),
-        }, status=status.HTTP_201_CREATED)
-
+        return Response(result, status=status.HTTP_201_CREATED)
 class LateJobView(APIView):
     """
     POST /api/v1/jobs/late/
@@ -1044,151 +469,24 @@ class LateJobView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        from apps.jobs.models import Job, JobLineItem, Service
-        from apps.jobs.pricing_engine import PricingEngine
-        from apps.finance.sheet_engine import SheetEngine
-        from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
-        from django.utils import timezone
-
-        user   = request.user
-        branch = getattr(user, 'branch', None)
-
-        if not branch:
-            return Response(
-                {'detail': 'No branch assigned.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Only BM can create late jobs
-        role_name = getattr(getattr(user, 'role', None), 'name', '')
-        if role_name != 'BRANCH_MANAGER':
-            return Response(
-                {'detail': 'Only a Branch Manager can create post-closing jobs.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Must be past closing time
-        bm_schedule = HRShiftEngine(branch).get_role_schedule('BRANCH_MANAGER')
-        if bm_schedule['can_create_jobs'] and not bm_schedule['is_post_closing']:
-            return Response(
-                {'detail': 'Branch is still open. Use the standard New Job flow.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Reason is mandatory
-        reason = request.data.get('post_closing_reason', '').strip()
-        if not reason:
-            return Response(
-                {'detail': 'A reason is required for post-closing jobs.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Must have line items
-        line_items_data = request.data.get('line_items', [])
-        if not line_items_data:
-            return Response(
-                {'detail': 'At least one service is required.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Get today's sheet
-        sheet, _ = SheetEngine(branch).get_or_open_today()
-        if not sheet:
-            return Response(
-                {'detail': 'No active sheet for today.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Price line items
-        from decimal import Decimal
-        total        = Decimal('0.00')
-        priced_items = []
-        names        = []
-
-        for item in line_items_data:
-            try:
-                svc = Service.objects.get(pk=item['service'])
-            except Service.DoesNotExist:
-                continue
-
-            pg       = int(item.get('pages', 1))
-            sets     = int(item.get('sets', 1))
-            is_color = bool(item.get('is_color', False))
-
-            pricing    = PricingEngine.get_price(
-                service  = svc,
-                branch   = branch,
-                quantity = sets,
-                is_color = is_color,
-                pages    = pg,
-            )
-            line_total = Decimal(str(pricing.get('total', 0)))
-            unit_price = Decimal(str(pricing.get('base_price', 0)))
-            total     += line_total
-            names.append(svc.name)
-            priced_items.append({
-                'service'   : svc,
-                'pages'     : pg,
-                'sets'      : sets,
-                'quantity'  : sets,
-                'is_color'  : is_color,
-                'paper_size': item.get('paper_size', 'A4'),
-                'sides'     : item.get('sides', 'SINGLE'),
-                'unit_price': unit_price,
-                'line_total': line_total,
-            })
-
-        if not priced_items:
-            return Response(
-                {'detail': 'No valid services found.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Build title
-        if len(names) == 1:
-            title = names[0]
-        elif len(names) <= 3:
-            title = ', '.join(names)
-        else:
-            title = ', '.join(names[:3]) + f' +{len(names)-3} more'
-
-        # Create job
-        job = Job.objects.create(
-            branch                   = branch,
-            intake_by                = user,
-            daily_sheet              = sheet,
-            title                    = title,
-            job_type                 = 'INSTANT',
-            status                   = Job.PENDING_PAYMENT,
-            estimated_cost           = total,
-            post_closing             = True,
-            post_closing_reason      = reason,
-            post_closing_approved_by = user,
-            intake_channel           = request.data.get('intake_channel', 'WALK_IN'),
-        )
-
-        # Create line items
-        for i, item in enumerate(priced_items):
-            JobLineItem.objects.create(
-                job        = job,
-                service    = item['service'],
-                quantity   = item['quantity'],
-                pages      = item['pages'],
-                sets       = item['sets'],
-                is_color   = item['is_color'],
-                paper_size = item['paper_size'],
-                sides      = item['sides'],
-                unit_price = item['unit_price'],
-                line_total = item['line_total'],
-                position   = i,
-            )
-
+        from apps.jobs.services.job_service import create_late_job
         from apps.jobs.api.serializers import JobListSerializer
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            job = create_late_job(request.user, branch, request.data)
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response(
             JobListSerializer(job, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
-
 class DraftListView(generics.ListAPIView):
     """
     GET /api/v1/jobs/drafts/
@@ -1339,9 +637,7 @@ class JobStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Sum, Count, Q
-        from django.utils import timezone
-        from datetime import timedelta, date
+        from apps.jobs.selectors.stats_selectors import get_branch_stats, get_personal_stats
 
         user   = request.user
         branch = getattr(user, 'branch', None)
@@ -1350,246 +646,15 @@ class JobStatsView(APIView):
 
         sheet_id = request.query_params.get('daily_sheet')
 
-        # ── Branch-wide stats ─────────────────────────────────
-        qs = Job.objects.filter(branch=branch)
-        if sheet_id:
-            qs = qs.filter(daily_sheet_id=sheet_id)
+        branch_stats = get_branch_stats(branch, sheet_id)
 
-        totals = qs.aggregate(
-            total       = Count('id'),
-            complete    = Count('id', filter=models.Q(status='COMPLETE')),
-            in_progress = Count('id', filter=models.Q(status='IN_PROGRESS')),
-            pending     = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
-            routed      = Count('id', filter=models.Q(is_routed=True)),
-            revenue     = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
-        )
-
-        # ── Personal stats ────────────────────────────────────
         personal = {}
         try:
-            personal = self._personal_stats(request, user, branch, sheet_id)
+            personal = get_personal_stats(user, branch, sheet_id)
         except Exception:
-            pass  # never let personal stats break the branch stats
+            pass  # never let personal stats break branch stats
 
-        # Registered (linked to a customer) vs walk-in
-        registered = qs.filter(customer__isnull=False).count()
-        walkin     = (totals['total'] or 0) - registered
-
-        response = {
-            'total'       : totals['total']       or 0,
-            'complete'    : totals['complete']     or 0,
-            'in_progress' : totals['in_progress']  or 0,
-            'pending'     : totals['pending']      or 0,
-            'routed'      : totals['routed']       or 0,
-            'revenue'     : str(totals['revenue']  or 0),
-            'registered'  : registered,
-            'walkin'      : walkin,
-            'personal'    : personal,
-        }
-        return Response(response)
-
-    # ─────────────────────────────────────────────────────────
-    def _personal_stats(self, request, user, branch, sheet_id):
-        from django.db.models import Sum, Count, Q
-        from django.utils import timezone
-        from datetime import timedelta, date
-        from apps.finance.models import DailySalesSheet
-
-        today = timezone.localdate()
-        now   = timezone.now()
-
-        # ── My jobs on this sheet ─────────────────────────────
-        my_qs = Job.objects.filter(branch=branch, intake_by=user)
-        if sheet_id:
-            my_qs = my_qs.filter(daily_sheet_id=sheet_id)
-
-        my_agg = my_qs.aggregate(
-            total     = Count('id'),
-            confirmed = Count('id', filter=Q(status='COMPLETE')),
-            my_value  = Sum('estimated_cost'),
-        )
-        my_total     = my_agg['total']     or 0
-        my_confirmed = my_agg['confirmed'] or 0
-        my_value     = float(my_agg['my_value'] or 0)
-        my_rate      = round(my_confirmed / my_total * 100) if my_total else 0
-
-        # ── Sheet open time → jobs per hour ───────────────────
-        jobs_per_hour = None
-        sheet_number  = None
-        try:
-            sheet = DailySalesSheet.objects.get(pk=sheet_id) if sheet_id else \
-                    DailySalesSheet.objects.get(branch=branch, date=today)
-            sheet_number = sheet.id  # use sheet pk as number
-
-            if sheet.created_at:
-                hours_elapsed = max(
-                    (now - sheet.created_at).total_seconds() / 3600, 0.25
-                )
-                jobs_per_hour = round(my_total / hours_elapsed, 1)
-        except Exception:
-            pass
-
-        # ── Yesterday's completion rate ───────────────────────
-        yesterday_rate = None
-        try:
-            yesterday = today - timedelta(days=1)
-            ysheet    = DailySalesSheet.objects.get(branch=branch, date=yesterday)
-            y_qs      = Job.objects.filter(
-                branch=branch, intake_by=user, daily_sheet=ysheet
-            )
-            y_agg     = y_qs.aggregate(
-                total     = Count('id'),
-                confirmed = Count('id', filter=Q(status='COMPLETE')),
-            )
-            if y_agg['total']:
-                yesterday_rate = round(
-                    (y_agg['confirmed'] or 0) / y_agg['total'] * 100
-                )
-        except Exception:
-            pass
-
-        # ── Personal best (all time) ──────────────────────────
-        personal_best       = None
-        personal_best_date  = None
-        try:
-            from django.db.models.functions import TruncDate
-            daily_counts = (
-                Job.objects
-                .filter(branch=branch, intake_by=user)
-                .annotate(day=TruncDate('created_at'))
-                .values('day')
-                .annotate(count=Count('id'))
-                .order_by('-count')
-                .first()
-            )
-            if daily_counts:
-                personal_best      = daily_counts['count']
-                personal_best_date = daily_counts['day'].strftime('%-d %b')
-        except Exception:
-            pass
-
-        # ── Top service this week ─────────────────────────────
-        top_service       = None
-        top_service_count = None
-        try:
-            week_start = today - timedelta(days=today.weekday())
-            from apps.jobs.models import JobLineItem
-            top = (
-                JobLineItem.objects
-                .filter(
-                    job__branch=branch,
-                    job__intake_by=user,
-                    job__created_at__date__gte=week_start,
-                )
-                .values('service__name')
-                .annotate(cnt=Count('id'))
-                .order_by('-cnt')
-                .first()
-            )
-            if top:
-                top_service       = top['service__name']
-                top_service_count = top['cnt']
-        except Exception:
-            pass
-
-        # ── Week daily counts (Mon–today) ─────────────────────
-        week_daily_counts = []
-        try:
-            week_start = today - timedelta(days=today.weekday())
-            day_names  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-            for i in range(6):  # Mon=0 … Sat=5
-                d     = week_start + timedelta(days=i)
-                count = Job.objects.filter(
-                    branch=branch, intake_by=user,
-                    created_at__date=d,
-                ).count()
-                week_daily_counts.append({
-                    'day'     : day_names[i],
-                    'date'    : d.isoformat(),
-                    'count'   : count,
-                    'is_today': d == today,
-                    'is_future': d > today,
-                })
-        except Exception:
-            pass
-
-        # ── Streak — consecutive 100% completion days ─────────
-        streak       = 0
-        streak_days  = []
-        try:
-            day_names_short = ['M', 'T', 'W', 'T', 'F', 'S']
-            week_start      = today - timedelta(days=today.weekday())
-
-            for i in range(6):
-                d = week_start + timedelta(days=i)
-                if d > today:
-                    streak_days.append({'label': day_names_short[i], 'state': 'future'})
-                    continue
-
-                d_qs  = Job.objects.filter(
-                    branch=branch, intake_by=user, created_at__date=d
-                )
-                d_agg = d_qs.aggregate(
-                    total     = Count('id'),
-                    confirmed = Count('id', filter=Q(status='COMPLETE')),
-                )
-                d_total = d_agg['total'] or 0
-                d_conf  = d_agg['confirmed'] or 0
-                hit     = d_total > 0 and d_conf == d_total
-
-                streak_days.append({
-                    'label'   : day_names_short[i],
-                    'state'   : 'hit' if hit else ('miss' if d_total > 0 else 'empty'),
-                    'is_today': d == today,
-                })
-
-            # Count backwards from today
-            for i in range(today.weekday(), -1, -1):
-                day_entry = streak_days[i]
-                if day_entry['state'] == 'hit' or (day_entry['is_today'] and my_rate == 100):
-                    streak += 1
-                else:
-                    break
-        except Exception:
-            pass
-
-        # ── Daily target — rolling 7-day average ─────────────
-        daily_target = 10  # fallback
-        try:
-            seven_days_ago = today - timedelta(days=7)
-            past_counts    = (
-                Job.objects
-                .filter(
-                    branch=branch, intake_by=user,
-                    created_at__date__gte=seven_days_ago,
-                    created_at__date__lt=today,
-                )
-                .values('created_at__date')
-                .annotate(count=Count('id'))
-            )
-            if past_counts:
-                avg = sum(d['count'] for d in past_counts) / len(past_counts)
-                daily_target = max(int(round(avg)), 5)  # floor at 5
-        except Exception:
-            pass
-
-        return {
-            'my_total'          : my_total,
-            'my_confirmed'      : my_confirmed,
-            'my_value'          : round(my_value, 2),
-            'my_rate'           : my_rate,
-            'jobs_per_hour'     : jobs_per_hour,
-            'yesterday_rate'    : yesterday_rate,
-            'personal_best'     : personal_best,
-            'personal_best_date': personal_best_date,
-            'top_service'       : top_service,
-            'top_service_count' : top_service_count,
-            'week_daily_counts' : week_daily_counts,
-            'streak'            : streak,
-            'streak_days'       : streak_days,
-            'daily_target'      : daily_target,
-            'sheet_number'      : sheet_number,
-        }
+        return Response({**branch_stats, 'personal': personal})
 
 class JobHistoryView(APIView):
     """
@@ -1606,10 +671,9 @@ class JobHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Sum, Count, Q
-        from django.utils import timezone
-        from datetime import date, timedelta
-        import calendar
+        from apps.jobs.selectors.job_selectors import (
+            get_year_level, get_month_level, get_week_level, get_day_level,
+        )
 
         user   = request.user
         branch = getattr(user, 'branch', None)
@@ -1621,7 +685,6 @@ class JobHistoryView(APIView):
         month = request.query_params.get('month')
         week  = request.query_params.get('week')
 
-        # Convert to int
         year  = int(year)  if year  else None
         month = int(month) if month else None
         week  = int(week)  if week  else None
@@ -1629,426 +692,15 @@ class JobHistoryView(APIView):
         base_qs = Job.objects.filter(branch=branch)
 
         if level == 'year':
-            return self._year_level(request, base_qs, branch)
+            return Response(get_year_level(base_qs, branch))
         elif level == 'month' and year:
-            return self._month_level(request, base_qs, branch, year)
+            return Response(get_month_level(base_qs, branch, year))
         elif level == 'week' and year and month:
-            return self._week_level(request, base_qs, branch, year, month)
+            return Response(get_week_level(base_qs, branch, year, month))
         elif level == 'day' and year and month and week is not None:
-            return self._day_level(request, base_qs, branch, year, month, week)
+            data = get_day_level(base_qs, branch, year, month, week)
+            if data is None:
+                return Response({'detail': 'Week not found.'}, status=400)
+            return Response(data)
         else:
             return Response({'detail': 'Invalid parameters.'}, status=400)
-
-    # ── Helpers ───────────────────────────────────────────────
-
-    def _agg(self, qs):
-        """Aggregate a queryset into KPI numbers."""
-        from django.db.models import Sum, Count
-        result = qs.aggregate(
-            total    = Count('id'),
-            complete = Count('id', filter=models.Q(status='COMPLETE')),
-            pending  = Count('id', filter=models.Q(status='PENDING_PAYMENT')),
-            revenue  = Sum('amount_paid', filter=models.Q(status='COMPLETE')),
-        )
-        total    = result['total']    or 0
-        complete = result['complete'] or 0
-        pending  = result['pending']  or 0
-        revenue  = float(result['revenue'] or 0)
-        rate     = round(complete / total * 100, 1) if total else 0
-        return {
-            'total'    : total,
-            'complete' : complete,
-            'pending'  : pending,
-            'revenue'  : revenue,
-            'rate'     : rate,
-        }
-
-    def _pct_change(self, current, previous):
-        """Compute % change between two values."""
-        if not previous:
-            return None
-        change = round((current - previous) / previous * 100, 1)
-        return f"+{change}%" if change >= 0 else f"{change}%"
-
-    def _week_ranges(self, year, month):
-        """Return list of (week_num, start_date, end_date) for Mon-Sat weeks in a month."""
-        import calendar
-        from datetime import date, timedelta
-        
-        first_day = date(year, month, 1)
-        last_day  = date(year, month, calendar.monthrange(year, month)[1])
-        
-        weeks = []
-        current = first_day
-        # Move to Monday
-        while current.weekday() != 0:
-            current -= timedelta(days=1)
-        
-        week_num = 1
-        while current <= last_day:
-            week_start = current
-            week_end   = min(current + timedelta(days=5), last_day)  # Mon-Sat
-            if week_end >= first_day:  # Only include if overlaps with month
-                weeks.append((week_num, week_start, week_end))
-                week_num += 1
-            current += timedelta(days=7)
-        
-        return weeks
-
-    # ── Year level ────────────────────────────────────────────
-
-    def _year_level(self, request, base_qs, branch):
-        from django.db.models.functions import TruncYear, TruncMonth
-        from django.db.models import Sum, Count
-        from datetime import date
-
-        # Get all years with data
-        years_qs = base_qs.dates('created_at', 'year')
-        current_year = date.today().year
-
-        # Also always include current year
-        year_set = set(d.year for d in years_qs) | {current_year}
-        years    = sorted(year_set, reverse=True)
-
-        # Current year KPIs
-        cur_qs  = base_qs.filter(created_at__year=current_year)
-        prev_qs = base_qs.filter(created_at__year=current_year - 1)
-        cur     = self._agg(cur_qs)
-        prev    = self._agg(prev_qs)
-
-        kpis = {
-            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
-            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
-            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
-            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
-        }
-
-        # Trend — jobs per month for current year
-        trend_labels  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-        trend_jobs    = []
-        trend_revenue = []
-        for m in range(1, 13):
-            mqs = cur_qs.filter(created_at__month=m)
-            agg = self._agg(mqs)
-            trend_jobs.append(agg['total'])
-            trend_revenue.append(agg['revenue'])
-
-        # Bar — jobs per year
-        bar_labels = [str(y) for y in sorted(years)]
-        bar_data   = []
-        for y in sorted(years):
-            bar_data.append(self._agg(base_qs.filter(created_at__year=y))['total'])
-
-        # Heatmap — jobs per week of current year (52 weeks)
-        from datetime import date, timedelta
-        heatmap = []
-        start = date(current_year, 1, 1)
-        for w in range(52):
-            week_start = start + timedelta(weeks=w)
-            week_end   = week_start + timedelta(days=6)
-            count = cur_qs.filter(
-                created_at__date__gte=week_start,
-                created_at__date__lte=week_end,
-            ).count()
-            heatmap.append({'week': w + 1, 'count': count})
-
-        # Drill-down items
-        items = []
-        for y in years:
-            agg = self._agg(base_qs.filter(created_at__year=y))
-            items.append({
-                'label'   : str(y),
-                'year'    : y,
-                'total'   : agg['total'],
-                'revenue' : agg['revenue'],
-                'rate'    : agg['rate'],
-            })
-
-        return Response({
-            'level'  : 'year',
-            'kpis'   : kpis,
-            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
-            'bar'    : { 'labels': bar_labels,   'data': bar_data },
-            'heatmap': heatmap,
-            'items'  : items,
-        })
-
-    # ── Month level ───────────────────────────────────────────
-
-    def _month_level(self, request, base_qs, branch, year):
-        import calendar
-        from datetime import date
-
-        month_names = ['Jan','Feb','Mar','Apr','May','Jun',
-                       'Jul','Aug','Sep','Oct','Nov','Dec']
-
-        cur_qs  = base_qs.filter(created_at__year=year)
-        prev_qs = base_qs.filter(created_at__year=year - 1)
-        cur     = self._agg(cur_qs)
-        prev    = self._agg(prev_qs)
-
-        kpis = {
-            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
-            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
-            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
-            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
-        }
-
-        # Trend — jobs per month
-        trend_labels  = month_names
-        trend_jobs    = []
-        trend_revenue = []
-        for m in range(1, 13):
-            mqs = cur_qs.filter(created_at__month=m)
-            agg = self._agg(mqs)
-            trend_jobs.append(agg['total'])
-            trend_revenue.append(agg['revenue'])
-
-        # Bar — same as trend
-        bar_labels = month_names
-        bar_data   = trend_jobs[:]
-
-        # Heatmap — jobs per day of year
-        from datetime import date, timedelta
-        heatmap = []
-        start = date(year, 1, 1)
-        for w in range(52):
-            week_start = start + timedelta(weeks=w)
-            week_end   = week_start + timedelta(days=6)
-            count = cur_qs.filter(
-                created_at__date__gte=week_start,
-                created_at__date__lte=week_end,
-            ).count()
-            heatmap.append({'week': w + 1, 'count': count})
-
-        # Drill-down items — months
-        items = []
-        for m in range(1, 13):
-            mqs = cur_qs.filter(created_at__month=m)
-            agg = self._agg(mqs)
-            if agg['total'] > 0 or m <= date.today().month:
-                items.append({
-                    'label'  : month_names[m - 1],
-                    'year'   : year,
-                    'month'  : m,
-                    'total'  : agg['total'],
-                    'revenue': agg['revenue'],
-                    'rate'   : agg['rate'],
-                })
-
-        return Response({
-            'level'  : 'month',
-            'year'   : year,
-            'kpis'   : kpis,
-            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
-            'bar'    : { 'labels': bar_labels,   'data': bar_data },
-            'heatmap': heatmap,
-            'items'  : items,
-        })
-
-    # ── Week level ────────────────────────────────────────────
-
-    def _week_level(self, request, base_qs, branch, year, month):
-        import calendar
-        from datetime import date
-
-        month_names = ['January','February','March','April','May','June',
-                       'July','August','September','October','November','December']
-
-        cur_qs  = base_qs.filter(created_at__year=year, created_at__month=month)
-        prev_month = month - 1 if month > 1 else 12
-        prev_year  = year if month > 1 else year - 1
-        prev_qs = base_qs.filter(created_at__year=prev_year, created_at__month=prev_month)
-        cur  = self._agg(cur_qs)
-        prev = self._agg(prev_qs)
-
-        kpis = {
-            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
-            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
-            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
-            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
-        }
-
-        # Get week ranges
-        weeks = self._week_ranges(year, month)
-
-        # Trend — jobs per day of month
-        days_in_month = calendar.monthrange(year, month)[1]
-        trend_labels  = [str(d) for d in range(1, days_in_month + 1)]
-        trend_jobs    = []
-        trend_revenue = []
-        for d in range(1, days_in_month + 1):
-            dqs = cur_qs.filter(created_at__day=d)
-            agg = self._agg(dqs)
-            trend_jobs.append(agg['total'])
-            trend_revenue.append(agg['revenue'])
-
-        # Bar — jobs per week
-        bar_labels = [f"Week {w[0]}" for w in weeks]
-        bar_data   = []
-        for _, ws, we in weeks:
-            bar_data.append(
-                cur_qs.filter(created_at__date__gte=ws, created_at__date__lte=we).count()
-            )
-
-        # Heatmap — jobs per day (Mon-Sat grid)
-        heatmap = []
-        for _, ws, we in weeks:
-            week_row = []
-            from datetime import timedelta
-            current = ws
-            while current <= we:
-                count = cur_qs.filter(created_at__date=current).count()
-                week_row.append({'date': current.isoformat(), 'count': count})
-                current += timedelta(days=1)
-            heatmap.append(week_row)
-
-        # Drill-down items — weeks
-        items = []
-        for wnum, ws, we in weeks:
-            wqs = cur_qs.filter(created_at__date__gte=ws, created_at__date__lte=we)
-            agg = self._agg(wqs)
-            items.append({
-                'label'     : f"Week {wnum}",
-                'week'      : wnum,
-                'year'      : year,
-                'month'     : month,
-                'start'     : ws.isoformat(),
-                'end'       : we.isoformat(),
-                'total'     : agg['total'],
-                'revenue'   : agg['revenue'],
-                'rate'      : agg['rate'],
-            })
-
-        return Response({
-            'level'  : 'week',
-            'year'   : year,
-            'month'  : month,
-            'month_name': month_names[month - 1],
-            'kpis'   : kpis,
-            'trend'  : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
-            'bar'    : { 'labels': bar_labels,   'data': bar_data },
-            'heatmap': heatmap,
-            'items'  : items,
-        })
-
-    # ── Day level ─────────────────────────────────────────────
-
-    def _day_level(self, request, base_qs, branch, year, month, week):
-        from datetime import date, timedelta
-        import calendar as cal
-        from apps.finance.models import DailySalesSheet
-
-        weeks  = self._week_ranges(year, month)
-        target = next((w for w in weeks if w[0] == week), None)
-        if not target:
-            return Response({'detail': 'Week not found.'}, status=400)
-
-        _, week_start, week_end = target
-
-        # Cap at month boundaries — same rule as weekly report
-        first_day_of_month = date(year, month, 1)
-        last_day_of_month  = date(year, month, cal.monthrange(year, month)[1])
-        effective_start    = max(week_start, first_day_of_month)
-        effective_end      = min(week_end,   last_day_of_month)
-
-        cur_qs  = base_qs.filter(
-            created_at__date__gte=effective_start,
-            created_at__date__lte=effective_end,
-        )
-
-        # Previous week — same boundary logic
-        prev_start = effective_start - timedelta(days=7)
-        prev_end   = effective_end   - timedelta(days=7)
-        prev_qs    = base_qs.filter(
-            created_at__date__gte=prev_start,
-            created_at__date__lte=prev_end,
-        )
-
-        cur  = self._agg(cur_qs)
-        prev = self._agg(prev_qs)
-
-        kpis = {
-            'total'  : { 'value': cur['total'],   'change': self._pct_change(cur['total'],   prev['total'])   },
-            'revenue': { 'value': cur['revenue'],  'change': self._pct_change(cur['revenue'], prev['revenue']) },
-            'pending': { 'value': cur['pending'],  'change': self._pct_change(cur['pending'], prev['pending']) },
-            'rate'   : { 'value': cur['rate'],     'change': self._pct_change(cur['rate'],    prev['rate'])    },
-        }
-
-        # Trend — jobs per hour of day (aggregated across week)
-        trend_labels  = [f"{h:02d}:00" for h in range(8, 20)]
-        trend_jobs    = [
-            cur_qs.filter(created_at__hour=h).count()
-            for h in range(8, 20)
-        ]
-        trend_revenue = [
-            float(cur_qs.filter(
-                created_at__hour=h, status='COMPLETE'
-            ).aggregate(r=models.Sum('amount_paid'))['r'] or 0)
-            for h in range(8, 20)
-        ]
-
-        # Bar — jobs per day of week
-        bar_labels = []
-        bar_data   = []
-        current    = effective_start
-        while current <= effective_end:
-            bar_labels.append(current.strftime('%a %d'))
-            bar_data.append(cur_qs.filter(created_at__date=current).count())
-            current += timedelta(days=1)
-
-        # Heatmap — jobs per hour per day
-        heatmap = []
-        current = effective_start
-        while current <= effective_end:
-            day_row = []
-            for h in range(8, 20):
-                count = cur_qs.filter(
-                    created_at__date=current,
-                    created_at__hour=h,
-                ).count()
-                day_row.append({'hour': h, 'count': count})
-            heatmap.append({'date': current.isoformat(), 'hours': day_row})
-            current += timedelta(days=1)
-
-        # Drill-down items — days with sheet info
-        items = []
-        current = effective_start
-        while current <= effective_end:
-            dqs = cur_qs.filter(created_at__date=current)
-            agg = self._agg(dqs)
-
-            try:
-                sheet = DailySalesSheet.objects.get(branch=branch, date=current)
-                sheet_id     = sheet.id
-                sheet_status = sheet.status
-            except DailySalesSheet.DoesNotExist:
-                sheet_id     = None
-                sheet_status = None
-
-            items.append({
-                'date'        : current.isoformat(),
-                'label'       : current.strftime('%a %d %b'),
-                'total'       : agg['total'],
-                'revenue'     : agg['revenue'],
-                'complete'    : agg['complete'],
-                'pending'     : agg['pending'],
-                'rate'        : agg['rate'],
-                'sheet_id'    : sheet_id,
-                'sheet_status': sheet_status,
-            })
-            current += timedelta(days=1)
-
-        return Response({
-            'level'     : 'day',
-            'year'      : year,
-            'month'     : month,
-            'week'      : week,
-            'week_start': effective_start.isoformat(),
-            'week_end'  : effective_end.isoformat(),
-            'kpis'      : kpis,
-            'trend'     : { 'labels': trend_labels, 'jobs': trend_jobs, 'revenue': trend_revenue },
-            'bar'       : { 'labels': bar_labels,   'data': bar_data },
-            'heatmap'   : heatmap,
-            'items'     : items,
-        })
