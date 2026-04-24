@@ -69,6 +69,7 @@ const FinancePortal = (() => {
       'SUPER_ADMIN',
     ]);
     await _loadContext();
+    _applyRoleUI();
     await _loadStrip();
     switchSection('home');
   }
@@ -90,6 +91,34 @@ const FinancePortal = (() => {
       _set('fin-profile-role', role);
       _set('fin-profile-empid', _user.employee_id || '—');
     } catch { /* silent */ }
+  }
+
+  // ── Role-based UI ─────────────────────────────────────────
+  function _applyRoleUI() {
+    const role = _user?.role_detail?.name || _user?.role?.name || '';
+    const isRegional = role.includes('REGIONAL');
+    const isBelt     = role.includes('BELT');
+
+    // Regional and Belt Finance: hide HQ-only sections
+    if (isRegional || isBelt) {
+      ['nav-budget', 'nav-procurement', 'nav-vendors'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      // Also hide the Finance section header if all items under it are hidden
+      document.querySelectorAll('.fin-nav-section').forEach(el => {
+        if (el.textContent.trim() === 'Finance') {
+          // Check if any siblings are visible
+          let next = el.nextElementSibling;
+          let allHidden = true;
+          while (next && !next.classList.contains('fin-nav-section')) {
+            if (next.style.display !== 'none') { allHidden = false; break; }
+            next = next.nextElementSibling;
+          }
+          if (allHidden) el.style.display = 'none';
+        }
+      });
+    }
   }
 
   // ── Info strip ────────────────────────────────────────────
