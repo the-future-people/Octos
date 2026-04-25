@@ -138,8 +138,12 @@ class DailySalesSheetDetailView(generics.RetrieveAPIView):
 class DailySalesSheetTodayView(APIView):
     """
     GET /api/v1/finance/sheets/today/
-    Returns today's open sheet for the user's branch.
+    Returns today's sheet for the user's branch.
     Creates one if it doesn't exist (fallback open).
+
+    Returns serialized sheet data only — no live total injection.
+    Live vs frozen revenue is handled by SheetSummaryService via
+    the /summary/ endpoint. This view remains a thin identity fetch.
     """
     permission_classes = [IsAuthenticated]
 
@@ -161,44 +165,51 @@ class DailySalesSheetTodayView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        from django.db.models import Sum
-        from apps.jobs.models import Job
-
         data = DailySalesSheetDetailSerializer(
             sheet, context={'request': request}
         ).data
-
-       # If sheet is still open, inject live totals from actual jobs
-        if sheet.status == DailySalesSheet.Status.OPEN:
-            from apps.finance.models import PaymentLeg
-            from decimal import Decimal
-            jobs = Job.objects.filter(
-                daily_sheet=sheet,
-                status=Job.COMPLETE,
-            )
-            split_jobs = jobs.filter(payment_method='SPLIT')
-
-            def _live(method):
-                direct = jobs.filter(payment_method=method).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0')
-                legs   = PaymentLeg.objects.filter(
-                    job__in=split_jobs,
-                    payment_method=method,
-                ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
-                return direct + legs
-
-            live_cash = _live('CASH')
-            live_momo = _live('MOMO')
-            live_pos  = _live('POS')
-
-            data['total_cash']         = str(live_cash)
-            data['total_momo']         = str(live_momo)
-            data['total_pos']          = str(live_pos)
-            data['total_jobs_created'] = jobs.count()
-            data['net_cash_in_till']   = str(live_cash)
-
         return Response(data)
 
 
+class DailySalesSheetSummaryView(APIView):
+    """
+    GET /api/v1/finance/sheets/<pk>/summary/
+    Unified day sheet summary for the BM portal.
+
+    Returns one payload covering: revenue (live or frozen),
+    job counts, registration rate, pace, inventory snapshot,
+    and outstanding alerts. Replaces the multi-API client-side
+    join previously done in dashboard.js.
+
+    Access: branch-scoped — BM can only access own branch sheets.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+
+        try:
+            sheet = DailySalesSheet.objects.select_related(
+                'branch', 'opened_by', 'closed_by'
+            ).get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Branch-scope enforcement
+        user_branch = getattr(request.user, 'branch', None)
+        if user_branch and sheet.branch != user_branch:
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        summary = SheetSummaryService.get_summary(sheet, sheet.branch)
+        return Response(summary)
+    
+    
 class DailySalesSheetNotesView(APIView):
     """
     PATCH /api/v1/finance/sheets/<id>/notes/
