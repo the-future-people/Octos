@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Octos — Branch Manager Dashboard
  * dashboard.js
  *
@@ -188,6 +188,23 @@ const Dashboard = (() => {
 
   // ── Stats ──────────────────────────────────────────────────
  async function loadStats() {
+    try {
+      const sheetRes = await Auth.fetch('/api/v1/finance/sheets/today/');
+      const sheet    = sheetRes.ok ? await sheetRes.json() : null;
+
+      const param = sheet?.id ? `daily_sheet=${sheet.id}` : 'period=day';
+      const res   = await Auth.fetch(`/api/v1/jobs/stats/?${param}`);
+      if (!res.ok) return;
+      const stats = await res.json();
+
+      _setStats(
+        stats.total       || 0,
+        stats.in_progress || 0,
+        stats.complete    || 0,
+        stats.pending     || 0,
+        stats.routed      || 0,
+      );
+    } catch { /* silent */ }
   }
 
   function _setStats(total, inProgress, complete, pending, routed) {
