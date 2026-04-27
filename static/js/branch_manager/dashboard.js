@@ -453,7 +453,7 @@ async function loadRecentJobs() {
     }
     if (paneId === 'reports')                     _loadReportsPane();
     if (paneId === 'inventory')                   Inventory.loadInventoryPane();
-    if (paneId === 'customers')                   _loadCustomersPane();
+    if (paneId === 'customers')                   Customers.loadCustomersPane();
   }
 
   // -- Jobs pane ----------------------------------------------
@@ -5865,7 +5865,7 @@ const kpiCards = [
                   : tc.label;
 
                 return `
-                  <tr data-search="${(name + ' ' + (c.phone||'')).toLowerCase()}"
+                  <tr data-search="${(name + ' ' + (c.phone||'') + ' ' + (c.phone ? '0'+c.phone.replace(/^(\+233|233)/,'') : '')).toLowerCase()}"
                     style="border-bottom:1px solid var(--border);
                       background:${idx % 2 === 0 ? '#fff' : '#fafafa'};
                       cursor:pointer;transition:background 0.12s;"
@@ -7508,8 +7508,8 @@ ${_esc(c.notes || '')}</textarea>
     return p;
   }
 
-  // -- Public API ---------------------------------------------
-return {
+// ── Public API ─────────────────────────────────────────────
+  return {
     init,
     switchPane,
     setPeriod,
@@ -7565,20 +7565,6 @@ return {
     _loadDailySheetInventory,
     _toggleCurrentWeek,
     _toggleHistoryWeek,
-    switchCustomersTab,
-    openCustomerDetail,
-    openAddCustomerModal,
-    _filterCustomerRows,
-    closeCustomerProfile,
-    _saveCustomerNotes,
-    _editCustomer,
-    _renderEditCustomerForm,
-    _saveCustomerEdit,
-    _editPhoneNormalise,
-    _toggleEditHistory,
-    _loadEditHistory,
-    _nominateCredit,
-    _editTitleChange,
     _renderWeeklyReportDetail,
     _renderWeeklyInventory,
     _renderMonthlyCloseDetail,
@@ -7590,10 +7576,10 @@ return {
     _svcPreviewImage     : Catalogue._svcPreviewImage,
     _svcToggleConsumable : Catalogue._svcToggleConsumable,
     // Inventory delegates
-    switchInventoryTab   : Inventory.switchInventoryTab,
-    openReceiveStock     : Inventory.openReceiveStock,
-    closeReceiveStock    : Inventory.closeReceiveStock,
-    submitReceiveStock   : Inventory.submitReceiveStock,
+    switchInventoryTab     : Inventory.switchInventoryTab,
+    openReceiveStock       : Inventory.openReceiveStock,
+    closeReceiveStock      : Inventory.closeReceiveStock,
+    submitReceiveStock     : Inventory.submitReceiveStock,
     _recvSelectConsumable  : Inventory._recvSelectConsumable,
     _recvFilterConsumables : Inventory._recvFilterConsumables,
     _recvShowDropdown      : Inventory._recvShowDropdown,
@@ -7603,6 +7589,22 @@ return {
     _openAddMaintenanceLog : Inventory._openAddMaintenanceLog,
     _saveMaintenanceLog    : Inventory._saveMaintenanceLog,
     _printEquipmentQR      : Inventory._printEquipmentQR,
+    // Customers delegates
+    switchCustomersTab   : Customers.switchCustomersTab,
+    openCustomerDetail   : Customers.openCustomerDetail,
+    openAddCustomerModal : Customers.openAddCustomerModal,
+    onSearchInput        : Customers.onSearchInput,
+    changePage           : Customers.changePage,
+    closeCustomerProfile : Customers.closeCustomerProfile,
+    _saveCustomerNotes   : Customers.saveCustomerNotes,
+    _editCustomer        : Customers.editCustomer,
+    _saveCustomerEdit    : Customers.saveCustomerEdit,
+    _editPhoneNormalise  : Customers.editPhoneNormalise,
+    _toggleEditHistory   : Customers.toggleEditHistory,
+    _nominateCredit      : Customers.nominateCredit,
+    _editTitleChange     : Customers.editTitleChange,
+    _renderEditCustomerForm: () => {},
+    _loadEditHistory       : () => {},
   };
 
 })();
