@@ -451,7 +451,7 @@ async function loadRecentJobs() {
       if (pane) pane.dataset.loaded = '';  // always bust cache on navigation
       _loadFinancePane();
     }
-    if (paneId === 'reports')                     _loadReportsPane();
+    if (paneId === 'reports')                     Reports.loadReportsPane();
     if (paneId === 'inventory')                   Inventory.loadInventoryPane();
     if (paneId === 'customers')                   Customers.loadCustomersPane();
   }
@@ -7509,12 +7509,11 @@ ${_esc(c.notes || '')}</textarea>
   }
 
 // ── Public API ─────────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────
   return {
     init,
     switchPane,
     setPeriod,
-    setReportsPeriod,
-    switchReportsTab,
     switchJobsTab,
     switchPerformanceTab,
     printReceipt,
@@ -7535,20 +7534,11 @@ ${_esc(c.notes || '')}</textarea>
     switchInboxChannel,
     openConvo,
     sendReply,
-    _historyDrill,
-    _historyNav,
     initiateSheetDownload,
     closePinModal,
     _onPinInput,
     _submitPin,
     toggleSheetRow,
-    weeklyPrepare,
-    weeklySubmit,
-    weeklyDownloadPDF,
-    _renderMonthlyClose,
-    _submitMonthlyClose,
-    _downloadMonthlyPDF,
-    setServicesPeriod,
     _validateFloatInput,
     downloadInvoicePDF,
     setInvoicesPeriod,
@@ -7561,13 +7551,6 @@ ${_esc(c.notes || '')}</textarea>
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
-    _toggleDailySheet,
-    _loadDailySheetInventory,
-    _toggleCurrentWeek,
-    _toggleHistoryWeek,
-    _renderWeeklyReportDetail,
-    _renderWeeklyInventory,
-    _renderMonthlyCloseDetail,
     // Catalogue delegates
     openAddServiceModal  : Catalogue.openAddServiceModal,
     closeAddServiceModal : Catalogue.closeAddServiceModal,
@@ -7590,21 +7573,40 @@ ${_esc(c.notes || '')}</textarea>
     _saveMaintenanceLog    : Inventory._saveMaintenanceLog,
     _printEquipmentQR      : Inventory._printEquipmentQR,
     // Customers delegates
-    switchCustomersTab   : Customers.switchCustomersTab,
-    openCustomerDetail   : Customers.openCustomerDetail,
-    openAddCustomerModal : Customers.openAddCustomerModal,
-    onSearchInput        : Customers.onSearchInput,
-    changePage           : Customers.changePage,
-    closeCustomerProfile : Customers.closeCustomerProfile,
-    _saveCustomerNotes   : Customers.saveCustomerNotes,
-    _editCustomer        : Customers.editCustomer,
-    _saveCustomerEdit    : Customers.saveCustomerEdit,
-    _editPhoneNormalise  : Customers.editPhoneNormalise,
-    _toggleEditHistory   : Customers.toggleEditHistory,
-    _nominateCredit      : Customers.nominateCredit,
-    _editTitleChange     : Customers.editTitleChange,
+    switchCustomersTab     : Customers.switchCustomersTab,
+    openCustomerDetail     : Customers.openCustomerDetail,
+    openAddCustomerModal   : Customers.openAddCustomerModal,
+    onSearchInput          : Customers.onSearchInput,
+    changePage             : Customers.changePage,
+    closeCustomerProfile   : Customers.closeCustomerProfile,
+    _saveCustomerNotes     : Customers.saveCustomerNotes,
+    _editCustomer          : Customers.editCustomer,
+    _saveCustomerEdit      : Customers.saveCustomerEdit,
+    _editPhoneNormalise    : Customers.editPhoneNormalise,
+    _toggleEditHistory     : Customers.toggleEditHistory,
+    _nominateCredit        : Customers.nominateCredit,
+    _editTitleChange       : Customers.editTitleChange,
     _renderEditCustomerForm: () => {},
     _loadEditHistory       : () => {},
+    // Reports delegates
+    setReportsPeriod         : Reports.setReportsPeriod,
+    switchReportsTab         : Reports.switchReportsTab,
+    weeklyPrepare            : Reports.weeklyPrepare,
+    weeklySubmit             : Reports.weeklySubmit,
+    weeklyDownloadPDF        : Reports.weeklyDownloadPDF,
+    _renderMonthlyClose      : Reports.renderMonthlyClose,
+    _submitMonthlyClose      : Reports.submitMonthlyClose,
+    _downloadMonthlyPDF      : Reports.downloadMonthlyPDF,
+    setServicesPeriod        : Reports.setServicesPeriod,
+    _toggleDailySheet        : Reports.toggleDailySheet,
+    _loadDailySheetInventory : Reports.loadDailySheetInventory,
+    _toggleCurrentWeek       : () => {},
+    _toggleHistoryWeek       : Reports.toggleHistoryWeek,
+    _renderWeeklyReportDetail: Reports.renderWeeklyReportDetail,
+    _renderWeeklyInventory   : Reports.renderWeeklyInventory,
+    _renderMonthlyCloseDetail: Reports.renderMonthlyCloseDetail,
+    _historyDrill            : Reports.historyDrill,
+    _historyNav              : Reports.historyNav,
   };
 
 })();
