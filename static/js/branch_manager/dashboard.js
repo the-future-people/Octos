@@ -1509,26 +1509,73 @@ win.document.write(`<!DOCTYPE html>
           }
         }
 
-        // Jobs pace indicator
-        if (sheet.status === 'OPEN' && total > 0 && sheet.opened_at) {
-          const hoursOpen = Math.max(
-            (Date.now() - new Date(sheet.opened_at).getTime()) / 3600000, 0.25
-          );
-          const pace = (total / hoursOpen).toFixed(1);
-          const paceDiv = document.getElementById('sheet-pace-strip');
-          if (!paceDiv) {
-            const strip = document.createElement('div');
-            strip.id = 'sheet-pace-strip';
-            strip.style.cssText = `margin-top:10px;padding:10px 16px;
-              background:var(--panel);border:1px solid var(--border);
-              border-radius:var(--radius-sm);font-size:12px;color:var(--text-3);
-              display:flex;align-items:center;justify-content:space-between;`;
-            strip.innerHTML = `
-              <span>Branch pace today</span>
-              <span style="font-family:'JetBrains Mono',monospace;font-weight:700;
-                color:var(--text);font-size:14px;">${pace} jobs/hr</span>`;
-            container.appendChild(strip);
-          }
+        // ── Analytics strip — uses summary.pace (already fetched) ──
+        if (sheet.status === 'OPEN' && summary.pace?.jobs_per_hour != null) {
+          const p             = summary.pace;
+          const paceColor     = p.pace_change_pct == null ? 'var(--text-3)'
+            : p.pace_change_pct >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+          const paceArrow     = p.pace_change_pct == null ? ''
+            : p.pace_change_pct >= 0 ? '↑' : '↓';
+          const paceVsYday    = p.pace_change_pct == null ? ''
+            : `<span style="font-size:11px;font-weight:700;color:${paceColor};margin-left:6px;">
+                ${paceArrow} ${Math.abs(p.pace_change_pct)}% vs yesterday
+               </span>`;
+          const avgToday      = p.avg_job_value_today != null
+            ? `GHS ${parseFloat(p.avg_job_value_today).toFixed(2)}` : '—';
+          const avg7d         = p.avg_job_value_7d != null
+            ? `GHS ${parseFloat(p.avg_job_value_7d).toFixed(2)}` : '—';
+          const avgColor      = (p.avg_job_value_today != null && p.avg_job_value_7d != null)
+            ? (p.avg_job_value_today >= p.avg_job_value_7d ? 'var(--green-text)' : 'var(--red-text)')
+            : 'var(--text)';
+
+          const strip = document.createElement('div');
+          strip.id    = 'sheet-pace-strip';
+          strip.style.cssText = `margin-top:10px;padding:12px 16px;
+            background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius-sm);
+            display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;`;
+          strip.innerHTML = `
+            <div style="padding-right:16px;border-right:1px solid var(--border);">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+                Branch Pace
+              </div>
+              <div style="display:flex;align-items:baseline;gap:4px;">
+                <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                  color:var(--text);font-size:18px;">${p.jobs_per_hour}</span>
+                <span style="font-size:11px;color:var(--text-3);">jobs/hr</span>
+                ${paceVsYday}
+              </div>
+              ${p.projected_eod != null ? `
+              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+                Projected EOD: <strong style="color:var(--text);">${p.projected_eod} jobs</strong>
+              </div>` : ''}
+            </div>
+            <div style="padding:0 16px;border-right:1px solid var(--border);">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+                Avg Job Value Today
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                font-size:18px;color:${avgColor};">${avgToday}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+                7-day avg: <strong style="color:var(--text);">${avg7d}</strong>
+              </div>
+            </div>
+            <div style="padding-left:16px;">
+              <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+                Hours Open
+              </div>
+              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                font-size:18px;color:var(--text);">${p.hours_open}h</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+                ${p.yesterday_per_hour != null
+                  ? `Yesterday: <strong style="color:var(--text);">${p.yesterday_per_hour} jobs/hr</strong>`
+                  : 'No comparison data'}
+              </div>
+            </div>`;
+          container.appendChild(strip);
         }
       }
     } catch { /* silent */ }
