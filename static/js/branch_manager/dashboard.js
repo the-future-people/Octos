@@ -1318,9 +1318,15 @@ win.document.write(`<!DOCTYPE html>
 
   async function _renderTodaySheet(container) {
     try {
-      const res = await Auth.fetch('/api/v1/finance/sheets/today/');
-      if (!res.ok) throw new Error();
-      const sheet = await res.json();
+      const todayRes = await Auth.fetch('/api/v1/finance/sheets/today/summary/');
+      if (!todayRes.ok) throw new Error();
+      const summary  = await todayRes.json();
+      const sheet    = { id: summary.meta.sheet_id, date: summary.meta.date, status: summary.meta.status, sheet_number: summary.meta.sheet_number, opened_at: summary.meta.opened_at, notes: summary.meta.notes, total_jobs_created: summary.jobs.total, total_refunds: 0, total_petty_cash_out: summary.revenue.petty_cash_out, total_credit_issued: summary.revenue.credit_issued, total_credit_settled: summary.revenue.credit_settled };
+      const rev      = summary.revenue;
+      const liveCash  = parseFloat(rev.cash  || 0);
+      const liveMomo  = parseFloat(rev.momo  || 0);
+      const livePos   = parseFloat(rev.pos   || 0);
+      const liveTotal = liveCash + liveMomo + livePos;
 
       container.innerHTML = `
         <!-- Status strip -->
@@ -1359,23 +1365,23 @@ win.document.write(`<!DOCTYPE html>
         <!-- Revenue cards -->
         <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;">
           <div class="stat-card" style="background:var(--panel);border:2px solid var(--text);">
-            <div class="stat-num">${_fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}</div>
+            <div class="stat-num">${_fmt(liveTotal)}</div>
             <div class="stat-lbl" style="font-weight:700;">Total Today</div>
           </div>
           <div class="stat-card green">
-            <div class="stat-num">${_fmt(sheet.total_cash)}</div>
+            <div class="stat-num">${_fmt(liveCash)}</div>
             <div class="stat-lbl">Cash</div>
           </div>
           <div class="stat-card amber">
-            <div class="stat-num">${_fmt(sheet.total_momo)}</div>
+            <div class="stat-num">${_fmt(liveMomo)}</div>
             <div class="stat-lbl">MoMo</div>
           </div>
           <div class="stat-card blue">
-            <div class="stat-num">${_fmt(sheet.total_pos)}</div>
+            <div class="stat-num">${_fmt(livePos)}</div>
             <div class="stat-lbl">POS</div>
           </div>
           <div class="stat-card purple">
-            <div class="stat-num">${_fmt(sheet.net_cash_in_till)}</div>
+            <div class="stat-num">${_fmt(parseFloat(rev.net_cash_in_till || 0))}</div>
             <div class="stat-lbl">Net Cash In Till</div>
           </div>
         </div>
@@ -1455,9 +1461,7 @@ win.document.write(`<!DOCTYPE html>
 
     // -- Populate computed fields ------------------------------
     // Total revenue
-    const totalRevenue = parseFloat(sheet.total_cash||0)
-      + parseFloat(sheet.total_momo||0)
-      + parseFloat(sheet.total_pos||0);
+    const totalRevenue = liveTotal;
 
     // Job stats from stats endpoint
     try {
@@ -1529,113 +1533,79 @@ win.document.write(`<!DOCTYPE html>
       }
     } catch { /* silent */ }
 
-    // -- Consumables snapshot ----------------------------------
+    // ── Consumables snapshot — uses summary.inventory (already fetched) ──
     if (sheet.status === 'OPEN') {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const [invRes, movRes] = await Promise.all([
-          Auth.fetch('/api/v1/inventory/stock/'),
-          Auth.fetch(`/api/v1/inventory/movements/?type=OUT&date=${today}&page_size=500`),
-        ]);
+      const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
+      if (invItems.length) {
+        const lowItems  = invItems.filter(i => i.is_low);
+        const invDiv    = document.createElement('div');
+        invDiv.style.cssText = 'margin-top:16px;';
+        invDiv.innerHTML = `
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+            display:flex;align-items:center;gap:8px;">
+            Current Stock Levels
+            ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+              background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+              ${lowItems.length} low</span>` : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+            ${invItems.map(item => {
+              const qty      = parseFloat(item.closing);
+              const consumed = parseFloat(item.consumed || 0);
+              const rpt      = parseFloat(item.reorder_point || 0);
+              const isCrit   = qty === 0;
+              const isLow    = item.is_low;
+              const isPct    = (item.unit || '').includes('%');
+              const unit     = item.unit || 'units';
+              const fmtQty   = n => isPct
+                ? `${parseFloat(n).toFixed(1)}%`
+                : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+              const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+              const total    = qty + consumed;
+              const fillPct  = isPct ? Math.min(100, qty) : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
 
-        if (invRes.ok) {
-          const invData  = await invRes.json();
-          const movData  = movRes.ok ? await movRes.json() : { results: [] };
-          const items    = (Array.isArray(invData) ? invData : (invData.results || []))
-            .filter(i => i.category !== 'Machinery' && parseFloat(i.quantity) >= 0);
-          const movements = Array.isArray(movData) ? movData : (movData.results || []);
+              // Tooltip — human readable consumption
+              const consumedLabel = consumed > 0
+                ? `${fmtQty(consumed)} ${unit} consumed today`
+                : 'No consumption recorded today';
+              const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
 
-          // Aggregate consumed today per consumable name
-          const consumedToday = {};
-          movements.forEach(m => {
-            const name = m.consumable_name || m.consumable;
-            if (!name) return;
-            consumedToday[name] = (consumedToday[name] || 0) + Math.abs(parseFloat(m.quantity || 0));
-          });
-
-          if (items.length) {
-            const lowItems = items.filter(i =>
-              parseFloat(i.quantity) <= parseFloat(i.reorder_point || 0)
-            );
-            const invDiv = document.createElement('div');
-            invDiv.style.cssText = 'margin-top:16px;';
-            invDiv.innerHTML = `
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
-                display:flex;align-items:center;gap:8px;">
-                Current Stock Levels
-                ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
-                  background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
-                  ${lowItems.length} low</span>` : ''}
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-                ${items.map(item => {
-                  const qty      = parseFloat(item.quantity);
-                  const rpt      = parseFloat(item.reorder_point || 0);
-                  const isCrit   = qty === 0;
-                  const isLow    = !isCrit && qty <= rpt;
-                  const isOk     = !isCrit && !isLow;
-                  const isPct    = (item.unit_label || '').includes('%');
-                  const consumed = consumedToday[item.name] || 0;
-                  const fmtQty   = n => isPct
-                    ? `${parseFloat(n).toFixed(1)}%`
-                    : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-
-                  // Status colour
-                  const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-
-                  // Fill bar width ? how full is the stock relative to a healthy level (3? reorder point)
-                  const maxRef  = rpt > 0 ? rpt * 3 : qty || 1;
-                  const fillPct = isPct
-                    ? Math.min(100, qty)
-                    : Math.min(100, (qty / maxRef) * 100);
-
-                  return `
-                    <div style="position:relative;overflow:hidden;
-                      padding:9px 12px 9px 12px;
-                      background:var(--panel);
-                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-                      border-radius:var(--radius-sm);
-                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
-
-                      <!-- Status fill bar on right edge -->
-                      <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                        background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                        <div style="position:absolute;bottom:0;left:0;width:100%;
-                          height:${fillPct.toFixed(1)}%;
-                          background:${statusColor};
-                          border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                          transition:height 0.3s ease;"></div>
-                      </div>
-
-                      <!-- Item name -->
-                      <span style="font-size:11px;font-weight:600;
-                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                        flex:1;min-width:0;"
-                        title="${_esc(item.name)}">${_esc(item.name)}</span>
-
-                      <!-- Stats -->
-                      <div style="display:flex;align-items:center;gap:5px;
-                        flex-shrink:0;padding-right:8px;">
-                        ${consumed > 0 ? `
-                          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                            font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                          <span style="color:var(--border);font-size:10px;">?</span>` : ''}
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                          font-weight:700;
-                          color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                          ${fmtQty(qty)}
-                        </span>
-                      </div>
-
-                    </div>`;
-                }).join('')}
-              </div>`;
-            container.appendChild(invDiv);
-          }
-        }
-      } catch { /* silent */ }
+              return `
+                <div title="${_esc(tooltip)}"
+                  style="position:relative;overflow:hidden;padding:9px 12px;
+                    background:var(--panel);
+                    border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                    border-radius:var(--radius-sm);
+                    display:flex;align-items:center;justify-content:space-between;gap:8px;
+                    cursor:default;">
+                  <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                    background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                    <div style="position:absolute;bottom:0;left:0;width:100%;
+                      height:${fillPct.toFixed(1)}%;background:${statusColor};
+                      border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                      transition:height 0.3s ease;"></div>
+                  </div>
+                  <span style="font-size:11px;font-weight:600;
+                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                    flex:1;min-width:0;"
+                    >${_esc(item.consumable)}</span>
+                  <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
+                    ${consumed > 0 ? `
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                        font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                      <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:700;color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                      ${fmtQty(qty)}
+                    </span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>`;
+        container.appendChild(invDiv);
+      }
     }
         } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
@@ -2635,7 +2605,7 @@ win.document.write(`<!DOCTYPE html>
     try {
       const [svcRes, custRes] = await Promise.all([
         Auth.fetch('/api/v1/jobs/services/'),
-        Auth.fetch('/api/v1/customers/'),
+        Auth.fetch('/api/v1/customers/?page_size=200'),
       ]);
 
       if (svcRes.ok) {
@@ -2651,6 +2621,17 @@ win.document.write(`<!DOCTYPE html>
       if (custRes.ok) {
         const data = await custRes.json();
         customers = Array.isArray(data) ? data : (data.results || []);
+        // If paginated, fetch remaining pages
+        if (data.count && data.next) {
+          let next = data.next;
+          while (next) {
+            const pageRes = await Auth.fetch(next);
+            if (!pageRes.ok) break;
+            const pageData = await pageRes.json();
+            customers = customers.concat(pageData.results || []);
+            next = pageData.next;
+          }
+        }
         if (typeof State !== 'undefined') State.customers = customers;
       }
 

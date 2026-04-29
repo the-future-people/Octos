@@ -170,6 +170,35 @@ class DailySalesSheetTodayView(APIView):
         ).data
         return Response(data)
 
+class TodaySummaryView(APIView):
+    """
+    GET /api/v1/finance/sheets/today/summary/
+    Single-call endpoint for the BM portal day sheet.
+    Opens today's sheet if needed, then returns the full
+    SheetSummaryService payload — live revenue, jobs, inventory, alerts.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+
+        user = request.user
+        if not hasattr(user, 'branch') or not user.branch:
+            return Response(
+                {'detail': 'User has no branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sheet, _ = SheetEngine(user.branch).get_or_open_today(opened_by=user)
+
+        if sheet is None:
+            return Response(
+                {'detail': 'No sheet today — branch may be closed (Sunday).'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        summary = SheetSummaryService.get_summary(sheet, sheet.branch)
+        return Response(summary)
 
 class DailySalesSheetSummaryView(APIView):
     """

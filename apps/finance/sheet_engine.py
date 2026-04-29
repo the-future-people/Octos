@@ -100,27 +100,38 @@ class SheetEngine:
 
     def get_or_open_today(self, opened_by=None):
         """
-        Fallback: get today's open sheet or create one on the spot.
-        Called when the scheduled task may have missed.
-        Never blocks an operation waiting for a sheet.
-        On Sundays, returns existing sheet if present — never creates.
+        Get today's open sheet or create one — race-condition safe.
+        Uses get_or_create directly against the DB unique constraint.
+        Never creates on Sundays.
         """
         from apps.finance.models import DailySalesSheet
         today = timezone.localdate()
 
-        # Sunday — never open or return a sheet
         if today.weekday() == 6:
             return None, False
 
-        existing = DailySalesSheet.objects.filter(
-            branch = self.branch,
-            date   = today,
-        ).first()
-        if existing:
-            return existing, False
-
-        return self.open_sheet(target_date=today, opened_by=opened_by)
-
+        try:
+            sheet, created = DailySalesSheet.objects.get_or_create(
+                branch = self.branch,
+                date   = today,
+                defaults = {
+                    'status'   : DailySalesSheet.Status.OPEN,
+                    'opened_by': opened_by,
+                },
+            )
+            if created:
+                self._assign_sheet_number(sheet, today)
+                self._link_staged_floats(sheet)
+                logger.info(
+                    'SheetEngine: opened sheet %s for branch %s on %s',
+                    sheet.pk, self.branch.code, today,
+                )
+            return sheet, created
+        except Exception:
+            # Integrity error from concurrent create — fetch the winner
+            sheet = DailySalesSheet.objects.get(branch=self.branch, date=today)
+            return sheet, False
+    
     def set_first_job_opener(self, sheet, user) -> None:
         """
         Record the first job creator as the operational sheet opener.
