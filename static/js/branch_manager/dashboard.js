@@ -445,15 +445,15 @@ async function loadRecentJobs() {
    if (paneId === 'jobs'        && !jobsLoaded)  _loadJobsPane();
     if (paneId === 'inbox'       && !inboxLoaded) loadInboxTab();
     if (paneId === 'catalogue'   && !svcLoaded)   Catalogue.loadServicesTab();
-    if (paneId === 'performance')                 _loadPerformancePane();
+    if (paneId === 'performance')                 Performance.loadPerformancePane();
     if (paneId === 'finance') {
       const pane = document.getElementById('pane-finance');
       if (pane) pane.dataset.loaded = '';  // always bust cache on navigation
       _loadFinancePane();
     }
-    if (paneId === 'reports')                     _loadReportsPane();
+    if (paneId === 'reports')                     Reports.loadReportsPane();
     if (paneId === 'inventory')                   Inventory.loadInventoryPane();
-    if (paneId === 'customers')                   _loadCustomersPane();
+    if (paneId === 'customers')                   Customers.loadCustomersPane();
   }
 
   // -- Jobs pane ----------------------------------------------
@@ -1294,80 +1294,17 @@ win.document.write(`<!DOCTYPE html>
 // -- Performance pane ---------------------------------------
   let _performanceTab = 'metrics';
 
-  function _loadPerformancePane() {
-    const pane = document.getElementById('pane-performance');
-    if (!pane) return;
-
-    pane.innerHTML = `
-      <div class="section-head">
-        <span class="section-title">Performance</span>
-      </div>
-      <div class="reports-tabs" id="performance-tab-bar">
-        <button class="reports-tab active" data-tab="metrics"
-          onclick="Dashboard.switchPerformanceTab('metrics')">Branch Metrics</button>
-        <button class="reports-tab" data-tab="services"
-          onclick="Dashboard.switchPerformanceTab('services')">Service Performance</button>
-      </div>
-      <div id="performance-tab-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    switchPerformanceTab('metrics');
-  }
-
-function switchPerformanceTab(tab) {
-    _performanceTab = tab;
-    document.querySelectorAll('#performance-tab-bar .reports-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    const content = document.getElementById('performance-tab-content');
-    if (!content) return;
-
-    if (tab === 'metrics') {
-      content.innerHTML = `
-        <div class="section-head" style="margin-top:16px;">
-          <span></span>
-          <div class="period-tabs">
-            <button class="period-tab active" data-period="day"   onclick="Dashboard.setPeriod('day')">Day</button>
-            <button class="period-tab"         data-period="week"  onclick="Dashboard.setPeriod('week')">Week</button>
-            <button class="period-tab"         data-period="month" onclick="Dashboard.setPeriod('month')">Month</button>
-          </div>
-        </div>
-        <div style="width:100%;">
-          <div id="metrics-grid" style="width:100%;">
-            <div class="loading-cell" style="padding:40px;">
-              <span class="spin"></span> Loading metrics?
-            </div>
-          </div>
-        </div>`;
-      _renderMetrics(currentPeriod);
-    }
-
-    if (tab === 'services') {
-      content.innerHTML = `
-        <div id="services-report-content" style="margin-top:16px;">
-          <div class="loading-cell"><span class="spin"></span> Loading?</div>
-        </div>`;
-      _renderServicesReport(content);
-    }
-  }
-
-
-
-  // -- Finance pane -------------------------------------------
- async function _loadFinancePane() {
+  async function _loadFinancePane() {
     const pane = document.getElementById('pane-finance');
     if (!pane) return;
     pane.dataset.loaded = '1';
-
     pane.innerHTML = `
       <div class="section-head">
         <span class="section-title">Day Sheet</span>
       </div>
       <div id="daysheet-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
+        <div class="loading-cell"><span class="spin"></span> Loading…</div>
       </div>`;
-
     await _renderTodaySheet(document.getElementById('daysheet-content'));
   }
 
@@ -1381,9 +1318,15 @@ function switchPerformanceTab(tab) {
 
   async function _renderTodaySheet(container) {
     try {
-      const res = await Auth.fetch('/api/v1/finance/sheets/today/');
-      if (!res.ok) throw new Error();
-      const sheet = await res.json();
+      const todayRes = await Auth.fetch('/api/v1/finance/sheets/today/summary/');
+      if (!todayRes.ok) throw new Error();
+      const summary  = await todayRes.json();
+      const sheet    = { id: summary.meta.sheet_id, date: summary.meta.date, status: summary.meta.status, sheet_number: summary.meta.sheet_number, opened_at: summary.meta.opened_at, notes: summary.meta.notes, total_jobs_created: summary.jobs.total, total_refunds: 0, total_petty_cash_out: summary.revenue.petty_cash_out, total_credit_issued: summary.revenue.credit_issued, total_credit_settled: summary.revenue.credit_settled };
+      const rev      = summary.revenue;
+      const liveCash  = parseFloat(rev.cash  || 0);
+      const liveMomo  = parseFloat(rev.momo  || 0);
+      const livePos   = parseFloat(rev.pos   || 0);
+      const liveTotal = liveCash + liveMomo + livePos;
 
       container.innerHTML = `
         <!-- Status strip -->
@@ -1422,23 +1365,23 @@ function switchPerformanceTab(tab) {
         <!-- Revenue cards -->
         <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px;">
           <div class="stat-card" style="background:var(--panel);border:2px solid var(--text);">
-            <div class="stat-num">${_fmt(parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0))}</div>
+            <div class="stat-num">${_fmt(liveTotal)}</div>
             <div class="stat-lbl" style="font-weight:700;">Total Today</div>
           </div>
           <div class="stat-card green">
-            <div class="stat-num">${_fmt(sheet.total_cash)}</div>
+            <div class="stat-num">${_fmt(liveCash)}</div>
             <div class="stat-lbl">Cash</div>
           </div>
           <div class="stat-card amber">
-            <div class="stat-num">${_fmt(sheet.total_momo)}</div>
+            <div class="stat-num">${_fmt(liveMomo)}</div>
             <div class="stat-lbl">MoMo</div>
           </div>
           <div class="stat-card blue">
-            <div class="stat-num">${_fmt(sheet.total_pos)}</div>
+            <div class="stat-num">${_fmt(livePos)}</div>
             <div class="stat-lbl">POS</div>
           </div>
           <div class="stat-card purple">
-            <div class="stat-num">${_fmt(sheet.net_cash_in_till)}</div>
+            <div class="stat-num">${_fmt(parseFloat(rev.net_cash_in_till || 0))}</div>
             <div class="stat-lbl">Net Cash In Till</div>
           </div>
         </div>
@@ -1518,9 +1461,7 @@ function switchPerformanceTab(tab) {
 
     // -- Populate computed fields ------------------------------
     // Total revenue
-    const totalRevenue = parseFloat(sheet.total_cash||0)
-      + parseFloat(sheet.total_momo||0)
-      + parseFloat(sheet.total_pos||0);
+    const totalRevenue = liveTotal;
 
     // Job stats from stats endpoint
     try {
@@ -1592,113 +1533,79 @@ function switchPerformanceTab(tab) {
       }
     } catch { /* silent */ }
 
-    // -- Consumables snapshot ----------------------------------
+    // ── Consumables snapshot — uses summary.inventory (already fetched) ──
     if (sheet.status === 'OPEN') {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const [invRes, movRes] = await Promise.all([
-          Auth.fetch('/api/v1/inventory/stock/'),
-          Auth.fetch(`/api/v1/inventory/movements/?type=OUT&date=${today}&page_size=500`),
-        ]);
+      const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
+      if (invItems.length) {
+        const lowItems  = invItems.filter(i => i.is_low);
+        const invDiv    = document.createElement('div');
+        invDiv.style.cssText = 'margin-top:16px;';
+        invDiv.innerHTML = `
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+            display:flex;align-items:center;gap:8px;">
+            Current Stock Levels
+            ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+              background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+              ${lowItems.length} low</span>` : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+            ${invItems.map(item => {
+              const qty      = parseFloat(item.closing);
+              const consumed = parseFloat(item.consumed || 0);
+              const rpt      = parseFloat(item.reorder_point || 0);
+              const isCrit   = qty === 0;
+              const isLow    = item.is_low;
+              const isPct    = (item.unit || '').includes('%');
+              const unit     = item.unit || 'units';
+              const fmtQty   = n => isPct
+                ? `${parseFloat(n).toFixed(1)}%`
+                : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+              const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+              const total    = qty + consumed;
+              const fillPct  = isPct ? Math.min(100, qty) : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
 
-        if (invRes.ok) {
-          const invData  = await invRes.json();
-          const movData  = movRes.ok ? await movRes.json() : { results: [] };
-          const items    = (Array.isArray(invData) ? invData : (invData.results || []))
-            .filter(i => i.category !== 'Machinery' && parseFloat(i.quantity) >= 0);
-          const movements = Array.isArray(movData) ? movData : (movData.results || []);
+              // Tooltip — human readable consumption
+              const consumedLabel = consumed > 0
+                ? `${fmtQty(consumed)} ${unit} consumed today`
+                : 'No consumption recorded today';
+              const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
 
-          // Aggregate consumed today per consumable name
-          const consumedToday = {};
-          movements.forEach(m => {
-            const name = m.consumable_name || m.consumable;
-            if (!name) return;
-            consumedToday[name] = (consumedToday[name] || 0) + Math.abs(parseFloat(m.quantity || 0));
-          });
-
-          if (items.length) {
-            const lowItems = items.filter(i =>
-              parseFloat(i.quantity) <= parseFloat(i.reorder_point || 0)
-            );
-            const invDiv = document.createElement('div');
-            invDiv.style.cssText = 'margin-top:16px;';
-            invDiv.innerHTML = `
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
-                display:flex;align-items:center;gap:8px;">
-                Current Stock Levels
-                ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
-                  background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
-                  ${lowItems.length} low</span>` : ''}
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-                ${items.map(item => {
-                  const qty      = parseFloat(item.quantity);
-                  const rpt      = parseFloat(item.reorder_point || 0);
-                  const isCrit   = qty === 0;
-                  const isLow    = !isCrit && qty <= rpt;
-                  const isOk     = !isCrit && !isLow;
-                  const isPct    = (item.unit_label || '').includes('%');
-                  const consumed = consumedToday[item.name] || 0;
-                  const fmtQty   = n => isPct
-                    ? `${parseFloat(n).toFixed(1)}%`
-                    : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-
-                  // Status colour
-                  const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-
-                  // Fill bar width ? how full is the stock relative to a healthy level (3? reorder point)
-                  const maxRef  = rpt > 0 ? rpt * 3 : qty || 1;
-                  const fillPct = isPct
-                    ? Math.min(100, qty)
-                    : Math.min(100, (qty / maxRef) * 100);
-
-                  return `
-                    <div style="position:relative;overflow:hidden;
-                      padding:9px 12px 9px 12px;
-                      background:var(--panel);
-                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-                      border-radius:var(--radius-sm);
-                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
-
-                      <!-- Status fill bar on right edge -->
-                      <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                        background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                        <div style="position:absolute;bottom:0;left:0;width:100%;
-                          height:${fillPct.toFixed(1)}%;
-                          background:${statusColor};
-                          border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                          transition:height 0.3s ease;"></div>
-                      </div>
-
-                      <!-- Item name -->
-                      <span style="font-size:11px;font-weight:600;
-                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                        flex:1;min-width:0;"
-                        title="${_esc(item.name)}">${_esc(item.name)}</span>
-
-                      <!-- Stats -->
-                      <div style="display:flex;align-items:center;gap:5px;
-                        flex-shrink:0;padding-right:8px;">
-                        ${consumed > 0 ? `
-                          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                            font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                          <span style="color:var(--border);font-size:10px;">?</span>` : ''}
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                          font-weight:700;
-                          color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                          ${fmtQty(qty)}
-                        </span>
-                      </div>
-
-                    </div>`;
-                }).join('')}
-              </div>`;
-            container.appendChild(invDiv);
-          }
-        }
-      } catch { /* silent */ }
+              return `
+                <div title="${_esc(tooltip)}"
+                  style="position:relative;overflow:hidden;padding:9px 12px;
+                    background:var(--panel);
+                    border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                    border-radius:var(--radius-sm);
+                    display:flex;align-items:center;justify-content:space-between;gap:8px;
+                    cursor:default;">
+                  <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                    background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                    <div style="position:absolute;bottom:0;left:0;width:100%;
+                      height:${fillPct.toFixed(1)}%;background:${statusColor};
+                      border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                      transition:height 0.3s ease;"></div>
+                  </div>
+                  <span style="font-size:11px;font-weight:600;
+                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                    flex:1;min-width:0;"
+                    >${_esc(item.consumable)}</span>
+                  <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
+                    ${consumed > 0 ? `
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                        font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                      <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                      font-weight:700;color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                      ${fmtQty(qty)}
+                    </span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>`;
+        container.appendChild(invDiv);
+      }
     }
         } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
@@ -2698,7 +2605,7 @@ function switchPerformanceTab(tab) {
     try {
       const [svcRes, custRes] = await Promise.all([
         Auth.fetch('/api/v1/jobs/services/'),
-        Auth.fetch('/api/v1/customers/'),
+        Auth.fetch('/api/v1/customers/?page_size=200'),
       ]);
 
       if (svcRes.ok) {
@@ -2714,6 +2621,17 @@ function switchPerformanceTab(tab) {
       if (custRes.ok) {
         const data = await custRes.json();
         customers = Array.isArray(data) ? data : (data.results || []);
+        // If paginated, fetch remaining pages
+        if (data.count && data.next) {
+          let next = data.next;
+          while (next) {
+            const pageRes = await Auth.fetch(next);
+            if (!pageRes.ok) break;
+            const pageData = await pageRes.json();
+            customers = customers.concat(pageData.results || []);
+            next = pageData.next;
+          }
+        }
         if (typeof State !== 'undefined') State.customers = customers;
       }
 
@@ -2883,2265 +2801,7 @@ function switchPerformanceTab(tab) {
   }
 
 // -- Reports pane ---------------------------------------------
-async function _loadReportsPane() {
-    const pane = document.getElementById('pane-reports');
-    if (!pane) return;
-
-    pane.innerHTML = `
-      <div class="section-head">
-        <span class="section-title">Reports & Filing</span>
-      </div>
-
-      <div class="reports-tabs">
-        <button class="reports-tab active" data-tab="daily"
-          onclick="Dashboard.switchReportsTab('daily')">Daily</button>
-        <button class="reports-tab" data-tab="filing"
-          onclick="Dashboard.switchReportsTab('filing')">Weekly</button>
-        <button class="reports-tab" data-tab="monthly"
-          onclick="Dashboard.switchReportsTab('monthly')">Monthly</button>
-        <button class="reports-tab" data-tab="yearly"
-          onclick="Dashboard.switchReportsTab('yearly')">Yearly</button>
-        <button class="reports-tab" data-tab="ledger"
-          onclick="Dashboard.switchReportsTab('ledger')">Job Ledger</button>
-      </div>
-
-      <div id="reports-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    await _loadReportsTab('daily');
-  }
-
-
-
-  async function setReportsPeriod(period) {
-    const activeTab = document.querySelector('.reports-tab.active')?.dataset.tab || 'history';
-    await _loadReportsTab(activeTab);
-  }
-
-async function switchReportsTab(tab) {
-    document.querySelectorAll('#pane-reports .reports-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    await _loadReportsTab(tab);
-  }
-
-async function _loadReportsTab(tab) {
-    const content = document.getElementById('reports-content');
-    if (!content) return;
-    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading?</div>';
-
-    if (tab === 'daily')   await _renderDailySheets(content);
-    if (tab === 'filing')  await _renderWeeklyFiling(content);
-    if (tab === 'monthly') await _renderMonthlyClose(content);
-    if (tab === 'yearly')  await _renderYearlySummary(content);
-    if (tab === 'ledger')  _renderHistoryReport(content);
-  }
-
-
-  // -- Sheets Archive --------------------------------------------
-  async function _renderSheetsReport(container) {
-    try {
-      const res = await Auth.fetch(`/api/v1/finance/sheets/?period=${_reportsPeriod}`);
-      if (!res.ok) throw new Error();
-      const data  = await res.json();
-      const sheets = data.results || data;
-
-      if (!sheets.length) {
-        container.innerHTML = '<div class="loading-cell">No sheets found for this period.</div>';
-        return;
-      }
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-
-      container.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Jobs</th>
-                <th>Cash</th>
-                <th>MoMo</th>
-                <th>POS</th>
-                <th>Total</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${sheets.map(s => `
-                <tr>
-                  <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">${s.date}</td>
-                  <td><span class="badge badge-${s.status === 'OPEN' ? 'progress' : 'done'}">${s.status}</span></td>
-                  <td>${s.total_jobs_created || 0}</td>
-                  <td>${fmt(s.total_cash)}</td>
-                  <td>${fmt(s.total_momo)}</td>
-                  <td>${fmt(s.total_pos)}</td>
-                  <td style="font-weight:700;">${fmt((parseFloat(s.total_cash||0)+parseFloat(s.total_momo||0)+parseFloat(s.total_pos||0)))}</td>
-                  <td>
-                    ${s.status !== 'OPEN' ? `
-                        <button onclick="Dashboard.downloadSheetPDF(${s.id}, '${s.date}')"
-                        style="font-size:12px;color:var(--text-2);background:none;border:none;cursor:pointer;font-weight:600;padding:0;">
-                        PDF ?
-                      </button>` : '?'}
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch {
-      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load sheets.</div>';
-    }
-  }
-
-  // -- Jobs History ----------------------------------------------
-  async function _renderJobsReport(container) {
-    try {
-      const res = await Auth.fetch(`/api/v1/jobs/?period=${_reportsPeriod}&page_size=50`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      const jobs = data.results || data;
-
-      const total     = jobs.length;
-      const completed = jobs.filter(j => j.status === 'COMPLETE').length;
-      const cancelled = jobs.filter(j => j.status === 'CANCELLED').length;
-      const drafts    = jobs.filter(j => j.status === 'DRAFT').length;
-      const pct       = total ? Math.round(completed / total * 100) : 0;
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-
-      container.innerHTML = `
-        <div class="stat-grid" style="margin-bottom:20px;">
-          <div class="stat-card blue"><div class="stat-num">${total}</div><div class="stat-lbl">Total Jobs</div></div>
-          <div class="stat-card green"><div class="stat-num">${completed}</div><div class="stat-lbl">Completed</div></div>
-          <div class="stat-card red"><div class="stat-num">${cancelled}</div><div class="stat-lbl">Cancelled</div></div>
-          <div class="stat-card amber"><div class="stat-num">${pct}%</div><div class="stat-lbl">Completion Rate</div></div>
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Ref</th>
-                <th>Title</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Attendant</th>
-                <th>Amount</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${jobs.map(j => `
-                <tr>
-                  <td style="font-family:'JetBrains Mono',monospace;font-size:11px;">${j.job_number||'?'}</td>
-                  <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${j.title||'?'}</td>
-                  <td><span class="type-pill ${j.job_type||''}">${j.job_type||'?'}</span></td>
-                  <td><span class="badge badge-${_jobStatusBadge(j.status)}">${j.status}</span></td>
-                  <td>${j.intake_by_name||'?'}</td>
-                  <td>${fmt(j.estimated_cost)}</td>
-                  <td style="font-size:11px;color:var(--text-3);">${j.created_at ? new Date(j.created_at).toLocaleDateString('en-GH') : '?'}</td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch {
-      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load jobs.</div>';
-    }
-  }
-
-  function _jobStatusBadge(status) {
-    const map = {
-      COMPLETE: 'done', PENDING_PAYMENT: 'pending', IN_PROGRESS: 'progress',
-      CANCELLED: 'cancelled', DRAFT: 'draft', PAID: 'progress',
-    };
-    return map[status] || 'pending';
-  }
-
-  // -- Service Performance ---------------------------------------
- // -- Service Performance --------------------------------------------------
-  let _servicesPeriod = 'month';
-
-  async function _renderServicesReport(container) {
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div style="font-size:10.5px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.8px;">Service Performance</div>
-        <div style="display:flex;gap:4px;">
-          ${['day','week','month','year'].map(p => `
-            <button onclick="Dashboard.setServicesPeriod('${p}')"
-              class="reports-tab ${_servicesPeriod === p ? 'active' : ''}"
-              data-period="${p}"
-              style="padding:5px 12px;font-size:12px;">
-              ${p.charAt(0).toUpperCase() + p.slice(1)}
-            </button>`).join('')}
-        </div>
-      </div>
-      <div id="services-report-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    await _fetchServicesReport();
-  }
-
-  async function _fetchServicesReport() {
-    const content = document.getElementById('services-report-content');
-    if (!content) return;
-
-    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading?</div>';
-
-    try {
-      const res = await Auth.fetch(`/api/v1/jobs/reports/services/?period=${_servicesPeriod}`);
-      if (!res.ok) throw new Error();
-      const data     = await res.json();
-      const services = data.services || [];
-
-      if (!services.length) {
-        content.innerHTML = '<div class="loading-cell">No service data for this period.</div>';
-        return;
-      }
-
-      const fmt    = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-      const maxRev = Math.max(...services.map(s => parseFloat(s.revenue||0)));
-
-      content.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:20px;margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">
-            Revenue by Service
-          </div>
-          ${services.slice(0,10).map(s => {
-            const pct = maxRev ? (parseFloat(s.revenue||0) / maxRev * 100) : 0;
-            return `
-              <div style="margin-bottom:10px;">
-                <div style="display:flex;justify-content:space-between;
-                  align-items:center;margin-bottom:4px;">
-                  <span style="font-size:12px;font-weight:500;color:var(--text);">${s.service}</span>
-                  <span style="font-size:12px;font-family:'JetBrains Mono',monospace;
-                    color:var(--text-2);">${fmt(s.revenue)}</span>
-                </div>
-                <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-                  <div style="height:100%;width:${pct}%;background:var(--text);
-                    border-radius:3px;transition:width 0.4s ease;"></div>
-                </div>
-              </div>`;
-          }).join('')}
-        </div>
-
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th>Jobs</th>
-                <th>Revenue</th>
-                <th>% of Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${services.map(s => `
-                <tr>
-                  <td>${s.service}</td>
-                  <td>${s.job_count}</td>
-                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">
-                    ${fmt(s.revenue)}</td>
-                  <td>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <div style="width:60px;height:4px;background:var(--border);border-radius:2px;">
-                        <div style="height:100%;width:${s.percentage}%;
-                          background:var(--green-text);border-radius:2px;"></div>
-                      </div>
-                      <span style="font-size:12px;color:var(--text-2);">${s.percentage}%</span>
-                    </div>
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch {
-      content.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load service data.</div>';
-    }
-  }
-
-  async function setServicesPeriod(period) {
-    _servicesPeriod = period;
-    document.querySelectorAll('.reports-tab[data-period]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.period === period);
-    });
-    await _fetchServicesReport();
-  }
-
- async function _renderMonthlyClose(container) {
-    if (!container) return;
-
-    const now   = new Date();
-    const month = now.getMonth() + 1;
-    const year  = now.getFullYear();
-
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        margin-bottom:20px;">
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-            color:var(--text);letter-spacing:-0.3px;">Monthly Close</div>
-          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
-            End-of-month operations closure and Finance review
-          </div>
-        </div>
-      </div>
-      <div id="monthly-current-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>
-      <div id="monthly-history" style="margin-top:24px;"></div>`;
-
-    try {
-      const res = await Auth.fetch(
-        `/api/v1/finance/monthly-close/?month=${month}&year=${year}`
-      );
-      const content = document.getElementById('monthly-current-content');
-      if (!content) return;
-
-      if (!res.ok) {
-        const monthName = ['January','February','March','April','May','June',
-          'July','August','September','October','November','December'][month - 1];
-        content.innerHTML = `
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:24px 20px;text-align:center;
-            color:var(--text-3);">
-            <div style="font-size:14px;font-weight:600;color:var(--text);
-              margin-bottom:6px;">${monthName} ${year}</div>
-            <div style="font-size:13px;">
-              No monthly close record yet. Submit at month end when all
-              integrity gates are met.
-            </div>
-          </div>`;
-        return;
-      }
-
-      const data = await res.json();
-      _renderMonthlyCloseDetail(content, data);
-    } catch {
-      const content = document.getElementById('monthly-current-content');
-      if (content) content.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:24px 20px;text-align:center;
-          color:var(--text-3);font-size:13px;">
-          Monthly close not yet initiated for this month.
-        </div>`;
-    }
-
-    await _loadMonthlyHistory();
-  }
-
-  async function _loadMonthlyHistory() {
-    const container = document.getElementById('monthly-history');
-    if (!container) return;
-
-    const monthNames = ['January','February','March','April','May','June',
-      'July','August','September','October','November','December'];
-
-    try {
-      // Fetch all closes for this branch ? we use the weekly list endpoint trick
-      // by fetching each previous month close
-      const now   = new Date();
-      const year  = now.getFullYear();
-      const currentMonth = now.getMonth() + 1;
-
-      // Fetch closes for all previous months this year
-      const fetches = [];
-      for (let m = 1; m < currentMonth; m++) {
-        fetches.push(
-          Auth.fetch(`/api/v1/finance/monthly-close/?month=${m}&year=${year}`)
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null)
-        );
-      }
-
-      const results = await Promise.all(fetches);
-      const closes  = results
-        .filter(r => r && r.status && r.status !== 'OPEN')
-        .sort((a, b) => b.month - a.month);
-
-      if (!closes.length) return;
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-
-      const statusConfig = {
-        SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
-        FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
-        NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
-        RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
-        FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
-        ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ?' },
-        LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ?' },
-        REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
-      };
-
-      container.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-          Previous Monthly Closes
-        </div>
-        ${closes.map(c => {
-          const snap    = c.summary_snapshot || {};
-          const revenue = snap.revenue || {};
-          const jobs    = snap.jobs    || {};
-          const sc      = statusConfig[c.status] || { bg:'var(--bg)', text:'var(--text-3)', label: c.status };
-          const canDownload = ['ENDORSED','LOCKED'].includes(c.status);
-
-          return `
-            <div style="border:1px solid var(--border);border-radius:var(--radius);
-              overflow:hidden;margin-bottom:10px;">
-
-              <!-- Header -->
-              <div style="padding:16px 20px;background:var(--panel);
-                border-bottom:1px solid var(--border);">
-                <div style="display:flex;align-items:center;
-                  justify-content:space-between;margin-bottom:10px;">
-                  <div>
-                    <div style="font-size:15px;font-weight:700;color:var(--text);">
-                      ${monthNames[(c.month||1)-1]} ${c.year}
-                    </div>
-                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
-                      Submitted by ${c.submitted_by || '?'}
-                      ${c.submitted_at ? ' ? ' + new Date(c.submitted_at)
-                        .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
-                    </div>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:8px;">
-                    <span style="padding:4px 12px;border-radius:20px;font-size:11px;
-                      font-weight:700;background:${sc.bg};color:${sc.text};">
-                      ${sc.label}
-                    </span>
-                    ${canDownload ? `
-                      <button onclick="Dashboard._downloadMonthlyPDF(${c.id})"
-                        style="display:inline-flex;align-items:center;gap:5px;
-                          padding:6px 14px;background:var(--text);color:#fff;
-                          border:none;border-radius:var(--radius-sm);font-size:12px;
-                          font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
-                          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                        </svg>
-                        PDF
-                      </button>` : ''}
-                  </div>
-                </div>
-
-                <!-- Revenue + jobs strip -->
-                ${snap.revenue ? `
-                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
-                    ${[
-                      ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
-                      ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong)'],
-                      ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong)'],
-                      ['Jobs',            jobs.total || 0,                   'var(--text)'],
-                    ].map(([label, val, color]) => `
-                      <div style="padding:8px 12px;background:var(--bg);
-                        border:1px solid var(--border);border-radius:var(--radius-sm);">
-                        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
-                          ${label}</div>
-                        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                          font-weight:700;color:${color};">${val}</div>
-                      </div>`).join('')}
-                  </div>` : ''}
-              </div>
-
-              <!-- Audit trail -->
-              <div style="padding:12px 20px;background:var(--bg);">
-                <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-                  Audit Trail
-                </div>
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                  ${[
-                    ['Submitted',       c.submitted_by,        c.submitted_at,        '#3355cc'],
-                    ['Finance Cleared', c.finance_reviewer,    c.finance_cleared_at,  '#22c98a'],
-                    ['Endorsed',        c.endorsed_by,         c.endorsed_at,         '#9b59b6'],
-                    ['Locked',          c.locked_at ? 'System' : null, c.locked_at,  '#666'],
-                  ].filter(([,actor]) => actor).map(([label, actor, ts, color]) => `
-                    <div style="display:flex;align-items:center;gap:10px;">
-                      <div style="width:6px;height:6px;border-radius:50%;
-                        background:${color};flex-shrink:0;"></div>
-                      <span style="font-size:12px;font-weight:600;color:var(--text);
-                        min-width:120px;">${label}</span>
-                      <span style="font-size:12px;color:var(--text-2);">${actor || '?'}</span>
-                      ${ts ? `<span style="font-size:11px;color:var(--text-3);margin-left:auto;">
-                        ${new Date(ts).toLocaleDateString('en-GB',
-                          {day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
-                    </div>`).join('')}
-                </div>
-                ${c.rejection_reason ? `
-                  <div style="margin-top:10px;padding:8px 12px;
-                    background:var(--red-bg);border:1px solid var(--red-border);
-                    border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);">
-                    <strong>Rejection reason:</strong> ${c.rejection_reason}
-                  </div>` : ''}
-              </div>
-
-            </div>`;
-        }).join('')}`;
-
-    } catch { /* silent */ }
-  }
-
-function _renderMonthlyCloseDetail(container, data) {
-    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-    const snap    = data.summary_snapshot || {};
-    const revenue = snap.revenue || {};
-    const jobs    = snap.jobs    || {};
-    const inv     = snap.inventory || {};
-    const invItems = (inv.items || []).filter(i => i.consumed > 0);
-
-    const monthNames = ['January','February','March','April','May','June',
-      'July','August','September','October','November','December'];
-    const monthName = monthNames[(data.month||1)-1];
-
-    const statusConfig = {
-      SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
-      FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
-      NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
-      RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
-      FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
-      ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ?' },
-      LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ?' },
-      REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
-    };
-    const sc = statusConfig[data.status] || { bg:'var(--bg)', text:'var(--text-3)', label: data.status };
-
-    container.innerHTML = `
-      <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        margin-bottom:16px;padding:16px 20px;background:var(--panel);
-        border:1px solid var(--border);border-radius:var(--radius);">
-        <div>
-          <div style="font-size:16px;font-weight:700;color:var(--text);">
-            ${monthName} ${data.year}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-            Submitted by ${_esc(data.submitted_by || '?')}
-            ${data.submitted_at ? ' ? ' + new Date(data.submitted_at)
-              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
-          </div>
-        </div>
-        <span style="padding:4px 14px;border-radius:20px;font-size:11px;
-          font-weight:700;background:${sc.bg};color:${sc.text};">
-          ${sc.label}
-        </span>
-      </div>
-
-      <!-- Revenue strip -->
-      ${revenue.total_collected != null ? `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-        ${[
-          ['Total Collected', fmt(revenue.total_collected || 0), 'var(--text)'],
-          ['Cash',            fmt(revenue.total_cash      || 0), 'var(--cash-strong, var(--green-text))'],
-          ['MoMo',            fmt(revenue.total_momo      || 0), 'var(--momo-strong, var(--amber-text))'],
-          ['Jobs',            jobs.total || 0,                   'var(--text)'],
-        ].map(([label, val, color]) => `
-          <div style="padding:12px 14px;background:var(--panel);
-            border:1px solid var(--border);border-radius:var(--radius-sm);">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-              ${label}</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
-              font-weight:700;color:${color};">${val}</div>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- Inventory consumption -->
-      <div style="background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-          Inventory Consumed This Month
-        </div>
-        ${invItems.length ? `
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <thead>
-            <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
-              <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumable</th>
-              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Consumed</th>
-              <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Closing</th>
-              <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
-                color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${invItems.map(item => {
-              const isToner = item.unit === '%';
-              const closing = parseFloat(item.closing);
-              const isLow   = item.is_low;
-              const color   = isToner
-                ? (closing >= 30 ? 'var(--green-text)' : closing >= 15 ? 'var(--amber-text)' : 'var(--red-text)')
-                : (isLow ? 'var(--red-text)' : 'var(--text-2)');
-              const badge   = isLow
-                ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
-                    border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
-                : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
-                    border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
-              return `
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
-                  <td style="padding:6px 10px;text-align:right;color:var(--text-3);
-                    font-family:'JetBrains Mono',monospace;">${item.consumed} ${item.unit}</td>
-                  <td style="padding:6px 10px;text-align:right;font-weight:600;
-                    font-family:'JetBrains Mono',monospace;color:${color};">
-                    ${item.closing} ${item.unit}</td>
-                  <td style="padding:6px 10px;text-align:center;">${badge}</td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>` : `
-        <div style="font-size:12px;color:var(--text-3);padding:8px 0;">
-          ${data.status === 'OPEN'
-            ? 'Inventory snapshot is generated when the month is submitted.'
-            : 'No consumption recorded for this month.'}
-        </div>`}
-      </div>
-
-      <!-- BM Notes -->
-      ${data.bm_notes ? `
-      <div style="padding:12px 16px;background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius-sm);">
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-          Branch Manager Notes</div>
-        <div style="font-size:13px;color:var(--text-2);">${_esc(data.bm_notes)}</div>
-      </div>` : ''}`;
-  }
-
-  async function _submitMonthlyClose(month, year) {
-    const btn   = document.getElementById('monthly-submit-btn');
-    const notes = document.getElementById('monthly-bm-notes')?.value.trim() || '';
-
-    if (btn) { btn.disabled = true; btn.textContent = 'Submitting?'; }
-
-    try {
-      const res = await Auth.fetch('/api/v1/finance/monthly-close/submit/', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ month, year, bm_notes: notes }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = Array.isArray(err.detail) ? err.detail.join(' ') : (err.detail || 'Submission failed.');
-        _toast(msg, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Submit for Endorsement'; }
-        return;
-      }
-
-      _toast('Monthly close submitted. Awaiting Belt Manager endorsement.', 'success');
-      const content = document.getElementById('reports-content');
-      if (content) await _renderMonthlyClose(content);
-
-    } catch {
-      _toast('Network error.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Submit for Endorsement'; }
-    }
-  }
-
-  async function _downloadMonthlyPDF(id) {
-    try {
-      const res = await Auth.fetch(`/api/v1/finance/monthly-close/${id}/pdf/`);
-      if (!res.ok) { _toast('Could not generate PDF.', 'error'); return; }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `monthly_close_${id}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      _toast('Download failed.', 'error');
-    }
-  }
-
-async function _renderYearlySummary(container) {
-    if (!container) return;
-
-    const year = new Date().getFullYear();
-    const monthNames = ['January','February','March','April','May','June',
-      'July','August','September','October','November','December'];
-
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        margin-bottom:20px;">
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-            color:var(--text);letter-spacing:-0.3px;">${year} Annual Overview</div>
-          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
-            Month-by-month summary for the current year
-          </div>
-        </div>
-      </div>
-      <div id="yearly-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    try {
-      const res = await Auth.fetch(
-        `/api/v1/jobs/history/?level=month&year=${year}`
-      );
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-
-      const content = document.getElementById('yearly-content');
-      if (!content) return;
-
-      const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-      const kpis    = data.kpis || {};
-      const items   = data.items || [];
-
-      // -- KPI strip -----------------------------------------
-      const kpiHtml = `
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);
-          gap:10px;margin-bottom:24px;">
-          ${[
-            { label:'Total Jobs',   value: kpis.total?.value   || 0, fmt: v => v,       color:'#3355cc' },
-            { label:'Revenue',      value: kpis.revenue?.value || 0, fmt: v => fmt(v),  color:'#22c98a' },
-            { label:'Pending',      value: kpis.pending?.value || 0, fmt: v => v,       color:'#e8a820' },
-            { label:'Completion',   value: kpis.rate?.value    || 0, fmt: v => v + '%', color:'#9b59b6' },
-          ].map(k => {
-            const change = kpis[Object.keys(kpis).find(key =>
-              kpis[key].value === k.value
-            )]?.change;
-            return `
-              <div style="background:var(--panel);border:1px solid var(--border);
-                border-top:3px solid ${k.color};border-radius:var(--radius);
-                padding:14px 16px;">
-                <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
-                  ${k.label}</div>
-                <div style="font-size:20px;font-weight:800;color:${k.color};
-                  font-family:'Outfit',sans-serif;">${k.fmt(k.value)}</div>
-              </div>`;
-          }).join('')}
-        </div>`;
-
-      // -- Monthly breakdown table ----------------------------
-      const maxRevenue = Math.max(...items.map(i => i.revenue || 0), 1);
-
-      const tableHtml = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;margin-bottom:20px;">
-          <table style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr style="background:var(--bg);">
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Month</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Jobs</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Revenue</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Rate</th>
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Trend</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:2px solid var(--border);">Close</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${monthNames.map((name, i) => {
-                const m      = i + 1;
-                const item   = items.find(it => it.month === m);
-                const now    = new Date();
-                const isPast = m < now.getMonth() + 1;
-                const isCurr = m === now.getMonth() + 1;
-                const isFuture = m > now.getMonth() + 1;
-
-                if (isFuture) {
-                  return `
-                    <tr style="border-bottom:1px solid var(--border);opacity:0.3;">
-                      <td style="padding:12px 16px;font-size:13px;font-weight:600;
-                        color:var(--text-3);">${name}</td>
-                      <td colspan="5" style="padding:12px 16px;font-size:12px;
-                        color:var(--text-3);text-align:center;">?</td>
-                    </tr>`;
-                }
-
-                const total   = item?.total   || 0;
-                const revenue = item?.revenue  || 0;
-                const rate    = item?.rate     || 0;
-                const barPct  = maxRevenue > 0 ? (revenue / maxRevenue * 100) : 0;
-
-                return `
-                  <tr style="border-bottom:1px solid var(--border);
-                    ${isCurr ? 'background:var(--bg);' : ''}
-                    transition:background 0.12s;"
-                    onmouseover="this.style.background='var(--bg)'"
-                    onmouseout="this.style.background='${isCurr ? 'var(--bg)' : ''}'">
-                    <td style="padding:12px 16px;">
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:13px;font-weight:700;color:var(--text);">
-                          ${name}</span>
-                        ${isCurr ? `<span style="padding:2px 8px;border-radius:20px;
-                          font-size:10px;font-weight:700;background:var(--amber-bg);
-                          color:var(--amber-text);">Current</span>` : ''}
-                      </div>
-                    </td>
-                    <td style="padding:12px 16px;text-align:right;font-size:13px;
-                      font-weight:600;color:var(--text);">${total}</td>
-                    <td style="padding:12px 16px;text-align:right;
-                      font-family:'JetBrains Mono',monospace;font-size:13px;
-                      font-weight:700;color:var(--text);">${fmt(revenue)}</td>
-                    <td style="padding:12px 16px;text-align:right;font-size:13px;
-                      font-weight:600;color:${rate >= 95 ? 'var(--green-text)' :
-                        rate >= 80 ? 'var(--amber-text)' : 'var(--red-text)'};">
-                      ${rate}%</td>
-                    <td style="padding:12px 16px;">
-                      <div style="height:6px;background:var(--border);
-                        border-radius:3px;width:120px;overflow:hidden;">
-                        <div style="height:100%;width:${barPct.toFixed(1)}%;
-                          background:var(--text);border-radius:3px;
-                          transition:width 0.4s ease;"></div>
-                      </div>
-                    </td>
-                    <td style="padding:12px 16px;text-align:center;">
-                      ${isPast || isCurr ? `
-                        <button onclick="Dashboard.switchReportsTab('monthly')"
-                          style="padding:4px 12px;background:none;
-                            border:1px solid var(--border);border-radius:var(--radius-sm);
-                            font-size:11px;font-weight:600;cursor:pointer;
-                            color:var(--text-2);font-family:'DM Sans',sans-serif;">
-                          View
-                        </button>` : '?'}
-                    </td>
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>`;
-
-      content.innerHTML = kpiHtml + tableHtml;
-
-    } catch {
-      const content = document.getElementById('yearly-content');
-      if (content) content.innerHTML = `
-        <div class="loading-cell" style="color:var(--red-text);">
-          Could not load yearly summary.</div>`;
-    }
-  }
-
-  async function _loadDailySheetInventory(sheetId, sheetDate) {
-    const container = document.getElementById(`daily-inv-${sheetId}`);
-    if (!container) return;
-
-    try {
-      const res  = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/eod-summary/`);
-      if (!res.ok) throw new Error();
-      const data  = await res.json();
-      const items = data.inventory_consumption || [];
-
-      if (!items.length) {
-        container.innerHTML = `
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-            Inventory Consumed</div>
-          <div style="font-size:12px;color:var(--text-3);padding:10px 0;">
-            No inventory movements recorded.</div>`;
-        return;
-      }
-
-      container.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-          Inventory Consumed</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-          ${items.map(item => {
-            const closing  = parseFloat(item.closing);
-            const consumed = parseFloat(item.consumed || 0);
-            const isPct    = item.unit === '%';
-            const isCrit   = closing === 0;
-            const isLow    = !isCrit && item.is_low;
-            const isOk     = !isCrit && !isLow;
-
-            const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-
-            const fmtQty = n => isPct
-              ? `${parseFloat(n).toFixed(1)}%`
-              : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-
-            // Fill bar ? toner uses % directly, others use closing vs closing+consumed as proxy
-            const total   = closing + consumed;
-            const fillPct = total > 0
-              ? Math.min(100, (closing / total) * 100)
-              : isPct ? Math.min(100, closing) : 0;
-
-            return `
-              <div style="position:relative;overflow:hidden;
-                padding:9px 12px;
-                background:var(--panel);
-                border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-                border-radius:var(--radius-sm);
-                display:flex;align-items:center;justify-content:space-between;gap:8px;">
-
-                <!-- Status fill bar on right edge -->
-                <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                  background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                  <div style="position:absolute;bottom:0;left:0;width:100%;
-                    height:${fillPct.toFixed(1)}%;
-                    background:${statusColor};
-                    border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                    transition:height 0.3s ease;"></div>
-                </div>
-
-                <!-- Item name -->
-                <span style="font-size:11px;font-weight:600;
-                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                  flex:1;min-width:0;"
-                  title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
-
-                <!-- Stats -->
-                <div style="display:flex;align-items:center;gap:5px;
-                  flex-shrink:0;padding-right:8px;">
-                  ${consumed > 0 ? `
-                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                      font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                    <span style="color:var(--border);font-size:10px;">?</span>` : ''}
-                  <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                    font-weight:700;
-                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                    ${fmtQty(closing)}
-                  </span>
-                </div>
-
-              </div>`;
-          }).join('')}
-        </div>`;
-    } catch {
-      container.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-          Inventory Consumed</div>
-        <div style="font-size:12px;color:var(--red-text);">
-          Could not load inventory data.</div>`;
-    }
-  }
-
-
-async function _renderDailySheets(container) {
-    if (!container) return;
-
-    const now   = new Date();
-    const month = now.getMonth() + 1;
-    const year  = now.getFullYear();
-
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        margin-bottom:20px;">
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-            color:var(--text);letter-spacing:-0.3px;">Daily Sheets</div>
-          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
-            Closed sheets for ${now.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}
-             ? read-only records
-          </div>
-        </div>
-      </div>
-      <div id="daily-sheets-list">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    try {
-      const res = await Auth.fetch(
-        `/api/v1/finance/sheets/?period=month&page_size=31`
-      );
-      if (!res.ok) throw new Error();
-      const data   = await res.json();
-      const sheets = (Array.isArray(data) ? data : (data.results || []))
-        .filter(s => s.status !== 'OPEN')
-        .sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      const list = document.getElementById('daily-sheets-list');
-      if (!list) return;
-
-      if (!sheets.length) {
-        list.innerHTML = `
-          <div style="text-align:center;padding:48px;color:var(--text-3);">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              No closed sheets this month</div>
-            <div style="font-size:13px;">Sheets appear here once closed by the Branch Manager.</div>
-          </div>`;
-        return;
-      }
-
-      list.innerHTML = sheets.map(s => {
-        const total    = parseFloat(s.total_cash||0) + parseFloat(s.total_momo||0) + parseFloat(s.total_pos||0);
-        const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-        const dateObj  = new Date(s.date);
-        const dayName  = dateObj.toLocaleDateString('en-GB',{weekday:'long'});
-        const dateStr  = dateObj.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-        const isAuto   = s.status === 'AUTO_CLOSED';
-
-        return `
-          <div style="border:1px solid var(--border);border-radius:var(--radius);
-            overflow:hidden;margin-bottom:10px;">
-
-            <!-- Sheet header ? always visible, click to expand -->
-            <div onclick="Dashboard._toggleDailySheet(${s.id})"
-              style="display:flex;align-items:center;justify-content:space-between;
-                padding:14px 20px;background:var(--panel);cursor:pointer;
-                transition:background 0.12s;"
-              onmouseover="this.style.background='var(--bg)'"
-              onmouseout="this.style.background='var(--panel)'">
-
-              <div style="display:flex;align-items:center;gap:14px;">
-                <!-- Date block -->
-                <div style="text-align:center;min-width:44px;">
-                  <div style="font-size:11px;font-weight:700;color:var(--text-3);
-                    text-transform:uppercase;">${dateObj.toLocaleDateString('en-GB',{month:'short'})}</div>
-                  <div style="font-size:22px;font-weight:800;color:var(--text);
-                    font-family:'Syne',sans-serif;line-height:1;">${dateObj.getDate()}</div>
-                  <div style="font-size:10px;color:var(--text-3);">${dateObj.toLocaleDateString('en-GB',{weekday:'short'})}</div>
-                </div>
-
-                <!-- Divider -->
-                <div style="width:1px;height:40px;background:var(--border);"></div>
-
-                <!-- Stats -->
-                <div>
-                  <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
-                    ${s.sheet_number ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--text-3);margin-right:6px;">${s.sheet_number}</span>` : ''}${dayName} ? ${dateStr}
-                  </div>
-                  <div style="display:flex;align-items:center;gap:16px;">
-                    <span style="font-size:12px;color:var(--text-3);">
-                      ${s.total_jobs_created || 0} jobs
-                    </span>
-                    <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                      font-weight:700;color:var(--text);">${fmt(total)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style="display:flex;align-items:center;gap:10px;">
-                ${isAuto ? `
-                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
-                    font-weight:700;background:var(--amber-bg);color:var(--amber-text);">
-                    Auto-closed
-                  </span>` : `
-                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
-                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
-                    Closed
-                  </span>`}
-                <svg id="daily-chevron-${s.id}" xmlns="http://www.w3.org/2000/svg"
-                  width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2"
-                  style="color:var(--text-3);transition:transform 0.2s;">
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </div>
-            </div>
-
-            <!-- Expandable detail -->
-            <div id="daily-detail-${s.id}" style="display:none;">
-              <div style="padding:16px 20px;border-top:1px solid var(--border);
-                background:var(--bg);">
-
-                <!-- Revenue strip -->
-                <div style="display:grid;grid-template-columns:repeat(4,1fr);
-                  gap:8px;margin-bottom:14px;">
-                  ${[
-                    ['Cash',           s.total_cash,          'cash'],
-                    ['MoMo',           s.total_momo,          'momo'],
-                    ['POS',            s.total_pos,           'pos'],
-                    ['Net Cash in Till', s.net_cash_in_till,  'green'],
-                  ].map(([label, val, theme]) => `
-                    <div style="padding:10px 12px;
-                      background:var(--${theme}-bg, var(--bg));
-                      border:1px solid var(--${theme}-border, var(--border));
-                      border-radius:var(--radius-sm);">
-                      <div style="font-size:10px;font-weight:700;
-                        color:var(--${theme}-text, var(--text-3));
-                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
-                        ${label}</div>
-                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                        font-weight:700;color:var(--${theme}-strong, var(--text));">
-                        ${fmt(val)}</div>
-                    </div>`).join('')}
-                </div>
-
-                <!-- Secondary metrics -->
-                <div style="display:grid;grid-template-columns:repeat(4,1fr);
-                  gap:8px;margin-bottom:14px;">
-                  ${[
-                    ['Jobs Created',   s.total_jobs_created || 0, false],
-                    ['Petty Cash Out', s.total_petty_cash_out,    true],
-                    ['Credit Issued',  s.total_credit_issued,     true],
-                    ['Credit Settled', s.total_credit_settled,    true],
-                  ].map(([label, val, isMoney]) => `
-                    <div style="padding:10px 12px;background:var(--panel);
-                      border:1px solid var(--border);border-radius:var(--radius-sm);">
-                      <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
-                        ${label}</div>
-                      <div style="font-size:15px;font-weight:700;color:var(--text);">
-                        ${isMoney ? fmt(val) : val}</div>
-                    </div>`).join('')}
-                </div>
-
-                <!-- Inventory consumption -->
-                <div style="margin-bottom:14px;" id="daily-inv-${s.id}">
-                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                    text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-                    Inventory Consumed</div>
-                  <div class="loading-cell" style="padding:12px;">
-                    <span class="spin"></span>
-                  </div>
-                </div>
-
-                <!-- Actions -->
-                <div style="display:flex;justify-content:flex-end;gap:8px;">
-                  ${s.status !== 'OPEN' ? `
-                    <button onclick="Dashboard.initiateSheetDownload(${s.id}, '${s.date}')"
-                      style="display:inline-flex;align-items:center;gap:6px;
-                        padding:7px 16px;background:var(--text);color:#fff;border:none;
-                        border-radius:var(--radius-sm);font-size:12px;font-weight:700;
-                        cursor:pointer;font-family:'DM Sans',sans-serif;">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
-                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                      </svg>
-                      Download PDF
-                    </button>` : ''}
-                </div>
-
-              </div>
-            </div>
-
-          </div>`;
-      }).join('');
-
-    } catch {
-      const list = document.getElementById('daily-sheets-list');
-      if (list) list.innerHTML = `
-        <div class="loading-cell" style="color:var(--red-text);">
-          Could not load daily sheets.</div>`;
-    }
-  }
-
-  let _openDailySheet = null;
-
-  function _toggleDailySheet(sheetId) {
-    const detail  = document.getElementById(`daily-detail-${sheetId}`);
-    const chevron = document.getElementById(`daily-chevron-${sheetId}`);
-    const isOpen  = detail.style.display !== 'none';
-
-    // Close any open sheet
-    if (_openDailySheet && _openDailySheet !== sheetId) {
-      const prev         = document.getElementById(`daily-detail-${_openDailySheet}`);
-      const prevChevron  = document.getElementById(`daily-chevron-${_openDailySheet}`);
-      if (prev)        prev.style.display        = 'none';
-      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
-    }
-
-    if (isOpen) {
-      detail.style.display    = 'none';
-      chevron.style.transform = 'rotate(0deg)';
-      _openDailySheet         = null;
-    } else {
-      detail.style.display    = 'block';
-      chevron.style.transform = 'rotate(180deg)';
-      _openDailySheet         = sheetId;
-      _loadDailySheetInventory(sheetId);
-    }
-  }
-
-
-async function _renderWeeklyFiling(container) {
-    if (!container) return;
-
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        margin-bottom:20px;">
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-            color:var(--text);letter-spacing:-0.3px;">Weekly Filing</div>
-          <div style="font-size:12.5px;color:var(--text-3);margin-top:3px;">
-            Monday ? Saturday consolidated operations report
-          </div>
-        </div>
-        <button id="weekly-prepare-btn" onclick="Dashboard.weeklyPrepare()"
-          style="padding:8px 18px;background:var(--text);color:#fff;border:none;
-                 border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-                 cursor:pointer;font-family:'DM Sans',sans-serif;">
-          Prepare This Week
-        </button>
-      </div>
-      <div id="weekly-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>
-      <div id="weekly-history" style="margin-top:24px;"></div>`;
-
-    await _loadWeeklyReport();
-    await _loadWeeklyHistory();
-  }
-
- async function _loadWeeklyHistory() {
-    const container = document.getElementById('weekly-history');
-    if (!container) return;
-
-    try {
-      const res  = await Auth.fetch('/api/v1/finance/weekly/');
-      if (!res.ok) throw new Error();
-      const data    = await res.json();
-      const reports = (Array.isArray(data) ? data : (data.results || []))
-        .filter(r => r.status === 'LOCKED')
-        .sort((a, b) => {
-          if (b.year !== a.year) return b.year - a.year;
-          return b.week_number - a.week_number;
-        });
-
-      if (!reports.length) return;
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-
-      container.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-          Previous Filed Weeks
-        </div>
-        ${reports.map(r => {
-          const total      = parseFloat(r.total_cash||0) + parseFloat(r.total_momo||0) + parseFloat(r.total_pos||0);
-          const dateFrom   = new Date(r.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-          const dateTo     = new Date(r.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-          const submittedAt = r.submitted_at
-            ? new Date(r.submitted_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})
-            : '?';
-
-          return `
-            <div style="border:1px solid var(--border);border-radius:var(--radius);
-              overflow:hidden;margin-bottom:8px;">
-
-              <!-- Header ? clickable to expand -->
-              <div onclick="Dashboard._toggleHistoryWeek(${r.id})"
-                style="display:flex;align-items:center;justify-content:space-between;
-                  padding:14px 20px;background:var(--panel);cursor:pointer;
-                  transition:background 0.12s;"
-                onmouseover="this.style.background='var(--bg)'"
-                onmouseout="this.style.background='var(--panel)'">
-                <div>
-                  <div style="font-size:14px;font-weight:700;color:var(--text);
-                    margin-bottom:3px;">
-                    Week ${r.week_number}, ${r.year}
-                    <span style="font-size:12px;font-weight:400;color:var(--text-3);
-                      margin-left:8px;">${dateFrom} ? ${dateTo}</span>
-                  </div>
-                  <div style="font-size:11px;color:var(--text-3);">
-                    Filed by ${r.submitted_by_name || '?'} ? ${submittedAt}
-                  </div>
-                </div>
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="padding:3px 10px;border-radius:20px;font-size:10px;
-                    font-weight:700;background:var(--green-bg);color:var(--green-text);">
-                    ? Locked
-                  </span>
-                  <button onclick="event.stopPropagation();Dashboard.weeklyDownloadPDF(${r.id})"
-                    style="display:inline-flex;align-items:center;gap:5px;
-                      padding:6px 14px;background:var(--text);color:#fff;border:none;
-                      border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                      cursor:pointer;font-family:'DM Sans',sans-serif;">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
-                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                    </svg>
-                    PDF
-                  </button>
-                  <svg id="history-week-chevron-${r.id}"
-                    xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                    style="color:var(--text-3);transition:transform 0.2s;">
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
-                </div>
-              </div>
-
-              <!-- Revenue strip ? always visible -->
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;
-                gap:0;border-top:1px solid var(--border);">
-                ${[
-                  ['Total',  fmt(total),           'var(--text)',       'var(--panel)'],
-                  ['Cash',   fmt(r.total_cash),    'var(--cash-strong)','var(--cash-bg)'],
-                  ['MoMo',   fmt(r.total_momo),    'var(--momo-strong)','var(--momo-bg)'],
-                  ['Jobs',   r.total_jobs_created || 0, 'var(--text)', 'var(--panel)'],
-                ].map(([label, val, color, bg]) => `
-                  <div style="padding:10px 16px;background:${bg};
-                    border-right:1px solid var(--border);">
-                    <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                      text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
-                      ${label}</div>
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                      font-weight:700;color:${color};">${val}</div>
-                  </div>`).join('')}
-              </div>
-
-              <!-- Expandable full detail ? lazy loaded -->
-              <div id="history-week-detail-${r.id}" style="display:none;">
-                <div style="padding:16px 20px;border-top:1px solid var(--border);
-                  background:var(--bg);">
-                  <div class="loading-cell"><span class="spin"></span> Loading?</div>
-                </div>
-              </div>
-
-            </div>`;
-        }).join('')}`;
-
-    } catch { /* silent */ }
-  }
-
-  let _openHistoryWeek = null;
-
-  async function _toggleHistoryWeek(reportId) {
-    const detail  = document.getElementById(`history-week-detail-${reportId}`);
-    const chevron = document.getElementById(`history-week-chevron-${reportId}`);
-    if (!detail) return;
-
-    const isOpen = detail.style.display !== 'none';
-
-    // Close any open
-    if (_openHistoryWeek && _openHistoryWeek !== reportId) {
-      const prev        = document.getElementById(`history-week-detail-${_openHistoryWeek}`);
-      const prevChevron = document.getElementById(`history-week-chevron-${_openHistoryWeek}`);
-      if (prev)        prev.style.display        = 'none';
-      if (prevChevron) prevChevron.style.transform = 'rotate(0deg)';
-    }
-
-    if (isOpen) {
-      detail.style.display    = 'none';
-      chevron.style.transform = 'rotate(0deg)';
-      _openHistoryWeek        = null;
-      return;
-    }
-
-    // Open and lazy-load detail
-    detail.style.display    = 'block';
-    chevron.style.transform = 'rotate(180deg)';
-    _openHistoryWeek        = reportId;
-
-    const inner = detail.querySelector('div');
-
-    try {
-      const res    = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/`);
-      if (!res.ok) throw new Error();
-      const report = await res.json();
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-
-      // Sheet grid
-      const days   = ['Mon','Tue','Wed','Thu','Fri','Sat'];
-      const sheets = report.daily_sheets || [];
-      const sheetGrid = days.map((day, i) => {
-        const sheet = sheets.find(s => new Date(s.date).getDay() === (i + 1));
-        if (!sheet) return `
-          <div style="flex:1;padding:8px 6px;background:var(--bg);
-            border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;">
-            <div style="font-size:9px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;margin-bottom:3px;">${day}</div>
-            <div style="font-size:9px;color:var(--text-3);">No sheet</div>
-          </div>`;
-        const isClosed = sheet.status !== 'OPEN';
-        const dotColor = isClosed ? 'var(--green-text)' : 'var(--amber-text)';
-        const dotBg    = isClosed ? 'var(--green-bg)'   : 'var(--amber-bg)';
-        const tot      = parseFloat(sheet.total_cash||0) + parseFloat(sheet.total_momo||0) + parseFloat(sheet.total_pos||0);
-        return `
-          <div style="flex:1;padding:8px 6px;background:${dotBg};
-            border:1px solid ${isClosed ? 'var(--green-border)' : 'var(--amber-border)'};
-            border-radius:var(--radius-sm);text-align:center;">
-            <div style="font-size:9px;font-weight:700;color:${dotColor};
-              text-transform:uppercase;margin-bottom:3px;">${day}</div>
-            <div style="font-size:9px;color:${dotColor};font-weight:600;">
-              ${isClosed ? '?' : '?'}</div>
-            <div style="font-size:8px;color:${dotColor};margin-top:2px;
-              font-family:'JetBrains Mono',monospace;">
-              ${fmt(tot)}</div>
-          </div>`;
-      }).join('');
-
-      inner.innerHTML = `
-        <!-- Sheet grid -->
-        <div style="margin-bottom:14px;">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-            Daily Sheets</div>
-          <div style="display:flex;gap:6px;">${sheetGrid}</div>
-        </div>
-
-        <!-- Jobs summary -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);
-          gap:8px;margin-bottom:14px;">
-          ${[
-            ['Jobs Created',  report.total_jobs_created  || 0, 'var(--text)'],
-            ['Completed',     report.total_jobs_complete  || 0, 'var(--green-text)'],
-            ['Cancelled',     report.total_jobs_cancelled || 0, 'var(--red-text)'],
-            ['Carry Forward', report.carry_forward_count  || 0, 'var(--amber-text)'],
-          ].map(([label, val, color]) => `
-            <div style="padding:10px 12px;background:var(--panel);
-              border:1px solid var(--border);border-radius:var(--radius-sm);
-              text-align:center;">
-              <div style="font-size:18px;font-weight:700;color:${color};">${val}</div>
-              <div style="font-size:10px;color:var(--text-3);margin-top:2px;">${label}</div>
-            </div>`).join('')}
-        </div>
-
-        <!-- Inventory -->
-        <div style="margin-bottom:14px;">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
-            Inventory Consumed This Week</div>
-          ${_renderWeeklyInventory(report.inventory_snapshot)}
-        </div>
-
-      <!-- BM Notes -->
-      <div style="margin-bottom:16px;">
-
-        <!-- BM Notes -->
-        <div style="padding:10px 14px;background:var(--panel);
-          border:1px solid var(--border);border-radius:var(--radius-sm);">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-            Branch Manager Notes</div>
-          <div style="font-size:13px;color:var(--text-2);">
-            ${report.bm_notes || '?'}</div>
-        </div>`;
-
-    } catch {
-      inner.innerHTML = `<div style="color:var(--red-text);font-size:13px;">
-        Could not load week detail.</div>`;
-    }
-  }
-
-
- async function _loadWeeklyReport() {
-    const content = document.getElementById('weekly-content');
-    if (!content) return;
-
-    try {
-      const res  = await Auth.fetch('/api/v1/finance/weekly/');
-      if (!res.ok) throw new Error();
-      const data    = await res.json();
-      const reports = Array.isArray(data) ? data : (data.results || []);
-
-      const now   = new Date();
-      const year  = now.getFullYear();
-      const month = now.getMonth() + 1;
-
-      // Find report whose date range covers today
-      const today = now.toISOString().split('T')[0];
-      const current = reports.find(r =>
-        r.date_from <= today && r.date_to >= today
-      );
-
-      if (current) {
-        // Fetch full detail so inventory_snapshot is available
-        const detailRes = await Auth.fetch(`/api/v1/finance/weekly/${current.id}/`);
-        if (!detailRes.ok) throw new Error();
-        const fullReport = await detailRes.json();
-
-        // Hide prepare button if locked
-        const prepareBtn = document.getElementById('weekly-prepare-btn');
-        if (prepareBtn) prepareBtn.style.display = fullReport.status === 'LOCKED' ? 'none' : '';
-
-        _renderWeeklyReportDetail(content, fullReport);
-      } else {
-        // No report covering today ? show empty state with prepare button
-        const prepareBtn = document.getElementById('weekly-prepare-btn');
-        if (prepareBtn) prepareBtn.style.display = '';
-        _renderWeeklyEmpty(content);
-      }
-
-    } catch {
-      content.innerHTML = `
-        <div style="text-align:center;padding:60px;color:var(--text-3);font-size:13px;">
-          Could not load weekly filing.
-        </div>`;
-    }
-  }
-
-  function _renderWeeklyEmpty(container) {
-    const now      = new Date();
-    const monday   = new Date(now);
-    monday.setDate(now.getDate() - now.getDay() + 1);
-    const saturday = new Date(monday);
-    saturday.setDate(monday.getDate() + 5);
-
-    const fmt = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-    container.innerHTML = `
-      <div style="background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);padding:32px;text-align:center;">
-        <div style="width:48px;height:48px;border-radius:12px;background:var(--bg);
-          border:1px solid var(--border);display:flex;align-items:center;
-          justify-content:center;margin:0 auto 16px;color:var(--text-3);">
-          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-        </div>
-        <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;
-          color:var(--text);margin-bottom:6px;">No filing for this week</div>
-        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-          ${fmt(monday)} ? ${fmt(saturday)}
-        </div>
-        <button onclick="Dashboard.weeklyPrepare()"
-          style="padding:8px 20px;background:var(--text);color:#fff;border:none;
-                 border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-                 cursor:pointer;font-family:'DM Sans',sans-serif;">
-          Prepare Filing
-        </button>
-      </div>`;
-  }
-
-  function _renderWeeklyReportDetail(container, report) {
-    const fmt      = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-    const total    = parseFloat(report.total_cash||0) + parseFloat(report.total_momo||0) + parseFloat(report.total_pos||0);
-    const dateFrom = new Date(report.date_from).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-    const dateTo   = new Date(report.date_to).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-    const isLocked = report.status === 'LOCKED';
-    const isDraft  = report.status === 'DRAFT';
-
-    const statusConfig = {
-      DRAFT    : { bg: 'var(--bg)',        text: 'var(--text-3)',    label: 'Draft' },
-      SUBMITTED: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Submitted' },
-      LOCKED   : { bg: 'var(--green-bg)', text: 'var(--green-text)', label: '? Locked' },
-    };
-    const sc = statusConfig[report.status] || statusConfig.DRAFT;
-
-    container.innerHTML = `
-      <!-- Header strip -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        padding:14px 20px;background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);margin-bottom:16px;">
-        <div>
-          <div style="font-size:15px;font-weight:700;color:var(--text);">
-            Week ${report.week_number}, ${report.year}
-            <span style="font-size:12px;font-weight:400;color:var(--text-3);margin-left:8px;">
-              ${dateFrom} ? ${dateTo}
-            </span>
-          </div>
-          ${report.submitted_at ? `
-          <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-            Submitted ${new Date(report.submitted_at)
-              .toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
-          </div>` : ''}
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="padding:4px 12px;border-radius:20px;font-size:11px;
-            font-weight:700;background:${sc.bg};color:${sc.text};">
-            ${sc.label}
-          </span>
-          ${isLocked ? `
-          <button onclick="Dashboard.weeklyDownloadPDF(${report.id})"
-            style="display:inline-flex;align-items:center;gap:5px;
-              padding:6px 14px;background:var(--text);color:#fff;border:none;
-              border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-              cursor:pointer;font-family:'DM Sans',sans-serif;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-            PDF
-          </button>` : ''}
-        </div>
-      </div>
-
-      <!-- Revenue cards -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-        ${[
-          ['Cash',    fmt(report.total_cash),  'var(--cash-bg,var(--bg))',    'var(--cash-strong,var(--text))'],
-          ['MoMo',    fmt(report.total_momo),  'var(--momo-bg,var(--bg))',    'var(--momo-strong,var(--text))'],
-          ['POS',     fmt(report.total_pos),   'var(--pos-bg,var(--bg))',     'var(--pos-strong,var(--text))'],
-          ['Total',   fmt(total),              'var(--panel)',                'var(--text)'],
-        ].map(([label, val, bg, color]) => `
-          <div style="padding:12px 14px;background:${bg};
-            border:1px solid var(--border);border-radius:var(--radius-sm);">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-              ${label}</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
-              font-weight:700;color:${color};">${val}</div>
-          </div>`).join('')}
-      </div>
-
-      <!-- Jobs summary -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-        ${[
-          ['Jobs Created',  report.total_jobs_created  || 0, 'var(--text)'],
-          ['Completed',     report.total_jobs_complete  || 0, 'var(--green-text)'],
-          ['Cancelled',     report.total_jobs_cancelled || 0, 'var(--red-text)'],
-          ['Carry Forward', report.carry_forward_count  || 0, 'var(--amber-text)'],
-        ].map(([label, val, color]) => `
-          <div style="padding:12px 14px;background:var(--panel);
-            border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;">
-            <div style="font-size:20px;font-weight:700;color:${color};">${val}</div>
-            <div style="font-size:10px;color:var(--text-3);margin-top:3px;">${label}</div>
-          </div>`).join('')}
-      </div>
-
-      <!-- Inventory consumption -->
-      <div style="background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;">
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-          Inventory Consumed This Week
-        </div>
-        ${_renderWeeklyInventory(report.inventory_snapshot)}
-      </div>
-
-      <!-- BM Notes + submit -->
-      <div style="background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);padding:16px 20px;">
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-          Branch Manager Notes
-        </div>
-        ${isDraft ? `
-        <textarea id="weekly-notes" rows="3"
-          style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-            font-size:13px;resize:vertical;box-sizing:border-box;
-            font-family:'DM Sans',sans-serif;outline:none;margin-bottom:12px;"
-          placeholder="Add notes before submitting?">${_esc(report.bm_notes || '')}</textarea>
-        <button id="weekly-submit-btn"
-          onclick="Dashboard.weeklySubmit(${report.id})"
-          style="padding:10px 24px;background:var(--text);color:#fff;border:none;
-            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-            cursor:pointer;font-family:'DM Sans',sans-serif;">
-          Submit & Lock Filing
-        </button>` : `
-        <div style="font-size:13px;color:var(--text-2);">
-          ${_esc(report.bm_notes || '?')}
-        </div>`}
-      </div>`;
-  }
-
-  function _renderWeeklyInventory(snapshot) {
-    if (!snapshot || !snapshot.items || !snapshot.items.length) {
-      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
-        No inventory data for this week.</div>`;
-    }
-
-    const items = snapshot.items.filter(i => i.consumed > 0);
-    if (!items.length) {
-      return `<div style="font-size:12px;color:var(--text-3);padding:10px 0;">
-        No consumption recorded this week.</div>`;
-    }
-
-    return `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-        ${items.map(item => {
-          const closing  = parseFloat(item.closing);
-          const consumed = parseFloat(item.consumed || 0);
-          const isPct    = item.unit === '%';
-          const isCrit   = closing === 0;
-          const isLow    = !isCrit && item.is_low;
-
-          const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-
-          const fmtQty = n => isPct
-            ? `${parseFloat(n).toFixed(1)}%`
-            : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-
-          const total   = closing + consumed;
-          const fillPct = total > 0
-            ? Math.min(100, (closing / total) * 100)
-            : isPct ? Math.min(100, closing) : 0;
-
-          return `
-            <div style="position:relative;overflow:hidden;
-              padding:9px 12px;
-              background:var(--panel);
-              border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-              border-radius:var(--radius-sm);
-              display:flex;align-items:center;justify-content:space-between;gap:8px;">
-
-              <!-- Status fill bar on right edge -->
-              <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                <div style="position:absolute;bottom:0;left:0;width:100%;
-                  height:${fillPct.toFixed(1)}%;
-                  background:${statusColor};
-                  border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                  transition:height 0.3s ease;"></div>
-              </div>
-
-              <!-- Item name -->
-              <span style="font-size:11px;font-weight:600;
-                color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                flex:1;min-width:0;"
-                title="${_esc(item.consumable)}">${_esc(item.consumable)}</span>
-
-              <!-- Stats -->
-              <div style="display:flex;align-items:center;gap:5px;
-                flex-shrink:0;padding-right:8px;">
-                ${consumed > 0 ? `
-                  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                    font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                  <span style="color:var(--border);font-size:10px;">?</span>` : ''}
-                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                  font-weight:700;
-                  color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                  ${fmtQty(closing)}
-                </span>
-              </div>
-
-            </div>`;
-        }).join('')}
-      </div>`;
-  }
-
-  function _toggleCurrentWeek() {
-    const detail  = document.getElementById('current-week-detail');
-    const chevron = document.getElementById('current-week-chevron');
-    if (!detail) return;
-    const isOpen = detail.style.display !== 'none';
-    detail.style.display    = isOpen ? 'none' : 'block';
-    chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
-  }
-
-  async function weeklyPrepare() {
-    const btn = document.getElementById('weekly-prepare-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Preparing?'; }
-
-    try {
-      const res = await Auth.fetch('/api/v1/finance/weekly/prepare/', { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        _toast(err.detail || 'Could not prepare weekly report.', 'error');
-        return;
-      }
-      const report = await res.json();
-      const content = document.getElementById('weekly-content');
-      if (content) _renderWeeklyReportDetail(content, report);
-      _toast('Weekly filing prepared.', 'success');
-    } catch {
-      _toast('Network error.', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Prepare This Week'; }
-    }
-  }
-
-  async function weeklySubmit(reportId) {
-    const btn = document.getElementById('weekly-submit-btn');
-    if (btn && btn.style.opacity === '0.4') return;
-    if (btn) { btn.disabled = true; btn.textContent = 'Submitting?'; }
-
-    // Save notes first
-    const notes = document.getElementById('weekly-notes')?.value.trim() || '';
-    if (notes) {
-      await Auth.fetch(`/api/v1/finance/weekly/${reportId}/notes/`, {
-        method  : 'PATCH',
-        headers : { 'Content-Type': 'application/json' },
-        body    : JSON.stringify({ bm_notes: notes }),
-      }).catch(() => {});
-    }
-
-    try {
-      const res = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/submit/`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        _toast(err.detail || 'Submission failed.', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Submit & Lock Filing'; }
-        return;
-      }
-      const report = await res.json();
-      const content = document.getElementById('weekly-content');
-      if (content) _renderWeeklyReportDetail(content, report);
-      _toast('Weekly filing submitted and locked.', 'success');
-    } catch {
-      _toast('Network error.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Submit & Lock Filing'; }
-    }
-  }
-
-  async function weeklyDownloadPDF(reportId) {
-    try {
-      const res = await Auth.fetch(`/api/v1/finance/weekly/${reportId}/pdf/`);
-      if (!res.ok) { _toast('Could not generate PDF.', 'error'); return; }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `weekly_report_${reportId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      _toast('Download failed.', 'error');
-    }
-  }
-
-  // -- Jobs Archive (drill-down history) ---------------------
-  let _historyLevel  = 'year';
-  let _historyYear   = null;
-  let _historyMonth  = null;
-  let _historyWeek   = null;
-  let _historyCharts = {};
-
-  async function _renderHistoryReport(container) {
-    _historyLevel = 'year';
-    _historyYear  = null;
-    _historyMonth = null;
-    _historyWeek  = null;
-    await _fetchAndRenderHistory(container);
-  }
-
-  async function _fetchAndRenderHistory(container) {
-    if (!container) container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
-    container.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading?</div>';
-
-    // Destroy existing charts
-    Object.values(_historyCharts).forEach(c => { try { c.destroy(); } catch {} });
-    _historyCharts = {};
-
-    // Build query params
-    const params = new URLSearchParams({ level: _historyLevel });
-    if (_historyYear)  params.set('year',  _historyYear);
-    if (_historyMonth) params.set('month', _historyMonth);
-    if (_historyWeek !== null) params.set('week', _historyWeek);
-
-    try {
-      const res  = await Auth.fetch(`/api/v1/jobs/history/?${params}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      _renderHistoryData(container, data);
-    } catch {
-      container.innerHTML = '<div class="loading-cell" style="color:var(--red-text);">Could not load history.</div>';
-    }
-  }
-
- function _renderHistoryData(container, data) {
-    const fmt  = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-    const kpis = data.kpis || {};
-
-    // -- Breadcrumb --------------------------------------------
-    const crumbs = [{ label: 'All Years', level: 'year', year: null, month: null, week: null }];
-    if (_historyYear)  crumbs.push({ label: String(_historyYear), level: 'month', year: _historyYear, month: null, week: null });
-    if (_historyMonth) {
-      const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_historyMonth-1];
-      crumbs.push({ label: mn, level: 'week', year: _historyYear, month: _historyMonth, week: null });
-    }
-    if (_historyWeek !== null) crumbs.push({ label: `Week ${_historyWeek}`, level: 'day', year: _historyYear, month: _historyMonth, week: _historyWeek });
-
-    const breadcrumbHtml = crumbs.map((c, i) => {
-      const isLast = i === crumbs.length - 1;
-      return isLast
-        ? `<span style="font-size:13px;font-weight:700;color:var(--text);">${c.label}</span>`
-        : `<span onclick="Dashboard._historyNav('${c.level}',${c.year},${c.month},${c.week})"
-             style="font-size:13px;color:var(--text-3);cursor:pointer;transition:color 0.15s;"
-             onmouseover="this.style.color='var(--text)'"
-             onmouseout="this.style.color='var(--text-3)'">${c.label}</span>
-           <span style="color:var(--border-dark);margin:0 6px;">?</span>`;
-    }).join('');
-
-    // -- Drill-down items --------------------------------------
-    let itemsHtml = '';
-
-    if (data.level === 'year' || data.level === 'month') {
-      const heading = data.level === 'year' ? 'Years' : 'Months';
-      itemsHtml = `
-        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-          letter-spacing:0.5px;margin-bottom:12px;">${heading}</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:24px;">
-          ${(data.items||[]).map((item, i) => {
-            const colors = ['#1a1a2e','#6b47d9','#1a3a2e','#2e1a1a','#1a2e3a','#3a2e1a'];
-            const bg = colors[i % colors.length];
-            return `
-            <div onclick="Dashboard._historyDrill(this)"
-              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
-              style="border:1px solid var(--border);border-radius:8px;overflow:hidden;
-                     cursor:pointer;transition:all 0.15s;display:flex;height:64px;
-                     box-shadow:0 1px 4px rgba(0,0,0,0.05);"
-              onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'"
-              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 4px rgba(0,0,0,0.05)'">
-
-              <!-- Left ? year -->
-              <div style="
-                background:${bg};
-                background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 1px,transparent 1px,transparent 7px);
-                width:80px;flex-shrink:0;
-                display:flex;align-items:center;justify-content:center;">
-                <div style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:800;
-                  color:#fff;letter-spacing:-0.01em;">
-                  ${item.label}
-                </div>
-              </div>
-
-              <!-- Right ? stats -->
-              <div style="background:var(--panel);flex:1;padding:0 14px;
-                display:flex;align-items:center;gap:20px;">
-                <div>
-                  <div style="font-size:13px;font-weight:700;color:var(--text);">${item.total} jobs</div>
-                  <div style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">${fmt(item.revenue)}</div>
-                </div>
-                <div style="flex:1;">
-                  <div style="height:3px;background:var(--border);border-radius:2px;">
-                    <div style="height:100%;width:${item.rate}%;background:var(--green-text);border-radius:2px;"></div>
-                  </div>
-                  <div style="font-size:10px;color:var(--text-3);margin-top:3px;font-family:'JetBrains Mono',monospace;">${item.rate}% complete</div>
-                </div>
-              </div>
-
-            </div>`;
-          }).join('')}
-        </div>`;
-
-    } else if (data.level === 'week') {
-      itemsHtml = `
-        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-          letter-spacing:0.5px;margin-bottom:12px;">Weeks</div>
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-          overflow:hidden;margin-bottom:24px;">
-          ${(data.items||[]).map(item => `
-            <div onclick="Dashboard._historyDrill(this)"
-              data-item="${JSON.stringify(item).replace(/"/g,'&quot;')}"
-              style="display:flex;align-items:center;justify-content:space-between;
-                     padding:14px 20px;border-bottom:1px solid var(--border);cursor:pointer;
-                     transition:background 0.12s;"
-              onmouseover="this.style.background='var(--bg)'"
-              onmouseout="this.style.background=''">
-              <div>
-                <div style="font-size:14px;font-weight:700;color:var(--text);">${item.label}</div>
-                <div style="font-size:11px;color:var(--text-3);margin-top:2px;font-family:'JetBrains Mono',monospace;">
-                  ${item.start} ? ${item.end}
-                </div>
-              </div>
-              <div style="display:flex;align-items:center;gap:24px;">
-                <div style="text-align:right;">
-                  <div style="font-size:13px;font-weight:600;color:var(--text);">${item.total} jobs</div>
-                  <div style="font-size:12px;color:var(--text-3);">${fmt(item.revenue)}</div>
-                </div>
-                <div style="font-size:12px;color:var(--green-text);font-weight:600;min-width:40px;text-align:right;">
-                  ${item.rate}%
-                </div>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-                  fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3);">
-                  <polyline points="9 18 15 12 9 6"/>
-                </svg>
-              </div>
-            </div>`).join('')}
-        </div>`;
-
-    } else if (data.level === 'day') {
-      itemsHtml = `
-        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-          letter-spacing:0.5px;margin-bottom:12px;">Days</div>
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-          overflow:hidden;margin-bottom:24px;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th>Jobs</th>
-                <th>Complete</th>
-                <th>Pending</th>
-                <th>Revenue</th>
-                <th>Sheet</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(data.items||[]).map(item => `
-                <tr>
-                  <td style="font-weight:600;color:var(--text);">${item.label}</td>
-                  <td>${item.total}</td>
-                  <td style="color:var(--green-text);font-weight:600;">${item.complete}</td>
-                  <td style="color:var(--amber-text);">${item.pending}</td>
-                  <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">${fmt(item.revenue)}</td>
-                  <td>
-                    ${item.sheet_status
-                      ? `<span class="badge badge-${item.sheet_status==='OPEN'?'progress':'done'}">${item.sheet_status}</span>`
-                      : '<span style="color:var(--text-3);font-size:12px;">No sheet</span>'}
-                  </td>
-                  <td>
-                    ${item.sheet_id && item.sheet_status !== 'OPEN'
-                      ? `<button onclick="Dashboard.downloadSheetPDF(${item.sheet_id},'${item.date}')"
-                           style="font-size:12px;color:var(--text-2);background:none;border:none;
-                                  cursor:pointer;font-weight:600;padding:0;">PDF ?</button>`
-                      : '?'}
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    }
-
-    // -- KPI cards (compact with % change) ---------------------
-const kpiCards = [
-      { key:'total',   label:'Total Jobs', value: kpis.total?.value   || 0, fmt: v => v,       border:'#3355cc', text:'#3355cc' },
-      { key:'revenue', label:'Revenue',    value: kpis.revenue?.value || 0, fmt: v => fmt(v),  border:'#22c98a', text:'#22c98a' },
-      { key:'pending', label:'Pending',    value: kpis.pending?.value || 0, fmt: v => v,       border:'#e8a820', text:'#e8a820' },
-      { key:'rate',    label:'Completion', value: kpis.rate?.value    || 0, fmt: v => v + '%', border:'#9b59b6', text:'#9b59b6' },
-    ];
-
-    const kpiHtml = `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;">
-        ${kpiCards.map(k => {
-          const change = kpis[k.key]?.change;
-          const isPos  = change?.startsWith('+');
-          const isNeg  = change?.startsWith('-');
-          return `
-            <div style="background:var(--panel);border:1px solid var(--border);
-              border-top:3px solid ${k.border};
-              border-radius:8px;padding:10px 12px;">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                ${k.label}
-              </div>
-              <div style="font-size:17px;font-weight:800;color:${k.text};
-                font-family:'Outfit',sans-serif;letter-spacing:-0.01em;margin-bottom:3px;">
-                ${k.fmt(k.value)}
-              </div>
-              ${change ? `
-                <div style="font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;
-                  color:${isPos ? '#22c98a' : isNeg ? '#e8294a' : 'var(--text-3)'};">
-                  ${isPos ? '?' : isNeg ? '?' : ''} ${change} vs prev
-                </div>` : `
-                <div style="font-size:9px;color:var(--text-3);">no prev data</div>`}
-            </div>`;
-        }).join('')}
-      </div>`;
-
-    // -- Charts ------------------------------------------------
-    const chartsHtml = `
-      <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-        padding:20px;margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-          letter-spacing:0.5px;margin-bottom:16px;">?? Trend</div>
-        <canvas id="history-trend-chart" height="70"></canvas>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
-          <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-            letter-spacing:0.5px;margin-bottom:16px;">?? Distribution</div>
-          <canvas id="history-bar-chart" height="140"></canvas>
-        </div>
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
-          <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;
-            letter-spacing:0.5px;margin-bottom:16px;">?? Activity Heatmap</div>
-          <div id="history-heatmap"></div>
-        </div>
-      </div>`;
-
-    // -- Assemble in new order ---------------------------------
-    container.innerHTML = `
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:20px;flex-wrap:wrap;">
-        ${breadcrumbHtml}
-      </div>
-      ${itemsHtml}
-      ${kpiHtml}
-      ${chartsHtml}`;
-
-    _drawHistoryCharts(data);
-  }
-
-  function _drawHistoryCharts(data) {
-    // Load Chart.js if not already loaded
-    if (typeof Chart === 'undefined') {
-      const script   = document.createElement('script');
-      script.src     = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
-      script.onload  = () => _drawHistoryCharts(data);
-      document.head.appendChild(script);
-      return;
-    }
-
-    const textColor   = getComputedStyle(document.documentElement)
-      .getPropertyValue('--text-3').trim() || '#999';
-    const borderColor = getComputedStyle(document.documentElement)
-      .getPropertyValue('--border').trim() || '#eee';
-
-    // Trend chart
-    const trendCtx = document.getElementById('history-trend-chart');
-    if (trendCtx && data.trend) {
-      _historyCharts.trend = new Chart(trendCtx, {
-        type: 'line',
-        data: {
-          labels  : data.trend.labels,
-          datasets: [
-            {
-              label          : 'Jobs',
-              data           : data.trend.jobs,
-              borderColor    : '#3355cc',
-              backgroundColor: 'rgba(51,85,204,0.08)',
-              tension        : 0.4,
-              fill           : true,
-              yAxisID        : 'y',
-            },
-            {
-              label          : 'Revenue (GHS)',
-              data           : data.trend.revenue,
-              borderColor    : '#22c98a',
-              backgroundColor: 'rgba(34,201,138,0.08)',
-              tension        : 0.4,
-              fill           : true,
-              yAxisID        : 'y1',
-            },
-          ],
-        },
-        options: {
-          responsive : true,
-          interaction: { mode: 'index', intersect: false },
-          plugins    : { legend: { labels: { color: textColor, font: { size: 11 } } } },
-          scales     : {
-            x : { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor } },
-            y : { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor }, position: 'left' },
-            y1: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false }, position: 'right' },
-          },
-        },
-      });
-    }
-
-    // Bar chart
-    const barCtx = document.getElementById('history-bar-chart');
-    if (barCtx && data.bar) {
-      _historyCharts.bar = new Chart(barCtx, {
-        type: 'bar',
-        data: {
-          labels  : data.bar.labels,
-          datasets: [{
-            label          : 'Jobs',
-            data           : data.bar.data,
-            backgroundColor: 'rgba(51,85,204,0.7)',
-            borderRadius   : 4,
-          }],
-        },
-        options: {
-          responsive: true,
-          plugins   : { legend: { display: false } },
-          scales    : {
-            x: { ticks: { color: textColor, font: { size: 10 } }, grid: { display: false } },
-            y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: borderColor } },
-          },
-        },
-      });
-    }
-
-    // Heatmap
-    _drawHeatmap(data);
-  }
-
-  function _drawHeatmap(data) {
-    const el = document.getElementById('history-heatmap');
-    if (!el || !data.heatmap) return;
-
-    // Flatten heatmap to get max value for color scaling
-    let items = [];
-    if (data.level === 'day') {
-      // Array of {date, hours:[{hour,count}]}
-      data.heatmap.forEach(day => {
-        day.hours.forEach(h => items.push(h.count));
-      });
-    } else {
-      // Array of {week, count}
-      items = data.heatmap.map(w => (typeof w === 'object' && w.count !== undefined) ? w.count : 0);
-    }
-    const max = Math.max(...items, 1);
-
-    const cellSize = 14;
-    const gap      = 2;
-
-    if (data.level === 'day') {
-      // Hour ? Day grid
-      const days  = data.heatmap;
-      const hours = Array.from({length:12}, (_,i) => i + 8);
-      let html = `
-        <div style="overflow-x:auto;">
-          <table style="border-collapse:separate;border-spacing:${gap}px;font-size:9px;color:var(--text-3);">
-            <thead>
-              <tr>
-                <td></td>
-                ${days.map(d => `<td style="text-align:center;padding-bottom:4px;">
-                  ${new Date(d.date).toLocaleDateString('en-GB',{weekday:'short'})}</td>`).join('')}
-              </tr>
-            </thead>
-            <tbody>
-              ${hours.map(h => `
-                <tr>
-                  <td style="padding-right:6px;text-align:right;">${h}h</td>
-                  ${days.map(d => {
-                    const hdata = d.hours.find(x => x.hour === h);
-                    const count = hdata?.count || 0;
-                    const alpha = count ? 0.15 + (count / max) * 0.85 : 0.05;
-                    return `<td title="${count} jobs" style="width:${cellSize}px;height:${cellSize}px;
-                      border-radius:2px;background:rgba(51,85,204,${alpha.toFixed(2)});cursor:default;"></td>`;
-                  }).join('')}
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-      el.innerHTML = html;
-    } else {
-      // Week grid ? 52 weeks ? 1 row or monthly grid
-      const weeks = data.heatmap;
-      let html = '<div style="display:flex;flex-wrap:wrap;gap:2px;">';
-      weeks.forEach(w => {
-        const count = Array.isArray(w) ? w.reduce((s,d) => s + d.count, 0) : (w.count || 0);
-        const alpha = count ? 0.15 + (count / max) * 0.85 : 0.05;
-        html += `<div title="${count} jobs" style="width:${cellSize}px;height:${cellSize}px;
-          border-radius:2px;background:rgba(51,85,204,${alpha.toFixed(2)});"></div>`;
-      });
-      html += '</div>';
-      el.innerHTML = html;
-    }
-  }
-
-  function _historyDrill(elOrItem) {
-    let item = elOrItem;
-    if (elOrItem instanceof HTMLElement) {
-      try { item = JSON.parse(elOrItem.dataset.item.replace(/&quot;/g, '"')); } catch { return; }
-    } else if (typeof elOrItem === 'string') {
-      try { item = JSON.parse(elOrItem.replace(/&quot;/g, '"')); } catch { return; }
-    }
-    _historyYear  = item.year  || _historyYear;
-    _historyMonth = item.month || null;
-    _historyWeek  = item.week  !== undefined ? item.week : null;
-
-    if (_historyMonth && _historyWeek !== null) {
-      _historyLevel = 'day';
-    } else if (_historyMonth) {
-      _historyLevel = 'week';
-    } else if (_historyYear) {
-      _historyLevel = 'month';
-    }
-
-    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
-    _fetchAndRenderHistory(container);
-  }
-
-  function _historyNav(level, year, month, week) {
-    _historyLevel = level;
-    _historyYear  = year;
-    _historyMonth = month;
-    _historyWeek  = week;
-    const container = document.getElementById('performance-tab-content') || document.getElementById('reports-content');
-    _fetchAndRenderHistory(container);
-  }
+// ── Sheet PDF download ─────────────────────────────────────
   async function downloadSheetPDF(sheetId, sheetDate) {
     try {
       const res = await Auth.fetch(`/api/v1/finance/sheets/${sheetId}/pdf/`);
@@ -5161,7 +2821,8 @@ const kpiCards = [
       _toast('Network error downloading PDF.', 'error');
     }
   }
-  // -- PIN Modal ----------------------------------------------
+
+  // ── PIN Modal ──────────────────────────────────────────────
   let _pinSheetId   = null;
   let _pinSheetDate = null;
   let _pinAttempts  = 0;
@@ -5172,14 +2833,12 @@ const kpiCards = [
     _pinSheetDate = sheetDate;
     _pinAttempts  = 0;
 
-    // Check if PIN is set
-    const user = Auth.getUser();
+    const user     = Auth.getUser();
     const hasPinSet = user?.download_pin_set;
 
-    _set('pin-modal-subtitle', `Sheet ? ${sheetDate}`);
+    _set('pin-modal-subtitle', `Sheet · ${sheetDate}`);
 
     if (!hasPinSet) {
-      // Need to re-fetch to get latest pin status
       const res = await Auth.fetch('/api/v1/accounts/me/');
       if (res?.ok) {
         const fresh = await res.json();
@@ -5222,106 +2881,79 @@ const kpiCards = [
   }
 
   async function _submitPin() {
-    const btn = document.getElementById('pin-submit-btn');
+    const btn        = document.getElementById('pin-submit-btn');
     const isSetState = document.getElementById('pin-set-state').style.display !== 'none';
-
-    btn.disabled = true;
-    btn.textContent = 'Checking?';
-
-    if (isSetState) {
-      await _handleSetPin(btn);
-    } else {
-      await _handleVerifyPin(btn);
-    }
+    btn.disabled     = true;
+    btn.textContent  = 'Checking…';
+    if (isSetState) { await _handleSetPin(btn); } else { await _handleVerifyPin(btn); }
   }
 
   async function _handleSetPin(btn) {
     const pin        = document.getElementById('pin-set-input')?.value.trim();
     const confirmPin = document.getElementById('pin-confirm-input')?.value.trim();
     const errorEl    = document.getElementById('pin-set-error');
-
     errorEl.style.display = 'none';
 
     if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
-      errorEl.textContent    = 'PIN must be exactly 4 digits.';
-      errorEl.style.display  = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Confirm';
+      errorEl.textContent   = 'PIN must be exactly 4 digits.';
+      errorEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Confirm';
       return;
     }
-
     if (pin !== confirmPin) {
-      errorEl.textContent    = 'PINs do not match.';
-      errorEl.style.display  = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Confirm';
+      errorEl.textContent   = 'PINs do not match.';
+      errorEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Confirm';
       return;
     }
-
     try {
       const res = await Auth.fetch('/api/v1/accounts/pin/set/', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ pin, confirm_pin: confirmPin }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, confirm_pin: confirmPin }),
       });
-
       if (res.ok) {
-        // Update cached user
         const userRes = await Auth.fetch('/api/v1/accounts/me/');
         if (userRes?.ok) Auth.setUser(await userRes.json());
-
         _toast('Download PIN set successfully.', 'success');
         closePinModal();
-
-        // Now proceed to verify
         setTimeout(() => initiateSheetDownload(_pinSheetId, _pinSheetDate), 300);
       } else {
         const err = await res.json().catch(() => ({}));
         errorEl.textContent   = err.detail || 'Could not set PIN.';
         errorEl.style.display = 'block';
-        btn.disabled    = false;
-        btn.textContent = 'Confirm';
+        btn.disabled = false; btn.textContent = 'Confirm';
       }
     } catch {
-      const errorEl = document.getElementById('pin-set-error');
       errorEl.textContent   = 'Network error. Please try again.';
       errorEl.style.display = 'block';
-      btn.disabled    = false;
-      btn.textContent = 'Confirm';
+      btn.disabled = false; btn.textContent = 'Confirm';
     }
   }
 
   async function _handleVerifyPin(btn) {
-    const pin     = document.getElementById('pin-verify-input')?.value.trim();
-    const errorEl = document.getElementById('pin-verify-error');
+    const pin        = document.getElementById('pin-verify-input')?.value.trim();
+    const errorEl    = document.getElementById('pin-verify-error');
     const attemptsEl = document.getElementById('pin-attempts');
-
     errorEl.style.display = 'none';
 
     if (!pin || pin.length !== 4) {
       errorEl.textContent   = 'Please enter your 4-digit PIN.';
       errorEl.style.display = 'block';
-      btn.disabled    = false;
-      btn.textContent = 'Confirm';
+      btn.disabled = false; btn.textContent = 'Confirm';
       return;
     }
-
     try {
       const res = await Auth.fetch('/api/v1/accounts/pin/verify/', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ pin, sheet_id: _pinSheetId }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, sheet_id: _pinSheetId }),
       });
-
       if (res.ok) {
         closePinModal();
-        _toast('PIN verified. Downloading?', 'success');
+        _toast('PIN verified. Downloading…', 'success');
         await downloadSheetPDF(_pinSheetId, _pinSheetDate);
       } else {
         _pinAttempts++;
         const remaining = MAX_ATTEMPTS - _pinAttempts;
-
-        // Shake animation
         const input = document.getElementById('pin-verify-input');
         if (input) {
           input.style.borderColor = 'var(--red-text)';
@@ -5333,143 +2965,43 @@ const kpiCards = [
           setTimeout(() => { input.style.borderColor = 'var(--border)'; }, 600);
           setTimeout(() => input.focus(), 100);
         }
-
         if (_pinAttempts >= MAX_ATTEMPTS) {
           errorEl.textContent   = 'Too many incorrect attempts. Please try again later.';
           errorEl.style.display = 'block';
-          attemptsEl.textContent = '';
-          btn.disabled = true;
-          btn.textContent = 'Locked';
+          if (attemptsEl) attemptsEl.textContent = '';
+          btn.disabled = true; btn.textContent = 'Locked';
         } else {
           errorEl.textContent   = 'Incorrect PIN.';
           errorEl.style.display = 'block';
-          attemptsEl.textContent = `${remaining} attempt${remaining !== 1 ? 's' : ''} remaining`;
-          btn.disabled    = false;
-          btn.textContent = 'Confirm';
+          if (attemptsEl) attemptsEl.textContent = `${remaining} attempt${remaining !== 1 ? 's' : ''} remaining`;
+          btn.disabled = false; btn.textContent = 'Confirm';
         }
       }
     } catch {
       errorEl.textContent   = 'Network error. Please try again.';
       errorEl.style.display = 'block';
-      btn.disabled    = false;
-      btn.textContent = 'Confirm';
+      btn.disabled = false; btn.textContent = 'Confirm';
     }
   }
 
   function closePinModal() {
     document.getElementById('pin-modal').classList.remove('open');
-    const pinVerifyInput = document.getElementById('pin-verify-input');
-    const pinSetInput    = document.getElementById('pin-set-input');
-    const pinConfirmInput = document.getElementById('pin-confirm-input');
-    if (pinVerifyInput)  pinVerifyInput.value  = '';
-    if (pinSetInput)     pinSetInput.value     = '';
-    if (pinConfirmInput) pinConfirmInput.value = '';
+    ['pin-verify-input','pin-set-input','pin-confirm-input'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
     for (let i = 0; i < 4; i++) {
-      const dot    = document.getElementById(`pin-dot-${i}`);
-      const setDot = document.getElementById(`pin-set-dot-${i}`);
-      if (dot)    dot.style.background    = 'var(--border)';
-      if (setDot) setDot.style.background = 'var(--border)';
+      const d  = document.getElementById(`pin-dot-${i}`);
+      const ds = document.getElementById(`pin-set-dot-${i}`);
+      if (d)  d.style.background  = 'var(--border)';
+      if (ds) ds.style.background = 'var(--border)';
     }
     _pinAttempts = 0;
   }
 
-  // -- Add Service Modal ? functions moved to catalogue.js --------------
-  // -- Invoices pane -----------------------------------------
-  let _invoicesLoaded = false;
-
-  async function _loadInvoicesPane() {
-    _invoicesLoaded = true;
-    const container = document.getElementById('invoices-content');
-    if (!container) return;
-
-    try {
-      const res  = await Auth.fetch('/api/v1/finance/invoices/');
-      if (!res.ok) throw new Error();
-      const data     = await res.json();
-      const invoices = Array.isArray(data) ? data : (data.results || []);
-
-      if (!invoices.length) {
-        container.innerHTML = `
-          <div style="text-align:center;padding:48px;color:var(--text-3);font-size:13px;">
-            No invoices yet. Create one to get started.
-          </div>`;
-        return;
-      }
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH', {minimumFractionDigits:2})}`;
-
-      container.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          <table class="p-table">
-            <thead>
-              <tr>
-                <th>Invoice No</th>
-                <th>Type</th>
-                <th>Bill To</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Date</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${invoices.map(inv => `
-                <tr>
-                  <td>
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;">
-                      ${_esc(inv.invoice_number)}
-                    </div>
-                  </td>
-                  <td>
-                    <span class="badge ${inv.invoice_type === 'PROFORMA' ? 'badge-production' : 'badge-instant'}">
-                      ${inv.invoice_type}
-                    </span>
-                  </td>
-                  <td>
-                    <div style="font-weight:600;font-size:13px;">${_esc(inv.bill_to_name || '?')}</div>
-                    ${inv.bill_to_company ? `<div style="font-size:11px;color:var(--text-3);">${_esc(inv.bill_to_company)}</div>` : ''}
-                  </td>
-                  <td style="font-family:'JetBrains Mono',monospace;font-weight:600;">
-                    ${fmt(inv.total)}
-                  </td>
-                  <td>
-                    <span class="badge ${_invoiceStatusBadge(inv.status)}">
-                      ${inv.status}
-                    </span>
-                  </td>
-                  <td style="font-size:12px;color:var(--text-3);">
-                    ${inv.issue_date ? new Date(inv.issue_date).toLocaleDateString('en-GH') : '?'}
-                  </td>
-                  <td>
-                    <button onclick="Dashboard.downloadInvoicePDF(${inv.id}, '${_esc(inv.invoice_number)}')"
-                      style="padding:5px 12px;font-size:12px;font-weight:600;
-                        background:var(--bg);border:1px solid var(--border);
-                        border-radius:var(--radius-sm);cursor:pointer;
-                        font-family:'DM Sans',sans-serif;color:var(--text-2);
-                        transition:all 0.15s;"
-                      onmouseover="this.style.borderColor='var(--border-dark)'"
-                      onmouseout="this.style.borderColor='var(--border)'">
-                      ? PDF
-                    </button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch {
-      container.innerHTML = `<div class="loading-cell">Could not load invoices.</div>`;
-    }
-  }
-
+  // ── Invoice status badge ───────────────────────────────────
   function _invoiceStatusBadge(status) {
-    return {
-      'DRAFT'  : 'badge-draft',
-      'SENT'   : 'badge-progress',
-      'VIEWED' : 'badge-pending',
-      'PAID'   : 'badge-done',
-    }[status] || 'badge-draft';
+    return { 'DRAFT':'badge-draft','SENT':'badge-progress','VIEWED':'badge-pending','PAID':'badge-done' }[status] || 'badge-draft';
   }
 
   async function downloadInvoicePDF(id, invoiceNumber) {
@@ -5479,28 +3011,24 @@ const kpiCards = [
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `${invoiceNumber}.pdf`;
-      a.click();
+      a.href = url; a.download = `${invoiceNumber}.pdf`; a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      _toast('Download failed.', 'error');
-    }
+    } catch { _toast('Download failed.', 'error'); }
   }
 
   function openCreateInvoice() {
     _toast('Invoice creation coming soon.', 'info');
   }
 
-  // -- Late Job --------------------------------------------------
+  // ── Late Job ───────────────────────────────────────────────
   function openLateJobModal() {
-    document.getElementById('late-job-reason').value    = '';
-    document.getElementById('late-job-svc-search').value= '';
-    document.getElementById('late-job-svc-id').value   = '';
-    document.getElementById('late-job-pages').value     = '1';
-    document.getElementById('late-job-sets').value      = '1';
-    document.getElementById('late-job-color').value     = 'false';
-    document.getElementById('late-job-error').style.display = 'none';
+    document.getElementById('late-job-reason').value     = '';
+    document.getElementById('late-job-svc-search').value = '';
+    document.getElementById('late-job-svc-id').value     = '';
+    document.getElementById('late-job-pages').value      = '1';
+    document.getElementById('late-job-sets').value       = '1';
+    document.getElementById('late-job-color').value      = 'false';
+    document.getElementById('late-job-error').style.display    = 'none';
     document.getElementById('late-job-svc-dropdown').style.display = 'none';
     document.getElementById('late-job-overlay').classList.add('open');
   }
@@ -5512,26 +3040,21 @@ const kpiCards = [
   function _lateJobFilterServices() {
     const query    = document.getElementById('late-job-svc-search').value.toLowerCase();
     const dropdown = document.getElementById('late-job-svc-dropdown');
-    const filtered = services.filter(s =>
-      s.name.toLowerCase().includes(query)
-    );
+    const filtered = services.filter(s => s.name.toLowerCase().includes(query));
     if (!filtered.length) { dropdown.style.display = 'none'; return; }
     dropdown.innerHTML = filtered.map(s => `
       <div onclick="Dashboard._lateJobSelectService(${s.id}, '${_esc(s.name)}')"
-        style="padding:9px 12px;font-size:13px;cursor:pointer;
-               border-bottom:1px solid var(--border);"
-        onmouseover="this.style.background='var(--bg)'"
-        onmouseout="this.style.background=''">
+        style="padding:9px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);"
+        onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
         <div style="font-weight:600;color:var(--text);">${_esc(s.name)}</div>
         <div style="font-size:11px;color:var(--text-3);">${s.category}</div>
-      </div>
-    `).join('');
+      </div>`).join('');
     dropdown.style.display = 'block';
   }
 
   function _lateJobSelectService(id, name) {
     document.getElementById('late-job-svc-id').value    = id;
-    document.getElementById('late-job-svc-search').value= name;
+    document.getElementById('late-job-svc-search').value = name;
     document.getElementById('late-job-svc-dropdown').style.display = 'none';
   }
 
@@ -5549,72 +3072,50 @@ const kpiCards = [
     if (!reason) { err.textContent = 'Reason is required.'; err.style.display = 'block'; return; }
     if (!svcId)  { err.textContent = 'Please select a service.'; err.style.display = 'block'; return; }
 
-    btn.disabled    = true;
-    btn.textContent = 'Recording?';
-
+    btn.disabled = true; btn.textContent = 'Recording…';
     try {
       const res = await Auth.fetch('/api/v1/jobs/late/', {
-        method  : 'POST',
-        headers : { 'Content-Type': 'application/json' },
-        body    : JSON.stringify({
-          post_closing_reason : reason,
-          line_items          : [{
-            service  : parseInt(svcId),
-            pages,
-            sets,
-            is_color : isColor,
-          }],
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          post_closing_reason: reason,
+          line_items: [{ service: parseInt(svcId), pages, sets, is_color: isColor }],
         }),
       });
-
       const data = await res.json();
       if (!res.ok) {
         err.textContent   = data.detail || Object.values(data).flat().join(' ');
         err.style.display = 'block';
         return;
       }
-
       closeLateJobModal();
       _toast(`Late job ${data.job_number} recorded and sent to cashier.`, 'success');
-
     } catch {
       err.textContent   = 'Network error. Please try again.';
       err.style.display = 'block';
     } finally {
-      btn.disabled    = false;
-      btn.textContent = 'Record Late Job';
+      btn.disabled = false; btn.textContent = 'Record Late Job';
     }
   }
 
   function _checkLateJobButton() {
     const btn = document.getElementById('late-job-btn');
     if (!btn) return;
-    const now     = new Date();
-    const hours   = now.getHours();
-    const minutes = now.getMinutes();
-    // Show after 19:30
-    const isPastClosing = hours > 19 || (hours === 19 && minutes >= 30);
+    const now  = new Date();
+    const isPastClosing = now.getHours() > 19 || (now.getHours() === 19 && now.getMinutes() >= 30);
     btn.style.display = isPastClosing ? 'inline-flex' : 'none';
   }
 
-  // -- Closing time warning -----------------------------------
+  // ── Closing warning ────────────────────────────────────────
   let _closingWarnShown = false;
 
   function _checkClosingWarning() {
-    const now     = new Date();
-    const hours   = now.getHours();
-    const minutes = now.getMinutes();
-
-    // Show at 19:00 (30 mins before 19:30 closing)
-    const isWarningTime = hours === 19 && minutes >= 0 && minutes < 30;
+    const now   = new Date();
+    const hours = now.getHours();
+    const mins  = now.getMinutes();
+    const isWarningTime = hours === 19 && mins >= 0 && mins < 30;
     if (!isWarningTime || _closingWarnShown) return;
-
-    // Don't interrupt if a modal is open
-    const openModals = document.querySelectorAll(
-      '.modal-overlay.open, .eod-overlay.open'
-    );
+    const openModals = document.querySelectorAll('.modal-overlay.open, .eod-overlay.open');
     if (openModals.length > 0) return;
-
     _closingWarnShown = true;
     _showClosingModal();
   }
@@ -5622,1901 +3123,38 @@ const kpiCards = [
   function _showClosingModal() {
     const existing = document.getElementById('closing-warn-overlay');
     if (existing) existing.remove();
-
     const overlay = document.createElement('div');
     overlay.id    = 'closing-warn-overlay';
-    overlay.style.cssText = `
-      position:fixed;inset:0;z-index:9998;
-      background:rgba(0,0,0,0.85);
-      display:flex;align-items:center;justify-content:center;
-      font-family:'DM Sans',sans-serif;
-      animation:fadeIn 0.3s ease;`;
-
+    overlay.style.cssText = `position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;animation:fadeIn 0.3s ease;`;
     overlay.innerHTML = `
-      <div style="
-        background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);width:100%;max-width:480px;
-        padding:32px;text-align:center;
-        box-shadow:0 24px 64px rgba(0,0,0,0.4);">
-
-        <!-- Icon -->
-        <div style="width:64px;height:64px;border-radius:50%;
-          background:var(--amber-bg);border:2px solid var(--amber-border);
-          display:flex;align-items:center;justify-content:center;
-          margin:0 auto 20px;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
-            viewBox="0 0 24 24" fill="none"
-            stroke="var(--amber-text)" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);width:100%;max-width:480px;padding:32px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+        <div style="width:64px;height:64px;border-radius:50%;background:var(--amber-bg);border:2px solid var(--amber-border);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--amber-text)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         </div>
-
-        <!-- Title -->
-        <div style="font-family:'Syne',sans-serif;font-size:22px;
-          font-weight:800;color:var(--text);margin-bottom:8px;">
-          30 Minutes to Closing
-        </div>
-        <div style="font-size:14px;color:var(--text-3);margin-bottom:8px;">
-          Branch closes at <strong style="color:var(--text);">7:30 PM</strong> today.
-        </div>
-        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
-          Ensure all jobs are processed and the cashier is prepared for end-of-day sign-off.
-        </div>
-
-        <!-- Countdown -->
-        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-          Auto-dismissing in <span id="closing-warn-countdown"
-            style="font-weight:700;color:var(--amber-text);">15</span>s
-        </div>
-
-        <!-- Dismiss button -->
-        <button onclick="document.getElementById('closing-warn-overlay').remove()"
-          style="padding:10px 28px;background:var(--text);color:#fff;border:none;
-            border-radius:var(--radius-sm);font-size:14px;font-weight:700;
-            cursor:pointer;font-family:'DM Sans',sans-serif;">
-          Dismiss
-        </button>
+        <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--text);margin-bottom:8px;">30 Minutes to Closing</div>
+        <div style="font-size:14px;color:var(--text-3);margin-bottom:8px;">Branch closes at <strong style="color:var(--text);">7:30 PM</strong> today.</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">Ensure all jobs are processed and the cashier is prepared for end-of-day sign-off.</div>
+        <div style="font-size:13px;color:var(--text-3);margin-bottom:20px;">Auto-dismissing in <span id="closing-warn-countdown" style="font-weight:700;color:var(--amber-text);">15</span>s</div>
+        <button onclick="document.getElementById('closing-warn-overlay').remove()" style="padding:10px 28px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Dismiss</button>
       </div>`;
-
     document.body.appendChild(overlay);
-
-    // Auto-dismiss after 15 seconds
     let count = 15;
     const timer = setInterval(() => {
       count--;
       const el = document.getElementById('closing-warn-countdown');
       if (el) el.textContent = count;
-      if (count <= 0) {
-        clearInterval(timer);
-        overlay.remove();
-      }
+      if (count <= 0) { clearInterval(timer); overlay.remove(); }
     }, 1000);
   }
-// -- Customers pane ----------------------------------------
-  let _customersTab = 'all';
-
-  async function _loadCustomersPane() {
-    const pane = document.getElementById('pane-customers');
-    if (!pane) return;
-
-    pane.innerHTML = `
-      <div class="section-head">
-        <span class="section-title">Customers</span>
-        <button onclick="Dashboard.openAddCustomerModal()"
-          style="padding:7px 16px;background:var(--text);color:#fff;border:none;
-            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-            cursor:pointer;font-family:'DM Sans',sans-serif;">
-          + Add Customer
-        </button>
-      </div>
-
-      <div class="reports-tabs" id="customers-tab-bar">
-        <button class="reports-tab active" data-tab="all"
-          onclick="Dashboard.switchCustomersTab('all')">All</button>
-        <button class="reports-tab" data-tab="individuals"
-          onclick="Dashboard.switchCustomersTab('individuals')">Individuals</button>
-        <button class="reports-tab" data-tab="businesses"
-          onclick="Dashboard.switchCustomersTab('businesses')">Businesses</button>
-        <button class="reports-tab" data-tab="institutions"
-          onclick="Dashboard.switchCustomersTab('institutions')">Institutions</button>
-        <button class="reports-tab" data-tab="credit"
-          onclick="Dashboard.switchCustomersTab('credit')">Credit Accounts</button>
-      </div>
-
-      <div id="customers-content">
-        <div class="loading-cell"><span class="spin"></span> Loading?</div>
-      </div>`;
-
-    await _loadCustomersTab('all');
-  }
-
-  async function switchCustomersTab(tab) {
-    _customersTab = tab;
-    document.querySelectorAll('#customers-tab-bar .reports-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
-    });
-    await _loadCustomersTab(tab);
-  }
-
-  async function _loadCustomersTab(tab) {
-    const content = document.getElementById('customers-content');
-    if (!content) return;
-    content.innerHTML = '<div class="loading-cell"><span class="spin"></span> Loading?</div>';
-
-    if (tab === 'all')          await _renderCustomerList(content, {});
-    if (tab === 'individuals')  await _renderCustomerList(content, { customer_type: 'INDIVIDUAL' });
-    if (tab === 'businesses')   await _renderCustomerList(content, { customer_type: 'BUSINESS' });
-    if (tab === 'institutions') await _renderCustomerList(content, { customer_type: 'INSTITUTION' });
-    if (tab === 'credit')       await _renderCreditCustomers(content);
-  }
-
-  async function _renderCustomerList(container, filters = {}) {
-    try {
-      const params = new URLSearchParams(filters);
-      const res    = await Auth.fetch(`/api/v1/customers/?${params}`);
-      if (!res.ok) throw new Error();
-      const data      = await res.json();
-      const customers = Array.isArray(data) ? data : (data.results || []);
-
-      if (!customers.length) {
-        container.innerHTML = `
-          <div style="text-align:center;padding:60px;color:var(--text-3);">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-            </svg>
-            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              No customers found</div>
-            <div style="font-size:13px;">Add your first customer to get started.</div>
-          </div>`;
-        return;
-      }
-
-      const typeConfig = {
-        INDIVIDUAL : { label: 'Individual',   bg: '#f0f4fd', color: '#2e4a8a' },
-        BUSINESS   : { label: 'Business',     bg: '#f0fdf4', color: '#1a6b3a' },
-        INSTITUTION: { label: 'Institution',  bg: '#f5f0fd', color: '#5a2e8a' },
-      };
-
-      const tierConfig = {
-        REGULAR  : { label: 'Regular',   bg: 'var(--bg)',       color: 'var(--text-3)' },
-        PREFERRED: { label: 'Preferred', bg: '#fef3c7',         color: '#d97706'       },
-        VIP      : { label: 'VIP',       bg: '#fdf0f5',         color: '#8a1a4a'       },
-      };
-
-      const subtypeLabel = {
-        SCHOOL: 'School', CHURCH: 'Church', NGO: 'NGO',
-        GOVT: 'Government', OTHER: 'Institution',
-      };
-
-      container.innerHTML = `
-        <!-- Search bar -->
-        <div style="margin-bottom:16px;">
-          <input type="text" id="customers-search"
-            placeholder="Search by name or phone?"
-            oninput="Dashboard._filterCustomerRows(this.value)"
-            style="width:100%;max-width:320px;padding:8px 14px;
-              border:1.5px solid var(--border);border-radius:var(--radius-sm);
-              background:var(--bg);color:var(--text);font-size:13px;
-              font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
-        </div>
-
-        <!-- Summary strip -->
-        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-          ${[
-            ['Total', customers.length, 'var(--text)', 'var(--panel)'],
-            ['Individuals',  customers.filter(c => c.customer_type === 'INDIVIDUAL').length,  '#2e4a8a', '#f0f4fd'],
-            ['Businesses',   customers.filter(c => c.customer_type === 'BUSINESS').length,    '#1a6b3a', '#f0fdf4'],
-            ['Institutions', customers.filter(c => c.customer_type === 'INSTITUTION').length, '#5a2e8a', '#f5f0fd'],
-          ].map(([label, count, color, bg]) => `
-            <div style="padding:10px 16px;background:${bg};border:1px solid #e5e7eb;
-              border-radius:8px;text-align:center;min-width:90px;">
-              <div style="font-size:20px;font-weight:800;color:${color};">${count}</div>
-              <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;
-                letter-spacing:0.4px;margin-top:2px;">${label}</div>
-            </div>`).join('')}
-        </div>
-
-        <!-- Table -->
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          <table style="width:100%;border-collapse:collapse;" id="customers-table">
-            <thead>
-              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Phone</th>
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Type</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Visits</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Tier</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Score</th>
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Since</th>
-                <th style="padding:10px 16px;"></th>
-              </tr>
-            </thead>
-            <tbody id="customers-tbody">
-              ${customers.map((c, idx) => {
-                const tc  = typeConfig[c.customer_type]  || typeConfig.INDIVIDUAL;
-                const trc = tierConfig[c.tier]           || tierConfig.REGULAR;
-                const isIndividual = c.customer_type === 'INDIVIDUAL';
-                const name = isIndividual
-                  ? (c.full_name || c.display_name || '?')
-                  : (c.display_name || '?');
-                const sub = isIndividual
-                  ? ''
-                  : (c.full_name ? `Rep: ${c.full_name}` : '');
-                const sinceDate = c.created_at
-                  ? new Date(c.created_at).toLocaleDateString('en-GB',
-                      { day: 'numeric', month: 'short', year: 'numeric' })
-                  : '?';
-                const scoreColor = c.confidence_score >= 70
-                  ? '#16a34a' : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
-                const typeLabel = c.institution_subtype
-                  ? subtypeLabel[c.institution_subtype] || tc.label
-                  : tc.label;
-
-                return `
-                  <tr data-search="${(name + ' ' + (c.phone||'')).toLowerCase()}"
-                    style="border-bottom:1px solid var(--border);
-                      background:${idx % 2 === 0 ? '#fff' : '#fafafa'};
-                      cursor:pointer;transition:background 0.12s;"
-                    onmouseover="this.style.background='var(--bg)'"
-                    onmouseout="this.style.background='${idx % 2 === 0 ? '#fff' : '#fafafa'}'"
-                    onclick="Dashboard.openCustomerDetail(${c.id})">
-
-                    <!-- Name -->
-                    <td style="padding:11px 16px;">
-                      <div style="font-size:13px;font-weight:700;color:var(--text);">
-                        ${_esc(name)}</div>
-                      ${sub ? `
-                        <div style="font-size:11px;color:var(--text-3);margin-top:1px;">
-                          ${_esc(sub)}
-                        </div>` : ''}
-                    </td>
-
-                    <!-- Phone -->
-                    <td style="padding:11px 16px;font-family:'JetBrains Mono',monospace;
-                      font-size:12px;color:var(--text-2);">${_esc(c.phone || '?')}</td>
-
-                    <!-- Type -->
-                    <td style="padding:11px 16px;">
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:${tc.bg};color:${tc.color};">
-                        ${typeLabel}
-                      </span>
-                    </td>
-
-                    <!-- Visits -->
-                    <td style="padding:11px 16px;text-align:center;font-size:13px;
-                      font-weight:600;color:var(--text);">${c.visit_count || 0}</td>
-
-                    <!-- Tier -->
-                    <td style="padding:11px 16px;text-align:center;">
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:${trc.bg};color:${trc.color};">
-                        ${trc.label}
-                      </span>
-                    </td>
-
-                    <!-- Score -->
-                    <td style="padding:11px 16px;text-align:center;">
-                      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                        font-weight:700;color:${scoreColor};">${c.confidence_score}</span>
-                    </td>
-
-                    <!-- Since -->
-                    <td style="padding:11px 16px;font-size:12px;color:var(--text-3);">
-                      ${sinceDate}</td>
-
-                    <!-- Action -->
-                    <td style="padding:11px 16px;text-align:right;">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-                        viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2" style="color:var(--text-3);">
-                        <polyline points="9 18 15 12 9 6"/>
-                      </svg>
-                    </td>
-
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>`;
-
-    } catch {
-      container.innerHTML = `
-        <div class="loading-cell" style="color:var(--red-text);">
-          Could not load customers.</div>`;
-    }
-  }
-
-  async function _renderCreditCustomers(container) {
-    try {
-      const res  = await Auth.fetch('/api/v1/customers/credit/');
-      if (!res.ok) throw new Error();
-      const data     = await res.json();
-      const accounts = Array.isArray(data) ? data : (data.results || []);
-
-      if (!accounts.length) {
-        container.innerHTML = `
-          <div style="text-align:center;padding:60px;color:var(--text-3);">
-            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">
-              No credit accounts</div>
-            <div style="font-size:13px;">
-              Nominate a customer for credit from their profile.</div>
-          </div>`;
-        return;
-      }
-
-      const statusConfig = {
-        ACTIVE   : { bg: '#dcfce7', color: '#16a34a', label: 'Active'    },
-        PENDING  : { bg: '#fef3c7', color: '#d97706', label: 'Pending'   },
-        SUSPENDED: { bg: '#fee2e2', color: '#dc2626', label: 'Suspended' },
-        CLOSED   : { bg: '#f3f4f6', color: '#6b7280', label: 'Closed'    },
-      };
-
-      const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',
-        { minimumFractionDigits: 2 })}`;
-
-      container.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          <table style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
-                <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Customer</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Limit</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Balance</th>
-                <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Available</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Usage</th>
-                <th style="padding:10px 16px;text-align:center;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${accounts.map((a, idx) => {
-                const sc      = statusConfig[a.status] || statusConfig.PENDING;
-                const usagePct = a.utilisation_pct || 0;
-                const usageColor = usagePct >= 90 ? '#dc2626'
-                  : usagePct >= 70 ? '#d97706' : '#16a34a';
-
-                return `
-                  <tr style="border-bottom:1px solid var(--border);
-                    background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
-                    <td style="padding:11px 16px;">
-
-                      <!-- Line 1: Primary name + account type badge -->
-                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
-                        <span style="font-size:13px;font-weight:700;color:var(--text);">
-                          ${_esc(a.customer_name || '?')}
-                        </span>
-                        <span style="font-size:9px;font-weight:700;padding:1px 7px;
-                          border-radius:20px;
-                          background:${a.account_type === 'BUSINESS' ? '#f0fdf4' : '#f0f4fd'};
-                          color:${a.account_type === 'BUSINESS' ? '#1a6b3a' : '#2e4a8a'};">
-                          ${a.account_type === 'BUSINESS' ? 'Business' : 'Individual'}
-                        </span>
-                      </div>
-
-                      <!-- Line 2: Rep (business) or company affiliation (individual) + phone -->
-                      <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">
-                        ${a.account_type === 'BUSINESS'
-                          ? (a.contact_person ? `Rep: ${_esc(a.contact_person)} ? ` : '')
-                          : (a.customer_company ? `${_esc(a.customer_company)} ? ` : '')}
-                        <span style="font-family:'JetBrains Mono',monospace;">
-                          ${_esc(a.customer_phone || '?')}
-                        </span>
-                      </div>
-
-                      <!-- Line 3: Address if available -->
-                      ${a.customer_address ? `
-                        <div style="font-size:11px;color:var(--text-3);">
-                          ${_esc(a.customer_address)}
-                        </div>` : ''}
-
-                    </td>
-                    <td style="padding:11px 16px;text-align:right;
-                      font-family:'JetBrains Mono',monospace;font-size:12px;
-                      font-weight:600;color:var(--text);">${fmt(a.credit_limit)}</td>
-                    <td style="padding:11px 16px;text-align:right;
-                      font-family:'JetBrains Mono',monospace;font-size:12px;
-                      font-weight:700;color:#dc2626;">${fmt(a.current_balance)}</td>
-                    <td style="padding:11px 16px;text-align:right;
-                      font-family:'JetBrains Mono',monospace;font-size:12px;
-                      color:#16a34a;font-weight:600;">${fmt(a.available_credit)}</td>
-                    <td style="padding:11px 16px;text-align:center;">
-                      <div style="display:flex;align-items:center;gap:6px;
-                        justify-content:center;">
-                        <div style="width:60px;height:4px;background:#f3f4f6;
-                          border-radius:2px;overflow:hidden;">
-                          <div style="height:100%;width:${Math.min(100,usagePct).toFixed(1)}%;
-                            background:${usageColor};border-radius:2px;"></div>
-                        </div>
-                        <span style="font-size:11px;font-weight:600;
-                          color:${usageColor};">${usagePct.toFixed(0)}%</span>
-                      </div>
-                    </td>
-                    <td style="padding:11px 16px;text-align:center;">
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:${sc.bg};color:${sc.color};">
-                        ${sc.label}
-                      </span>
-                    </td>
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>`;
-
-    } catch {
-      container.innerHTML = `
-        <div class="loading-cell" style="color:var(--red-text);">
-          Could not load credit accounts.</div>`;
-    }
-  }
-
-  function _filterCustomerRows(query) {
-    const q    = query.toLowerCase();
-    const rows = document.querySelectorAll('#customers-tbody tr');
-    rows.forEach(row => {
-      const search = row.dataset.search || '';
-      row.style.display = search.includes(q) ? '' : 'none';
-    });
-  }
-
-async function openCustomerDetail(customerId) {
-    const overlay = document.getElementById('customer-profile-overlay');
-    const content = document.getElementById('customer-profile-content');
-    if (!overlay || !content) return;
-
-    overlay.style.display = 'block';
-
-    content.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;
-        min-height:100vh;color:var(--text-3);">
-        <span class="spin"></span>
-      </div>`;
-
-    try {
-      const [profileRes, jobsRes, creditRes] = await Promise.all([
-        Auth.fetch(`/api/v1/customers/${customerId}/`),
-        Auth.fetch(`/api/v1/jobs/?customer=${customerId}&page_size=100`),
-        Auth.fetch(`/api/v1/customers/credit/`),
-      ]);
-
-      const customer  = profileRes.ok ? await profileRes.json() : null;
-      if (!customer) throw new Error();
-
-      const jobsData   = jobsRes.ok   ? await jobsRes.json()   : { results: [] };
-      const creditData = creditRes.ok ? await creditRes.json() : { results: [] };
-
-      // Filter jobs that are actually linked to this customer
-      const jobs   = (jobsData.results || []).filter(j => j.customer == customerId);
-
-      // Filter credit account for this customer
-      const credit = (creditData.results || []).find(c => c.customer === customerId) || null;
-
-      _renderCustomerProfile(content, customer, jobs, credit);
-
-    } catch {
-      content.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:center;
-          min-height:100vh;flex-direction:column;gap:12px;color:var(--red-text);">
-          <div>Could not load customer profile.</div>
-          <button onclick="Dashboard.closeCustomerProfile()"
-            style="padding:8px 20px;background:var(--text);color:#fff;border:none;
-              border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;">
-            Close
-          </button>
-        </div>`;
-    }
-  }
-
-  function _renderCustomerProfile(container, c, jobs, credit) {
-    const fmt = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
-    const isIndividual = c.customer_type === 'INDIVIDUAL';
-
-    const primaryName = isIndividual
-      ? (c.full_name || '?')
-      : (c.company_name || '?');
-    const secondaryName = isIndividual
-      ? (c.company_name || '')
-      : (c.full_name ? `Rep: ${c.full_name}` : '');
-
-    const typeConfig = {
-      INDIVIDUAL : { label: 'Individual',  bg: '#f0f4fd', color: '#2e4a8a' },
-      BUSINESS   : { label: 'Business',    bg: '#f0fdf4', color: '#1a6b3a' },
-      INSTITUTION: { label: 'Institution', bg: '#f5f0fd', color: '#5a2e8a' },
-    };
-    const tc  = typeConfig[c.customer_type] || typeConfig.INDIVIDUAL;
-
-    const tierConfig = {
-      REGULAR  : { label: 'Regular',   color: '#6b7280' },
-      PREFERRED: { label: 'Preferred', color: '#d97706' },
-      VIP      : { label: 'VIP',       color: '#8a1a4a' },
-    };
-    const trc = tierConfig[c.tier] || tierConfig.REGULAR;
-
-    const sinceDate = c.created_at
-      ? new Date(c.created_at).toLocaleDateString('en-GB',
-          { day: 'numeric', month: 'long', year: 'numeric' })
-      : '?';
-
-    const initials = primaryName.split(' ').slice(0,2)
-      .map(w => w[0]?.toUpperCase() || '').join('');
-
-    const scoreColor = c.confidence_score >= 70 ? '#16a34a'
-      : c.confidence_score >= 40 ? '#d97706' : '#dc2626';
-
-    const totalSpent = jobs.reduce((s, j) => s + parseFloat(j.amount_paid||0), 0);
-    const scoreToCredit = Math.max(0, 50 - c.confidence_score);
-
-    // -- Timeline HTML -------------------------------------
-    const timelineHtml = !jobs.length ? `
-      <div style="text-align:center;padding:48px 24px;
-        background:var(--panel);border:1px solid var(--border);
-        border-radius:var(--radius);">
-        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          stroke-width="1.5" style="opacity:0.3;display:block;margin:0 auto 12px;
-          color:var(--text-3);">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-        </svg>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">
-          No Job History Available for ${_esc(primaryName)}
-        </div>
-        <div style="font-size:13px;color:var(--text-3);">
-          Jobs linked to this customer will appear here once created.
-        </div>
-      </div>` : `
-      <div style="position:relative;">
-        ${jobs.map((j, idx) => {
-          const dt       = new Date(j.created_at);
-          const dateStr  = dt.toLocaleDateString('en-GB',
-            { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-          const timeStr  = dt.toLocaleTimeString('en-GH',
-            { hour: '2-digit', minute: '2-digit' });
-          const services = (j.line_items || [])
-            .map(li => li.service_name).join(', ') || '?';
-          const isLast   = idx === jobs.length - 1;
-
-          const statusColor = {
-            COMPLETE       : '#16a34a', CANCELLED: '#dc2626',
-            IN_PROGRESS    : '#d97706', PENDING_PAYMENT: '#d97706',
-          }[j.status] || '#6b7280';
-
-          const statusBg = {
-            COMPLETE       : '#dcfce7', CANCELLED: '#fee2e2',
-            IN_PROGRESS    : '#fef3c7', PENDING_PAYMENT: '#fef3c7',
-          }[j.status] || '#f3f4f6';
-
-          const methodColor = {
-            CASH: '#8a6a2e', MOMO: '#1a6b3a', POS: '#2e4a8a', CREDIT: '#8a1a4a',
-          }[j.payment_method] || '#6b7280';
-
-          const methodBg = {
-            CASH: '#fdf8f0', MOMO: '#f0fdf4', POS: '#f0f4fd', CREDIT: '#fdf0f5',
-          }[j.payment_method] || '#f3f4f6';
-
-          return `
-            <div style="display:flex;gap:16px;margin-bottom:${isLast ? '0' : '0'};">
-
-              <!-- Timeline spine -->
-              <div style="display:flex;flex-direction:column;align-items:center;
-                flex-shrink:0;width:32px;">
-                <!-- Node dot -->
-                <div style="width:12px;height:12px;border-radius:50%;
-                  background:${statusColor};border:2px solid #fff;
-                  box-shadow:0 0 0 2px ${statusColor};
-                  flex-shrink:0;margin-top:16px;"></div>
-                <!-- Line -->
-                ${!isLast ? `
-                  <div style="width:2px;flex:1;background:#e5e7eb;
-                    margin-top:4px;min-height:24px;"></div>` : ''}
-              </div>
-
-              <!-- Job card -->
-              <div style="flex:1;background:var(--panel);border:1px solid var(--border);
-                border-radius:var(--radius);overflow:hidden;margin-bottom:12px;">
-
-                <!-- Job header ? dark strip -->
-                <div style="padding:10px 16px;background:var(--text);
-                  display:flex;align-items:center;justify-content:space-between;">
-                  <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                    font-weight:700;color:#fff;letter-spacing:0.3px;">
-                    ${_esc(j.job_number || '?')}
-                  </div>
-                  <div style="display:flex;align-items:center;gap:6px;">
-                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                      font-weight:700;background:rgba(255,255,255,0.15);color:#fff;">
-                      ${j.job_type || '?'}
-                    </span>
-                    <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                      font-weight:700;background:${statusBg};color:${statusColor};">
-                      ${j.status.replace(/_/g,' ')}
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Job body -->
-                <div style="padding:12px 16px;">
-
-                  <!-- Service name -->
-                  <div style="font-size:13px;font-weight:600;color:var(--text);
-                    margin-bottom:10px;">${_esc(services)}</div>
-
-                  <!-- Meta grid -->
-                  <div style="display:grid;grid-template-columns:repeat(3,1fr);
-                    gap:8px;margin-bottom:10px;">
-
-                    <div>
-                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
-                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
-                        Date & Time</div>
-                      <div style="font-size:11px;color:var(--text-2);">${dateStr}</div>
-                      <div style="font-size:10px;color:var(--text-3);">${timeStr}</div>
-                    </div>
-
-                    <div>
-                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
-                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
-                        Attendant</div>
-                      <div style="font-size:11px;color:var(--text-2);">
-                        ${_esc(j.intake_by_name || '?')}</div>
-                    </div>
-
-                    <div>
-                      <div style="font-size:9px;font-weight:700;color:var(--text-3);
-                        text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">
-                        Amount</div>
-                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
-                        font-weight:800;color:var(--text);">${fmt(j.amount_paid)}</div>
-                    </div>
-
-                  </div>
-
-                  <!-- Bottom row: payment method + production duration -->
-                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    ${j.payment_method ? `
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:${methodBg};color:${methodColor};">
-                        ${j.payment_method}
-                      </span>` : ''}
-                    ${j.job_type === 'PRODUCTION' && j.deadline ? `
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:#f0f4fd;color:#2e4a8a;">
-                        Due: ${new Date(j.deadline).toLocaleDateString('en-GB',
-                          { day: 'numeric', month: 'short' })}
-                      </span>` : ''}
-                    ${j.is_routed ? `
-                      <span style="padding:2px 8px;border-radius:20px;font-size:10px;
-                        font-weight:700;background:#f5f0fd;color:#5a2e8a;">
-                        ? Routed
-                      </span>` : ''}
-                  </div>
-
-                </div>
-              </div>
-            </div>`;
-        }).join('')}
-      </div>`;
-
-    // -- Full modal HTML -----------------------------------
-    container.innerHTML = `
-      <!-- Topbar -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        padding:14px 28px;border-bottom:1px solid var(--border);
-        background:var(--panel);position:sticky;top:0;z-index:10;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <button onclick="Dashboard.closeCustomerProfile()"
-            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
-              background:none;border:1px solid var(--border);
-              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-              cursor:pointer;color:var(--text-2);font-family:inherit;"
-            onmouseover="this.style.borderColor='var(--border-dark)'"
-            onmouseout="this.style.borderColor='var(--border)'">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="19" y1="12" x2="5" y2="12"/>
-              <polyline points="12 19 5 12 12 5"/>
-            </svg>
-            Back
-          </button>
-          <span style="font-size:13px;color:var(--text-3);">Customer Profile</span>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button onclick="Dashboard._editCustomer(${c.id})"
-            style="padding:7px 16px;background:none;border:1px solid var(--border);
-              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-              cursor:pointer;color:var(--text-2);font-family:inherit;">
-            Edit Profile
-          </button>
-          ${!credit && c.confidence_score >= 50 ? `
-          <button onclick="Dashboard._nominateCredit(${c.id})"
-            style="padding:7px 16px;background:#16a34a;color:#fff;border:none;
-              border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-              cursor:pointer;font-family:inherit;">
-            Nominate for Credit
-          </button>` : ''}
-        </div>
-      </div>
-
-      <!-- Scrollable body ? single column -->
-      <div style="max-height:calc(100vh - 120px);overflow-y:auto;">
-      <div style="max-width:800px;margin:0 auto;padding:32px 28px;">
-
-        <!-- -- Profile header ---------------------------- -->
-        <div style="display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;">
-
-          <!-- Avatar with score ring -->
-          <div style="position:relative;flex-shrink:0;">
-            <svg width="80" height="80" viewBox="0 0 80 80">
-              <circle cx="40" cy="40" r="34" fill="none"
-                stroke="#f3f4f6" stroke-width="4"/>
-              <circle cx="40" cy="40" r="34" fill="none"
-                stroke="${scoreColor}" stroke-width="4"
-                stroke-dasharray="${2 * Math.PI * 34}"
-                stroke-dashoffset="${2 * Math.PI * 34 * (1 - c.confidence_score / 100)}"
-                stroke-linecap="round"
-                transform="rotate(-90 40 40)"/>
-            </svg>
-            <div style="position:absolute;inset:0;display:flex;
-              align-items:center;justify-content:center;">
-              <div style="width:60px;height:60px;border-radius:50%;
-                background:var(--text);display:flex;align-items:center;
-                justify-content:center;font-family:'Syne',sans-serif;
-                font-size:20px;font-weight:800;color:#fff;">
-                ${initials}
-              </div>
-            </div>
-          </div>
-
-          <!-- Name + badges + meta -->
-          <div style="flex:1;">
-            <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
-              color:var(--text);letter-spacing:-0.4px;margin-bottom:4px;">
-              ${_esc(primaryName)}
-            </div>
-            ${secondaryName ? `
-              <div style="font-size:13px;color:var(--text-3);margin-bottom:8px;">
-                ${_esc(secondaryName)}
-              </div>` : ''}
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-              margin-bottom:12px;">
-              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
-                font-weight:700;background:${tc.bg};color:${tc.color};">
-                ${tc.label}
-              </span>
-              <span style="padding:3px 10px;border-radius:20px;font-size:11px;
-                font-weight:700;background:var(--bg);color:${trc.color};
-                border:1px solid var(--border);">
-                ${trc.label}
-              </span>
-              ${c.is_priority ? `
-                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
-                  font-weight:700;background:#fef3c7;color:#d97706;">
-                  ? Priority
-                </span>` : ''}
-              ${credit ? `
-                <span style="padding:3px 10px;border-radius:20px;font-size:11px;
-                  font-weight:700;background:#fdf0f5;color:#8a1a4a;">
-                  ?? Credit Account
-                </span>` : ''}
-            </div>
-            <!-- Quick stats -->
-            <div style="display:flex;gap:20px;flex-wrap:wrap;">
-              ${[
-                ['Customer since', sinceDate],
-                ['Total visits',   c.visit_count || 0],
-                ['Jobs on record', jobs.length],
-                ['Lifetime spend', fmt(totalSpent)],
-              ].map(([label, val]) => `
-                <div>
-                  <div style="font-size:10px;color:var(--text-3);margin-bottom:1px;">
-                    ${label}</div>
-                  <div style="font-size:13px;font-weight:700;color:var(--text);">
-                    ${val}</div>
-                </div>`).join('')}
-            </div>
-          </div>
-        </div>
-
-        <!-- -- Info sections ----------------------------- -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;
-          margin-bottom:24px;">
-
-          <!-- Contact -->
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:16px 18px;">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-              Contact Details
-            </div>
-            ${[
-              ['Phone',   c.phone   || '?'],
-              ['Email',   c.email   || '?'],
-              ['Address', c.address || '?'],
-            ].map(([label, val]) => `
-              <div style="display:flex;justify-content:space-between;
-                padding:6px 0;border-bottom:1px solid var(--border);">
-                <span style="font-size:12px;color:var(--text-3);">${label}</span>
-                <span style="font-size:12px;font-weight:500;
-                  color:${val === '?' ? 'var(--text-3)' : 'var(--text)'};">
-                  ${_esc(val)}</span>
-              </div>`).join('')}
-          </div>
-
-          <!-- Credit or eligibility -->
-          <div style="background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius);padding:16px 18px;">
-            ${credit ? `
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-                Credit Account
-              </div>
-              ${[
-                ['Limit',     fmt(credit.credit_limit)],
-                ['Balance',   fmt(credit.current_balance)],
-                ['Available', fmt(credit.available_credit)],
-                ['Terms',     `${credit.payment_terms} days`],
-                ['Status',    credit.status],
-              ].map(([label, val]) => `
-                <div style="display:flex;justify-content:space-between;
-                  padding:6px 0;border-bottom:1px solid var(--border);">
-                  <span style="font-size:12px;color:var(--text-3);">${label}</span>
-                  <span style="font-size:12px;font-weight:600;
-                    color:${label==='Balance' ? '#dc2626'
-                      : label==='Available' ? '#16a34a' : 'var(--text)'};">
-                    ${_esc(String(val))}</span>
-                </div>`).join('')}
-              <!-- Usage bar -->
-              <div style="margin-top:10px;">
-                <div style="height:4px;background:#f3f4f6;border-radius:2px;
-                  overflow:hidden;">
-                  <div style="height:100%;
-                    width:${Math.min(100,credit.utilisation_pct).toFixed(1)}%;
-                    background:${credit.utilisation_pct>=90?'#dc2626'
-                      :credit.utilisation_pct>=70?'#d97706':'#16a34a'};
-                    border-radius:2px;"></div>
-                </div>
-                <div style="font-size:10px;color:var(--text-3);margin-top:3px;
-                  text-align:right;">${credit.utilisation_pct.toFixed(0)}% utilised</div>
-              </div>` : `
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-                Credit Eligibility
-              </div>
-              <div style="margin-bottom:10px;">
-                <div style="display:flex;justify-content:space-between;
-                  margin-bottom:6px;">
-                  <span style="font-size:12px;color:var(--text-2);">
-                    Confidence Score</span>
-                  <span style="font-size:13px;font-weight:700;color:${scoreColor};">
-                    ${c.confidence_score} / 100</span>
-                </div>
-                <div style="height:6px;background:#f3f4f6;border-radius:3px;
-                  overflow:hidden;">
-                  <div style="height:100%;width:${c.confidence_score}%;
-                    background:${scoreColor};border-radius:3px;"></div>
-                </div>
-              </div>
-              <div style="font-size:12px;color:var(--text-3);">
-                ${c.confidence_score >= 50
-                  ? '? Eligible ? use Nominate for Credit button above'
-                  : `Needs <strong style="color:var(--text);">${scoreToCredit} more points</strong> to reach credit threshold`}
-              </div>`}
-          </div>
-
-        </div>
-
-        <!-- -- BM Notes ----------------------------------- -->
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);padding:16px 18px;margin-bottom:24px;">
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
-            Branch Manager Notes
-          </div>
-          <textarea id="customer-notes-${c.id}" rows="3"
-            placeholder="Add notes about this customer?"
-            onblur="Dashboard._saveCustomerNotes(${c.id})"
-            style="width:100%;padding:10px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;resize:vertical;box-sizing:border-box;
-              font-family:'DM Sans',sans-serif;outline:none;">
-${_esc(c.notes || '')}</textarea>
-          <div style="font-size:10px;color:var(--text-3);margin-top:4px;">
-            Auto-saves when you click away
-          </div>
-        </div>
-
-        <!-- -- Job History timeline ---------------------- -->
-        <div style="margin-bottom:32px;">
-          <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
-            color:var(--text);letter-spacing:-0.2px;margin-bottom:16px;
-            display:flex;align-items:center;gap:10px;">
-            Job History
-            <span style="font-size:12px;font-weight:400;color:var(--text-3);
-              font-family:'DM Sans',sans-serif;">
-              ${jobs.length} job${jobs.length !== 1 ? 's' : ''} on record
-            </span>
-          </div>
-          ${timelineHtml}
-        </div>
-
-      </div>
-      </div>`;
-  }
-
-  function closeCustomerProfile() {
-    const overlay = document.getElementById('customer-profile-overlay');
-    if (overlay) overlay.style.display = 'none';
-  }
-
-  async function _saveCustomerNotes(customerId) {
-    const textarea = document.getElementById(`customer-notes-${customerId}`);
-    if (!textarea) return;
-    const notes = textarea.value.trim();
-    try {
-      await Auth.fetch(`/api/v1/customers/${customerId}/`, {
-        method : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ notes }),
-      });
-    } catch { /* silent */ }
-  }
-
-  // -- Customer Inline Edit --------------------------------------
-// Replaces _editCustomer stub. Opens edit view inside the profile overlay.
-
-  async function _editCustomer(customerId) {
-    const content = document.getElementById('customer-profile-content');
-    if (!content) return;
-
-    // Show spinner while we fetch fresh data
-    content.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;
-        min-height:100vh;color:var(--text-3);">
-        <span class="spin"></span>
-      </div>`;
-
-    try {
-      const res = await Auth.fetch(`/api/v1/customers/${customerId}/`);
-      if (!res.ok) throw new Error();
-      const c = await res.json();
-      _renderEditCustomerForm(content, c);
-    } catch {
-      _toast('Could not load customer for editing.', 'error');
-      // Fall back to re-opening the profile view
-      openCustomerDetail(customerId);
-    }
-  }
-
-  function _renderEditCustomerForm(container, c) {
-    const isIndividual  = c.customer_type === 'INDIVIDUAL';
-    const isBusiness    = c.customer_type === 'BUSINESS';
-    const isInstitution = c.customer_type === 'INSTITUTION';
-
-    const primaryName = isIndividual
-      ? (c.full_name || '?')
-      : (c.company_name || '?');
-
-    // Fields allowed per type
-    const showCompany    = isBusiness || isInstitution;
-    const showSubtype    = isInstitution;
-
-    const subtypeOptions = [
-      ['SCHOOL', 'School'],
-      ['CHURCH', 'Church / Religious'],
-      ['NGO',    'NGO / Non-profit'],
-      ['GOVT',   'Government / Public'],
-      ['OTHER',  'Other Institution'],
-    ];
-
-    container.innerHTML = `
-      <!-- Topbar -->
-      <div style="display:flex;align-items:center;justify-content:space-between;
-        padding:14px 28px;border-bottom:1px solid var(--border);
-        background:var(--panel);position:sticky;top:0;z-index:10;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <button onclick="Dashboard.openCustomerDetail(${c.id})"
-            style="display:flex;align-items:center;gap:6px;padding:7px 14px;
-              background:none;border:1px solid var(--border);
-              border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-              cursor:pointer;color:var(--text-2);font-family:inherit;"
-            onmouseover="this.style.borderColor='var(--border-dark)'"
-            onmouseout="this.style.borderColor='var(--border)'">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="19" y1="12" x2="5" y2="12"/>
-              <polyline points="12 19 5 12 12 5"/>
-            </svg>
-            Cancel
-          </button>
-          <span style="font-size:13px;color:var(--text-3);">
-            Editing: <strong style="color:var(--text);">${_esc(primaryName)}</strong>
-          </span>
-        </div>
-        <button id="edit-cust-save-btn"
-          onclick="Dashboard._saveCustomerEdit(${c.id})"
-          style="padding:8px 20px;background:var(--text);color:#fff;border:none;
-            border-radius:var(--radius-sm);font-size:13px;font-weight:700;
-            cursor:pointer;font-family:'DM Sans',sans-serif;">
-          Save Changes
-        </button>
-      </div>
-
-      <!-- Edit form body -->
-      <div style="max-height:calc(100vh - 64px);overflow-y:auto;">
-      <div style="max-width:680px;margin:0 auto;padding:36px 28px;">
-
-        <!-- Section label -->
-        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;
-          color:var(--text);letter-spacing:-0.3px;margin-bottom:6px;">Edit Profile</div>
-        <div style="font-size:13px;color:var(--text-3);margin-bottom:28px;">
-          Locked fields (tier, score, customer type, visit count) cannot be edited here.
-          All changes are logged in the audit trail.
-        </div>
-
-        <!-- Error banner -->
-        <div id="edit-cust-error" style="display:none;font-size:13px;
-          color:var(--red-text);padding:10px 14px;background:var(--red-bg);
-          border:1px solid var(--red-border);border-radius:var(--radius-sm);
-          margin-bottom:20px;"></div>
-
-        <!-- -- Editable fields ------------------------- -->
-        <div style="display:flex;flex-direction:column;gap:18px;">
-
-          ${showCompany ? `
-          <!-- Company / Institution name -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">
-              ${isBusiness ? 'Company Name' : 'Institution Name'} *
-            </label>
-            <input type="text" id="edit-company"
-              value="${_esc(c.company_name || '')}"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-          </div>` : ''}
-
-          ${showSubtype ? `
-          <!-- Institution subtype -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">Institution Type</label>
-            <select id="edit-subtype"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
-              <option value="">Select type?</option>
-              ${subtypeOptions.map(([val, label]) =>
-                `<option value="${val}" ${c.institution_subtype === val ? 'selected' : ''}>${label}</option>`
-              ).join('')}
-            </select>
-          </div>` : ''}
-
-          <!-- Title + Gender row -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Title <span style="font-weight:400;">(optional)</span></label>
-              <select id="edit-title"
-                onchange="Dashboard._editTitleChange()"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
-                <option value="">No title</option>
-                <option value="MR"    ${c.title==='MR'    ?'selected':''}>Mr</option>
-                <option value="MRS"   ${c.title==='MRS'   ?'selected':''}>Mrs</option>
-                <option value="MISS"  ${c.title==='MISS'  ?'selected':''}>Miss</option>
-                <option value="MS"    ${c.title==='MS'    ?'selected':''}>Ms</option>
-                <option value="MADAM" ${c.title==='MADAM' ?'selected':''}>Madam</option>
-                <option value="DR"    ${c.title==='DR'    ?'selected':''}>Dr</option>
-                <option value="PROF"  ${c.title==='PROF'  ?'selected':''}>Prof</option>
-                <option value="REV"   ${c.title==='REV'   ?'selected':''}>Rev</option>
-                <option value="ESQ"   ${c.title==='ESQ'   ?'selected':''}>Esq</option>
-                <option value="OTHER" ${c.title==='OTHER' ?'selected':''}>Other</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Gender <span style="font-weight:400;">(optional)</span></label>
-              <select id="edit-gender"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
-                <option value="">Not specified</option>
-                <option value="MALE"       ${c.gender==='MALE'       ?'selected':''}>Male</option>
-                <option value="FEMALE"     ${c.gender==='FEMALE'     ?'selected':''}>Female</option>
-                <option value="PREFER_NOT" ${c.gender==='PREFER_NOT' ?'selected':''}>Prefer not to say</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Other title ? shows only when OTHER selected -->
-          <div id="edit-title-other-wrap"
-            style="display:${c.title==='OTHER' ? 'block' : 'none'};">
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">Custom Title *</label>
-            <input type="text" id="edit-title-other"
-              value="${_esc(c.title_other || '')}"
-              placeholder="e.g. Chief, Pastor?"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-          </div>
-
-          <!-- Name row -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">
-                ${isIndividual ? 'First Name' : 'Rep First Name'} *
-              </label>
-              <input type="text" id="edit-first-name"
-                value="${_esc(c.first_name || '')}"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                  box-sizing:border-box;">
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">
-                ${isIndividual ? 'Last Name' : 'Rep Last Name'} *
-              </label>
-              <input type="text" id="edit-last-name"
-                value="${_esc(c.last_name || '')}"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                  box-sizing:border-box;">
-            </div>
-          </div>
-
-          <!-- Phone row: primary + secondary -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Phone Number *</label>
-              <input type="tel" id="edit-phone"
-                value="${_esc(c.phone || '')}"
-                onblur="Dashboard._editPhoneNormalise(this)"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                  box-sizing:border-box;">
-              <div id="edit-phone-feedback" style="font-size:11px;margin-top:5px;"></div>
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Secondary Phone <span style="font-weight:400;">(optional)</span></label>
-              <input type="tel" id="edit-secondary-phone"
-                value="${_esc(c.secondary_phone || '')}"
-                placeholder="e.g. 0201234567"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                  box-sizing:border-box;">
-            </div>
-          </div>
-
-          <!-- Preferred contact + Email row -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Preferred Contact <span style="font-weight:400;">(optional)</span></label>
-              <select id="edit-preferred-contact"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;">
-                <option value="">Not specified</option>
-                <option value="WHATSAPP" ${c.preferred_contact==='WHATSAPP'?'selected':''}>WhatsApp</option>
-                <option value="CALL"     ${c.preferred_contact==='CALL'    ?'selected':''}>Call</option>
-                <option value="SMS"      ${c.preferred_contact==='SMS'     ?'selected':''}>SMS</option>
-                <option value="EMAIL"    ${c.preferred_contact==='EMAIL'   ?'selected':''}>Email</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;display:block;
-                margin-bottom:7px;">Email <span style="font-weight:400;">(optional)</span></label>
-              <input type="email" id="edit-email"
-                value="${_esc(c.email || '')}"
-                style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                  border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                  font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                  box-sizing:border-box;">
-            </div>
-          </div>
-
-          <!-- Email -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">
-              Email <span style="font-weight:400;">(optional)</span>
-            </label>
-            <input type="email" id="edit-email"
-              value="${_esc(c.email || '')}"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-          </div>
-
-          <!-- Address -->
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;
-              margin-bottom:7px;">
-              Address ${!isIndividual
-                ? '*'
-                : '<span style="font-weight:400;">(optional)</span>'}
-            </label>
-            <textarea id="edit-address" rows="3"
-              style="width:100%;padding:10px 13px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                resize:vertical;box-sizing:border-box;">${_esc(c.address || '')}</textarea>
-          </div>
-
-          <!-- -- Locked fields ? read-only display ----- -->
-          <div style="padding:16px 18px;background:var(--bg);
-            border:1px solid var(--border);border-radius:var(--radius-sm);">
-            <div style="font-size:10px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
-              Read-only Fields
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              ${[
-                ['Customer Type',     c.customer_type],
-                ['Tier',              c.tier || 'REGULAR'],
-                ['Confidence Score',  c.confidence_score + ' / 100'],
-                ['Total Visits',      c.visit_count || 0],
-              ].map(([label, val]) => `
-                <div>
-                  <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                    text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">
-                    ${label}</div>
-                  <div style="font-size:13px;color:var(--text-3);font-weight:500;">
-                    ${_esc(String(val))}</div>
-                </div>`).join('')}
-            </div>
-          </div>
-
-        </div>
-
-        <!-- -- Edit History ---------------------------- -->
-        <div style="margin-top:36px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;
-            margin-bottom:12px;">
-            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
-              color:var(--text);letter-spacing:-0.2px;">Edit History</div>
-            <button onclick="Dashboard._toggleEditHistory(${c.id})"
-              id="edit-history-toggle-btn"
-              style="padding:5px 14px;background:none;border:1px solid var(--border);
-                border-radius:var(--radius-sm);font-size:12px;font-weight:600;
-                cursor:pointer;color:var(--text-2);font-family:inherit;">
-              Load History
-            </button>
-          </div>
-          <div id="edit-history-content" style="display:none;"></div>
-        </div>
-
-      </div>
-      </div>`;
-  }
-
-  function _editTitleChange() {
-    const val  = document.getElementById('edit-title')?.value;
-    const wrap = document.getElementById('edit-title-other-wrap');
-    if (wrap) wrap.style.display = val === 'OTHER' ? 'block' : 'none';
-  }
-
-  function _editPhoneNormalise(input) {
-    const norm = _normalisePhone(input.value);
-    input.value = norm;
-    const fb = document.getElementById('edit-phone-feedback');
-    if (fb && norm && norm !== document.getElementById('edit-phone')?.dataset.original) {
-      fb.textContent = 'Number normalised to: ' + norm;
-      fb.style.color = 'var(--text-3)';
-    }
-  }
-
-  async function _saveCustomerEdit(customerId) {
-    const btn   = document.getElementById('edit-cust-save-btn');
-    const errEl = document.getElementById('edit-cust-error');
-    errEl.style.display = 'none';
-
-    const firstName = document.getElementById('edit-first-name')?.value.trim();
-    const lastName  = document.getElementById('edit-last-name')?.value.trim();
-    const rawPhone  = document.getElementById('edit-phone')?.value.trim();
-    const phone     = _normalisePhone(rawPhone);
-    const email     = document.getElementById('edit-email')?.value.trim();
-    const address   = document.getElementById('edit-address')?.value.trim();
-    const company   = document.getElementById('edit-company')?.value.trim();
-    const subtype   = document.getElementById('edit-subtype')?.value;
-
-    // -- Validation --------------------------------------
-    const showErr = msg => {
-      errEl.textContent   = msg;
-      errEl.style.display = 'block';
-      errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
-
-    if (!firstName) return showErr('First name is required.');
-    if (!lastName)  return showErr('Last name is required.');
-    if (!phone)     return showErr('Phone number is required.');
-
-    btn.disabled    = true;
-    btn.textContent = 'Saving?';
-
-    // Build payload ? only send fields that exist in the form
-    const payload = { first_name: firstName, last_name: lastName, phone };
-    if (email   !== undefined) payload.email   = email;
-    if (address !== undefined) payload.address = address;
-    if (company !== undefined && document.getElementById('edit-company'))
-      payload.company_name = company;
-    if (subtype !== undefined && document.getElementById('edit-subtype'))
-      payload.institution_subtype = subtype;
-    payload.title              = document.getElementById('edit-title')?.value || '';
-    payload.title_other        = document.getElementById('edit-title-other')?.value.trim() || '';
-    payload.gender             = document.getElementById('edit-gender')?.value || '';
-    payload.secondary_phone    = _normalisePhone(document.getElementById('edit-secondary-phone')?.value.trim() || '');
-    payload.preferred_contact  = document.getElementById('edit-preferred-contact')?.value || '';
-
-    try {
-      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit/`, {
-        method : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        const msg = typeof data.detail === 'string'
-          ? data.detail
-          : Object.values(data).flat().join(' ');
-        btn.disabled    = false;
-        btn.textContent = 'Save Changes';
-        return showErr(msg || 'Save failed. Please try again.');
-      }
-
-      _toast('Profile updated successfully.', 'success');
-      // Refresh the full profile view
-      openCustomerDetail(customerId);
-
-    } catch {
-      btn.disabled    = false;
-      btn.textContent = 'Save Changes';
-      showErr('Network error. Please try again.');
-    }
-  }
-
-  async function _toggleEditHistory(customerId) {
-    const content = document.getElementById('edit-history-content');
-    const btn     = document.getElementById('edit-history-toggle-btn');
-    if (!content) return;
-
-    const isVisible = content.style.display !== 'none';
-    if (isVisible) {
-      content.style.display = 'none';
-      btn.textContent = 'Load History';
-      return;
-    }
-
-    content.style.display = 'block';
-    btn.textContent = 'Hide History';
-    content.innerHTML = '<div style="padding:16px 0;color:var(--text-3);font-size:13px;"><span class="spin"></span> Loading?</div>';
-
-    await _loadEditHistory(customerId, content);
-  }
-
-  async function _loadEditHistory(customerId, container) {
-    try {
-      const res  = await Auth.fetch(`/api/v1/customers/${customerId}/edit-log/`);
-      if (!res.ok) throw new Error();
-      const logs = await res.json();
-
-      if (!logs.length) {
-        container.innerHTML = `
-          <div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px;
-            background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius-sm);">
-            No edits recorded yet.
-          </div>`;
-        return;
-      }
-
-      const fieldLabel = field => ({
-        first_name          : 'First Name',
-        last_name           : 'Last Name',
-        phone               : 'Phone',
-        email               : 'Email',
-        address             : 'Address',
-        company_name        : 'Company / Institution Name',
-        institution_subtype : 'Institution Type',
-      }[field] || field);
-
-      container.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);
-          border-radius:var(--radius);overflow:hidden;">
-          ${logs.map((log, idx) => {
-            const dt = new Date(log.changed_at);
-            const dateStr = dt.toLocaleDateString('en-GB',
-              { day: 'numeric', month: 'short', year: 'numeric' });
-            const timeStr = dt.toLocaleTimeString('en-GH',
-              { hour: '2-digit', minute: '2-digit' });
-            const isLast = idx === logs.length - 1;
-
-            return `
-              <div style="display:flex;align-items:flex-start;gap:14px;
-                padding:14px 18px;
-                ${!isLast ? 'border-bottom:1px solid var(--border);' : ''}">
-
-                <!-- Field pill -->
-                <div style="flex-shrink:0;margin-top:2px;">
-                  <span style="padding:3px 9px;border-radius:20px;font-size:10px;
-                    font-weight:700;background:var(--bg);color:var(--text-2);
-                    border:1px solid var(--border);">
-                    ${_esc(fieldLabel(log.field_name))}
-                  </span>
-                </div>
-
-                <!-- Change -->
-                <div style="flex:1;min-width:0;">
-                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-                    margin-bottom:5px;">
-                    <span style="font-size:13px;color:var(--red-text);font-weight:500;
-                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
-                      white-space:nowrap;"
-                      title="${_esc(log.old_value || '(empty)')}">
-                      ${_esc(log.old_value || '(empty)')}
-                    </span>
-                    <span style="color:var(--text-3);font-size:12px;">?</span>
-                    <span style="font-size:13px;color:var(--green-text);font-weight:600;
-                      max-width:200px;overflow:hidden;text-overflow:ellipsis;
-                      white-space:nowrap;"
-                      title="${_esc(log.new_value || '(empty)')}">
-                      ${_esc(log.new_value || '(empty)')}
-                    </span>
-                  </div>
-                  <div style="font-size:11px;color:var(--text-3);">
-                    By <strong style="color:var(--text-2);">
-                      ${_esc(log.changed_by_name || '?')}
-                    </strong>
-                    ? ${dateStr} at ${timeStr}
-                  </div>
-                </div>
-
-              </div>`;
-          }).join('')}
-        </div>`;
-
-    } catch {
-      container.innerHTML = `
-        <div style="padding:16px;color:var(--red-text);font-size:13px;
-          background:var(--red-bg);border:1px solid var(--red-border);
-          border-radius:var(--radius-sm);">
-          Could not load edit history.
-        </div>`;
-    }
-  }
-
-  function _nominateCredit(customerId) {
-    _toast('Credit nomination coming soon.', 'info');
-  }
-
-// -- Add Customer Modal ? delegates to CustomerReg -------------------------
-  function openAddCustomerModal() {
-    CustomerReg.open(async function(data) {
-      _toast(`${data.display_name || data.full_name || 'Customer'} registered successfully.`, 'success');
-      await _loadCustomersTab(_customersTab);
-      if (data.id) setTimeout(() => openCustomerDetail(data.id), 300);
-    });
-  }
-
-  function _buildCustForm(type) {
-    const isIndividual  = type === 'INDIVIDUAL';
-    const isBusiness    = type === 'BUSINESS';
-    const isInstitution = type === 'INSTITUTION';
-
-    return `
-      <div style="display:flex;flex-direction:column;gap:14px;">
-
-        ${isInstitution ? `
-        <!-- Institution subtype -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Institution Type *
-          </label>
-          <select id="cust-subtype" style="width:100%;padding:9px 12px;
-            border:1.5px solid var(--border);border-radius:var(--radius-sm);
-            background:var(--bg);color:var(--text);font-size:13px;
-            font-family:'DM Sans',sans-serif;outline:none;">
-            <option value="">Select type?</option>
-            <option value="SCHOOL">School</option>
-            <option value="CHURCH">Church / Religious</option>
-            <option value="NGO">NGO / Non-profit</option>
-            <option value="GOVT">Government / Public</option>
-            <option value="OTHER">Other Institution</option>
-          </select>
-        </div>` : ''}
-
-        ${!isIndividual ? `
-        <!-- Company / Institution name -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            ${isBusiness ? 'Company Name' : 'Institution Name'} *
-          </label>
-          <input type="text" id="cust-company" placeholder="${isBusiness ? 'e.g. Suma Court Hotel' : 'e.g. Accra High School'}"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              box-sizing:border-box;">
-        </div>` : ''}
-
-        <!-- Name row -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-              ${isIndividual ? 'First Name *' : 'Rep First Name *'}
-            </label>
-            <input type="text" id="cust-first-name"
-              placeholder="${isIndividual ? 'e.g. Kwame' : 'e.g. Ama'}"
-              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-          </div>
-          <div>
-            <label style="font-size:11px;font-weight:700;color:var(--text-3);
-              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-              ${isIndividual ? 'Last Name *' : 'Rep Last Name *'}
-            </label>
-            <input type="text" id="cust-last-name"
-              placeholder="${isIndividual ? 'e.g. Mensah' : 'e.g. Owusu'}"
-              style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-                font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-                box-sizing:border-box;">
-          </div>
-        </div>
-
-        <!-- Phone -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Phone Number *
-          </label>
-          <input type="tel" id="cust-phone" placeholder="e.g. 0244123456"
-            onblur="Dashboard._checkCustPhoneDuplicate()"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              box-sizing:border-box;">
-          <div id="cust-phone-feedback" style="font-size:11px;margin-top:4px;"></div>
-        </div>
-
-        <!-- Email -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Email <span style="font-weight:400;color:var(--text-3);">(optional)</span>
-          </label>
-          <input type="email" id="cust-email" placeholder="e.g. info@sumacourt.com"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              box-sizing:border-box;">
-        </div>
-
-        <!-- Address -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Address ${!isIndividual ? '*' : '<span style="font-weight:400;color:var(--text-3);">(optional)</span>'}
-          </label>
-          <textarea id="cust-address" rows="2"
-            placeholder="Physical address?"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              resize:none;box-sizing:border-box;"></textarea>
-        </div>
-
-        <!-- BM Notes -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
-            Notes <span style="font-weight:400;color:var(--text-3);">(optional)</span>
-          </label>
-          <textarea id="cust-notes" rows="2"
-            placeholder="Any notes about this customer?"
-            style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-              border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-              font-size:13px;font-family:'DM Sans',sans-serif;outline:none;
-              resize:none;box-sizing:border-box;"></textarea>
-        </div>
-
-      </div>`;
-  }
-
-  function _setCustType(type) {
-    _addCustType = type;
-
-    // Update button styles
-    const typeColors = {
-      INDIVIDUAL : { bg: '#f0f4fd', color: '#2e4a8a', border: '#2e4a8a' },
-      BUSINESS   : { bg: '#f0fdf4', color: '#1a6b3a', border: '#1a6b3a' },
-      INSTITUTION: { bg: '#f5f0fd', color: '#5a2e8a', border: '#5a2e8a' },
-    };
-    ['INDIVIDUAL','BUSINESS','INSTITUTION'].forEach(t => {
-      const btn = document.getElementById(`cust-type-${t}`);
-      if (!btn) return;
-      if (t === type) {
-        const c = typeColors[t];
-        btn.style.background = c.bg;
-        btn.style.color      = c.color;
-        btn.style.border     = `2px solid ${c.border}`;
-      } else {
-        btn.style.background = 'var(--bg)';
-        btn.style.color      = 'var(--text-3)';
-        btn.style.border     = '2px solid var(--border)';
-      }
-    });
-
-    // Rebuild form
-    const body = document.getElementById('add-cust-form-body');
-    if (body) {
-      body.innerHTML = _buildCustForm(type);
-      setTimeout(() => document.getElementById('cust-first-name')?.focus(), 50);
-    }
-  }
-
-  async function _checkCustPhoneDuplicate() {
-    const raw   = document.getElementById('cust-phone')?.value.trim();
-    const phone = _normalisePhone(raw);
-    if (raw !== phone) {
-      const phoneInput = document.getElementById('cust-phone');
-      if (phoneInput) phoneInput.value = phone;
-    }
-    const feedback = document.getElementById('cust-phone-feedback');
-    const input    = document.getElementById('cust-phone');
-    if (!feedback || !phone) return;
-
-    feedback.textContent = '';
-    feedback.style.color = '';
-
-    // Check against employee roster first
-    try {
-      const branchId  = State.branchId;
-      const empRes    = await Auth.fetch(`/api/v1/accounts/users/?branch=${branchId}`);
-      if (empRes.ok) {
-        const empData = await empRes.json();
-        const empList = Array.isArray(empData) ? empData : (empData.results || []);
-        const match   = empList.find(u => u.phone && u.phone === phone);
-        if (match) {
-          feedback.textContent = `? This number belongs to a branch employee (${match.full_name}). Cannot register.`;
-          feedback.style.color = 'var(--red-text)';
-          input.style.borderColor = 'var(--red-border)';
-          return;
-        }
-      }
-    } catch { /* silent */ }
-
-    // Check against existing customers
-    try {
-      const res = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(phone)}`);
-      if (res.status === 200) {
-        const existing = await res.json();
-        const name     = existing.display_name || existing.full_name || 'Unknown';
-        feedback.innerHTML = `? A customer with this number already exists: <strong>${_esc(name)}</strong>. Cannot register a duplicate.`;
-        feedback.style.color = 'var(--red-text)';
-        input.style.borderColor = 'var(--red-border)';
-        return;
-      }
-    } catch { /* silent */ }
-
-    // Clean
-    feedback.textContent    = '? Phone number is available';
-    feedback.style.color    = 'var(--green-text)';
-    input.style.borderColor = 'var(--green-border, #16a34a)';
-  }
-
-  async function _submitAddCustomer() {
-    const btn    = document.getElementById('add-cust-submit-btn');
-    const errEl  = document.getElementById('add-cust-error');
-    errEl.style.display = 'none';
-
-    const type      = _addCustType;
-    const firstName = document.getElementById('cust-first-name')?.value.trim();
-    const lastName  = document.getElementById('cust-last-name')?.value.trim();
-    const phone     = _normalisePhone(document.getElementById('cust-phone')?.value.trim());
-    const email     = document.getElementById('cust-email')?.value.trim();
-    const address   = document.getElementById('cust-address')?.value.trim();
-    const notes     = document.getElementById('cust-notes')?.value.trim();
-    const company   = document.getElementById('cust-company')?.value.trim() || '';
-    const subtype   = document.getElementById('cust-subtype')?.value || '';
-
-    // -- Validation ------------------------------------------
-    const showErr = msg => {
-      errEl.textContent   = msg;
-      errEl.style.display = 'block';
-      errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
-
-    if (!firstName) return showErr('First name is required.');
-    if (!lastName)  return showErr('Last name is required.');
-    if (!phone)     return showErr('Phone number is required.');
-
-    if (type !== 'INDIVIDUAL' && !company) {
-      return showErr(`${type === 'BUSINESS' ? 'Company' : 'Institution'} name is required.`);
-    }
-    if (type === 'INSTITUTION' && !subtype) {
-      return showErr('Please select the institution type.');
-    }
-    if (type !== 'INDIVIDUAL' && !address) {
-      return showErr('Address is required for businesses and institutions.');
-    }
-
-    // -- Duplicate checks ------------------------------------
-    btn.disabled    = true;
-    btn.textContent = 'Checking?';
-
-    // Employee phone check
-    try {
-      const branchId = State.branchId;
-      const empRes   = await Auth.fetch(`/api/v1/accounts/users/?branch=${branchId}`);
-      if (empRes.ok) {
-        const empData = await empRes.json();
-        const empList = Array.isArray(empData) ? empData : (empData.results || []);
-        const match   = empList.find(u => u.phone && u.phone === phone);
-        if (match) {
-          btn.disabled    = false;
-          btn.textContent = 'Register Customer';
-          return showErr(`This phone number belongs to a branch employee (${match.full_name}). Registration blocked.`);
-        }
-      }
-    } catch { /* silent */ }
-
-    // Customer phone duplicate check
-    try {
-      const res = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(phone)}`);
-      if (res.status === 200) {
-        const existing = await res.json();
-        const name     = existing.display_name || existing.full_name || 'this number';
-        btn.disabled    = false;
-        btn.textContent = 'Register Customer';
-        return showErr(`A customer with this number already exists: ${name}. Cannot create a duplicate.`);
-      }
-    } catch { /* silent */ }
-
-    // Company name duplicate check
-    if (company) {
-      try {
-        const res  = await Auth.fetch(`/api/v1/customers/?company_name=${encodeURIComponent(company)}`);
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.results || []);
-          if (list.length > 0) {
-            btn.disabled    = false;
-            btn.textContent = 'Register Customer';
-            return showErr(`A customer named "${company}" already exists. Cannot create a duplicate.`);
-          }
-        }
-      } catch { /* silent */ }
-    }
-
-    // -- Submit ----------------------------------------------
-    btn.textContent = 'Registering?';
-
-    const payload = {
-      customer_type       : type,
-      first_name          : firstName,
-      last_name           : lastName,
-      phone,
-      email               : email || '',
-      address             : address || '',
-      company_name        : company || '',
-      institution_subtype : subtype || '',
-      notes               : notes || '',
-    };
-
-    try {
-      const res  = await Auth.fetch('/api/v1/customers/create/', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        const msg = Object.values(data).flat().join(' ');
-        btn.disabled    = false;
-        btn.textContent = 'Register Customer';
-        return showErr(msg || 'Registration failed. Please try again.');
-      }
-
-      // Success
-      _closeAddCustomer();
-      _toast(`${data.display_name || firstName + ' ' + lastName} registered successfully.`, 'success');
-
-      // Refresh customer list
-      await _loadCustomersTab(_customersTab);
-
-      // Look up the new customer by phone to get full profile with id
-      if (phone) {
-        try {
-          const lookupRes = await Auth.fetch(`/api/v1/customers/lookup/?phone=${encodeURIComponent(_normalisePhone(phone))}`);
-          if (lookupRes.ok) {
-            const newCust = await lookupRes.json();
-            if (newCust.id) setTimeout(() => openCustomerDetail(newCust.id), 300);
-          }
-        } catch { /* silent */ }
-      }
-
-    } catch {
-      btn.disabled    = false;
-      btn.textContent = 'Register Customer';
-      showErr('Network error. Please try again.');
-    }
-  }
-
-  function _closeAddCustomer() {
-    document.getElementById('add-customer-overlay')?.remove();
-  }
-  function _normalisePhone(raw) {
-    // Strip all spaces, dashes, parentheses
-    let p = String(raw || '').replace(/[\s\-().]/g, '');
-    // Convert +233XXXXXXXXX ? 0XXXXXXXXX
-    if (p.startsWith('+233')) p = '0' + p.slice(4);
-    // Convert 233XXXXXXXXX ? 0XXXXXXXXX
-    if (p.startsWith('233') && p.length >= 12) p = '0' + p.slice(3);
-    return p;
-  }
-
-  // -- Public API ---------------------------------------------
-return {
+  
+// ── Public API ─────────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────
+  return {
     init,
     switchPane,
     setPeriod,
-    setReportsPeriod,
-    switchReportsTab,
     switchJobsTab,
-    switchPerformanceTab,
+    switchPerformanceTab : Performance.switchPerformanceTab,
     printReceipt,
     openReceipt,
     setReceiptsPeriod,
@@ -7535,20 +3173,11 @@ return {
     switchInboxChannel,
     openConvo,
     sendReply,
-    _historyDrill,
-    _historyNav,
     initiateSheetDownload,
     closePinModal,
     _onPinInput,
     _submitPin,
     toggleSheetRow,
-    weeklyPrepare,
-    weeklySubmit,
-    weeklyDownloadPDF,
-    _renderMonthlyClose,
-    _submitMonthlyClose,
-    _downloadMonthlyPDF,
-    setServicesPeriod,
     _validateFloatInput,
     downloadInvoicePDF,
     setInvoicesPeriod,
@@ -7561,27 +3190,6 @@ return {
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
-    _toggleDailySheet,
-    _loadDailySheetInventory,
-    _toggleCurrentWeek,
-    _toggleHistoryWeek,
-    switchCustomersTab,
-    openCustomerDetail,
-    openAddCustomerModal,
-    _filterCustomerRows,
-    closeCustomerProfile,
-    _saveCustomerNotes,
-    _editCustomer,
-    _renderEditCustomerForm,
-    _saveCustomerEdit,
-    _editPhoneNormalise,
-    _toggleEditHistory,
-    _loadEditHistory,
-    _nominateCredit,
-    _editTitleChange,
-    _renderWeeklyReportDetail,
-    _renderWeeklyInventory,
-    _renderMonthlyCloseDetail,
     // Catalogue delegates
     openAddServiceModal  : Catalogue.openAddServiceModal,
     closeAddServiceModal : Catalogue.closeAddServiceModal,
@@ -7590,10 +3198,10 @@ return {
     _svcPreviewImage     : Catalogue._svcPreviewImage,
     _svcToggleConsumable : Catalogue._svcToggleConsumable,
     // Inventory delegates
-    switchInventoryTab   : Inventory.switchInventoryTab,
-    openReceiveStock     : Inventory.openReceiveStock,
-    closeReceiveStock    : Inventory.closeReceiveStock,
-    submitReceiveStock   : Inventory.submitReceiveStock,
+    switchInventoryTab     : Inventory.switchInventoryTab,
+    openReceiveStock       : Inventory.openReceiveStock,
+    closeReceiveStock      : Inventory.closeReceiveStock,
+    submitReceiveStock     : Inventory.submitReceiveStock,
     _recvSelectConsumable  : Inventory._recvSelectConsumable,
     _recvFilterConsumables : Inventory._recvFilterConsumables,
     _recvShowDropdown      : Inventory._recvShowDropdown,
@@ -7603,6 +3211,41 @@ return {
     _openAddMaintenanceLog : Inventory._openAddMaintenanceLog,
     _saveMaintenanceLog    : Inventory._saveMaintenanceLog,
     _printEquipmentQR      : Inventory._printEquipmentQR,
+    // Customers delegates
+    switchCustomersTab     : Customers.switchCustomersTab,
+    openCustomerDetail     : Customers.openCustomerDetail,
+    openAddCustomerModal   : Customers.openAddCustomerModal,
+    onSearchInput          : Customers.onSearchInput,
+    changePage             : Customers.changePage,
+    closeCustomerProfile   : Customers.closeCustomerProfile,
+    _saveCustomerNotes     : Customers.saveCustomerNotes,
+    _editCustomer          : Customers.editCustomer,
+    _saveCustomerEdit      : Customers.saveCustomerEdit,
+    _editPhoneNormalise    : Customers.editPhoneNormalise,
+    _toggleEditHistory     : Customers.toggleEditHistory,
+    _nominateCredit        : Customers.nominateCredit,
+    _editTitleChange       : Customers.editTitleChange,
+    _renderEditCustomerForm: () => {},
+    _loadEditHistory       : () => {},
+    // Reports delegates
+    setReportsPeriod         : Reports.setReportsPeriod,
+    switchReportsTab         : Reports.switchReportsTab,
+    weeklyPrepare            : Reports.weeklyPrepare,
+    weeklySubmit             : Reports.weeklySubmit,
+    weeklyDownloadPDF        : Reports.weeklyDownloadPDF,
+    _renderMonthlyClose      : Reports.renderMonthlyClose,
+    _submitMonthlyClose      : Reports.submitMonthlyClose,
+    _downloadMonthlyPDF      : Reports.downloadMonthlyPDF,
+    setServicesPeriod        : Reports.setServicesPeriod,
+    _toggleDailySheet        : Reports.toggleDailySheet,
+    _loadDailySheetInventory : Reports.loadDailySheetInventory,
+    _toggleCurrentWeek       : () => {},
+    _toggleHistoryWeek       : Reports.toggleHistoryWeek,
+    _renderWeeklyReportDetail: Reports.renderWeeklyReportDetail,
+    _renderWeeklyInventory   : Reports.renderWeeklyInventory,
+    _renderMonthlyCloseDetail: Reports.renderMonthlyCloseDetail,
+    _historyDrill            : Reports.historyDrill,
+    _historyNav              : Reports.historyNav,
   };
 
 })();
