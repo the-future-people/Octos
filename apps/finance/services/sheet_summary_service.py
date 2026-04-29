@@ -213,24 +213,122 @@ class SheetSummaryService:
     @staticmethod
     def _build_pace(sheet, jobs: dict, is_open: bool) -> dict:
         """
-        Jobs per hour since sheet opened.
+        Jobs per hour since sheet opened, plus comparative analytics.
         Only meaningful for open sheets — returns None for closed.
+
+        Returns:
+            jobs_per_hour       : float — today's pace
+            hours_open          : float — hours since sheet opened
+            yesterday_per_hour  : float | None — yesterday's pace for comparison
+            pace_change_pct     : float | None — % change vs yesterday (positive = faster)
+            projected_eod       : int | None — estimated total jobs by close time
+            avg_job_value_today : float | None — revenue per completed job today
+            avg_job_value_7d    : float | None — revenue per completed job last 7 days
         """
         if not is_open or not sheet.opened_at:
             return {
-                'jobs_per_hour': None,
-                'hours_open'   : None,
+                'jobs_per_hour'      : None,
+                'hours_open'         : None,
+                'yesterday_per_hour' : None,
+                'pace_change_pct'    : None,
+                'projected_eod'      : None,
+                'avg_job_value_today': None,
+                'avg_job_value_7d'   : None,
             }
 
         from django.utils import timezone
-        now        = timezone.now()
-        delta      = now - sheet.opened_at
-        hours_open = max(delta.total_seconds() / 3600, 0.25)  # min 15 mins
-        jobs_per_hr= round(jobs['total'] / hours_open, 1)
+        from datetime import timedelta
+
+        now         = timezone.now()
+        delta       = now - sheet.opened_at
+        hours_open  = max(delta.total_seconds() / 3600, 0.25)
+        jobs_per_hr = round(jobs['total'] / hours_open, 1)
+
+        # ── Yesterday's pace ──────────────────────────────────
+        yesterday_per_hour = None
+        pace_change_pct    = None
+        try:
+            from apps.finance.models import DailySalesSheet
+            yesterday = sheet.date - timedelta(days=1)
+            y_sheet   = DailySalesSheet.objects.filter(
+                branch=sheet.branch,
+                date=yesterday,
+            ).exclude(status=DailySalesSheet.Status.OPEN).first()
+
+            if y_sheet and y_sheet.opened_at and y_sheet.closed_at:
+                y_hours = (y_sheet.closed_at - y_sheet.opened_at).total_seconds() / 3600
+                if y_hours > 0:
+                    yesterday_per_hour = round(y_sheet.total_jobs_created / y_hours, 1)
+                    if yesterday_per_hour > 0:
+                        pace_change_pct = round(
+                            (jobs_per_hr - yesterday_per_hour) / yesterday_per_hour * 100, 1
+                        )
+        except Exception:
+            logger.exception('SheetSummaryService: yesterday pace failed for sheet %s', sheet.pk)
+
+        # ── Projected EOD ─────────────────────────────────────
+        projected_eod = None
+        try:
+            from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+            from datetime import datetime
+            bm_schedule   = HRShiftEngine(sheet.branch).get_role_schedule(
+                'BRANCH_MANAGER', target_date=sheet.date
+            )
+            shift_end     = datetime.fromisoformat(bm_schedule['shift_end'])
+            hours_remain  = max((shift_end - now).total_seconds() / 3600, 0)
+            projected_eod = int(jobs['total'] + (jobs_per_hr * hours_remain))
+        except Exception:
+            logger.exception('SheetSummaryService: EOD projection failed for sheet %s', sheet.pk)
+
+        # ── Avg job value — today ─────────────────────────────
+        avg_job_value_today = None
+        try:
+            from apps.jobs.models import Job
+            from apps.jobs.selectors.revenue_selectors import get_method_total
+
+            completed   = Job.objects.filter(daily_sheet=sheet, status=Job.COMPLETE)
+            n_complete  = completed.count()
+            if n_complete > 0:
+                total = get_method_total(completed, 'CASH') + \
+                        get_method_total(completed, 'MOMO') + \
+                        get_method_total(completed, 'POS')
+                avg_job_value_today = round(float(total) / n_complete, 2)
+        except Exception:
+            logger.exception('SheetSummaryService: avg job value today failed for sheet %s', sheet.pk)
+
+        # ── Avg job value — last 7 closed sheets ─────────────
+        avg_job_value_7d = None
+        try:
+            from apps.finance.models import DailySalesSheet, Receipt
+            from django.db.models import Sum, Count
+
+            cutoff   = sheet.date - timedelta(days=7)
+            past     = DailySalesSheet.objects.filter(
+                branch=sheet.branch,
+                date__gte=cutoff,
+                date__lt=sheet.date,
+            ).exclude(status=DailySalesSheet.Status.OPEN)
+
+            agg = Receipt.objects.filter(
+                daily_sheet__in=past,
+                is_void=False,
+            ).exclude(payment_method='CREDIT').aggregate(
+                total=Sum('amount_paid'),
+                count=Count('id'),
+            )
+            if agg['count'] and agg['total']:
+                avg_job_value_7d = round(float(agg['total']) / agg['count'], 2)
+        except Exception:
+            logger.exception('SheetSummaryService: avg job value 7d failed for sheet %s', sheet.pk)
 
         return {
-            'jobs_per_hour': jobs_per_hr,
-            'hours_open'   : round(hours_open, 1),
+            'jobs_per_hour'      : jobs_per_hr,
+            'hours_open'         : round(hours_open, 1),
+            'yesterday_per_hour' : yesterday_per_hour,
+            'pace_change_pct'    : pace_change_pct,
+            'projected_eod'      : projected_eod,
+            'avg_job_value_today': avg_job_value_today,
+            'avg_job_value_7d'   : avg_job_value_7d,
         }
 
     # ── Inventory ─────────────────────────────────────────────────────────────
