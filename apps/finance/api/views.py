@@ -1443,41 +1443,61 @@ class DailySalesSheetPDFView(APIView):
         except DailySalesSheet.DoesNotExist:
             return Response({'detail': 'Sheet not found.'}, status=404)
 
-        # Only allow access to own branch
         if request.user.branch != sheet.branch:
             return Response({'detail': 'Access denied.'}, status=403)
 
-        # Only closed sheets can be downloaded
-        if sheet.status != DailySalesSheet.Status.CLOSED:
+        if sheet.status not in (DailySalesSheet.Status.CLOSED, DailySalesSheet.Status.AUTO_CLOSED):
             return Response(
                 {'detail': 'Sheet must be closed before downloading.'},
                 status=400
             )
 
-        # Generate PDF
+        # ── Download limit: 2 per BM, then view-only ──────────
+        from apps.finance.models import SheetDownloadLog
+        user_role = getattr(getattr(request.user, 'role', None), 'name', '')
+        hq_roles  = {'SUPER_ADMIN', 'REGIONAL_MANAGER', 'BELT_MANAGER',
+                    'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY'}
+        is_hq     = user_role in hq_roles
+
+        download_count = SheetDownloadLog.objects.filter(
+            sheet=sheet, downloaded_by=request.user
+        ).count()
+
+        view_only = (not is_hq) and (download_count >= 2)
+
+        # ── Generate PDF if not cached ─────────────────────────
         import os
         from django.conf import settings
-        from io import BytesIO
         from django.core.management import call_command
 
-        media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-        sheets_dir = os.path.join(media_root, 'sheets')
+        media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
+        sheets_dir  = os.path.join(media_root, 'sheets')
         os.makedirs(sheets_dir, exist_ok=True)
         output_path = os.path.join(sheets_dir, f"sheet_{sheet.pk}_{sheet.date}.pdf")
 
-        # Regenerate if file doesn't exist
         if not os.path.exists(output_path):
             call_command('generate_sheet_pdf', sheet_id=sheet.pk, output=output_path)
 
-        # Serve the file
+        # ── Log download (only if not view-only) ──────────────
+        if not view_only:
+            ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                or request.META.get('REMOTE_ADDR'))
+            SheetDownloadLog.objects.create(
+                sheet=sheet, downloaded_by=request.user, ip_address=ip or None
+            )
+
+        # ── Serve ──────────────────────────────────────────────
         from django.http import FileResponse
+        disposition = 'inline' if view_only else 'attachment'
         response = FileResponse(
             open(output_path, 'rb'),
             content_type='application/pdf',
         )
         response['Content-Disposition'] = (
-            f'attachment; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
+            f'{disposition}; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
         )
+        if view_only:
+            response['X-Download-Limit-Reached'] = 'true'
         return response
 
 class BranchLockStatusView(APIView):
