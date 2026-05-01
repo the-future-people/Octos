@@ -101,7 +101,7 @@ const Dashboard = (() => {
       if (!res.ok) return;
       const user = await res.json();
 
-      // -- Shadow banner ? incoming employee ------------------
+      // -- Shadow banner — incoming employee ------------------
       if (user.employment_status === 'SHADOW') {
         const paRes = await Auth.fetch('/api/v1/accounts/pending-activation/me/');
         if (paRes.ok) {
@@ -110,20 +110,26 @@ const Dashboard = (() => {
           const dateStr  = new Date(pa.start_date).toLocaleDateString('en-GB', {
             day: 'numeric', month: 'short', year: 'numeric',
           });
-          _injectBanner({
-            id      : 'shadow-banner',
-            color   : '#1a3599',
-            bg      : '#eef3ff',
-            border  : '#b0c4f8',
-            icon    : '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
-            message : `You go live in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> ? Assumption date: ${dateStr}`,
-            sub     : 'You currently have read-only shadow access. Full access activates on your start date.',
-          });
+
+          if (daysLeft <= 0) {
+            // Start date has arrived — trigger activation
+            _showActivationModal(pa);
+          } else {
+            _injectBanner({
+              id      : 'shadow-banner',
+              color   : '#1a3599',
+              bg      : '#eef3ff',
+              border  : '#b0c4f8',
+              icon    : '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+              message : `You go live in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> · Assumption date: ${dateStr}`,
+              sub     : 'You currently have read-only shadow access. Full access activates on your start date.',
+            });
+          }
         }
-        return; // shadow users don't see outgoing handover banner
+        return;
       }
 
-      // -- Outgoing BM banner ? being replaced ----------------
+      // -- Outgoing BM banner — being replaced ----------------
       const dispRes = await Auth.fetch('/api/v1/accounts/pending-activation/displacing-me/');
       if (dispRes.ok) {
         const pa       = await dispRes.json();
@@ -131,8 +137,15 @@ const Dashboard = (() => {
         const dateStr  = new Date(pa.start_date).toLocaleDateString('en-GB', {
           day: 'numeric', month: 'short', year: 'numeric',
         });
-        const urgency  = daysLeft <= 3 ? '#b91c1c' : daysLeft <= 7 ? '#7a5c00' : '#1a6640';
-        const urgencyBg = daysLeft <= 3 ? '#fff0f0' : daysLeft <= 7 ? '#fffbec' : '#edfaf4';
+
+        if (daysLeft <= 0) {
+          // Handover day — show farewell modal
+          _showFarewellModal(pa, user);
+          return;
+        }
+
+        const urgency       = daysLeft <= 3 ? '#b91c1c' : daysLeft <= 7 ? '#7a5c00' : '#1a6640';
+        const urgencyBg     = daysLeft <= 3 ? '#fff0f0' : daysLeft <= 7 ? '#fffbec' : '#edfaf4';
         const urgencyBorder = daysLeft <= 3 ? '#fca5a5' : daysLeft <= 7 ? '#f0d878' : '#a8dfc0';
         _injectBanner({
           id      : 'handover-banner',
@@ -140,13 +153,106 @@ const Dashboard = (() => {
           bg      : urgencyBg,
           border  : urgencyBorder,
           icon    : '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-          message : `Handover in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> ? ${pa.incoming_name} assumes on ${dateStr}`,
+          message : `Handover in <strong>${daysLeft} day${daysLeft !== 1 ? 's' : ''}</strong> · ${pa.incoming_name} assumes on ${dateStr}`,
           sub     : 'Ensure open jobs are resolved, sheets are closed, and floats are reconciled before handover.',
         });
       }
-    } catch { /* silent ? banners are non-critical */ }
+    } catch { /* silent — banners are non-critical */ }
   }
 
+  function _showActivationModal(pa) {
+    const overlay = document.createElement('div');
+    overlay.id    = 'activation-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:rgba(10,20,60,0.92);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;animation:fadeIn 0.4s ease;`;
+
+    overlay.innerHTML = `
+      <div style="text-align:center;max-width:480px;padding:48px 40px;
+        background:#fff;border-radius:16px;box-shadow:0 32px 80px rgba(0,0,0,0.4);">
+        <div style="font-size:48px;margin-bottom:16px;">🎉</div>
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
+          color:#1a1a1a;margin-bottom:8px;">
+          Welcome aboard!
+        </div>
+        <div style="font-size:15px;color:#555;margin-bottom:24px;line-height:1.6;">
+          Today is your first day at <strong>${_esc(pa.branch_name || 'this branch')}</strong>.<br>
+          Your full access is now active.
+        </div>
+        <div style="font-size:13px;color:#999;margin-bottom:28px;">
+          Reloading your portal in <span id="activation-countdown">5</span>s…
+        </div>
+        <button onclick="location.reload()"
+          style="padding:12px 32px;background:#1a3599;color:#fff;border:none;
+            border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
+            font-family:'DM Sans',sans-serif;">
+          Start Now
+        </button>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    let count = 5;
+    const timer = setInterval(() => {
+      count--;
+      const el = document.getElementById('activation-countdown');
+      if (el) el.textContent = count;
+      if (count <= 0) { clearInterval(timer); location.reload(); }
+    }, 1000);
+  }
+
+  function _showFarewellModal(pa, user) {
+    const name     = user.full_name || user.first_name || 'Branch Manager';
+    const overlay  = document.createElement('div');
+    overlay.id     = 'farewell-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:rgba(10,20,40,0.95);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;animation:fadeIn 0.5s ease;`;
+
+    overlay.innerHTML = `
+      <div style="text-align:center;max-width:520px;padding:56px 48px;
+        background:#fff;border-radius:16px;box-shadow:0 32px 80px rgba(0,0,0,0.5);">
+        <div style="font-size:52px;margin-bottom:20px;">👋</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;
+          color:#1a1a1a;margin-bottom:10px;">
+          Thank you for your service, ${_esc(name)}
+        </div>
+        <div style="font-size:15px;color:#555;line-height:1.7;margin-bottom:12px;">
+          It was a pleasure having you here at<br>
+          <strong>${_esc(pa.branch_name || 'Farhat Printing Press')}</strong>.
+        </div>
+        <div style="font-size:14px;color:#888;margin-bottom:28px;line-height:1.6;">
+          ${pa.incoming_name
+            ? `<strong>${_esc(pa.incoming_name)}</strong> takes over from today.`
+            : 'Your successor takes over from today.'}
+          <br>Wishing you all the best in your next chapter.
+        </div>
+        <div style="font-size:13px;color:#bbb;margin-bottom:28px;">
+          Redirecting in <span id="farewell-countdown">30</span>s…
+        </div>
+        <button onclick="Auth.logout()"
+          style="padding:12px 32px;background:#1a1a1a;color:#fff;border:none;
+            border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
+            font-family:'DM Sans',sans-serif;">
+          Sign Out Now
+        </button>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    let count = 30;
+    const timer = setInterval(() => {
+      count--;
+      const el = document.getElementById('farewell-countdown');
+      if (el) el.textContent = count;
+      if (count <= 0) { clearInterval(timer); Auth.logout(); }
+    }, 1000);
+  }
+  
   function _injectBanner({ id, color, bg, border, icon, message, sub }) {
     // Remove existing banner of same id
     document.getElementById(id)?.remove();
