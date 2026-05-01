@@ -26,8 +26,17 @@ class WeeklyReportService:
             return None, ['Already submitted.']
 
         today = timezone.localdate()
-        if today.weekday() != 5:
-            return None, ['Weekly report can only be submitted on Saturday after closing.']
+        import calendar
+        last_day_of_month = today.replace(
+            day=calendar.monthrange(today.year, today.month)[1]
+        )
+        is_saturday  = today.weekday() == 5
+        is_month_end = today == last_day_of_month
+        if not is_saturday and not is_month_end:
+            return None, [
+                'Weekly report can only be submitted on Saturday '
+                'or the last day of the month.'
+            ]
 
         if not report.daily_sheets.exists():
             return None, ['No daily sheets linked. Prepare the report first.']
