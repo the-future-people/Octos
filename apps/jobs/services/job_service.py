@@ -224,15 +224,16 @@ def create_late_job(user, branch, data: dict):
     job = Job.objects.create(
         branch                   = branch,
         intake_by                = user,
-        daily_sheet              = sheet,
+        daily_sheet              = None,
         title                    = _build_title(names),
         job_type                 = 'INSTANT',
-        status                   = Job.PENDING_PAYMENT,
+        status                   = Job.INTAKE_HELD,
         estimated_cost           = total,
         post_closing             = True,
         post_closing_reason      = reason,
         post_closing_approved_by = user,
         intake_channel           = data.get('intake_channel', 'WALK_IN'),
+        cash_tendered            = Decimal(str(data.get('cash_tendered', '0') or '0')),
     )
     _create_line_items(job, priced_items)
 

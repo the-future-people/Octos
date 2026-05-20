@@ -122,6 +122,7 @@ class SheetEngine:
             if created:
                 self._assign_sheet_number(sheet, today)
                 self._link_staged_floats(sheet)
+                self._link_intake_held_jobs(sheet)
                 logger.info(
                     'SheetEngine: opened sheet %s for branch %s on %s',
                     sheet.pk, self.branch.code, today,
@@ -177,6 +178,26 @@ class SheetEngine:
         """
         from apps.finance.float_engine import FloatEngine
         return FloatEngine.link_staged_floats(sheet)
+
+    def _link_intake_held_jobs(self, sheet) -> int:
+        """
+        Detect INTAKE_HELD jobs for this branch with no daily_sheet.
+        Does NOT link them — that happens when cashier resolves each one.
+        Returns count so the cashier portal knows to show the handover modal.
+        """
+        from apps.jobs.models import Job
+        count = Job.objects.filter(
+            branch      = self.branch,
+            status      = Job.INTAKE_HELD,
+            daily_sheet = None,
+        ).count()
+        if count:
+            logger.info(
+                'SheetEngine: %d INTAKE_HELD job(s) pending handover resolution '
+                'for branch %s on sheet %s',
+                count, self.branch.code, sheet.pk,
+            )
+        return count
 
     # ── Lock status ───────────────────────────────────────────────────────────
 

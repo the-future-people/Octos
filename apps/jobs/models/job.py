@@ -40,6 +40,9 @@ class Job(AuditModel):
     REVISION_REQUESTED = 'REVISION_REQUESTED'
     DESIGN_APPROVED    = 'DESIGN_APPROVED'
 
+    # ── After-hours (BM post-closing, awaiting cashier handover) ─────────
+    INTAKE_HELD        = 'INTAKE_HELD'
+
     # ── Deprecated (kept for DB integrity, not used in new transitions) ──
     BRIEFED            = 'BRIEFED'
     DESIGN_IN_PROGRESS = 'DESIGN_IN_PROGRESS'
@@ -59,6 +62,7 @@ class Job(AuditModel):
         (CANCELLED,          'Cancelled'),
         (VOIDED,             'Voided'),
         (HALTED,             'Halted'),
+        (INTAKE_HELD,        'Intake Held'),
         (SAMPLE_SENT,        'Sample Sent'),
         (REVISION_REQUESTED, 'Revision Requested'),
         (DESIGN_APPROVED,    'Design Approved'),

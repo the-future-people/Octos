@@ -36,4 +36,6 @@ urlpatterns = [
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),
     path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),
     path('late/', views.LateJobView.as_view(), name='late-job'),
+    path('intake-held/', views.IntakeHeldQueueView.as_view(), name='intake-held-queue'),
+    path('<int:pk>/resolve-handover/', views.ResolveHandoverView.as_view(), name='resolve-handover'),
 ]

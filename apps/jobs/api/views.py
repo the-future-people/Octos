@@ -704,3 +704,108 @@ class JobHistoryView(APIView):
             return Response(data)
         else:
             return Response({'detail': 'Invalid parameters.'}, status=400)
+
+class IntakeHeldQueueView(APIView):
+    """
+    GET /api/v1/jobs/intake-held/
+    Returns all INTAKE_HELD jobs for the cashier's branch.
+    Called by the cashier portal on shift start to detect pending handovers.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        jobs = Job.objects.filter(
+            branch      = branch,
+            status      = Job.INTAKE_HELD,
+            daily_sheet = None,
+        ).select_related(
+            'intake_by', 'customer'
+        ).prefetch_related(
+            'line_items__service'
+        ).order_by('created_at')
+
+        data = [
+            {
+                'id'             : j.id,
+                'job_number'     : j.job_number,
+                'title'          : j.title,
+                'estimated_cost' : str(j.estimated_cost or 0),
+                'cash_tendered'  : str(j.cash_tendered or 0),
+                'recorded_by'    : j.intake_by.full_name if j.intake_by else '—',
+                'recorded_at'    : j.created_at.isoformat(),
+                'post_closing_reason': j.post_closing_reason,
+                'customer_name'  : j.customer.full_name if j.customer else 'Walk-in',
+                'line_items'     : [
+                    {
+                        'label'     : li.label or li.service.name,
+                        'line_total': str(li.line_total),
+                        'quantity'  : li.quantity,
+                        'pages'     : li.pages,
+                    }
+                    for li in j.line_items.all()
+                ],
+            }
+            for j in jobs
+        ]
+
+        return Response(data)
+
+
+class ResolveHandoverView(APIView):
+    """
+    POST /api/v1/jobs/<id>/resolve-handover/
+    Cashier confirms receipt of cash for an INTAKE_HELD job.
+    Links the job to today's sheet and moves it to PENDING_PAYMENT.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.sheet_engine import SheetEngine
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job = Job.objects.get(
+                pk          = pk,
+                branch      = branch,
+                status      = Job.INTAKE_HELD,
+                daily_sheet = None,
+            )
+        except Job.DoesNotExist:
+            return Response(
+                {'detail': 'Job not found or not in INTAKE_HELD state.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Get or open today's sheet
+        sheet, _ = SheetEngine(branch).get_or_open_today()
+        if not sheet:
+            return Response(
+                {'detail': 'No active sheet for today.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Link to today's sheet and move to cashier queue
+        job.daily_sheet = sheet
+        job.status      = Job.PENDING_PAYMENT
+        job.save(update_fields=['daily_sheet', 'status', 'updated_at'])
+
+        return Response({
+            'id'        : job.id,
+            'job_number': job.job_number,
+            'status'    : job.status,
+            'sheet_id'  : sheet.pk,
+            'detail'    : f'{job.job_number} handed over and added to payment queue.',
+        })

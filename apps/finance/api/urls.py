@@ -41,6 +41,7 @@ from .views import (
     WeeklyReportSubmitView,
     WeeklyReportPDFView,
     MonthlyCloseStatusView,
+    MonthlyClosePrepareView,
     MonthlyCloseSubmitView,
     MonthlyCloseEndorseView,
     MonthlyCloseRejectView,
@@ -48,6 +49,8 @@ from .views import (
     MonthlyClosePendingView,
     MonthlyCloseDetailView,
     FloatAcknowledgeView,
+    FloatPhysicalConfirmView,
+    FloatReConfirmView,
     MonthlyCloseMyQueueView,
     MonthlyCloseMyHistoryView,
     MonthlyCloseClearView,
@@ -74,6 +77,8 @@ urlpatterns = [
     path('floats/<int:pk>/close/',               CashierFloatCloseView.as_view(),             name='float-close'),
     path('floats/<int:pk>/sign-off/',            CashierSignOffView.as_view(),                name='float-sign-off'),
     path('floats/<int:pk>/acknowledge/',         FloatAcknowledgeView.as_view(),              name='float-acknowledge'),
+    path('floats/<int:pk>/physical-confirm/',    FloatPhysicalConfirmView.as_view(),           name='float-physical-confirm'),
+    path('floats/<int:pk>/re-confirm/',          FloatReConfirmView.as_view(),                 name='float-re-confirm'),
 
     # ── Cashier ───────────────────────────────────────────────────────────────
     path('cashier/shift-status/',                CashierShiftStatusView.as_view(),            name='cashier-shift-status'),
@@ -121,6 +126,7 @@ urlpatterns = [
 
     # ── Monthly Close ─────────────────────────────────────────────────────────
     path('monthly-close/',                                MonthlyCloseStatusView.as_view(),                name='monthly-close-status'),
+    path('monthly-close/prepare/',                        MonthlyClosePrepareView.as_view(),               name='monthly-close-prepare'),
     path('monthly-close/submit/',                         MonthlyCloseSubmitView.as_view(),                name='monthly-close-submit'),
     path('monthly-close/pending/',                        MonthlyClosePendingView.as_view(),               name='monthly-close-pending'),
     path('monthly-close/my-queue/',                       MonthlyCloseMyQueueView.as_view(),               name='monthly-close-my-queue'),

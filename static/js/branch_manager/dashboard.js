@@ -39,6 +39,7 @@ const Dashboard = (() => {
       loadRecentJobs(),
       _loadServicesAndCustomers(),
     ]);
+    await _checkFloatDispute();
     _renderMetrics(currentPeriod);
       Notifications.startPolling();
       WeekGreeter.init();
@@ -93,6 +94,138 @@ const Dashboard = (() => {
     } catch { /* silent */ }
     _checkHandoverBanners();
   }
+
+// -- Float dispute hard block ------------------------------
+  async function _checkFloatDispute() {
+    try {
+      const res = await Auth.fetch('/api/v1/finance/lock-status/');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.float_dispute_active) {
+        _showFloatDisputeBlock(
+          data.dispute_cashier_name,
+          data.dispute_float_amount,
+          data.dispute_float_id,
+        );
+      }
+    } catch { /* silent */ }
+  }
+
+  function _showFloatDisputeBlock(cashierName, floatAmount, floatId) {
+    const existing = document.getElementById('float-dispute-overlay');
+    if (existing) return;
+
+    const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'float-dispute-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:rgba(0,0,0,0.88);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:2px solid var(--red-border);
+        border-radius:var(--radius);width:100%;max-width:480px;
+        box-shadow:0 24px 64px rgba(0,0,0,0.4);overflow:hidden;">
+
+        <div style="padding:20px 24px;background:var(--red-bg);
+          border-bottom:1px solid var(--red-border);">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:10px;
+              background:#fee2e2;border:1px solid #fca5a5;
+              display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                viewBox="0 0 24 24" fill="none"
+                stroke="var(--red-text)" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div>
+              <div style="font-family:'Syne',sans-serif;font-size:17px;
+                font-weight:800;color:var(--red-text);">
+                Portal Blocked — Float Dispute
+              </div>
+              <div style="font-size:12px;color:var(--red-text);opacity:0.8;margin-top:2px;">
+                Regional Manager has been notified
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:24px;">
+          <div style="font-size:14px;color:var(--text);line-height:1.7;margin-bottom:20px;">
+            <strong>${_esc(cashierName)}</strong> reported that they did
+            <strong>not receive</strong> their opening float of
+            <strong style="color:var(--text);">${fmt(floatAmount)}</strong>
+            this morning.
+          </div>
+
+          <div style="padding:14px 16px;background:var(--amber-bg);
+            border:1px solid var(--amber-border);border-radius:var(--radius-sm);
+            margin-bottom:20px;">
+            <div style="font-size:13px;font-weight:700;color:var(--amber-text);
+              margin-bottom:4px;">Action required:</div>
+            <div style="font-size:13px;color:var(--amber-text);line-height:1.6;">
+              Physically hand <strong>${fmt(floatAmount)}</strong> to
+              <strong>${_esc(cashierName)}</strong>, then ask them to confirm
+              receipt on their cashier portal. This block will lift automatically
+              once they confirm.
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;">
+            <button onclick="Dashboard._pollFloatDisputeResolution(${floatId})"
+              id="dispute-poll-btn"
+              style="flex:1;padding:11px;background:var(--text);color:#fff;
+                border:none;border-radius:var(--radius-sm);font-size:13px;
+                font-weight:700;cursor:pointer;font-family:inherit;">
+              I have handed over the float — check for confirmation
+            </button>
+          </div>
+          <div id="dispute-poll-status"
+            style="margin-top:10px;font-size:12px;color:var(--text-3);
+              text-align:center;display:none;">
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+  }
+
+  async function _pollFloatDisputeResolution(floatId) {
+    const btn      = document.getElementById('dispute-poll-btn');
+    const statusEl = document.getElementById('dispute-poll-status');
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    if (statusEl) statusEl.style.display = 'none';
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/lock-status/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!data.float_dispute_active) {
+        // Resolved — remove block
+        document.getElementById('float-dispute-overlay')?.remove();
+        _toast('Float dispute resolved. Portal unblocked.', 'success');
+        return;
+      }
+
+      // Still active
+      if (statusEl) {
+        statusEl.textContent  = `Cashier has not yet confirmed receipt. Ask them to tap "I have now received my float" on their portal.`;
+        statusEl.style.display = 'block';
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Check again'; }
+
+    } catch {
+      if (btn) { btn.disabled = false; btn.textContent = 'Check again'; }
+    }
+  }
+
 
 // -- Handover / Shadow banners ------------------------------
   async function _checkHandoverBanners() {
@@ -160,7 +293,7 @@ const Dashboard = (() => {
     } catch { /* silent — banners are non-critical */ }
   }
 
-  function _showActivationModal(pa) {
+ async function _showActivationModal(pa) {
     const overlay = document.createElement('div');
     overlay.id    = 'activation-overlay';
     overlay.style.cssText = `
@@ -172,35 +305,61 @@ const Dashboard = (() => {
     overlay.innerHTML = `
       <div style="text-align:center;max-width:480px;padding:48px 40px;
         background:#fff;border-radius:16px;box-shadow:0 32px 80px rgba(0,0,0,0.4);">
-        <div style="font-size:48px;margin-bottom:16px;">🎉</div>
+        <div style="font-size:48px;margin-bottom:16px;">⏳</div>
         <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
-          color:#1a1a1a;margin-bottom:8px;">
-          Welcome aboard!
+          color:#1a1a1a;margin-bottom:8px;" id="activation-title">
+          Activating your account…
         </div>
-        <div style="font-size:15px;color:#555;margin-bottom:24px;line-height:1.6;">
-          Today is your first day at <strong>${_esc(pa.branch_name || 'this branch')}</strong>.<br>
-          Your full access is now active.
+        <div style="font-size:14px;color:#888;margin-bottom:28px;" id="activation-sub">
+          Please wait while we set up your full access.
         </div>
-        <div style="font-size:13px;color:#999;margin-bottom:28px;">
-          Reloading your portal in <span id="activation-countdown">5</span>s…
-        </div>
-        <button onclick="location.reload()"
-          style="padding:12px 32px;background:#1a3599;color:#fff;border:none;
-            border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;">
-          Start Now
-        </button>
       </div>`;
 
     document.body.appendChild(overlay);
 
-    let count = 5;
-    const timer = setInterval(() => {
-      count--;
-      const el = document.getElementById('activation-countdown');
-      if (el) el.textContent = count;
-      if (count <= 0) { clearInterval(timer); location.reload(); }
-    }, 1000);
+    try {
+      const res = await Auth.fetch(
+        '/api/v1/accounts/pending-activation/self-activate/',
+        { method: 'POST' }
+      );
+
+      const titleEl = document.getElementById('activation-title');
+      const subEl   = document.getElementById('activation-sub');
+      const iconEl  = overlay.querySelector('div[style*="font-size:48px"]');
+
+      if (res && res.ok) {
+        // Success — show welcome message then reload
+        if (iconEl)  iconEl.textContent  = '🎉';
+        if (titleEl) titleEl.textContent = 'Welcome aboard!';
+        if (subEl)   subEl.innerHTML     = `
+          Today is your first day at <strong>${_esc(pa.branch_name || 'this branch')}</strong>.<br>
+          Your full access is now active. Reloading in <span id="activation-countdown">5</span>s…`;
+
+        let count = 5;
+        const timer = setInterval(() => {
+          count--;
+          const el = document.getElementById('activation-countdown');
+          if (el) el.textContent = count;
+          if (count <= 0) { clearInterval(timer); location.reload(); }
+        }, 1000);
+
+      } else {
+        // Failed — show error, offer manual reload
+        if (iconEl)  iconEl.textContent  = '⚠️';
+        if (titleEl) titleEl.textContent = 'Activation failed';
+        if (subEl)   subEl.innerHTML     = `
+          Something went wrong. Please contact HR or try reloading.<br><br>
+          <button onclick="location.reload()"
+            style="padding:10px 24px;background:#111;color:#fff;border:none;
+              border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+            Reload
+          </button>`;
+      }
+    } catch {
+      document.getElementById('activation-title').textContent = 'Network error';
+      document.getElementById('activation-sub').textContent   =
+        'Could not reach the server. Please reload and try again.';
+    }
   }
 
   function _showFarewellModal(pa, user) {
@@ -252,7 +411,7 @@ const Dashboard = (() => {
       if (count <= 0) { clearInterval(timer); Auth.logout(); }
     }, 1000);
   }
-  
+
   function _injectBanner({ id, color, bg, border, icon, message, sub }) {
     // Remove existing banner of same id
     document.getElementById(id)?.remove();
@@ -3343,6 +3502,7 @@ win.document.write(`<!DOCTYPE html>
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
+    _pollFloatDisputeResolution,
     // Catalogue delegates
     openAddServiceModal  : Catalogue.openAddServiceModal,
     closeAddServiceModal : Catalogue.closeAddServiceModal,

@@ -170,7 +170,7 @@ const Reports = (() => {
   }
 
   // ── Monthly Close ──────────────────────────────────────────
-  async function _renderMonthlyClose(container) {
+async function _renderMonthlyClose(container) {
     if (!container) return;
     const now   = new Date();
     const month = now.getMonth() + 1;
@@ -188,16 +188,23 @@ const Reports = (() => {
       </div>
       <div id="monthly-history" style="margin-top:24px;"></div>`;
 
+    // Current month card
     try {
       const res     = await Auth.fetch(`/api/v1/finance/monthly-close/?month=${month}&year=${year}`);
       const content = document.getElementById('monthly-current-content');
       if (!content) return;
+      const monthName = ['January','February','March','April','May','June',
+        'July','August','September','October','November','December'][month - 1];
       if (!res.ok) {
-        const monthName = ['January','February','March','April','May','June','July','August','September','October','November','December'][month - 1];
         content.innerHTML = `
-          <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:24px 20px;text-align:center;color:var(--text-3);">
-            <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">${monthName} ${year}</div>
-            <div style="font-size:13px;">No monthly close record yet. Submit at month end when all integrity gates are met.</div>
+          <div style="background:var(--panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:24px 20px;">
+            <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">
+              ${monthName} ${year}
+            </div>
+            <div style="font-size:13px;color:var(--text-3);">
+              No monthly close record yet.
+            </div>
           </div>`;
       } else {
         const data = await res.json();
@@ -206,89 +213,454 @@ const Reports = (() => {
     } catch {
       const content = document.getElementById('monthly-current-content');
       if (content) content.innerHTML = `
-        <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:24px 20px;text-align:center;color:var(--text-3);font-size:13px;">
+        <div style="background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:24px 20px;text-align:center;
+          color:var(--text-3);font-size:13px;">
           Monthly close not yet initiated for this month.
         </div>`;
     }
+
     await _loadMonthlyHistory();
   }
 
   async function _loadMonthlyHistory() {
     const container = document.getElementById('monthly-history');
     if (!container) return;
-    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    const monthNames = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'];
+    const statusConfig = {
+      OPEN               : { bg: 'var(--bg)',       text: 'var(--text-3)',     label: 'Open' },
+      SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Awaiting Finance' },
+      FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',           label: 'Finance Reviewing' },
+      NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Needs Clarification' },
+      RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)', label: 'Resubmitted' },
+      FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)', label: 'Finance Cleared' },
+      ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)', label: 'Endorsed ✓' },
+      LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)', label: 'Locked ✓' },
+      REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',   label: 'Rejected' },
+    };
+
     try {
       const now          = new Date();
-      const year         = now.getFullYear();
       const currentMonth = now.getMonth() + 1;
-      const fetches      = [];
+      const year         = now.getFullYear();
+
+      // Fetch all previous months including OPEN ones (they may need preparing)
+      const fetches = [];
       for (let m = 1; m < currentMonth; m++) {
         fetches.push(
           Auth.fetch(`/api/v1/finance/monthly-close/?month=${m}&year=${year}`)
-            .then(r => r.ok ? r.json() : null).catch(() => null)
+            .then(r => r.ok ? r.json() : { month: m, year, status: null })
+            .catch(() => ({ month: m, year, status: null }))
         );
       }
+
       const results = await Promise.all(fetches);
-      const closes  = results.filter(r => r && r.status && r.status !== 'OPEN').sort((a, b) => b.month - a.month);
+      // Show all previous months, newest first
+      const closes  = results.sort((a, b) => b.month - a.month);
       if (!closes.length) return;
 
-      const statusConfig = {
-        SUBMITTED          : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Awaiting Finance' },
-        FINANCE_REVIEWING  : { bg: '#dbeafe',           text: '#1e40af',            label: 'Finance Reviewing' },
-        NEEDS_CLARIFICATION: { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Needs Clarification' },
-        RESUBMITTED        : { bg: 'var(--amber-bg)',  text: 'var(--amber-text)',  label: 'Resubmitted' },
-        FINANCE_CLEARED    : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Finance Cleared' },
-        ENDORSED           : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Endorsed ✓' },
-        LOCKED             : { bg: 'var(--green-bg)',  text: 'var(--green-text)',  label: 'Locked ✓' },
-        REJECTED           : { bg: 'var(--red-bg)',    text: 'var(--red-text)',    label: 'Rejected' },
-      };
-
       container.innerHTML = `
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">Previous Monthly Closes</div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);
+          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">
+          Previous Monthly Closes
+        </div>
         ${closes.map(c => {
+          const monthName = monthNames[(c.month||1)-1];
+
+          // Month has no record yet or is OPEN — show prepare card
+          if (!c.status || c.status === 'OPEN') {
+            return `
+              <div style="border:1px solid var(--border);border-radius:var(--radius);
+                overflow:hidden;margin-bottom:10px;">
+                <div style="padding:16px 20px;background:var(--panel);
+                  display:flex;align-items:center;justify-content:space-between;">
+                  <div>
+                    <div style="font-size:15px;font-weight:700;color:var(--text);">
+                      ${monthName} ${c.year}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                      Not yet submitted for Finance review
+                    </div>
+                  </div>
+                  <button onclick="Reports._prepareMonthlyClose(${c.month}, ${c.year})"
+                    id="prepare-monthly-btn-${c.month}"
+                    style="padding:8px 18px;background:var(--text);color:#fff;border:none;
+                      border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                      cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Prepare Monthly Sheet
+                  </button>
+                </div>
+              </div>`;
+          }
+
+          // Month has a proper status — show full card
           const snap    = c.summary_snapshot || {};
           const revenue = snap.revenue || {};
           const jobs    = snap.jobs    || {};
           const sc      = statusConfig[c.status] || { bg:'var(--bg)', text:'var(--text-3)', label: c.status };
-          const canDownload = ['ENDORSED','LOCKED'].includes(c.status);
+          const canDownload   = ['ENDORSED','LOCKED'].includes(c.status);
+          const canSubmit     = c.can_submit && c.status === 'OPEN';
+
           return `
-            <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px;">
-              <div style="padding:16px 20px;background:var(--panel);border-bottom:1px solid var(--border);">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <div style="border:1px solid var(--border);border-radius:var(--radius);
+              overflow:hidden;margin-bottom:10px;">
+              <div style="padding:16px 20px;background:var(--panel);
+                border-bottom:1px solid var(--border);">
+                <div style="display:flex;align-items:center;
+                  justify-content:space-between;margin-bottom:10px;">
                   <div>
-                    <div style="font-size:15px;font-weight:700;color:var(--text);">${monthNames[(c.month||1)-1]} ${c.year}</div>
-                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Submitted by ${c.submitted_by || '—'}${c.submitted_at ? ' · ' + new Date(c.submitted_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}</div>
+                    <div style="font-size:15px;font-weight:700;color:var(--text);">
+                      ${monthName} ${c.year}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                      Submitted by ${c.submitted_by || '—'}
+                      ${c.submitted_at
+                        ? ' · ' + new Date(c.submitted_at).toLocaleDateString('en-GB',
+                            {day:'numeric',month:'short',year:'numeric'})
+                        : ''}
+                    </div>
                   </div>
                   <div style="display:flex;align-items:center;gap:8px;">
-                    <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.text};">${sc.label}</span>
-                    ${canDownload ? `<button onclick="Reports.downloadMonthlyPDF(${c.id})" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">PDF</button>` : ''}
+                    <span style="padding:4px 12px;border-radius:20px;font-size:11px;
+                      font-weight:700;background:${sc.bg};color:${sc.text};">
+                      ${sc.label}
+                    </span>
+                    ${canSubmit ? `
+                      <button onclick="Reports._openMonthlySubmitModal(${c.id}, ${c.month}, ${c.year})"
+                        style="padding:7px 16px;background:var(--text);color:#fff;border:none;
+                          border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                          cursor:pointer;font-family:'DM Sans',sans-serif;">
+                        Review & Submit
+                      </button>` : ''}
+                    ${canDownload ? `
+                      <button onclick="Reports.downloadMonthlyPDF(${c.id})"
+                        style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;
+                          background:var(--text);color:#fff;border:none;
+                          border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+                          cursor:pointer;font-family:'DM Sans',sans-serif;">
+                        PDF
+                      </button>` : ''}
                   </div>
                 </div>
-                ${snap.revenue ? `
+                ${revenue.total_collected != null ? `
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
-                  ${[['Total Collected',_fmt(revenue.total_collected||0),'var(--text)'],['Cash',_fmt(revenue.total_cash||0),'var(--cash-strong)'],['MoMo',_fmt(revenue.total_momo||0),'var(--momo-strong)'],['Jobs',jobs.total||0,'var(--text)']].map(([label,val,color]) => `
-                    <div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
-                      <div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${label}</div>
-                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:${color};">${val}</div>
+                  ${[
+                    ['Total Collected', _fmt(revenue.total_collected||0), 'var(--text)'],
+                    ['Cash',            _fmt(revenue.total_cash||0),      'var(--cash-strong,var(--green-text))'],
+                    ['MoMo',            _fmt(revenue.total_momo||0),      'var(--momo-strong,var(--amber-text))'],
+                    ['Jobs',            jobs.total||0,                    'var(--text)'],
+                  ].map(([label, val, color]) => `
+                    <div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);
+                      border-radius:var(--radius-sm);">
+                      <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                        text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                        ${label}
+                      </div>
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                        font-weight:700;color:${color};">
+                        ${val}
+                      </div>
                     </div>`).join('')}
                 </div>` : ''}
               </div>
               <div style="padding:12px 20px;background:var(--bg);">
-                <div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Audit Trail</div>
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+                  Audit Trail
+                </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
-                  ${[['Submitted',c.submitted_by,c.submitted_at,'#3355cc'],['Finance Cleared',c.finance_reviewer,c.finance_cleared_at,'#22c98a'],['Endorsed',c.endorsed_by,c.endorsed_at,'#9b59b6'],['Locked',c.locked_at?'System':null,c.locked_at,'#666']].filter(([,actor])=>actor).map(([label,actor,ts,color]) => `
+                  ${[
+                    ['Submitted',       c.submitted_by,     c.submitted_at,       '#3355cc'],
+                    ['Finance Cleared', c.finance_reviewer, c.finance_cleared_at, '#22c98a'],
+                    ['Endorsed',        c.endorsed_by,      c.endorsed_at,        '#9b59b6'],
+                    ['Locked',          c.locked_at ? 'System' : null, c.locked_at, '#666'],
+                  ].filter(([,actor]) => actor).map(([label, actor, ts, color]) => `
                     <div style="display:flex;align-items:center;gap:10px;">
-                      <div style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-                      <span style="font-size:12px;font-weight:600;color:var(--text);min-width:120px;">${label}</span>
+                      <div style="width:6px;height:6px;border-radius:50%;
+                        background:${color};flex-shrink:0;"></div>
+                      <span style="font-size:12px;font-weight:600;color:var(--text);
+                        min-width:120px;">${label}</span>
                       <span style="font-size:12px;color:var(--text-2);">${actor||'—'}</span>
-                      ${ts ? `<span style="font-size:11px;color:var(--text-3);margin-left:auto;">${new Date(ts).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
+                      ${ts ? `<span style="font-size:11px;color:var(--text-3);margin-left:auto;">
+                        ${new Date(ts).toLocaleDateString('en-GB',
+                          {day:'numeric',month:'short',year:'numeric'})}
+                      </span>` : ''}
                     </div>`).join('')}
                 </div>
-                ${c.rejection_reason ? `<div style="margin-top:10px;padding:8px 12px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--radius-sm);font-size:12px;color:var(--red-text);"><strong>Rejection reason:</strong> ${c.rejection_reason}</div>` : ''}
+                ${c.rejection_reason ? `
+                <div style="margin-top:10px;padding:8px 12px;background:var(--red-bg);
+                  border:1px solid var(--red-border);border-radius:var(--radius-sm);
+                  font-size:12px;color:var(--red-text);">
+                  <strong>Rejection reason:</strong> ${c.rejection_reason}
+                </div>` : ''}
               </div>
             </div>`;
         }).join('')}`;
     } catch { /* silent */ }
+  }
+
+ async function _prepareMonthlyClose(month, year) {
+    const btn = document.getElementById(`prepare-monthly-btn-${month}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+
+    try {
+      const res  = await Auth.fetch('/api/v1/finance/monthly-close/prepare/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ month, year }),
+      });
+
+      if (!res.ok) {
+        const err     = await res.json().catch(() => ({}));
+        const detail  = err.detail;
+        const msg     = Array.isArray(detail)
+          ? detail.join(' · ')
+          : (detail || 'Cannot prepare monthly close.');
+        _toast(msg, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Prepare Monthly Sheet'; }
+        return;
+      }
+
+      // Snapshot is now populated — re-enable button before opening modal
+      if (btn) { btn.disabled = false; btn.textContent = 'Prepare Monthly Sheet'; }
+
+      const data = await res.json();
+      _openMonthlySubmitModal(data.id, month, year);
+
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Prepare Monthly Sheet'; }
+    }
+  }
+
+  async function _openMonthlySubmitModal(id, month, year) {
+    const monthName = ['January','February','March','April','May','June',
+      'July','August','September','October','November','December'][month - 1];
+
+    // Create modal
+    const existing = document.getElementById('monthly-submit-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'monthly-submit-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.6);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;animation:fadeIn 0.2s ease;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:580px;max-height:80vh;
+        display:flex;flex-direction:column;overflow:hidden;
+        box-shadow:0 24px 64px rgba(0,0,0,0.3);">
+
+        <!-- Header -->
+        <div style="padding:20px 24px;border-bottom:1px solid var(--border);
+          display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;
+              color:var(--text);">
+              ${monthName} ${year} — Monthly Close
+            </div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:2px;">
+              Review summary before submitting to Finance
+            </div>
+          </div>
+          <button onclick="document.getElementById('monthly-submit-overlay').remove()"
+            style="background:none;border:none;cursor:pointer;color:var(--text-3);
+              font-size:20px;padding:0;line-height:1;">×</button>
+        </div>
+
+        <!-- Body -->
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;"
+          id="monthly-modal-body">
+          <div class="loading-cell"><span class="spin"></span> Loading summary…</div>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:16px 24px;border-top:1px solid var(--border);
+          flex-shrink:0;background:var(--panel);">
+          <div style="margin-bottom:10px;">
+            <label style="font-size:12px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">
+              Branch Manager Notes (optional)
+            </label>
+            <textarea id="monthly-modal-notes" rows="2"
+              placeholder="Add any notes for Finance review…"
+              style="width:100%;padding:8px 12px;border:1.5px solid var(--border);
+                border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+                font-size:13px;resize:none;box-sizing:border-box;
+                font-family:'DM Sans',sans-serif;outline:none;"></textarea>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button onclick="document.getElementById('monthly-submit-overlay').remove()"
+              style="padding:9px 20px;background:none;border:1px solid var(--border);
+                border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+                cursor:pointer;color:var(--text-2);font-family:'DM Sans',sans-serif;">
+              Cancel
+            </button>
+            <button id="monthly-modal-submit-btn"
+              onclick="Reports._submitMonthlyClose(${month}, ${year})"
+              style="padding:9px 24px;background:var(--text);color:#fff;border:none;
+                border-radius:var(--radius-sm);font-size:13px;font-weight:700;
+                cursor:pointer;font-family:'DM Sans',sans-serif;">
+              Submit for Finance Review
+            </button>
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Load summary into modal body
+    try {
+      const res  = await Auth.fetch(`/api/v1/finance/monthly-close/?month=${month}&year=${year}`);
+      const body = document.getElementById('monthly-modal-body');
+      if (!body) return;
+
+      if (!res.ok) throw new Error();
+      const data    = await res.json();
+      const snap    = data.summary_snapshot || {};
+      const revenue = snap.revenue || {};
+      const jobs    = snap.jobs    || {};
+      const inv     = snap.inventory || {};
+      const invItems= (inv.items || []).filter(i => i.consumed > 0);
+
+      body.innerHTML = `
+        <!-- Revenue summary -->
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Revenue Summary
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+            ${[
+              ['Total Collected', _fmt(revenue.total_collected||0), 'var(--text)'],
+              ['Cash',            _fmt(revenue.total_cash||0),      'var(--green-text)'],
+              ['MoMo',            _fmt(revenue.total_momo||0),      'var(--amber-text)'],
+              ['POS',             _fmt(revenue.total_pos||0),       'var(--blue-text,#3355cc)'],
+            ].map(([label, val, color]) => `
+              <div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+                border-radius:var(--radius-sm);">
+                <div style="font-size:10px;font-weight:700;color:var(--text-3);
+                  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+                  ${label}
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;
+                  font-weight:700;color:${color};">
+                  ${val}
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <!-- Job summary -->
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Job Summary
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+            ${[
+              ['Total Jobs',  jobs.total||0,     'var(--text)'],
+              ['Complete',    jobs.complete||0,  'var(--green-text)'],
+              ['Cancelled',   jobs.cancelled||0, 'var(--red-text)'],
+              ['Carry Fwd',   jobs.carry_forward||0, 'var(--amber-text)'],
+            ].map(([label, val, color]) => `
+              <div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+                border-radius:var(--radius-sm);text-align:center;">
+                <div style="font-size:18px;font-weight:700;color:${color};">${val}</div>
+                <div style="font-size:10px;color:var(--text-3);margin-top:2px;">${label}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <!-- Inventory -->
+        ${invItems.length ? `
+        <div style="margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text-3);
+            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Inventory Consumed This Month
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
+                <th style="padding:5px 10px;text-align:left;font-size:9px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;">Consumable</th>
+                <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;">Consumed</th>
+                <th style="padding:5px 10px;text-align:right;font-size:9px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;">Closing</th>
+                <th style="padding:5px 10px;text-align:center;font-size:9px;font-weight:700;
+                  color:var(--text-3);text-transform:uppercase;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invItems.map(item => {
+                const isLow = item.is_low;
+                const badge = isLow
+                  ? `<span style="background:#fee2e2;color:var(--red-text);padding:1px 6px;
+                      border-radius:4px;font-size:9px;font-weight:700;">LOW</span>`
+                  : `<span style="background:#dcfce7;color:var(--green-text);padding:1px 6px;
+                      border-radius:4px;font-size:9px;font-weight:700;">OK</span>`;
+                return `
+                  <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:6px 10px;color:var(--text);">${_esc(item.consumable)}</td>
+                    <td style="padding:6px 10px;text-align:right;color:var(--text-3);
+                      font-family:'JetBrains Mono',monospace;">
+                      ${item.consumed} ${item.unit}
+                    </td>
+                    <td style="padding:6px 10px;text-align:right;font-weight:600;
+                      font-family:'JetBrains Mono',monospace;
+                      color:${isLow ? 'var(--red-text)' : 'var(--text)'};">
+                      ${item.closing} ${item.unit}
+                    </td>
+                    <td style="padding:6px 10px;text-align:center;">${badge}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}`;
+    } catch {
+      const body = document.getElementById('monthly-modal-body');
+      if (body) body.innerHTML = `
+        <div style="color:var(--red-text);font-size:13px;text-align:center;padding:24px;">
+          Could not load summary. Please try again.
+        </div>`;
+    }
+  }
+
+  async function _submitMonthlyClose(month, year) {
+    const btn   = document.getElementById('monthly-modal-submit-btn');
+    const notes = document.getElementById('monthly-modal-notes')?.value.trim() || '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/monthly-close/submit/', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ month, year, bm_notes: notes }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = Array.isArray(err.detail)
+          ? err.detail.join(' ')
+          : (err.detail || 'Submission failed.');
+        _toast(msg, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit for Finance Review'; }
+        return;
+      }
+      document.getElementById('monthly-submit-overlay')?.remove();
+      _toast('April monthly close submitted. Assigned to Finance for review.', 'success');
+      // Refresh the monthly tab
+      const content = document.getElementById('reports-content');
+      if (content) await _renderMonthlyClose(content);
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit for Finance Review'; }
+    }
   }
 
   function _renderMonthlyCloseDetail(container, data) {
@@ -1327,6 +1699,9 @@ const Reports = (() => {
     setReportsPeriod,
     setServicesPeriod,
     submitMonthlyClose,
+    _prepareMonthlyClose,
+    _openMonthlySubmitModal,
+    _submitMonthlyClose,
     downloadMonthlyPDF,
     weeklyPrepare,
     weeklySubmit,

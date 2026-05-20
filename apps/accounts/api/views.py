@@ -253,7 +253,61 @@ class PendingActivationMeView(APIView):
             'status'          : pa.status,
             'shadow_days'     : pa.shadow_days,
         })
+class SelfActivateView(APIView):
+    """
+    POST /api/v1/accounts/pending-activation/self-activate/
+    Called by the frontend when daysLeft <= 0 on the activation modal.
+    Triggers the same activation logic as the Celery task.
+    Only fires if start_date <= today and status is SHADOW/PENDING.
+    """
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        from apps.accounts.models import PendingActivation
+        from apps.accounts.tasks import _activate_employee
+        from django.db import transaction
+        from django.utils import timezone
+
+        today = timezone.localdate()
+
+        try:
+            pa = PendingActivation.objects.select_related(
+                'user', 'role', 'branch', 'region',
+                'conflict_user', 'created_by',
+            ).get(
+                user=request.user,
+                status__in=[PendingActivation.PENDING, PendingActivation.SHADOW],
+            )
+        except PendingActivation.DoesNotExist:
+            return Response(
+                {'detail': 'No pending activation found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if pa.start_date > today:
+            return Response(
+                {'detail': f'Activation date is {pa.start_date}. Not yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                _activate_employee(pa, today)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(
+                'SelfActivateView: activation failed for user %s', request.user.pk
+            )
+            return Response(
+                {'detail': 'Activation failed. Please contact HR.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({
+            'detail'    : 'Activated successfully.',
+            'role'      : pa.role.display_name,
+            'branch'    : pa.branch.name if pa.branch else None,
+        })
 
 class PendingActivationDisplacingMeView(APIView):
     """

@@ -1,3 +1,5 @@
+from asyncio.log import logger
+
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -1516,7 +1518,28 @@ class BranchLockStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from apps.finance.models import CashierFloat, DailySalesSheet
+        from django.utils import timezone
+
         status_data = SheetEngine(user.branch).get_branch_lock_status()
+
+        # Check for active float dispute — hard blocks BM portal
+        today = timezone.localdate()
+        float_dispute_active = CashierFloat.objects.filter(
+            daily_sheet__branch  = user.branch,
+            daily_sheet__date    = today,
+            physical_confirm_disputed = True,
+            morning_acknowledged = False,
+        ).select_related('cashier').first()
+
+        if float_dispute_active:
+            status_data['float_dispute_active']   = True
+            status_data['dispute_cashier_name']   = float_dispute_active.cashier.full_name
+            status_data['dispute_float_amount']   = str(float_dispute_active.opening_float)
+            status_data['dispute_float_id']       = float_dispute_active.pk
+        else:
+            status_data['float_dispute_active'] = False
+
         return Response(status_data)
 
 class EODSummaryView(APIView):
@@ -2647,6 +2670,55 @@ class MonthlyCloseStatusView(APIView):
             'summary_snapshot'         : close.summary_snapshot,
         })
 
+class MonthlyClosePrepareView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/prepare/
+    Builds and persists summary_snapshot on an OPEN monthly close
+    without changing its status. Idempotent — safe to call multiple times.
+    Called by the BM portal before opening the submit modal so the
+    modal can display real numbers.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            month = int(request.data.get('month', timezone.localdate().month))
+            year  = int(request.data.get('year',  timezone.localdate().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine   = MonthlyCloseEngine(branch, month, year)
+        close, _ = engine.get_or_create()
+
+        if close.status != 'OPEN':
+            return Response(
+                {'detail': f'Cannot prepare — current status is {close.status}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        integrity = engine.check_integrity()
+        if not integrity['can_submit']:
+            errors = [c['detail'] for c in integrity['checks'].values() if not c['pass']]
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        snapshot               = engine.build_snapshot()
+        close.summary_snapshot = snapshot
+        close.save(update_fields=['summary_snapshot'])
+
+        return Response({
+            'id'              : close.pk,
+            'month'           : close.month,
+            'year'            : close.year,
+            'status'          : close.status,
+            'can_submit'      : close.can_submit,
+            'integrity'       : integrity,
+            'summary_snapshot': close.summary_snapshot,
+        })
+    
 
 class MonthlyCloseSubmitView(APIView):
     """
@@ -3268,3 +3340,194 @@ class MonthlyCloseRequestClarificationView(APIView):
             'clarification_due_at' : close.clarification_due_at.isoformat(),
             'message'              : 'Clarification requested. Branch Manager has 24 hours to respond.',
         })
+
+class FloatPhysicalConfirmView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/physical-confirm/
+    Cashier confirms or disputes physical receipt of float on an auto-closed sheet.
+    Body: { received: true|false }
+
+    If received=true  → proceed to denomination count (PENDING_ACK)
+    If received=false → raise dispute, notify RM, hard-block BM portal
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from django.utils import timezone
+
+        try:
+            float_record = CashierFloat.objects.select_related(
+                'daily_sheet', 'cashier'
+            ).get(pk=pk, cashier=request.user)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        received = request.data.get('received', True)
+
+        if received:
+            # Cashier confirmed receipt — proceed to denomination count
+            return Response({
+                'detail'      : 'Receipt confirmed. Please count your float.',
+                'float_status': 'PENDING_ACK',
+                'float_id'    : float_record.pk,
+                'opening_float': str(float_record.opening_float),
+            })
+        else:
+            # Cashier disputes receipt — raise dispute
+            float_record.physical_confirm_disputed    = True
+            float_record.physical_confirm_disputed_at = timezone.now()
+            float_record.save(update_fields=[
+                'physical_confirm_disputed',
+                'physical_confirm_disputed_at',
+                'updated_at',
+            ])
+
+            # Notify RM
+            self._notify_rm_dispute(float_record)
+            # Notify BM
+            self._notify_bm_dispute(float_record)
+
+            return Response({
+                'detail'      : 'Dispute recorded. RM and BM have been notified.',
+                'float_status': 'PENDING_PHYSICAL_CONFIRM',
+                'disputed'    : True,
+            })
+
+    def _notify_rm_dispute(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            rm_users = CustomUser.objects.filter(
+                role__name = 'REGIONAL_MANAGER',
+                is_active  = True,
+                region     = branch.region,
+            )
+            for rm in rm_users:
+                notify(
+                    recipient = rm,
+                    verb      = 'FLOAT_DISPUTE',
+                    message   = (
+                        f"{float_record.cashier.full_name} at {branch.name} "
+                        f"reported not receiving their opening float of "
+                        f"GHS {float_record.opening_float}. "
+                        f"Branch Manager has been notified and portal blocked."
+                    ),
+                    link = '/portal/regional-manager/',
+                )
+        except Exception:
+            logger.exception('FloatPhysicalConfirmView: failed to notify RM of dispute')
+
+    def _notify_bm_dispute(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            bm = CustomUser.objects.filter(
+                branch     = branch,
+                role__name = 'BRANCH_MANAGER',
+                is_active  = True,
+            ).first()
+            if bm:
+                notify(
+                    recipient = bm,
+                    verb      = 'FLOAT_DISPUTE',
+                    message   = (
+                        f"{float_record.cashier.full_name} reported not receiving "
+                        f"their opening float of GHS {float_record.opening_float}. "
+                        f"Please hand over the float and ask them to re-confirm. "
+                        f"Your portal is blocked until this is resolved."
+                    ),
+                    link = '/portal/dashboard/',
+                )
+        except Exception:
+            logger.exception('FloatPhysicalConfirmView: failed to notify BM of dispute')
+
+
+class FloatReConfirmView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/re-confirm/
+    Cashier re-confirms physical receipt after BM has handed over the float.
+    Clears the dispute, lifts BM hard block, notifies RM of resolution.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from django.utils import timezone
+
+        try:
+            float_record = CashierFloat.objects.select_related(
+                'daily_sheet', 'cashier'
+            ).get(pk=pk, cashier=request.user)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not float_record.physical_confirm_disputed:
+            return Response(
+                {'detail': 'No active dispute on this float.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Clear dispute
+        float_record.physical_confirm_disputed = False
+        float_record.save(update_fields=[
+            'physical_confirm_disputed',
+            'updated_at',
+        ])
+
+        # Notify RM of resolution
+        self._notify_rm_resolved(float_record)
+
+        return Response({
+            'detail'      : 'Receipt confirmed. Please count your float.',
+            'float_status': 'PENDING_ACK',
+            'float_id'    : float_record.pk,
+            'opening_float': str(float_record.opening_float),
+        })
+
+    def _notify_rm_resolved(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            rm_users = CustomUser.objects.filter(
+                role__name = 'REGIONAL_MANAGER',
+                is_active  = True,
+                region     = branch.region,
+            )
+            for rm in rm_users:
+                notify(
+                    recipient = rm,
+                    verb      = 'FLOAT_DISPUTE_RESOLVED',
+                    message   = (
+                        f"Float dispute at {branch.name} resolved. "
+                        f"{float_record.cashier.full_name} has confirmed receipt of "
+                        f"GHS {float_record.opening_float}. BM portal unblocked."
+                    ),
+                    link = '/portal/regional-manager/',
+                )
+        except Exception:
+            logger.exception('FloatReConfirmView: failed to notify RM of resolution')
