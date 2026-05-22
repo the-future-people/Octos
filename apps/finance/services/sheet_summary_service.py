@@ -123,8 +123,13 @@ class SheetSummaryService:
             payment_method = 'CREDIT',
         ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0')
 
+        from apps.finance.models import CreditPayment
+        from django.db.models import Sum as DSum
+
         petty_out      = sheet.total_petty_cash_out or Decimal('0')
-        credit_settled = sheet.total_credit_settled or Decimal('0')
+        credit_settled = CreditPayment.objects.filter(
+            daily_sheet=sheet,
+        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
         net_cash       = cash + credit_settled - petty_out
 
         return {

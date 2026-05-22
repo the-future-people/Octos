@@ -368,10 +368,20 @@ const Cashier = (() => {
     }
     // Show/hide partial credit button based on customer credit account
     const pcBtn = document.getElementById('pm-partial-credit');
+    const fullCreditBtn = document.getElementById('pm-credit');
+    const jobAmount = parseFloat(activeJob.estimated_cost || 0);
+    const availableCredit = activeJob.customer_credit
+      ? parseFloat(activeJob.customer_credit.available_credit)
+      : 0;
+
     if (pcBtn) {
-      const hasCredit = !!(activeJob.customer_credit &&
-        parseFloat(activeJob.customer_credit.available_credit) > 0);
+      const hasCredit = !!(activeJob.customer_credit && availableCredit > 0);
       pcBtn.style.display = hasCredit ? 'flex' : 'none';
+    }
+    if (fullCreditBtn) {
+      const canFullCredit = !!(activeJob.customer_credit &&
+        availableCredit >= jobAmount && jobAmount > 0);
+      fullCreditBtn.style.display = canFullCredit ? 'flex' : 'none';
     }
     selectedDeposit = 100;
     selectedMethod  = 'CASH';
@@ -445,7 +455,7 @@ const Cashier = (() => {
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
     if (cashField) cashField.classList.toggle('visible', method === 'CASH');
-    if (method === 'SPLIT' || method === 'PARTIAL_CREDIT') {
+    if (method === 'SPLIT' || method === 'PARTIAL_CREDIT' || method === 'CREDIT') {
       momoField?.classList.remove('visible');
       posField?.classList.remove('visible');
       cashField?.classList.remove('visible');
@@ -461,10 +471,21 @@ const Cashier = (() => {
     const splitFields = document.getElementById('split-fields');
     if (splitFields) splitFields.style.display = method === 'SPLIT' ? 'block' : 'none';
     if (method === 'SPLIT') _updateSplitFields();
+    if (method !== 'SPLIT') {
+      // Reset split fields when switching away
+      const s1 = document.getElementById('split-amount-1');
+      const s2 = document.getElementById('split-amount-2');
+      if (s1) s1.value = '';
+      if (s2) s2.value = '';
+    }
 
     const pcFields = document.getElementById('partial-credit-fields');
     if (pcFields) pcFields.style.display = method === 'PARTIAL_CREDIT' ? 'block' : 'none';
     if (method === 'PARTIAL_CREDIT') _initPartialCredit();
+
+    const fullCreditFields = document.getElementById('full-credit-fields');
+    if (fullCreditFields) fullCreditFields.style.display = method === 'CREDIT' ? 'block' : 'none';
+    if (method === 'CREDIT') _initFullCredit();
 
     // Style the partial credit button
     const pcBtn = document.getElementById('pm-partial-credit');
@@ -563,6 +584,8 @@ const Cashier = (() => {
       ready = _validateSplitLegs().valid;
     } else if (selectedMethod === 'PARTIAL_CREDIT') {
       ready = _validatePartialCredit().valid;
+    } else if (selectedMethod === 'CREDIT') {
+      ready = !!(activeJob?.customer_credit);
     }
 
     btn.disabled      = !ready;
@@ -574,10 +597,10 @@ const Cashier = (() => {
     }
   }
 
-  // ── Confirm payment ────────────────────────────────────────
-  async function confirmPayment() {
+async function confirmPayment() {
     if (!activeJob) return;
 
+    // ── Validation ─────────────────────────────────────────
     if (selectedMethod === 'CASH') {
       const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
       const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -598,6 +621,11 @@ const Cashier = (() => {
         _toast('POS approval code is required.', 'error'); return;
       }
     }
+    if (selectedMethod === 'CREDIT') {
+      if (!activeJob?.customer_credit) {
+        _toast('No credit account found.', 'error'); return;
+      }
+    }
     if (selectedMethod === 'PARTIAL_CREDIT') {
       const validation = _validatePartialCredit();
       if (!validation.valid) {
@@ -608,17 +636,23 @@ const Cashier = (() => {
     const notes   = document.getElementById('confirm-notes')?.value.trim()  || '';
     const phone   = document.getElementById('confirm-phone')?.value.trim()  || '';
     const company = document.getElementById('confirm-company')?.value.trim() || '';
-    const momoRef = document.getElementById('momo-ref')?.value.trim()       || '';
     const posCode = document.getElementById('pos-ref')?.value.trim()        || '';
     const btn     = document.getElementById('confirm-submit-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
 
     try {
+      // ── Build body ────────────────────────────────────────
       const body = {
         deposit_percentage: selectedDeposit,
         payment_method    : selectedMethod,
         notes,
       };
+
+      if (selectedMethod === 'CREDIT') {
+        body.credit_account_id = activeJob.customer_credit?.account_id
+          || activeJob.customer_credit?.id;
+      }
+
       if (selectedMethod === 'MOMO') {
         const ref = document.getElementById('momo-ref')?.value.trim() || '';
         if (!/^\d{11}$/.test(ref)) {
@@ -628,7 +662,11 @@ const Cashier = (() => {
         }
         body.momo_reference = ref;
       }
-      if (selectedMethod === 'POS')  body.pos_approval_code = posCode;
+
+      if (selectedMethod === 'POS') {
+        body.pos_approval_code = posCode;
+      }
+
       if (selectedMethod === 'SPLIT') {
         const validation = _validateSplitLegs();
         if (!validation.valid) {
@@ -638,22 +676,22 @@ const Cashier = (() => {
         }
         body.split_legs = validation.legs;
       }
+
       if (selectedMethod === 'PARTIAL_CREDIT') {
-        const validation  = _validatePartialCredit();
-        const pcAmount    = parseFloat(document.getElementById('pc-amount')?.value || 0);
-        const pcMethod    = document.getElementById('pc-method')?.value || 'CASH';
-        const pcRef       = document.getElementById('pc-ref')?.value.trim() || '';
-        const due         = parseFloat(activeJob.estimated_cost || 0);
+        const pcAmount      = parseFloat(document.getElementById('pc-amount')?.value || 0);
+        const pcMethod      = document.getElementById('pc-method')?.value || 'CASH';
+        const pcRef         = document.getElementById('pc-ref')?.value.trim() || '';
+        const due           = parseFloat(activeJob.estimated_cost || 0);
         const creditPortion = due - pcAmount;
 
-        body.payment_method          = pcMethod;
-        body.partial_credit_amount   = creditPortion.toFixed(2);
-        body.partial_credit_account  = activeJob.customer_credit.account_id;
+        body.payment_method         = pcMethod;
+        body.partial_credit_amount  = creditPortion.toFixed(2);
+        body.partial_credit_account = activeJob.customer_credit.account_id
+          || activeJob.customer_credit.id;
         if (pcMethod === 'MOMO') body.momo_reference    = pcRef;
         if (pcMethod === 'POS')  body.pos_approval_code = pcRef;
       }
-      if (phone)   body.customer_phone = phone;
-      if (company) body.company_name   = company;
+
       if (selectedMethod === 'CASH') {
         const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
         const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -663,6 +701,10 @@ const Cashier = (() => {
         }
       }
 
+      if (phone)   body.customer_phone = phone;
+      if (company) body.company_name   = company;
+
+      // ── Submit ────────────────────────────────────────────
       const res = await Auth.fetch(
         `/api/v1/jobs/${activeJob.id}/cashier/confirm/`, {
           method : 'POST',
@@ -1214,7 +1256,46 @@ const Cashier = (() => {
     return Object.entries(breakdown || {})
       .reduce((sum, [d, c]) => sum + parseInt(d) * parseInt(c), 0);
   }
-function _showPhysicalConfirmScreen(floatId, openingFloat) {
+
+  function _initFullCredit() {
+    if (!activeJob?.customer_credit) return;
+    const credit  = activeJob.customer_credit;
+    const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const jobAmt  = parseFloat(activeJob.estimated_cost || 0);
+
+    const el = document.getElementById('full-credit-fields');
+    if (!el) return;
+
+    el.innerHTML = `
+      <div style="margin-top:12px;padding:14px 16px;
+        background:var(--amber-bg);border:1px solid var(--amber-border);
+        border-radius:var(--radius-sm);">
+        <div style="font-size:11px;font-weight:700;color:var(--amber-text);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+          Credit Account
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--amber-text);">${_esc(credit.display_name)}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+            font-weight:700;color:var(--amber-text);">
+            ${fmt(credit.available_credit)} available
+          </span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="font-size:12px;color:var(--amber-text);">Amount to charge</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:14px;
+            font-weight:800;color:var(--amber-text);">${fmt(jobAmt)}</span>
+        </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--amber-border);
+          font-size:11px;color:var(--amber-text);">
+          GHS 0.00 collected now — full amount added to credit account
+        </div>
+      </div>`;
+
+    _updateConfirmBtn();
+  }
+
+  function _showPhysicalConfirmScreen(floatId, openingFloat) {
     if (document.getElementById('physical-confirm-overlay')) return;
 
     const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
@@ -3499,6 +3580,7 @@ function _renderCreditPane(container) {
     _submitFloatAck,
     _confirmHandover,
     _checkIntakeHeldJobs,
+    _initFullCredit,
     _submitPhysicalConfirm,
     _submitReConfirm,
   };

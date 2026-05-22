@@ -21,21 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def confirm_payment(job, validated_data: dict, actor) -> dict:
-    """
-    Execute the full cashier payment confirmation flow.
-
-    Args:
-        job            : Job instance in PENDING_PAYMENT status
-        validated_data : dict from CashierPaymentSerializer.validated_data
-        actor          : CustomUser (the cashier)
-
-    Returns:
-        dict — result payload for the API response
-
-    Raises:
-        ValueError      — split legs mismatch, FSM rejection
-        PermissionError — FSM permission check
-    """
     from apps.jobs.status_engine import JobStatusEngine
     from apps.jobs.models import Job
 
@@ -43,6 +28,10 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     notes          = validated_data.get('notes', '')
     payment_method = validated_data.get('payment_method', 'CASH')
     split_legs     = validated_data.get('split_legs', [])
+
+    # ── Full credit payment (Mr. Doodoo flow) ─────────────────────────
+    if payment_method == 'CREDIT':
+        return _handle_full_credit(job, validated_data, actor, notes)
 
     # ── Calculate amount paid ─────────────────────────────────────────
     if job.estimated_cost:
@@ -95,8 +84,85 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
 
     return result
 
-
 # ── Private helpers ───────────────────────────────────────────────────────────
+def _handle_full_credit(job, validated_data, actor, notes):
+    """
+    Full credit payment flow — amount_paid=0, full job value
+    goes onto the customer's credit account.
+    Used when payment_method=CREDIT with no partial cash component.
+    """
+    from apps.jobs.status_engine import JobStatusEngine
+    from apps.jobs.models import Job
+    from apps.finance.models import CreditAccount, DailySalesSheet
+    from apps.finance.credit_engine import CreditEngine
+    from django.db.models import F
+
+    credit_account_id = validated_data.get('credit_account_id')
+    if not credit_account_id:
+        raise ValueError('Credit account is required for full credit payment.')
+
+    try:
+        credit_account = CreditAccount.objects.get(pk=credit_account_id)
+    except CreditAccount.DoesNotExist:
+        raise ValueError('Credit account not found.')
+
+    credit_amount = job.estimated_cost or Decimal('0')
+    if credit_amount <= 0:
+        raise ValueError('Job has no estimated cost — cannot issue credit.')
+
+    # Check credit limit
+    engine = CreditEngine(credit_account)
+    engine.check_or_raise(credit_amount)
+
+    # Get today's sheet
+    sheet = DailySalesSheet.objects.filter(
+        branch=job.branch,
+        status=DailySalesSheet.Status.OPEN,
+    ).order_by('-date').first()
+    if not sheet:
+        raise ValueError('No open sheet — cannot process credit payment.')
+
+    # Persist payment fields — amount_paid=0 for full credit
+    job.deposit_percentage = 100
+    job.amount_paid        = Decimal('0.00')
+    job.payment_method     = 'CREDIT'
+    job.credit_account     = credit_account
+    job.save(update_fields=[
+        'deposit_percentage', 'amount_paid',
+        'payment_method', 'credit_account', 'updated_at',
+    ])
+
+    # Issue credit against the account
+    engine.issue_credit(
+        job         = job,
+        amount      = credit_amount,
+        actor       = actor,
+        daily_sheet = sheet,
+    )
+
+    # Update sheet credit issued total
+    DailySalesSheet.objects.filter(pk=sheet.pk).update(
+        total_credit_issued=F('total_credit_issued') + credit_amount
+    )
+
+    # Advance FSM to COMPLETE
+    result = JobStatusEngine.advance(
+        job       = job,
+        to_status = Job.COMPLETE,
+        actor     = actor,
+        notes     = notes or f"Full credit — GHS {credit_amount} charged to {credit_account.customer.full_name}",
+    )
+
+    result['deposit_percentage'] = 100
+    result['amount_paid']        = '0.00'
+    result['balance_due']        = '0.00'
+    result['payment_method']     = 'CREDIT'
+    result['credit_amount']      = str(credit_amount)
+
+    # Issue receipt with CREDIT payment method
+    _issue_receipt(job, validated_data, actor, 'CREDIT', [], Decimal('0.00'), result)
+
+    return result
 
 def _issue_receipt(job, validated_data, actor, payment_method, split_legs, amount_paid, result):
     """Issue a receipt and attach receipt info to result dict. Never raises."""

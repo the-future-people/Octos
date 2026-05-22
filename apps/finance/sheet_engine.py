@@ -534,9 +534,13 @@ class SheetEngine:
                         cashier     = cashier,
                     ).first()
 
-                    opening = Decimal('0.00')
+                    DEFAULT_FLOAT = Decimal('100.00')
+                    opening = DEFAULT_FLOAT
                     if float_record and float_record.closing_cash:
                         opening = float_record.closing_cash
+                    # Never stage zero — fall back to default
+                    if opening <= Decimal('0.00'):
+                        opening = DEFAULT_FLOAT
 
                     FloatEngine.stage_float(
                         cashier     = cashier,
