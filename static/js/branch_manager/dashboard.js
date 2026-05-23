@@ -1581,7 +1581,7 @@ win.document.write(`<!DOCTYPE html>
     if (tab === 'archive') await _renderSheetsArchive(content);
   }
 
-  async function _renderTodaySheet(container) {
+ async function _renderTodaySheet(container) {
     try {
       const todayRes = await Auth.fetch('/api/v1/finance/sheets/today/summary/');
       if (!todayRes.ok) throw new Error();
@@ -1660,7 +1660,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Registered Jobs</div>
             <div style="font-size:18px;font-weight:700;color:var(--text);"
-              id="sheet-registered-jobs">?</div>
+              id="sheet-registered-jobs">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               linked to a customer</div>
           </div>
@@ -1669,7 +1669,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Walk-in Jobs</div>
             <div style="font-size:18px;font-weight:700;color:var(--green-text);"
-              id="sheet-walkin-jobs">?</div>
+              id="sheet-walkin-jobs">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               no customer linked</div>
           </div>
@@ -1678,7 +1678,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Registration Rate</div>
             <div style="font-size:18px;font-weight:700;"
-              id="sheet-reg-rate">?</div>
+              id="sheet-reg-rate">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               of jobs have a customer</div>
           </div>
@@ -1724,202 +1724,232 @@ win.document.write(`<!DOCTYPE html>
           ${_esc(sheet.notes)}
         </div>` : ''}`;
 
-    // -- Populate computed fields ------------------------------
-    // Total revenue
-    const totalRevenue = liveTotal;
+      // ── Job stats ──────────────────────────────────────────
+      try {
+        const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
+        if (statsRes.ok) {
+          const stats      = await statsRes.json();
+          const total      = stats.total      || 0;
+          const registered = stats.registered || 0;
+          const walkin     = stats.walkin     || total - registered;
+          const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
+          const rateColor  = rate >= 60 ? 'var(--green-text)'
+            : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
 
-    // Job stats from stats endpoint
-    try {
-      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
-      if (statsRes.ok) {
-        const stats = await statsRes.json();
-        const total     = stats.total || 0;
-        const registered = stats.registered || 0;
-        const walkin     = stats.walkin     || total - registered;
-        const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
-        const rateColor  = rate >= 60 ? 'var(--green-text)'
-          : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
+          _set('sheet-registered-jobs', registered);
+          _set('sheet-walkin-jobs',     walkin);
 
-        _set('sheet-registered-jobs', registered);
-        _set('sheet-walkin-jobs',     walkin);
+          const rateEl = document.getElementById('sheet-reg-rate');
+          if (rateEl) {
+            rateEl.textContent = `${rate}%`;
+            rateEl.style.color = rateColor;
+          }
 
-        const rateEl = document.getElementById('sheet-reg-rate');
-        if (rateEl) {
-          rateEl.textContent = `${rate}%`;
-          rateEl.style.color = rateColor;
-        }
-
-        // Outstanding jobs alert
-        const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
-        if (outstanding > 0 && sheet.status === 'OPEN') {
-          const existingAlert = document.getElementById('sheet-outstanding-alert');
-          if (!existingAlert) {
-            const alertDiv = document.createElement('div');
-            alertDiv.id = 'sheet-outstanding-alert';
-            alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
-              background:var(--amber-bg);border:1px solid var(--amber-border);
-              border-radius:var(--radius-sm);font-size:13px;
-              color:var(--amber-text);font-weight:600;
-              display:flex;align-items:center;gap:8px;`;
-            alertDiv.innerHTML = `
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
-              (${stats.pending || 0} pending payment ? ${stats.in_progress || 0} in progress)`;
-            container.appendChild(alertDiv);
+          // Outstanding jobs alert
+          const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
+          if (outstanding > 0 && sheet.status === 'OPEN') {
+            const existingAlert = document.getElementById('sheet-outstanding-alert');
+            if (!existingAlert) {
+              const alertDiv = document.createElement('div');
+              alertDiv.id = 'sheet-outstanding-alert';
+              alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
+                background:var(--amber-bg);border:1px solid var(--amber-border);
+                border-radius:var(--radius-sm);font-size:13px;
+                color:var(--amber-text);font-weight:600;
+                display:flex;align-items:center;gap:8px;`;
+              alertDiv.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
+                (${stats.pending || 0} pending payment · ${stats.in_progress || 0} in progress)`;
+              container.appendChild(alertDiv);
+            }
           }
         }
+      } catch { /* silent */ }
 
-        // ── Analytics strip — uses summary.pace (already fetched) ──
-        if (sheet.status === 'OPEN' && summary.pace?.jobs_per_hour != null) {
-          const p             = summary.pace;
-          const paceColor     = p.pace_change_pct == null ? 'var(--text-3)'
-            : p.pace_change_pct >= 0 ? 'var(--green-text)' : 'var(--red-text)';
-          const paceArrow     = p.pace_change_pct == null ? ''
-            : p.pace_change_pct >= 0 ? '↑' : '↓';
-          const paceVsYday    = p.pace_change_pct == null ? ''
-            : `<span style="font-size:11px;font-weight:700;color:${paceColor};margin-left:6px;">
-                ${paceArrow} ${Math.abs(p.pace_change_pct)}% vs yesterday
-               </span>`;
-          const avgToday      = p.avg_job_value_today != null
-            ? `GHS ${parseFloat(p.avg_job_value_today).toFixed(2)}` : '—';
-          const avg7d         = p.avg_job_value_7d != null
-            ? `GHS ${parseFloat(p.avg_job_value_7d).toFixed(2)}` : '—';
-          const avgColor      = (p.avg_job_value_today != null && p.avg_job_value_7d != null)
-            ? (p.avg_job_value_today >= p.avg_job_value_7d ? 'var(--green-text)' : 'var(--red-text)')
-            : 'var(--text)';
+      // ── Analytics + Prediction strip ───────────────────────
+      if (sheet.status === 'OPEN' && summary.pace?.jobs_per_hour != null) {
+        const p = summary.pace;
 
-          const strip = document.createElement('div');
-          strip.id    = 'sheet-pace-strip';
-          strip.style.cssText = `margin-top:10px;padding:12px 16px;
-            background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius-sm);
-            display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;`;
-          strip.innerHTML = `
-            <div style="padding-right:16px;border-right:1px solid var(--border);">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Branch Pace
-              </div>
-              <div style="display:flex;align-items:baseline;gap:4px;">
-                <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                  color:var(--text);font-size:18px;">${p.jobs_per_hour}</span>
-                <span style="font-size:11px;color:var(--text-3);">jobs/hr</span>
-                ${paceVsYday}
-              </div>
-              ${p.projected_eod != null ? `
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                Projected EOD: <strong style="color:var(--text);">${p.projected_eod} jobs</strong>
-              </div>` : ''}
+        const paceColor  = p.pace_change_pct == null ? 'var(--text-3)'
+          : p.pace_change_pct >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+        const paceArrow  = p.pace_change_pct == null ? ''
+          : p.pace_change_pct >= 0 ? '↑' : '↓';
+        const paceVsYday = p.pace_change_pct == null ? ''
+          : `<span style="font-size:11px;font-weight:700;color:${paceColor};margin-left:6px;">
+              ${paceArrow} ${Math.abs(p.pace_change_pct)}% vs yesterday
+             </span>`;
+
+        const avgToday = p.avg_job_value_today != null
+          ? `GHS ${parseFloat(p.avg_job_value_today).toFixed(2)}` : '—';
+        const avg7d    = p.avg_job_value_7d != null
+          ? `GHS ${parseFloat(p.avg_job_value_7d).toFixed(2)}` : '—';
+        const avgColor = (p.avg_job_value_today != null && p.avg_job_value_7d != null)
+          ? (p.avg_job_value_today >= p.avg_job_value_7d ? 'var(--green-text)' : 'var(--red-text)')
+          : 'var(--text)';
+
+        // Confidence colour
+        const confColor = p.confidence_pct == null ? 'var(--text-3)'
+          : p.confidence_pct >= 70 ? 'var(--green-text)'
+          : p.confidence_pct >= 40 ? 'var(--amber-text)'
+          : 'var(--text-3)';
+
+        const strip = document.createElement('div');
+        strip.id    = 'sheet-pace-strip';
+        strip.style.cssText = `margin-top:10px;padding:12px 16px;
+          background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius-sm);
+          display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;`;
+
+        strip.innerHTML = `
+          <!-- Col 1: Branch Pace -->
+          <div style="padding-right:16px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Branch Pace
             </div>
-            <div style="padding:0 16px;border-right:1px solid var(--border);">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Avg Job Value Today
-              </div>
-              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                font-size:18px;color:${avgColor};">${avgToday}</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                7-day avg: <strong style="color:var(--text);">${avg7d}</strong>
-              </div>
+            <div style="display:flex;align-items:baseline;gap:4px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                color:var(--text);font-size:18px;">${p.jobs_per_hour}</span>
+              <span style="font-size:11px;color:var(--text-3);">jobs/hr</span>
+              ${paceVsYday}
             </div>
-            <div style="padding-left:16px;">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Hours Open
+            ${p.yesterday_per_hour != null ? `
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              Yesterday: <strong style="color:var(--text);">${p.yesterday_per_hour} jobs/hr</strong>
+            </div>` : ''}
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              ${p.hours_open}h open
+              ${p.close_hour != null ? `· closes ~${p.close_hour}:00` : ''}
+            </div>
+          </div>
+
+          <!-- Col 2: Predicted EOD -->
+          <div style="padding:0 16px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Predicted EOD
+            </div>
+            <div style="display:flex;align-items:baseline;gap:6px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                font-size:18px;color:var(--text);">
+                ${p.predicted_jobs_eod != null ? p.predicted_jobs_eod : (p.projected_eod || '—')}
+              </span>
+              <span style="font-size:11px;color:var(--text-3);">jobs</span>
+            </div>
+            ${p.predicted_revenue_eod != null ? `
+            <div style="font-size:11px;font-weight:700;color:var(--green-text);margin-top:3px;">
+              ${_fmt(p.predicted_revenue_eod)} revenue
+            </div>` : ''}
+            ${p.confidence_pct != null ? `
+            <div style="margin-top:6px;">
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span style="font-size:10px;color:var(--text-3);">Confidence</span>
+                <span style="font-size:10px;font-weight:700;color:${confColor};">
+                  ${p.confidence_pct}%
+                </span>
               </div>
-              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                font-size:18px;color:var(--text);">${p.hours_open}h</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                ${p.yesterday_per_hour != null
-                  ? `Yesterday: <strong style="color:var(--text);">${p.yesterday_per_hour} jobs/hr</strong>`
-                  : 'No comparison data'}
+              <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;">
+                <div style="height:100%;width:${p.confidence_pct}%;border-radius:2px;
+                  background:${confColor};transition:width 0.4s ease;"></div>
               </div>
+            </div>` : ''}
+          </div>
+
+          <!-- Col 3: Avg Job Value -->
+          <div style="padding-left:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Avg Job Value Today
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
+              font-size:18px;color:${avgColor};">${avgToday}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              7-day avg: <strong style="color:var(--text);">${avg7d}</strong>
+            </div>
+          </div>`;
+
+        container.appendChild(strip);
+      }
+
+      // ── Inventory snapshot ─────────────────────────────────
+      if (sheet.status === 'OPEN') {
+        const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
+        if (invItems.length) {
+          const lowItems = invItems.filter(i => i.is_low);
+          const invDiv   = document.createElement('div');
+          invDiv.style.cssText = 'margin-top:16px;';
+          invDiv.innerHTML = `
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+              display:flex;align-items:center;gap:8px;">
+              Current Stock Levels
+              ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+                background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+                ${lowItems.length} low</span>` : ''}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+              ${invItems.map(item => {
+                const qty         = parseFloat(item.closing);
+                const consumed    = parseFloat(item.consumed || 0);
+                const isCrit      = qty === 0;
+                const isLow       = item.is_low;
+                const isPct       = (item.unit || '').includes('%');
+                const unit        = item.unit || 'units';
+                const fmtQty      = n => isPct
+                  ? `${parseFloat(n).toFixed(1)}%`
+                  : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+                const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+                const total       = qty + consumed;
+                const fillPct     = isPct
+                  ? Math.min(100, qty)
+                  : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
+                const consumedLabel = consumed > 0
+                  ? `${fmtQty(consumed)} ${unit} consumed today`
+                  : 'No consumption recorded today';
+                const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
+                return `
+                  <div title="${_esc(tooltip)}"
+                    style="position:relative;overflow:hidden;padding:9px 12px;
+                      background:var(--panel);
+                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                      border-radius:var(--radius-sm);
+                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                    <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                      background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                      <div style="position:absolute;bottom:0;left:0;width:100%;
+                        height:${fillPct.toFixed(1)}%;background:${statusColor};
+                        border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                        transition:height 0.3s ease;"></div>
+                    </div>
+                    <span style="font-size:11px;font-weight:600;
+                      color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                      flex:1;min-width:0;">${_esc(item.consumable)}</span>
+                    <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
+                      ${consumed > 0 ? `
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                          font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                        <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                        font-weight:700;
+                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                        ${fmtQty(qty)}
+                      </span>
+                    </div>
+                  </div>`;
+              }).join('')}
             </div>`;
-          container.appendChild(strip);
+          container.appendChild(invDiv);
         }
       }
-    } catch { /* silent */ }
 
-    // ── Consumables snapshot — uses summary.inventory (already fetched) ──
-    if (sheet.status === 'OPEN') {
-      const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
-      if (invItems.length) {
-        const lowItems  = invItems.filter(i => i.is_low);
-        const invDiv    = document.createElement('div');
-        invDiv.style.cssText = 'margin-top:16px;';
-        invDiv.innerHTML = `
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
-            display:flex;align-items:center;gap:8px;">
-            Current Stock Levels
-            ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
-              background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
-              ${lowItems.length} low</span>` : ''}
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-            ${invItems.map(item => {
-              const qty      = parseFloat(item.closing);
-              const consumed = parseFloat(item.consumed || 0);
-              const rpt      = parseFloat(item.reorder_point || 0);
-              const isCrit   = qty === 0;
-              const isLow    = item.is_low;
-              const isPct    = (item.unit || '').includes('%');
-              const unit     = item.unit || 'units';
-              const fmtQty   = n => isPct
-                ? `${parseFloat(n).toFixed(1)}%`
-                : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-              const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-              const total    = qty + consumed;
-              const fillPct  = isPct ? Math.min(100, qty) : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
-
-              // Tooltip — human readable consumption
-              const consumedLabel = consumed > 0
-                ? `${fmtQty(consumed)} ${unit} consumed today`
-                : 'No consumption recorded today';
-              const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
-
-              return `
-                <div title="${_esc(tooltip)}"
-                  style="position:relative;overflow:hidden;padding:9px 12px;
-                    background:var(--panel);
-                    border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-                    border-radius:var(--radius-sm);
-                    display:flex;align-items:center;justify-content:space-between;gap:8px;
-                    cursor:default;">
-                  <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                    background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                    <div style="position:absolute;bottom:0;left:0;width:100%;
-                      height:${fillPct.toFixed(1)}%;background:${statusColor};
-                      border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                      transition:height 0.3s ease;"></div>
-                  </div>
-                  <span style="font-size:11px;font-weight:600;
-                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                    flex:1;min-width:0;"
-                    >${_esc(item.consumable)}</span>
-                  <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
-                    ${consumed > 0 ? `
-                      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                        font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                      <span style="color:var(--border);font-size:10px;">·</span>` : ''}
-                    <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                      font-weight:700;color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                      ${fmtQty(qty)}
-                    </span>
-                  </div>
-                </div>`;
-            }).join('')}
-          </div>`;
-        container.appendChild(invDiv);
-      }
-    }
-        } catch {
+    } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
     }
   }
