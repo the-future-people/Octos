@@ -39,6 +39,7 @@ const Dashboard = (() => {
       loadRecentJobs(),
       _loadServicesAndCustomers(),
     ]);
+    await _checkFloatDispute();
     _renderMetrics(currentPeriod);
       Notifications.startPolling();
       WeekGreeter.init();
@@ -93,6 +94,138 @@ const Dashboard = (() => {
     } catch { /* silent */ }
     _checkHandoverBanners();
   }
+
+// -- Float dispute hard block ------------------------------
+  async function _checkFloatDispute() {
+    try {
+      const res = await Auth.fetch('/api/v1/finance/lock-status/');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.float_dispute_active) {
+        _showFloatDisputeBlock(
+          data.dispute_cashier_name,
+          data.dispute_float_amount,
+          data.dispute_float_id,
+        );
+      }
+    } catch { /* silent */ }
+  }
+
+  function _showFloatDisputeBlock(cashierName, floatAmount, floatId) {
+    const existing = document.getElementById('float-dispute-overlay');
+    if (existing) return;
+
+    const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'float-dispute-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:rgba(0,0,0,0.88);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:2px solid var(--red-border);
+        border-radius:var(--radius);width:100%;max-width:480px;
+        box-shadow:0 24px 64px rgba(0,0,0,0.4);overflow:hidden;">
+
+        <div style="padding:20px 24px;background:var(--red-bg);
+          border-bottom:1px solid var(--red-border);">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:10px;
+              background:#fee2e2;border:1px solid #fca5a5;
+              display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                viewBox="0 0 24 24" fill="none"
+                stroke="var(--red-text)" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div>
+              <div style="font-family:'Syne',sans-serif;font-size:17px;
+                font-weight:800;color:var(--red-text);">
+                Portal Blocked — Float Dispute
+              </div>
+              <div style="font-size:12px;color:var(--red-text);opacity:0.8;margin-top:2px;">
+                Regional Manager has been notified
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:24px;">
+          <div style="font-size:14px;color:var(--text);line-height:1.7;margin-bottom:20px;">
+            <strong>${_esc(cashierName)}</strong> reported that they did
+            <strong>not receive</strong> their opening float of
+            <strong style="color:var(--text);">${fmt(floatAmount)}</strong>
+            this morning.
+          </div>
+
+          <div style="padding:14px 16px;background:var(--amber-bg);
+            border:1px solid var(--amber-border);border-radius:var(--radius-sm);
+            margin-bottom:20px;">
+            <div style="font-size:13px;font-weight:700;color:var(--amber-text);
+              margin-bottom:4px;">Action required:</div>
+            <div style="font-size:13px;color:var(--amber-text);line-height:1.6;">
+              Physically hand <strong>${fmt(floatAmount)}</strong> to
+              <strong>${_esc(cashierName)}</strong>, then ask them to confirm
+              receipt on their cashier portal. This block will lift automatically
+              once they confirm.
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;">
+            <button onclick="Dashboard._pollFloatDisputeResolution(${floatId})"
+              id="dispute-poll-btn"
+              style="flex:1;padding:11px;background:var(--text);color:#fff;
+                border:none;border-radius:var(--radius-sm);font-size:13px;
+                font-weight:700;cursor:pointer;font-family:inherit;">
+              I have handed over the float — check for confirmation
+            </button>
+          </div>
+          <div id="dispute-poll-status"
+            style="margin-top:10px;font-size:12px;color:var(--text-3);
+              text-align:center;display:none;">
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+  }
+
+  async function _pollFloatDisputeResolution(floatId) {
+    const btn      = document.getElementById('dispute-poll-btn');
+    const statusEl = document.getElementById('dispute-poll-status');
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    if (statusEl) statusEl.style.display = 'none';
+
+    try {
+      const res = await Auth.fetch('/api/v1/finance/lock-status/');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!data.float_dispute_active) {
+        // Resolved — remove block
+        document.getElementById('float-dispute-overlay')?.remove();
+        _toast('Float dispute resolved. Portal unblocked.', 'success');
+        return;
+      }
+
+      // Still active
+      if (statusEl) {
+        statusEl.textContent  = `Cashier has not yet confirmed receipt. Ask them to tap "I have now received my float" on their portal.`;
+        statusEl.style.display = 'block';
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Check again'; }
+
+    } catch {
+      if (btn) { btn.disabled = false; btn.textContent = 'Check again'; }
+    }
+  }
+
 
 // -- Handover / Shadow banners ------------------------------
   async function _checkHandoverBanners() {
@@ -160,7 +293,7 @@ const Dashboard = (() => {
     } catch { /* silent — banners are non-critical */ }
   }
 
-  function _showActivationModal(pa) {
+ async function _showActivationModal(pa) {
     const overlay = document.createElement('div');
     overlay.id    = 'activation-overlay';
     overlay.style.cssText = `
@@ -172,35 +305,61 @@ const Dashboard = (() => {
     overlay.innerHTML = `
       <div style="text-align:center;max-width:480px;padding:48px 40px;
         background:#fff;border-radius:16px;box-shadow:0 32px 80px rgba(0,0,0,0.4);">
-        <div style="font-size:48px;margin-bottom:16px;">🎉</div>
+        <div style="font-size:48px;margin-bottom:16px;">⏳</div>
         <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;
-          color:#1a1a1a;margin-bottom:8px;">
-          Welcome aboard!
+          color:#1a1a1a;margin-bottom:8px;" id="activation-title">
+          Activating your account…
         </div>
-        <div style="font-size:15px;color:#555;margin-bottom:24px;line-height:1.6;">
-          Today is your first day at <strong>${_esc(pa.branch_name || 'this branch')}</strong>.<br>
-          Your full access is now active.
+        <div style="font-size:14px;color:#888;margin-bottom:28px;" id="activation-sub">
+          Please wait while we set up your full access.
         </div>
-        <div style="font-size:13px;color:#999;margin-bottom:28px;">
-          Reloading your portal in <span id="activation-countdown">5</span>s…
-        </div>
-        <button onclick="location.reload()"
-          style="padding:12px 32px;background:#1a3599;color:#fff;border:none;
-            border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;">
-          Start Now
-        </button>
       </div>`;
 
     document.body.appendChild(overlay);
 
-    let count = 5;
-    const timer = setInterval(() => {
-      count--;
-      const el = document.getElementById('activation-countdown');
-      if (el) el.textContent = count;
-      if (count <= 0) { clearInterval(timer); location.reload(); }
-    }, 1000);
+    try {
+      const res = await Auth.fetch(
+        '/api/v1/accounts/pending-activation/self-activate/',
+        { method: 'POST' }
+      );
+
+      const titleEl = document.getElementById('activation-title');
+      const subEl   = document.getElementById('activation-sub');
+      const iconEl  = overlay.querySelector('div[style*="font-size:48px"]');
+
+      if (res && res.ok) {
+        // Success — show welcome message then reload
+        if (iconEl)  iconEl.textContent  = '🎉';
+        if (titleEl) titleEl.textContent = 'Welcome aboard!';
+        if (subEl)   subEl.innerHTML     = `
+          Today is your first day at <strong>${_esc(pa.branch_name || 'this branch')}</strong>.<br>
+          Your full access is now active. Reloading in <span id="activation-countdown">5</span>s…`;
+
+        let count = 5;
+        const timer = setInterval(() => {
+          count--;
+          const el = document.getElementById('activation-countdown');
+          if (el) el.textContent = count;
+          if (count <= 0) { clearInterval(timer); location.reload(); }
+        }, 1000);
+
+      } else {
+        // Failed — show error, offer manual reload
+        if (iconEl)  iconEl.textContent  = '⚠️';
+        if (titleEl) titleEl.textContent = 'Activation failed';
+        if (subEl)   subEl.innerHTML     = `
+          Something went wrong. Please contact HR or try reloading.<br><br>
+          <button onclick="location.reload()"
+            style="padding:10px 24px;background:#111;color:#fff;border:none;
+              border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+            Reload
+          </button>`;
+      }
+    } catch {
+      document.getElementById('activation-title').textContent = 'Network error';
+      document.getElementById('activation-sub').textContent   =
+        'Could not reach the server. Please reload and try again.';
+    }
   }
 
   function _showFarewellModal(pa, user) {
@@ -252,7 +411,7 @@ const Dashboard = (() => {
       if (count <= 0) { clearInterval(timer); Auth.logout(); }
     }, 1000);
   }
-  
+
   function _injectBanner({ id, color, bg, border, icon, message, sub }) {
     // Remove existing banner of same id
     document.getElementById(id)?.remove();
@@ -1422,7 +1581,7 @@ win.document.write(`<!DOCTYPE html>
     if (tab === 'archive') await _renderSheetsArchive(content);
   }
 
-  async function _renderTodaySheet(container) {
+ async function _renderTodaySheet(container) {
     try {
       const todayRes = await Auth.fetch('/api/v1/finance/sheets/today/summary/');
       if (!todayRes.ok) throw new Error();
@@ -1501,7 +1660,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Registered Jobs</div>
             <div style="font-size:18px;font-weight:700;color:var(--text);"
-              id="sheet-registered-jobs">?</div>
+              id="sheet-registered-jobs">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               linked to a customer</div>
           </div>
@@ -1510,7 +1669,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Walk-in Jobs</div>
             <div style="font-size:18px;font-weight:700;color:var(--green-text);"
-              id="sheet-walkin-jobs">?</div>
+              id="sheet-walkin-jobs">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               no customer linked</div>
           </div>
@@ -1519,7 +1678,7 @@ win.document.write(`<!DOCTYPE html>
               text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
               Registration Rate</div>
             <div style="font-size:18px;font-weight:700;"
-              id="sheet-reg-rate">?</div>
+              id="sheet-reg-rate">—</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
               of jobs have a customer</div>
           </div>
@@ -1565,202 +1724,232 @@ win.document.write(`<!DOCTYPE html>
           ${_esc(sheet.notes)}
         </div>` : ''}`;
 
-    // -- Populate computed fields ------------------------------
-    // Total revenue
-    const totalRevenue = liveTotal;
+      // ── Job stats ──────────────────────────────────────────
+      try {
+        const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
+        if (statsRes.ok) {
+          const stats      = await statsRes.json();
+          const total      = stats.total      || 0;
+          const registered = stats.registered || 0;
+          const walkin     = stats.walkin     || total - registered;
+          const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
+          const rateColor  = rate >= 60 ? 'var(--green-text)'
+            : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
 
-    // Job stats from stats endpoint
-    try {
-      const statsRes = await Auth.fetch(`/api/v1/jobs/stats/?daily_sheet=${sheet.id}`);
-      if (statsRes.ok) {
-        const stats = await statsRes.json();
-        const total     = stats.total || 0;
-        const registered = stats.registered || 0;
-        const walkin     = stats.walkin     || total - registered;
-        const rate       = total > 0 ? Math.round(registered / total * 100) : 0;
-        const rateColor  = rate >= 60 ? 'var(--green-text)'
-          : rate >= 30 ? 'var(--amber-text)' : 'var(--red-text)';
+          _set('sheet-registered-jobs', registered);
+          _set('sheet-walkin-jobs',     walkin);
 
-        _set('sheet-registered-jobs', registered);
-        _set('sheet-walkin-jobs',     walkin);
+          const rateEl = document.getElementById('sheet-reg-rate');
+          if (rateEl) {
+            rateEl.textContent = `${rate}%`;
+            rateEl.style.color = rateColor;
+          }
 
-        const rateEl = document.getElementById('sheet-reg-rate');
-        if (rateEl) {
-          rateEl.textContent = `${rate}%`;
-          rateEl.style.color = rateColor;
-        }
-
-        // Outstanding jobs alert
-        const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
-        if (outstanding > 0 && sheet.status === 'OPEN') {
-          const existingAlert = document.getElementById('sheet-outstanding-alert');
-          if (!existingAlert) {
-            const alertDiv = document.createElement('div');
-            alertDiv.id = 'sheet-outstanding-alert';
-            alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
-              background:var(--amber-bg);border:1px solid var(--amber-border);
-              border-radius:var(--radius-sm);font-size:13px;
-              color:var(--amber-text);font-weight:600;
-              display:flex;align-items:center;gap:8px;`;
-            alertDiv.innerHTML = `
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
-              (${stats.pending || 0} pending payment ? ${stats.in_progress || 0} in progress)`;
-            container.appendChild(alertDiv);
+          // Outstanding jobs alert
+          const outstanding = (stats.pending || 0) + (stats.in_progress || 0);
+          if (outstanding > 0 && sheet.status === 'OPEN') {
+            const existingAlert = document.getElementById('sheet-outstanding-alert');
+            if (!existingAlert) {
+              const alertDiv = document.createElement('div');
+              alertDiv.id = 'sheet-outstanding-alert';
+              alertDiv.style.cssText = `margin-top:10px;padding:10px 16px;
+                background:var(--amber-bg);border:1px solid var(--amber-border);
+                border-radius:var(--radius-sm);font-size:13px;
+                color:var(--amber-text);font-weight:600;
+                display:flex;align-items:center;gap:8px;`;
+              alertDiv.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                ${outstanding} job${outstanding !== 1 ? 's' : ''} still outstanding
+                (${stats.pending || 0} pending payment · ${stats.in_progress || 0} in progress)`;
+              container.appendChild(alertDiv);
+            }
           }
         }
+      } catch { /* silent */ }
 
-        // ── Analytics strip — uses summary.pace (already fetched) ──
-        if (sheet.status === 'OPEN' && summary.pace?.jobs_per_hour != null) {
-          const p             = summary.pace;
-          const paceColor     = p.pace_change_pct == null ? 'var(--text-3)'
-            : p.pace_change_pct >= 0 ? 'var(--green-text)' : 'var(--red-text)';
-          const paceArrow     = p.pace_change_pct == null ? ''
-            : p.pace_change_pct >= 0 ? '↑' : '↓';
-          const paceVsYday    = p.pace_change_pct == null ? ''
-            : `<span style="font-size:11px;font-weight:700;color:${paceColor};margin-left:6px;">
-                ${paceArrow} ${Math.abs(p.pace_change_pct)}% vs yesterday
-               </span>`;
-          const avgToday      = p.avg_job_value_today != null
-            ? `GHS ${parseFloat(p.avg_job_value_today).toFixed(2)}` : '—';
-          const avg7d         = p.avg_job_value_7d != null
-            ? `GHS ${parseFloat(p.avg_job_value_7d).toFixed(2)}` : '—';
-          const avgColor      = (p.avg_job_value_today != null && p.avg_job_value_7d != null)
-            ? (p.avg_job_value_today >= p.avg_job_value_7d ? 'var(--green-text)' : 'var(--red-text)')
-            : 'var(--text)';
+      // ── Analytics + Prediction strip ───────────────────────
+      if (sheet.status === 'OPEN' && summary.pace?.jobs_per_hour != null) {
+        const p = summary.pace;
 
-          const strip = document.createElement('div');
-          strip.id    = 'sheet-pace-strip';
-          strip.style.cssText = `margin-top:10px;padding:12px 16px;
-            background:var(--panel);border:1px solid var(--border);
-            border-radius:var(--radius-sm);
-            display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;`;
-          strip.innerHTML = `
-            <div style="padding-right:16px;border-right:1px solid var(--border);">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Branch Pace
-              </div>
-              <div style="display:flex;align-items:baseline;gap:4px;">
-                <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                  color:var(--text);font-size:18px;">${p.jobs_per_hour}</span>
-                <span style="font-size:11px;color:var(--text-3);">jobs/hr</span>
-                ${paceVsYday}
-              </div>
-              ${p.projected_eod != null ? `
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                Projected EOD: <strong style="color:var(--text);">${p.projected_eod} jobs</strong>
-              </div>` : ''}
+        const paceColor  = p.pace_change_pct == null ? 'var(--text-3)'
+          : p.pace_change_pct >= 0 ? 'var(--green-text)' : 'var(--red-text)';
+        const paceArrow  = p.pace_change_pct == null ? ''
+          : p.pace_change_pct >= 0 ? '↑' : '↓';
+        const paceVsYday = p.pace_change_pct == null ? ''
+          : `<span style="font-size:11px;font-weight:700;color:${paceColor};margin-left:6px;">
+              ${paceArrow} ${Math.abs(p.pace_change_pct)}% vs yesterday
+             </span>`;
+
+        const avgToday = p.avg_job_value_today != null
+          ? `GHS ${parseFloat(p.avg_job_value_today).toFixed(2)}` : '—';
+        const avg7d    = p.avg_job_value_7d != null
+          ? `GHS ${parseFloat(p.avg_job_value_7d).toFixed(2)}` : '—';
+        const avgColor = (p.avg_job_value_today != null && p.avg_job_value_7d != null)
+          ? (p.avg_job_value_today >= p.avg_job_value_7d ? 'var(--green-text)' : 'var(--red-text)')
+          : 'var(--text)';
+
+        // Confidence colour
+        const confColor = p.confidence_pct == null ? 'var(--text-3)'
+          : p.confidence_pct >= 70 ? 'var(--green-text)'
+          : p.confidence_pct >= 40 ? 'var(--amber-text)'
+          : 'var(--text-3)';
+
+        const strip = document.createElement('div');
+        strip.id    = 'sheet-pace-strip';
+        strip.style.cssText = `margin-top:10px;padding:12px 16px;
+          background:var(--panel);border:1px solid var(--border);
+          border-radius:var(--radius-sm);
+          display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;`;
+
+        strip.innerHTML = `
+          <!-- Col 1: Branch Pace -->
+          <div style="padding-right:16px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Branch Pace
             </div>
-            <div style="padding:0 16px;border-right:1px solid var(--border);">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Avg Job Value Today
-              </div>
-              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                font-size:18px;color:${avgColor};">${avgToday}</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                7-day avg: <strong style="color:var(--text);">${avg7d}</strong>
-              </div>
+            <div style="display:flex;align-items:baseline;gap:4px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                color:var(--text);font-size:18px;">${p.jobs_per_hour}</span>
+              <span style="font-size:11px;color:var(--text-3);">jobs/hr</span>
+              ${paceVsYday}
             </div>
-            <div style="padding-left:16px;">
-              <div style="font-size:10px;font-weight:700;color:var(--text-3);
-                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
-                Hours Open
+            ${p.yesterday_per_hour != null ? `
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              Yesterday: <strong style="color:var(--text);">${p.yesterday_per_hour} jobs/hr</strong>
+            </div>` : ''}
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              ${p.hours_open}h open
+              ${p.close_hour != null ? `· closes ~${p.close_hour}:00` : ''}
+            </div>
+          </div>
+
+          <!-- Col 2: Predicted EOD -->
+          <div style="padding:0 16px;border-right:1px solid var(--border);">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Predicted EOD
+            </div>
+            <div style="display:flex;align-items:baseline;gap:6px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-weight:800;
+                font-size:18px;color:var(--text);">
+                ${p.predicted_jobs_eod != null ? p.predicted_jobs_eod : (p.projected_eod || '—')}
+              </span>
+              <span style="font-size:11px;color:var(--text-3);">jobs</span>
+            </div>
+            ${p.predicted_revenue_eod != null ? `
+            <div style="font-size:11px;font-weight:700;color:var(--green-text);margin-top:3px;">
+              ${_fmt(p.predicted_revenue_eod)} revenue
+            </div>` : ''}
+            ${p.confidence_pct != null ? `
+            <div style="margin-top:6px;">
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span style="font-size:10px;color:var(--text-3);">Confidence</span>
+                <span style="font-size:10px;font-weight:700;color:${confColor};">
+                  ${p.confidence_pct}%
+                </span>
               </div>
-              <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
-                font-size:18px;color:var(--text);">${p.hours_open}h</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
-                ${p.yesterday_per_hour != null
-                  ? `Yesterday: <strong style="color:var(--text);">${p.yesterday_per_hour} jobs/hr</strong>`
-                  : 'No comparison data'}
+              <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;">
+                <div style="height:100%;width:${p.confidence_pct}%;border-radius:2px;
+                  background:${confColor};transition:width 0.4s ease;"></div>
               </div>
+            </div>` : ''}
+          </div>
+
+          <!-- Col 3: Avg Job Value -->
+          <div style="padding-left:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+              Avg Job Value Today
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:800;
+              font-size:18px;color:${avgColor};">${avgToday}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:3px;">
+              7-day avg: <strong style="color:var(--text);">${avg7d}</strong>
+            </div>
+          </div>`;
+
+        container.appendChild(strip);
+      }
+
+      // ── Inventory snapshot ─────────────────────────────────
+      if (sheet.status === 'OPEN') {
+        const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
+        if (invItems.length) {
+          const lowItems = invItems.filter(i => i.is_low);
+          const invDiv   = document.createElement('div');
+          invDiv.style.cssText = 'margin-top:16px;';
+          invDiv.innerHTML = `
+            <div style="font-size:10px;font-weight:700;color:var(--text-3);
+              text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
+              display:flex;align-items:center;gap:8px;">
+              Current Stock Levels
+              ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
+                background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
+                ${lowItems.length} low</span>` : ''}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+              ${invItems.map(item => {
+                const qty         = parseFloat(item.closing);
+                const consumed    = parseFloat(item.consumed || 0);
+                const isCrit      = qty === 0;
+                const isLow       = item.is_low;
+                const isPct       = (item.unit || '').includes('%');
+                const unit        = item.unit || 'units';
+                const fmtQty      = n => isPct
+                  ? `${parseFloat(n).toFixed(1)}%`
+                  : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
+                const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
+                const total       = qty + consumed;
+                const fillPct     = isPct
+                  ? Math.min(100, qty)
+                  : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
+                const consumedLabel = consumed > 0
+                  ? `${fmtQty(consumed)} ${unit} consumed today`
+                  : 'No consumption recorded today';
+                const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
+                return `
+                  <div title="${_esc(tooltip)}"
+                    style="position:relative;overflow:hidden;padding:9px 12px;
+                      background:var(--panel);
+                      border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
+                      border-radius:var(--radius-sm);
+                      display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                    <div style="position:absolute;top:0;right:0;width:4px;height:100%;
+                      background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+                      <div style="position:absolute;bottom:0;left:0;width:100%;
+                        height:${fillPct.toFixed(1)}%;background:${statusColor};
+                        border-radius:0 0 var(--radius-sm) var(--radius-sm);
+                        transition:height 0.3s ease;"></div>
+                    </div>
+                    <span style="font-size:11px;font-weight:600;
+                      color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
+                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                      flex:1;min-width:0;">${_esc(item.consumable)}</span>
+                    <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
+                      ${consumed > 0 ? `
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
+                          font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
+                        <span style="color:var(--border);font-size:10px;">·</span>` : ''}
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                        font-weight:700;
+                        color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
+                        ${fmtQty(qty)}
+                      </span>
+                    </div>
+                  </div>`;
+              }).join('')}
             </div>`;
-          container.appendChild(strip);
+          container.appendChild(invDiv);
         }
       }
-    } catch { /* silent */ }
 
-    // ── Consumables snapshot — uses summary.inventory (already fetched) ──
-    if (sheet.status === 'OPEN') {
-      const invItems = (summary.inventory || []).filter(i => i.category !== 'Machinery');
-      if (invItems.length) {
-        const lowItems  = invItems.filter(i => i.is_low);
-        const invDiv    = document.createElement('div');
-        invDiv.style.cssText = 'margin-top:16px;';
-        invDiv.innerHTML = `
-          <div style="font-size:10px;font-weight:700;color:var(--text-3);
-            text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;
-            display:flex;align-items:center;gap:8px;">
-            Current Stock Levels
-            ${lowItems.length ? `<span style="padding:2px 8px;border-radius:20px;
-              background:var(--red-bg);color:var(--red-text);font-size:9px;font-weight:700;">
-              ${lowItems.length} low</span>` : ''}
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
-            ${invItems.map(item => {
-              const qty      = parseFloat(item.closing);
-              const consumed = parseFloat(item.consumed || 0);
-              const rpt      = parseFloat(item.reorder_point || 0);
-              const isCrit   = qty === 0;
-              const isLow    = item.is_low;
-              const isPct    = (item.unit || '').includes('%');
-              const unit     = item.unit || 'units';
-              const fmtQty   = n => isPct
-                ? `${parseFloat(n).toFixed(1)}%`
-                : parseFloat(n).toLocaleString('en-GH', { maximumFractionDigits: 1 });
-              const statusColor = isCrit ? '#dc2626' : isLow ? '#d97706' : '#16a34a';
-              const total    = qty + consumed;
-              const fillPct  = isPct ? Math.min(100, qty) : (total > 0 ? Math.min(100, (qty / total) * 100) : 0);
-
-              // Tooltip — human readable consumption
-              const consumedLabel = consumed > 0
-                ? `${fmtQty(consumed)} ${unit} consumed today`
-                : 'No consumption recorded today';
-              const tooltip = `${item.consumable} · ${consumedLabel} · Closing: ${fmtQty(qty)} ${unit}`;
-
-              return `
-                <div title="${_esc(tooltip)}"
-                  style="position:relative;overflow:hidden;padding:9px 12px;
-                    background:var(--panel);
-                    border:1px solid ${isCrit ? '#fca5a5' : isLow ? '#fcd34d' : 'var(--border)'};
-                    border-radius:var(--radius-sm);
-                    display:flex;align-items:center;justify-content:space-between;gap:8px;
-                    cursor:default;">
-                  <div style="position:absolute;top:0;right:0;width:4px;height:100%;
-                    background:#e5e7eb;border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
-                    <div style="position:absolute;bottom:0;left:0;width:100%;
-                      height:${fillPct.toFixed(1)}%;background:${statusColor};
-                      border-radius:0 0 var(--radius-sm) var(--radius-sm);
-                      transition:height 0.3s ease;"></div>
-                  </div>
-                  <span style="font-size:11px;font-weight:600;
-                    color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};
-                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                    flex:1;min-width:0;"
-                    >${_esc(item.consumable)}</span>
-                  <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-right:8px;">
-                    ${consumed > 0 ? `
-                      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;
-                        font-weight:600;color:#dc2626;">-${fmtQty(consumed)}</span>
-                      <span style="color:var(--border);font-size:10px;">·</span>` : ''}
-                    <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
-                      font-weight:700;color:${isCrit ? '#dc2626' : isLow ? '#d97706' : 'var(--text)'};">
-                      ${fmtQty(qty)}
-                    </span>
-                  </div>
-                </div>`;
-            }).join('')}
-          </div>`;
-        container.appendChild(invDiv);
-      }
-    }
-        } catch {
+    } catch {
       container.innerHTML = '<div class="loading-cell">Could not load today\'s sheet.</div>';
     }
   }
@@ -3343,6 +3532,7 @@ win.document.write(`<!DOCTYPE html>
     _lateJobSelectService,
     _checkLateJobButton,
     _showClosingModal,
+    _pollFloatDisputeResolution,
     // Catalogue delegates
     openAddServiceModal  : Catalogue.openAddServiceModal,
     closeAddServiceModal : Catalogue.closeAddServiceModal,

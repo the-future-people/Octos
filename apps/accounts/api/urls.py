@@ -14,4 +14,5 @@ urlpatterns = [
     path('permissions/', views.PermissionListView.as_view(), name='permission-list'),
     path('pending-activation/me/', views.PendingActivationMeView.as_view(), name='pending-activation-me'),
     path('pending-activation/displacing-me/', views.PendingActivationDisplacingMeView.as_view(), name='pending-activation-displacing-me'),
+    path('pending-activation/self-activate/', views.SelfActivateView.as_view(), name='self-activate'),
 ]

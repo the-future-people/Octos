@@ -122,6 +122,7 @@ class SheetEngine:
             if created:
                 self._assign_sheet_number(sheet, today)
                 self._link_staged_floats(sheet)
+                self._link_intake_held_jobs(sheet)
                 logger.info(
                     'SheetEngine: opened sheet %s for branch %s on %s',
                     sheet.pk, self.branch.code, today,
@@ -177,6 +178,26 @@ class SheetEngine:
         """
         from apps.finance.float_engine import FloatEngine
         return FloatEngine.link_staged_floats(sheet)
+
+    def _link_intake_held_jobs(self, sheet) -> int:
+        """
+        Detect INTAKE_HELD jobs for this branch with no daily_sheet.
+        Does NOT link them — that happens when cashier resolves each one.
+        Returns count so the cashier portal knows to show the handover modal.
+        """
+        from apps.jobs.models import Job
+        count = Job.objects.filter(
+            branch      = self.branch,
+            status      = Job.INTAKE_HELD,
+            daily_sheet = None,
+        ).count()
+        if count:
+            logger.info(
+                'SheetEngine: %d INTAKE_HELD job(s) pending handover resolution '
+                'for branch %s on sheet %s',
+                count, self.branch.code, sheet.pk,
+            )
+        return count
 
     # ── Lock status ───────────────────────────────────────────────────────────
 
@@ -513,9 +534,13 @@ class SheetEngine:
                         cashier     = cashier,
                     ).first()
 
-                    opening = Decimal('0.00')
+                    DEFAULT_FLOAT = Decimal('100.00')
+                    opening = DEFAULT_FLOAT
                     if float_record and float_record.closing_cash:
                         opening = float_record.closing_cash
+                    # Never stage zero — fall back to default
+                    if opening <= Decimal('0.00'):
+                        opening = DEFAULT_FLOAT
 
                     FloatEngine.stage_float(
                         cashier     = cashier,

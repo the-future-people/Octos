@@ -41,6 +41,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
+    'corsheaders',
 ]
 
 LOCAL_APPS = [
@@ -62,6 +63,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -182,3 +184,9 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=0, minute=1),  # 00:01 WAT daily
     },
 }
+
+# CORS
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]

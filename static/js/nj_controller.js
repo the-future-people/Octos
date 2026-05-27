@@ -1330,15 +1330,23 @@ function _resetConfigurator() {
     _onChannelChange();
   }
 
+  function _normalisePhone(raw) {
+    let p = String(raw || '').replace(/[\s\-().]/g, '');
+    if (p.startsWith('+233')) p = '0' + p.slice(4);
+    if (p.startsWith('233') && p.length >= 12) p = '0' + p.slice(3);
+    return p;
+  }
+
   function _filterCustomers(query) {
-    const q       = query.trim().toLowerCase();
-    const results = document.getElementById('nj-customer-results');
+    const q        = query.trim().toLowerCase();
+    const qPhone   = _normalisePhone(query.trim());
+    const results  = document.getElementById('nj-customer-results');
     if (!results) return;
 
     const filtered = State.customers.filter(c => {
       const name  = (c.display_name || c.full_name || '').toLowerCase();
-      const phone = (c.contact_phone || c.phone || '').toLowerCase();
-      return !q || name.includes(q) || phone.includes(q);
+      const phone = _normalisePhone(c.contact_phone || c.phone || '');
+      return !q || name.includes(q) || phone.includes(qPhone);
     });
 
     if (!filtered.length) {

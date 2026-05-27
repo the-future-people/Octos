@@ -2,6 +2,8 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
+from apps.accounts.models.activation import PendingActivation
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,7 +78,11 @@ def _activate_employee(activation, today):
 
     user = activation.user
 
-    # ── 1. Promote shadow user → ACTIVE ──────────────────────
+    # ── 1. Resolve conflict FIRST — clear the slot before assigning ──
+    if activation.conflict_user and activation.conflict_resolution:
+        _resolve_conflict(activation, today)
+
+    # ── 2. Promote shadow user → ACTIVE ──────────────────────────────
     AssignmentService.assign(
         user           = user,
         role           = activation.role,
@@ -86,28 +92,22 @@ def _activate_employee(activation, today):
         effective_from = today,
         acted_by       = activation.created_by,
         ended_reason   = StaffAssignment.REASON_ACTIVATION,
-        force          = True,  # conflict was already resolved at verify time
+        force          = True,
     )
-
     user.employment_status    = CustomUser.ACTIVE
-    user.must_change_password = True  # force password change on first real login
+    user.must_change_password = True
     user.save(update_fields=['employment_status', 'must_change_password', 'updated_at'])
 
-    # ── 2. Handle conflict user ───────────────────────────────
-    if activation.conflict_user and activation.conflict_resolution:
-        _resolve_conflict(activation, today)
-
-    # ── 3. Mark activation complete ──────────────────────────
+    # ── 3. Mark activation complete ───────────────────────────────────
     activation.status       = PendingActivation.ACTIVATED
     activation.activated_at = timezone.now()
     activation.save(update_fields=['status', 'activated_at', 'updated_at'])
 
-    # ── 4. Write audit log ────────────────────────────────────
+    # ── 4. Write audit log ────────────────────────────────────────────
     _write_activation_audit(activation, today)
 
-    # ── 5. Send notifications ─────────────────────────────────
+    # ── 5. Send notifications ─────────────────────────────────────────
     _notify_activation(activation)
-
 
 def _resolve_conflict(activation, today):
     """
@@ -211,6 +211,32 @@ def _write_activation_audit(activation, today):
 
 
 def _notify_activation(activation):
+    """
+    Send in-app notifications to the activated user and the conflict user.
+    WhatsApp deferred to Phase 7.
+    """
+    try:
+        from apps.notifications.services import notify
+        notify(
+            recipient = activation.user,
+            verb      = 'ACCOUNT_ACTIVATED',
+            message   = (
+                f'Your account is now fully active as '
+                f'{activation.role.display_name}. '
+                f'Welcome to the team.'
+            ),
+        )
+        if activation.conflict_user:
+            notify(
+                recipient = activation.conflict_user,
+                verb      = 'ROLE_UPDATED',
+                message   = (
+                    f'Your role has been updated as of {activation.start_date}. '
+                    f'Please contact HR if you have any questions.'
+                ),
+            )
+    except Exception as exc:
+        logger.warning(f"[_notify_activation] Notification failed: {exc}")
     """
     Send in-app notifications to the activated user and the conflict user.
     WhatsApp deferred to Phase 7.

@@ -123,8 +123,13 @@ class SheetSummaryService:
             payment_method = 'CREDIT',
         ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0')
 
+        from apps.finance.models import CreditPayment
+        from django.db.models import Sum as DSum
+
         petty_out      = sheet.total_petty_cash_out or Decimal('0')
-        credit_settled = sheet.total_credit_settled or Decimal('0')
+        credit_settled = CreditPayment.objects.filter(
+            daily_sheet=sheet,
+        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
         net_cash       = cash + credit_settled - petty_out
 
         return {
@@ -266,20 +271,6 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: yesterday pace failed for sheet %s', sheet.pk)
 
-        # ── Projected EOD ─────────────────────────────────────
-        projected_eod = None
-        try:
-            from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
-            from datetime import datetime
-            bm_schedule   = HRShiftEngine(sheet.branch).get_role_schedule(
-                'BRANCH_MANAGER', target_date=sheet.date
-            )
-            shift_end     = datetime.fromisoformat(bm_schedule['shift_end'])
-            hours_remain  = max((shift_end - now).total_seconds() / 3600, 0)
-            projected_eod = int(jobs['total'] + (jobs_per_hr * hours_remain))
-        except Exception:
-            logger.exception('SheetSummaryService: EOD projection failed for sheet %s', sheet.pk)
-
         # ── Avg job value — today ─────────────────────────────
         avg_job_value_today = None
         try:
@@ -321,14 +312,36 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: avg job value 7d failed for sheet %s', sheet.pk)
 
+        # ── Predicted EOD — curve-based prediction engine ─────────────
+        predicted_jobs_eod    = None
+        predicted_revenue_eod = None
+        confidence_pct        = None
+        projected_eod         = None  # kept for backward compat
+        try:
+            from apps.analytics.engines.prediction_engine import PredictionEngine
+            prediction = PredictionEngine(sheet.branch).predict(
+                sheet         = sheet,
+                current_jobs  = jobs['total'],
+                avg_job_value = avg_job_value_today or 0,
+            )
+            predicted_jobs_eod    = prediction['predicted_jobs_eod']
+            predicted_revenue_eod = prediction['predicted_revenue_eod']
+            confidence_pct        = prediction['confidence_pct']
+            projected_eod         = predicted_jobs_eod  # backward compat
+        except Exception:
+            logger.exception('SheetSummaryService: prediction failed for sheet %s', sheet.pk)
+
         return {
-            'jobs_per_hour'      : jobs_per_hr,
-            'hours_open'         : round(hours_open, 1),
-            'yesterday_per_hour' : yesterday_per_hour,
-            'pace_change_pct'    : pace_change_pct,
-            'projected_eod'      : projected_eod,
-            'avg_job_value_today': avg_job_value_today,
-            'avg_job_value_7d'   : avg_job_value_7d,
+            'jobs_per_hour'        : jobs_per_hr,
+            'hours_open'           : round(hours_open, 1),
+            'yesterday_per_hour'   : yesterday_per_hour,
+            'pace_change_pct'      : pace_change_pct,
+            'projected_eod'        : projected_eod,
+            'predicted_jobs_eod'   : predicted_jobs_eod,
+            'predicted_revenue_eod': predicted_revenue_eod,
+            'confidence_pct'       : confidence_pct,
+            'avg_job_value_today'  : avg_job_value_today,
+            'avg_job_value_7d'     : avg_job_value_7d,
         }
 
     # ── Inventory ─────────────────────────────────────────────────────────────

@@ -469,7 +469,7 @@ class JobRouteSerializer(serializers.Serializer):
 class CashierPaymentSerializer(serializers.Serializer):
     deposit_percentage = serializers.ChoiceField(choices=[70, 100])
     payment_method     = serializers.ChoiceField(
-        choices=['CASH', 'MOMO', 'POS', 'SPLIT'],
+        choices=['CASH', 'MOMO', 'POS', 'SPLIT', 'CREDIT'],
         default='CASH',
     )
     momo_reference    = serializers.CharField(required=False, allow_blank=True)
@@ -490,6 +490,11 @@ class CashierPaymentSerializer(serializers.Serializer):
         required=False,
         allow_empty=True,
         default=list,
+    )
+
+    # Full credit
+    credit_account_id = serializers.IntegerField(
+        required=False, allow_null=True
     )
 
     # Partial credit
