@@ -1209,7 +1209,7 @@ class CreditAccountListView(generics.ListAPIView):
 
     def get_queryset(self):
         return CreditAccount.objects.select_related(
-            'customer', 'recommended_by', 'approved_by'
+            'customer', 'nominated_by', 'approved_by'
         )
 
 

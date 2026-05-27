@@ -240,13 +240,21 @@ class ReceiptEngine:
             lines.append(f"{'ITEM':<24} {'QTY':>4} {'AMOUNT':>12}")
             lines.append(SEP)
             for li in line_items:
-                name = (li.label or li.service.name)[:24]
+                full_name = li.label or li.service.name
                 qty  = str(li.sets if li.sets > 1 else li.quantity)
                 amt  = f"GHS {float(li.line_total):,.2f}"
-                # Truncate name if needed
-                if len(name) > 20:
-                    name = name[:20] + '…'
-                lines.append(f"{name:<24} {qty:>4} {amt:>12}")
+                # Wrap long names across multiple lines
+                if len(full_name) <= 24:
+                    lines.append(f"{full_name:<24} {qty:>4} {amt:>12}")
+                else:
+                    # First line with qty and amount
+                    lines.append(f"{full_name[:24]:<24} {qty:>4} {amt:>12}")
+                    # Remaining name on next line(s)
+                    remaining = full_name[24:]
+                    while remaining:
+                        lines.append(f"  {remaining[:38]}")
+                        remaining = remaining[38:]
+                        
                 # Show spec detail on next line if multi-page
                 if li.pages and li.pages > 1:
                     spec = f"  {li.pages}pp × {li.sets} sets"
