@@ -131,7 +131,7 @@ class PricingEngine:
             return {
                 'success' : False,
                 'error'   : (
-                    f"No matching price tier for quantity {qty} "
+                    f"No matching price tier for quantity {quantity} "
                     f"on {self.service.name}"
                 ),
                 'total'   : Decimal('0.00'),
@@ -144,9 +144,10 @@ class PricingEngine:
             mode     = 'flat_tier'
         else:
             # Per-unit tier — price_per_unit × qty × copies
+            _qty = locals().get('qty', quantity)
             subtotal = (
                 Decimal(str(tier['price_per_unit']))
-                * Decimal(str(qty))
+                * Decimal(str(_qty))
                 * Decimal(str(quantity))
             )
             mode = 'per_unit_tier'
