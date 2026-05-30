@@ -354,13 +354,19 @@ class Job(AuditModel):
 
     def _generate_job_number(self) -> str:
         from django.utils import timezone
+        from django.db.models import Max
         year        = timezone.now().year
         branch_code = self.branch.code if self.branch else 'GEN'
-        last        = Job.objects.filter(
+        prefix      = f"FP-{branch_code}-{year}-"
+        last = Job.objects.filter(
             branch=self.branch,
-            created_at__year=year,
-        ).count() + 1
-        return f"FP-{branch_code}-{year}-{str(last).zfill(5)}"
+            job_number__startswith=prefix,
+        ).aggregate(Max('job_number'))['job_number__max']
+        if last:
+            last_num = int(last.split('-')[-1])
+        else:
+            last_num = 0
+        return f"{prefix}{str(last_num + 1).zfill(5)}"
 
     # ── Convenience properties ────────────────────────────────────
     @property

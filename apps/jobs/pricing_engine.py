@@ -138,16 +138,18 @@ class PricingEngine:
             }
 
         if 'flat_price' in tier:
-            # Flat fee — fixed price regardless of exact quantity
-            # Multiply by number of copies (quantity) for multi-copy binding jobs
-            subtotal = Decimal(str(tier['flat_price'])) * Decimal(str(quantity))
-            mode     = 'flat_tier'
+            # Flat fee × pages × copies
+            subtotal = (
+                Decimal(str(tier['flat_price']))
+                * Decimal(str(pages))
+                * Decimal(str(quantity))
+            )
+            mode = 'flat_tier'
         else:
-            # Per-unit tier — price_per_unit × qty × copies
-            _qty = locals().get('qty', quantity)
+            # Per-unit tier — price_per_unit × pages × copies
             subtotal = (
                 Decimal(str(tier['price_per_unit']))
-                * Decimal(str(_qty))
+                * Decimal(str(pages))
                 * Decimal(str(quantity))
             )
             mode = 'per_unit_tier'

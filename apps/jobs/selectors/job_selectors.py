@@ -15,12 +15,15 @@ from django.db import models
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _agg(qs) -> dict:
-    """Aggregate a queryset into KPI numbers."""
+    """Aggregate a queryset into KPI numbers.
+    Excludes jobs on OPEN sheets — open day totals are live/unstable.
+    """
+    closed_sheet = ~Q(daily_sheet__status='OPEN')
     result = qs.aggregate(
-        total    = Count('id'),
-        complete = Count('id', filter=Q(status='COMPLETE')),
-        pending  = Count('id', filter=Q(status='PENDING_PAYMENT')),
-        revenue  = Sum('amount_paid', filter=Q(status='COMPLETE')),
+        total    = Count('id',        filter=closed_sheet),
+        complete = Count('id',        filter=closed_sheet & Q(status='COMPLETE')),
+        pending  = Count('id',        filter=closed_sheet & Q(status='PENDING_PAYMENT')),
+        revenue  = Sum('amount_paid', filter=closed_sheet & Q(status='COMPLETE')),
     )
     total    = result['total']    or 0
     complete = result['complete'] or 0

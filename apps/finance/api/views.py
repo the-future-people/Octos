@@ -86,6 +86,7 @@ class DailySalesSheetListView(generics.ListAPIView):
     """
     serializer_class   = DailySalesSheetListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = None
 
     def get_queryset(self):
         user = self.request.user
@@ -99,6 +100,10 @@ class DailySalesSheetListView(generics.ListAPIView):
         date_param = self.request.query_params.get('date')
         if date_param:
             qs = qs.filter(date=date_param)
+
+        year_param = self.request.query_params.get('year')
+        if year_param:
+            qs = qs.filter(date__year=year_param)
 
         period = self.request.query_params.get('period')
         if period:
@@ -602,6 +607,25 @@ class CashierSignOffView(APIView):
         return Response(CashierFloatSerializer(result['float']).data)
 
 
+def _compute_expected_cash(float_record):
+    """
+    Expected cash = opening float + all cash payments collected by this cashier today.
+    This is computed live so the sign-off wizard shows the correct figure
+    before the cashier closes their float.
+    """
+    from django.db.models import Sum
+    from decimal import Decimal
+
+    cash_collected = Receipt.objects.filter(
+        cashier      = float_record.cashier,
+        daily_sheet  = float_record.daily_sheet,
+        payment_method = 'CASH',
+        is_void      = False,
+    ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
+
+    return float_record.opening_float + cash_collected
+
+
 class CashierShiftStatusView(APIView):
     """
     GET /api/v1/finance/cashier/shift-status/
@@ -648,6 +672,11 @@ class CashierShiftStatusView(APIView):
 
         # ── Signed off — return immediately ───────────────────
         if float_status['float_status'] == 'SIGNED_OFF':
+            try:
+                _fr = CashierFloat.objects.get(pk=float_status['float_id'])
+                _exp = str(_fr.expected_cash)
+            except Exception:
+                _exp = '0'
             return Response({
                 'has_shift'        : True,
                 'float_status'     : 'SIGNED_OFF',
@@ -656,6 +685,7 @@ class CashierShiftStatusView(APIView):
                 'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
+                'expected_cash'    : _exp,
                 'shift_end'        : None,
                 'minutes_remaining': 0,
                 'should_prompt'    : False,
@@ -766,6 +796,7 @@ class CashierShiftStatusView(APIView):
             'sheet_number'     : _sheet_number,
             'opening_float'    : float_status['opening_float'],
             'opening_breakdown': float_status['opening_breakdown'],
+            'expected_cash'    : str(_compute_expected_cash(float_record)) if float_record else '0',
             'shift_end'        : shift_end,
             'minutes_remaining': mins_remaining,
             'should_prompt'    : mins_remaining <= 60,

@@ -153,10 +153,14 @@ class CreditAccountListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return get_credit_accounts(
+        qs = get_credit_accounts(
             user   = self.request.user,
             status = self.request.query_params.get('status'),
         )
+        customer_id = self.request.query_params.get('customer')
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
+        return qs
 
 
 class CreditAccountDetailView(generics.RetrieveAPIView):

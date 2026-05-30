@@ -11,6 +11,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     display_name     = serializers.CharField(read_only=True)
     titled_name      = serializers.CharField(read_only=True)
     title_display    = serializers.CharField(read_only=True)
+    lifetime_spend   = serializers.SerializerMethodField()
     preferred_branch_name = serializers.CharField(
         source='preferred_branch.name', read_only=True
     )
@@ -29,7 +30,13 @@ class CustomerSerializer(serializers.ModelSerializer):
             'visit_count', 'tier', 'confidence_score',
             'preferred_branch', 'preferred_branch_name',
             'is_priority', 'is_walkin', 'notes', 'created_at',
+            'lifetime_spend',
         ]
+
+    def get_lifetime_spend(self, obj):
+        from django.db.models import Sum
+        result = obj.jobs.filter(status='COMPLETE').aggregate(total=Sum('amount_paid'))
+        return result['total'] or 0
 
 
 class CustomerListSerializer(serializers.ModelSerializer):
@@ -38,6 +45,9 @@ class CustomerListSerializer(serializers.ModelSerializer):
     display_name = serializers.CharField(read_only=True)
     titled_name  = serializers.CharField(read_only=True)
     title_display = serializers.CharField(read_only=True)
+    preferred_branch_name = serializers.CharField(
+        source='preferred_branch.name', read_only=True
+    )
 
     class Meta:
         model  = CustomerProfile
@@ -48,6 +58,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
             'company_name', 'customer_type', 'institution_subtype',
             'affiliation', 'affiliation_active',
             'tier', 'is_priority', 'confidence_score', 'visit_count',
+            'preferred_branch', 'preferred_branch_name',
             'created_at',
         ]
 
@@ -66,6 +77,15 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
             'customer_type', 'institution_subtype',
             'preferred_branch', 'notes',
         ]
+        extra_kwargs = {
+            'customer_type': {
+                'error_messages': {
+                    'invalid_choice': 'Customer type must be INDIVIDUAL, CORPORATE, or INSTITUTION.'
+                }
+            },
+            'phone': {'required': True},
+            'first_name': {'required': True},
+        }
 
     def validate_phone(self, value):
         import re
@@ -76,11 +96,25 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
             value = '0' + value[4:]
         elif value.startswith('233') and len(value) >= 12:
             value = '0' + value[3:]
+        
+        # Skip existence check if we're updating an existing customer
+        if self.instance:
+            return value
+            
         if CustomerProfile.objects.filter(phone=value).exists():
             raise serializers.ValidationError(
                 'A customer with this phone number already exists.'
             )
         return value
+
+    def validate_customer_type(self, value):
+        allowed = ['INDIVIDUAL', 'CORPORATE', 'INSTITUTION']
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Customer type must be one of: {", ".join(allowed)}'
+            )
+        return value
+
 
 # ── Credit Account serializers ────────────────────────────────────────────────
 
@@ -132,10 +166,27 @@ class CreditAccountNominateSerializer(serializers.ModelSerializer):
             'organisation_name', 'contact_person',
             'notes',
         ]
+        extra_kwargs = {
+            'customer': {'required': True},
+            'branch': {'required': True},
+            'account_type': {'required': True},
+            'credit_limit': {'required': True, 'min_value': 0.01},
+            'payment_terms': {'required': True},
+        }
 
     def validate_credit_limit(self, value):
         if value <= 0:
             raise serializers.ValidationError('Credit limit must be greater than zero.')
+        if value > 1000000:  # Add maximum limit
+            raise serializers.ValidationError('Credit limit cannot exceed GHS 1,000,000.')
+        return value
+
+    def validate_account_type(self, value):
+        allowed = ['CORPORATE', 'INSTITUTION', 'INDIVIDUAL']
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Account type must be one of: {", ".join(allowed)}'
+            )
         return value
 
     def validate(self, data):
@@ -196,6 +247,13 @@ class CreditSettleSerializer(serializers.Serializer):
                 {'reference': 'POS approval code is required.'}
             )
         return data
+
+    def validate_sheet_id(self, value):
+        from apps.finance.models import DailySalesSheet
+        if not DailySalesSheet.objects.filter(id=value).exists():
+            raise serializers.ValidationError('Invalid sheet ID.')
+        return value
+
 
 # ── Customer Edit Log serializer ──────────────────────────────────────────────
 
