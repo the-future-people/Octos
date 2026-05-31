@@ -369,6 +369,7 @@ class ServiceCreateView(APIView):
         )
 
         return Response(ServiceSerializer(service).data, status=status.HTTP_201_CREATED)
+    
 class PricingRuleListView(generics.ListAPIView):
     serializer_class   = PricingRuleSerializer
     permission_classes = [IsAuthenticated]
@@ -383,6 +384,52 @@ class PricingRuleListView(generics.ListAPIView):
             qs = qs.filter(service_id=service_id)
         return qs
 
+class PricingRuleDetailView(APIView):
+    """
+    PATCH /api/v1/jobs/pricing/<id>/
+    Update base_price and color_multiplier for a pricing rule.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            rule = PricingRule.objects.get(pk=pk)
+        except PricingRule.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if 'base_price' in request.data:
+            rule.base_price = request.data['base_price']
+        if 'color_multiplier' in request.data:
+            rule.color_multiplier = request.data['color_multiplier']
+        rule.save(update_fields=['base_price', 'color_multiplier', 'updated_at'])
+
+        return Response(PricingRuleSerializer(rule).data)
+
+class PricingRuleCreateView(APIView):
+    """
+    POST /api/v1/jobs/pricing/
+    Create a pricing rule for a service at a branch.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from decimal import Decimal
+        try:
+            rule = PricingRule.objects.create(
+                service          = Service.objects.get(pk=request.data['service']),
+                branch           = Branch.objects.get(pk=request.data['branch']),
+                base_price       = Decimal(str(request.data['base_price'])),
+                color_multiplier = Decimal(str(request.data.get('color_multiplier', '1.00'))),
+                is_active        = True,
+            )
+        except Service.DoesNotExist:
+            return Response({'detail': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Branch.DoesNotExist:
+            return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PricingRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
 class PriceCalculateView(APIView):
     """

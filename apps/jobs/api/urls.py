@@ -24,7 +24,10 @@ urlpatterns = [
     path('services/', views.ServiceListView.as_view(), name='service-list'),
 
     # Pricing
-    path('pricing/',          views.PricingRuleListView.as_view(), name='pricing-list'),
+    path('pricing/',          views.PricingRuleListView.as_view(),   name='pricing-list'),
+    path('pricing/create/',   views.PricingRuleCreateView.as_view(), name='pricing-create'),
+    path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
+    path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
     path('price/calculate/',  views.PriceCalculateView.as_view(),  name='price-calculate'),
     # Drafts
     path('drafts/',              views.DraftListView.as_view(),   name='draft-list'),
