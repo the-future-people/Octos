@@ -646,7 +646,9 @@ class JobStatsView(APIView):
 
         sheet_id = request.query_params.get('daily_sheet')
 
-        branch_stats = get_branch_stats(branch, sheet_id)
+        period   = request.query_params.get('period')
+        job_type = request.query_params.get('job_type')
+        branch_stats = get_branch_stats(branch, sheet_id, period=period, job_type=job_type)
 
         personal = {}
         try:

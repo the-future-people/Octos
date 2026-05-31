@@ -11,7 +11,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 
-def get_branch_stats(branch, sheet_id=None) -> dict:
+def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
     """
     Branch-wide job counts and revenue for a given sheet (or all time).
     Called by JobStatsView.
@@ -22,12 +22,24 @@ def get_branch_stats(branch, sheet_id=None) -> dict:
     qs = Job.objects.filter(branch=branch)
     if sheet_id:
         qs = qs.filter(daily_sheet_id=sheet_id)
+    if job_type:
+        qs = qs.filter(job_type=job_type)
+    if period:
+        since = {
+            'day':   timezone.now().replace(hour=0, minute=0, second=0, microsecond=0),
+            'week':  (timezone.now() - timedelta(days=timezone.now().weekday())).replace(hour=0, minute=0, second=0, microsecond=0),
+            'month': timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+            'year':  timezone.now().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0),
+        }.get(period)
+        if since:
+            qs = qs.filter(created_at__gte=since)
 
     totals = qs.aggregate(
         total       = Count('id'),
         complete    = Count('id', filter=Q(status='COMPLETE')),
         in_progress = Count('id', filter=Q(status='IN_PROGRESS')),
         pending     = Count('id', filter=Q(status='PENDING_PAYMENT')),
+        cancelled   = Count('id', filter=Q(status='CANCELLED')),
         routed      = Count('id', filter=Q(is_routed=True)),
         revenue     = Sum('amount_paid', filter=Q(status='COMPLETE')),
     )
@@ -40,6 +52,7 @@ def get_branch_stats(branch, sheet_id=None) -> dict:
         'complete'   : totals['complete']   or 0,
         'in_progress': totals['in_progress'] or 0,
         'pending'    : totals['pending']    or 0,
+        'cancelled'  : totals['cancelled']  or 0,
         'routed'     : totals['routed']     or 0,
         'revenue'    : str(totals['revenue'] or 0),
         'registered' : registered,
