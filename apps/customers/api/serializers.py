@@ -108,7 +108,7 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_customer_type(self, value):
-        allowed = ['INDIVIDUAL', 'CORPORATE', 'INSTITUTION']
+        allowed = ['INDIVIDUAL', 'BUSINESS', 'INSTITUTION']
         if value not in allowed:
             raise serializers.ValidationError(
                 f'Customer type must be one of: {", ".join(allowed)}'

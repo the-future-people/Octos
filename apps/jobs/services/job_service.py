@@ -221,13 +221,30 @@ def create_late_job(user, branch, data: dict):
     if not priced_items:
         raise ValueError('No valid services found.')
 
+    # Check if cashier is still active — if so send straight to queue
+    from apps.finance.models import CashierFloat
+    from django.utils import timezone
+    cashier_active = CashierFloat.objects.filter(
+        daily_sheet__branch  = branch,
+        daily_sheet__date    = timezone.localdate(),
+        is_signed_off        = False,
+        morning_acknowledged = True,
+    ).exists()
+
+    if cashier_active:
+        job_status  = Job.PENDING_PAYMENT
+        daily_sheet = sheet
+    else:
+        job_status  = Job.INTAKE_HELD
+        daily_sheet = None
+
     job = Job.objects.create(
         branch                   = branch,
         intake_by                = user,
-        daily_sheet              = None,
+        daily_sheet              = daily_sheet,
         title                    = _build_title(names),
         job_type                 = 'INSTANT',
-        status                   = Job.INTAKE_HELD,
+        status                   = job_status,
         estimated_cost           = total,
         post_closing             = True,
         post_closing_reason      = reason,
