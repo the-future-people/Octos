@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 
 urlpatterns = [
     # Jobs CRUD
@@ -35,6 +36,7 @@ urlpatterns = [
     path('drafts/<int:pk>/discard/', views.DiscardDraftView.as_view(), name='draft-discard'),
     path('reports/services/', views.ServicePerformanceView.as_view(), name='service-performance'),
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
+    path('performance/',      views.BranchPerformanceView.as_view(),  name='branch-performance'),
     path('history/', views.JobHistoryView.as_view(), name='job-history'),
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),
     path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),

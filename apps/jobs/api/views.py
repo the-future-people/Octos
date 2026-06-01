@@ -858,3 +858,20 @@ class ResolveHandoverView(APIView):
             'sheet_id'  : sheet.pk,
             'detail'    : f'{job.job_number} handed over and added to payment queue.',
         })
+
+
+class BranchPerformanceView(APIView):
+    """
+    GET /api/v1/jobs/performance/?period=day|week|month
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.jobs.selectors.performance_selectors import get_performance
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+
+        period = request.query_params.get('period', 'day')
+        return Response(get_performance(branch, period))
