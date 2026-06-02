@@ -258,6 +258,7 @@ def create_late_job(user, branch, data: dict):
         'paymentQueue', 'jobStats', 'recentJobs',
         'jobs', 'todaySummary', 'attendant-stats',
         'attendant-my-jobs-recent', 'attendant-my-jobs',
+        'notifCount', 'notifications',
     ])
 
     return job
