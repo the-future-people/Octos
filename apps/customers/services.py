@@ -1,11 +1,13 @@
+# apps/customers/services.py
 from django.utils import timezone
 from django.db import transaction
 
 from apps.customers.models import CustomerProfile, CustomerEditLog
+from apps.customers.utils import normalise_phone
 from apps.finance.models import CreditAccount
 
 
-# ── Customer creation ─────────────────────────────────────────────────────────
+# ── Customer creation ──────────────────────────────────────────────────────────
 
 class CustomerAlreadyExists(Exception):
     pass
@@ -18,19 +20,19 @@ class EmployeePhoneConflict(Exception):
 def create_customer(*, user, data: dict) -> CustomerProfile:
     """
     Creates a new CustomerProfile.
-    - Assigns branch from the creating user if not supplied.
+    - Normalises phone to canonical format before any check or save.
     - Raises CustomerAlreadyExists if phone is already registered.
     - Raises EmployeePhoneConflict if phone belongs to a branch employee.
     """
-    phone = data.get('phone', '').strip()
+    phone = normalise_phone(data.get('phone', '').strip())
+    if phone:
+        data['phone'] = phone
 
-    # Duplicate phone check
     if phone and CustomerProfile.objects.filter(phone=phone).exists():
         raise CustomerAlreadyExists(
             f'A customer with phone {phone} already exists.'
         )
 
-    # Employee phone conflict check
     if phone:
         from apps.accounts.models import CustomUser
         if CustomUser.objects.filter(phone=phone).exists():
@@ -47,7 +49,7 @@ def create_customer(*, user, data: dict) -> CustomerProfile:
     return customer
 
 
-# ── Customer editing ──────────────────────────────────────────────────────────
+# ── Customer editing ───────────────────────────────────────────────────────────
 
 class FieldNotEditable(Exception):
     pass
@@ -76,10 +78,8 @@ EDITABLE_FIELDS = {
 def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
     """
     Applies allowed field edits to a CustomerProfile.
+    Normalises phone before duplicate check and save.
     Writes an audit log entry for every changed field.
-    Raises FieldNotEditable for disallowed fields.
-    Raises CustomerAlreadyExists for duplicate phone.
-    Returns the updated CustomerProfile.
     """
     customer = CustomerProfile.objects.get(pk=pk)
     allowed  = EDITABLE_FIELDS.get(customer.customer_type, [])
@@ -90,6 +90,10 @@ def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
         if field not in allowed:
             errors[field] = f'Field "{field}" is not editable.'
             continue
+
+        # Normalise phone before any comparison or save
+        if field == 'phone' and new_value:
+            new_value = normalise_phone(str(new_value).strip())
 
         old_value = str(getattr(customer, field, '') or '')
         new_value = str(new_value or '').strip()
@@ -123,7 +127,7 @@ def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
     return customer
 
 
-# ── Credit nomination ─────────────────────────────────────────────────────────
+# ── Credit nomination ──────────────────────────────────────────────────────────
 
 def nominate_credit(
     *,
@@ -134,11 +138,6 @@ def nominate_credit(
     account_type: str,
     contact_person: str = '',
 ) -> CreditAccount:
-    """
-    Nominates a customer for a credit account.
-    Creates the account in PENDING status.
-    Notifies the Belt Manager via the notifications service.
-    """
     customer = CustomerProfile.objects.get(pk=customer_pk)
 
     account = CreditAccount.objects.create(
@@ -153,7 +152,6 @@ def nominate_credit(
         contact_person= contact_person,
     )
 
-    # Notify Belt Manager
     try:
         from apps.notifications.services import notify
         from apps.accounts.models import CustomUser
@@ -173,6 +171,6 @@ def nominate_credit(
                 link=f'/credit/{account.id}/',
             )
     except Exception:
-        pass  # Notifications are non-critical
+        pass
 
     return account

@@ -1,5 +1,9 @@
-from django.db.models import QuerySet
+# apps/customers/selectors.py
+from django.db.models import QuerySet, Q
+from django.contrib.postgres.search import TrigramSimilarity
+
 from apps.customers.models import CustomerProfile, CustomerEditLog
+from apps.customers.utils import normalise_phone, phone_variants
 from apps.finance.models import CreditAccount
 
 
@@ -13,10 +17,6 @@ def get_customer_list(
     company_name: str = None,
     phone: str = None,
 ) -> QuerySet:
-    """
-    Returns a filtered queryset of CustomerProfile objects.
-    Branch scoping is applied automatically from the requesting user.
-    """
     qs = CustomerProfile.objects.select_related('preferred_branch').all()
 
     if customer_type:
@@ -30,31 +30,76 @@ def get_customer_list(
     if company_name:
         qs = qs.filter(company_name__iexact=company_name)
     if phone:
-        qs = qs.filter(phone=phone)
+        qs = qs.filter(phone__in=phone_variants(phone))
 
     return qs
 
 
 def get_customer_by_id(*, pk: int) -> CustomerProfile:
-    """
-    Returns a single CustomerProfile by pk.
-    Raises CustomerProfile.DoesNotExist if not found.
-    """
     return CustomerProfile.objects.select_related('preferred_branch').get(pk=pk)
 
 
 def get_customer_by_phone(*, phone: str) -> CustomerProfile:
     """
-    Returns a single CustomerProfile by phone number.
+    Looks up a customer by phone, matching all known format variants
+    so records stored in any historical format are found correctly.
     Raises CustomerProfile.DoesNotExist if not found.
     """
-    return CustomerProfile.objects.get(phone=phone)
+    variants = phone_variants(phone)
+    customer = CustomerProfile.objects.filter(phone__in=variants).first()
+    if customer is None:
+        raise CustomerProfile.DoesNotExist
+    return customer
+
+
+def search_customers(*, query: str, limit: int = 10) -> QuerySet:
+    """
+    Unified customer search combining:
+    - Exact normalised phone match (highest priority)
+    - Trigram similarity on first_name, last_name, company_name
+
+    Returns a ranked queryset — exact phone matches bubble to the top,
+    fuzzy name matches follow ordered by similarity score.
+    """
+    if not query:
+        return CustomerProfile.objects.none()
+
+    query = query.strip()
+
+    # Phone path — if query looks like a phone number, do normalised exact match
+    digits = ''.join(c for c in query if c.isdigit())
+    if len(digits) >= 6:
+        variants = phone_variants(query)
+        phone_qs = CustomerProfile.objects.filter(
+            phone__in=variants
+        ).select_related('preferred_branch')
+        if phone_qs.exists():
+            return phone_qs
+
+    # Name path — trigram similarity across all name fields
+    qs = (
+        CustomerProfile.objects
+        .select_related('preferred_branch')
+        .annotate(
+            sim_first   = TrigramSimilarity('first_name',   query),
+            sim_last    = TrigramSimilarity('last_name',    query),
+            sim_company = TrigramSimilarity('company_name', query),
+        )
+        .filter(
+            Q(sim_first__gt=0.1) |
+            Q(sim_last__gt=0.1)  |
+            Q(sim_company__gt=0.1) |
+            Q(first_name__icontains=query) |
+            Q(last_name__icontains=query)  |
+            Q(company_name__icontains=query)
+        )
+        .order_by('-sim_first', '-sim_last', '-sim_company')
+    )
+
+    return qs[:limit]
 
 
 def get_customer_edit_log(*, pk: int) -> QuerySet:
-    """
-    Returns all edit log entries for a customer, newest first.
-    """
     return (
         CustomerEditLog.objects
         .filter(customer_id=pk)
@@ -64,9 +109,6 @@ def get_customer_edit_log(*, pk: int) -> QuerySet:
 
 
 def get_credit_accounts(*, user, status: str = None) -> QuerySet:
-    """
-    Returns credit accounts scoped to the requesting user's branch.
-    """
     branch = getattr(user, 'branch', None)
     qs = CreditAccount.objects.select_related(
         'customer', 'branch', 'nominated_by', 'approved_by'
@@ -79,10 +121,6 @@ def get_credit_accounts(*, user, status: str = None) -> QuerySet:
 
 
 def get_credit_account_by_id(*, pk: int, status: str = None) -> CreditAccount:
-    """
-    Returns a single CreditAccount by pk, optionally filtered by status.
-    Raises CreditAccount.DoesNotExist if not found.
-    """
     qs = CreditAccount.objects.select_related(
         'customer', 'branch', 'nominated_by', 'approved_by'
     )

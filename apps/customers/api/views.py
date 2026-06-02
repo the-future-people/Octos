@@ -16,6 +16,7 @@ from apps.customers.selectors import (
     get_customer_edit_log,
     get_credit_accounts,
     get_credit_account_by_id,
+    search_customers,
 )
 from apps.customers.services import (
     create_customer,
@@ -46,12 +47,16 @@ class CustomerPagination(PageNumberPagination):
 class CustomerListView(generics.ListAPIView):
     serializer_class   = CustomerListSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends    = [filters.SearchFilter]
-    search_fields      = ['phone', 'secondary_phone', 'first_name', 'last_name', 'email', 'company_name']
     pagination_class   = CustomerPagination
 
     def get_queryset(self):
-        p = self.request.query_params
+        p      = self.request.query_params
+        search = p.get('search', '').strip()
+
+        # Unified fuzzy search — phone (normalised) + trigram name match
+        if search:
+            return search_customers(query=search, limit=20)
+
         return get_customer_list(
             user          = self.request.user,
             customer_type = p.get('customer_type'),
