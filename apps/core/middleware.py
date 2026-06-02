@@ -39,3 +39,33 @@ class ShadowUserMiddleware:
                     pass
 
         return self.get_response(request)
+
+# ── WebSocket JWT Authentication Middleware ────────────────────────────────────
+
+from channels.middleware import BaseMiddleware
+from channels.db import database_sync_to_async
+from django.contrib.auth.models import AnonymousUser
+
+
+@database_sync_to_async
+def get_user_from_token(token_str):
+    try:
+        token = AccessToken(token_str)
+        return CustomUser.objects.select_related('branch').get(id=token['user_id'])
+    except (InvalidToken, TokenError, CustomUser.DoesNotExist):
+        return AnonymousUser()
+
+
+class JwtAuthMiddleware(BaseMiddleware):
+    """
+    Reads ?token=<access_token> from the WebSocket URL,
+    validates it, and attaches the real user to scope['user'].
+    Rejected connections get AnonymousUser which the consumer
+    then closes with code 4001.
+    """
+    async def __call__(self, scope, receive, send):
+        from urllib.parse import parse_qs
+        qs     = parse_qs(scope.get('query_string', b'').decode())
+        token  = qs.get('token', [None])[0]
+        scope['user'] = await get_user_from_token(token) if token else AnonymousUser()
+        return await super().__call__(scope, receive, send)

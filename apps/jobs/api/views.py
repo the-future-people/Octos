@@ -99,6 +99,16 @@ class JobCreateView(generics.CreateAPIView):
     serializer_class   = JobCreateSerializer
     permission_classes = [IsAuthenticated]
 
+    def perform_create(self, serializer):
+        job = serializer.save()
+        from apps.core.broadcast import broadcast_invalidation
+        broadcast_invalidation(job.branch.id, [
+            'paymentQueue', 'jobStats', 'recentJobs',
+            'jobs', 'todaySummary', 'attendant-stats',
+            'attendant-my-jobs-recent', 'attendant-my-jobs',
+            'cashierSummary',
+        ])
+
 
 class JobTransitionView(APIView):
     """
@@ -129,6 +139,11 @@ class JobTransitionView(APIView):
                 actor     = request.user,
                 notes     = serializer.validated_data.get('notes', ''),
             )
+            from apps.core.broadcast import broadcast_invalidation
+            broadcast_invalidation(job.branch.id, [
+                'jobs', 'job-detail', 'jobStats', 'recentJobs',
+                'paymentQueue', 'attendant-my-jobs', 'attendant-my-jobs-recent',
+            ])
             return Response(result)
         except PermissionError as e:
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)

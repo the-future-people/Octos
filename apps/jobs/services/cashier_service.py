@@ -16,6 +16,7 @@ Raises ValueError on validation failures (caller returns 400).
 
 import logging
 from decimal import Decimal
+from apps.core.broadcast import broadcast_invalidation
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,14 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     # ── Issue receipt ─────────────────────────────────────────────────
     _issue_receipt(job, validated_data, actor, payment_method, split_legs, amount_paid, result)
 
-    # ── Partial credit ────────────────────────────────────────────────
+    # ── Partial credit ────────────────────────────────────────────────────────
     _handle_partial_credit(job, validated_data, result)
+
+    broadcast_invalidation(job.branch.id, [
+        'paymentQueue', 'cashierSummary', 'shiftStatus',
+        'todaySummary', 'jobStats', 'recentJobs',
+        'jobs', 'attendant-my-jobs', 'attendant-my-jobs-recent',
+    ])
 
     return result
 

@@ -14,9 +14,9 @@ Private helpers:
 
 import logging
 from decimal import Decimal
+from apps.core.broadcast import broadcast_invalidation
 
 logger = logging.getLogger(__name__)
-
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -253,6 +253,12 @@ def create_late_job(user, branch, data: dict):
         cash_tendered            = Decimal(str(data.get('cash_tendered', '0') or '0')),
     )
     _create_line_items(job, priced_items)
+
+    broadcast_invalidation(branch.id, [
+        'paymentQueue', 'jobStats', 'recentJobs',
+        'jobs', 'todaySummary', 'attendant-stats',
+        'attendant-my-jobs-recent', 'attendant-my-jobs',
+    ])
 
     return job
 

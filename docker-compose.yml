@@ -32,7 +32,7 @@ services:
   web:
     build: .
     restart: always
-    command: python manage.py runserver 0.0.0.0:8000
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
