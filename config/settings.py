@@ -4,6 +4,7 @@ from celery.schedules import crontab
 
 
 import os
+import os as _os
 from decouple import config as decouple_config
 # Override decouple with actual OS env vars (for Docker)
 class EnvConfig:
@@ -16,7 +17,7 @@ class EnvConfig:
         if cast is not None:
             return decouple_config(key, default=default, cast=cast)
         return decouple_config(key, default=default)
-config = EnvConfig()
+
 
 config = EnvConfig()
 
@@ -65,6 +66,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -123,8 +125,9 @@ USE_TZ = True
 
 # Static & Media
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
@@ -158,18 +161,19 @@ SIMPLE_JWT = {
 # ── ASGI & WebSocket ───────────────────────────────────────────────────────────
 ASGI_APPLICATION = 'config.asgi.application'
 
+_REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            'hosts': [('redis', 6379)],  # 'redis' = Docker service name
+            'hosts': [_REDIS_URL],
             'capacity': 1500,
             'expiry': 10,
         },
     },
 }
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_BROKER_URL = _os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = _os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
 CELERY_BEAT_SCHEDULE = {
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
@@ -205,4 +209,6 @@ CELERY_BEAT_SCHEDULE = {
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'https://octos-web.vercel.app',
+    'https://octos-production.up.railway.app',
 ]
