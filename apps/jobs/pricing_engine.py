@@ -131,22 +131,25 @@ class PricingEngine:
             return {
                 'success' : False,
                 'error'   : (
-                    f"No matching price tier for quantity {qty} "
+                    f"No matching price tier for quantity {quantity} "
                     f"on {self.service.name}"
                 ),
                 'total'   : Decimal('0.00'),
             }
 
         if 'flat_price' in tier:
-            # Flat fee — fixed price regardless of exact quantity
-            # Multiply by number of copies (quantity) for multi-copy binding jobs
-            subtotal = Decimal(str(tier['flat_price'])) * Decimal(str(quantity))
-            mode     = 'flat_tier'
+            # Flat fee × pages × copies
+            subtotal = (
+                Decimal(str(tier['flat_price']))
+                * Decimal(str(pages))
+                * Decimal(str(quantity))
+            )
+            mode = 'flat_tier'
         else:
-            # Per-unit tier — price_per_unit × qty × copies
+            # Per-unit tier — price_per_unit × pages × copies
             subtotal = (
                 Decimal(str(tier['price_per_unit']))
-                * Decimal(str(qty))
+                * Decimal(str(pages))
                 * Decimal(str(quantity))
             )
             mode = 'per_unit_tier'

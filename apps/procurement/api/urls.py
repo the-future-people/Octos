@@ -1,5 +1,6 @@
 from django.urls import path
-from apps.procurement.api import views
+from apps.procurement.api import views, views_budget
+
 
 urlpatterns = [
     # Branch health + prepare
@@ -26,4 +27,18 @@ urlpatterns = [
     path('orders/<int:pk>/deliver/',        views.RecordDeliveryView.as_view(),       name='procurement-deliver'),
     path('orders/<int:pk>/accept/',         views.AcceptDeliveryView.as_view(),       name='procurement-accept'),
     path('orders/<int:pk>/cancel/',         views.CancelOrderView.as_view(),          name='procurement-cancel'),
+    path('orders/<int:pk>/receipt/',        views_budget.ReceiptUploadView.as_view(), name='procurement-receipt-upload'),
+    path('orders/<int:pk>/verify-receipt/', views_budget.ReceiptVerifyView.as_view(), name='procurement-receipt-verify'),
+
+    # ── Budget ────────────────────────────────────────────────────────
+    path('budgets/',                              views_budget.AnnualBudgetListView.as_view(),    name='budget-list'),
+    path('budgets/<int:pk>/',                     views_budget.AnnualBudgetDetailView.as_view(),  name='budget-detail'),
+    path('budgets/<int:pk>/approve/',             views_budget.AnnualBudgetApproveView.as_view(), name='budget-approve'),
+    path('budgets/<int:pk>/envelopes/',           views_budget.BudgetEnvelopeListView.as_view(),  name='budget-envelopes'),
+    path('envelopes/current/',                    views_budget.CurrentEnvelopeView.as_view(),     name='envelope-current'),
+
+    # ── Vendors ───────────────────────────────────────────────────────
+    path('vendors/',                              views_budget.VendorListView.as_view(),          name='vendor-list'),
+    path('vendors/<int:pk>/',                     views_budget.VendorDetailView.as_view(),        name='vendor-detail'),
+    path('vendors/<int:pk>/items/',               views_budget.VendorItemCreateView.as_view(),    name='vendor-item-create'),
 ]

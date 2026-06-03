@@ -267,10 +267,16 @@ class FloatEngine:
         from apps.finance.models import CashierFloat
 
         if not float_record.morning_acknowledged:
-            return {
-                'ok'   : False,
-                'error': 'Float has not been acknowledged — cannot sign off.',
-            }
+            # Auto-acknowledge if cashier is already mid-shift —
+            # prevents blocking sign-off for shifts started before
+            # the acknowledgement flow was introduced.
+            float_record.morning_acknowledged    = True
+            float_record.morning_acknowledged_at = timezone.now()
+            float_record.save(update_fields=[
+                'morning_acknowledged',
+                'morning_acknowledged_at',
+                'updated_at',
+            ])
 
         if float_record.is_signed_off:
             return {'ok': False, 'error': 'Float already signed off.'}
@@ -358,10 +364,16 @@ class FloatEngine:
             {'ok': False, 'error': str}
         """
         if not float_record.morning_acknowledged:
-            return {
-                'ok'   : False,
-                'error': 'Float has not been acknowledged — cannot sign off.',
-            }
+            # Auto-acknowledge if cashier is already mid-shift —
+            # prevents blocking sign-off for shifts started before
+            # the acknowledgement flow was introduced.
+            float_record.morning_acknowledged    = True
+            float_record.morning_acknowledged_at = timezone.now()
+            float_record.save(update_fields=[
+                'morning_acknowledged',
+                'morning_acknowledged_at',
+                'updated_at',
+            ])
 
         if float_record.is_signed_off:
             return {'ok': False, 'error': 'Float already signed off.'}

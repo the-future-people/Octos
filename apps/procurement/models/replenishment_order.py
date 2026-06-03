@@ -104,6 +104,46 @@ class ReplenishmentOrder(AuditModel):
     ops_notes = models.TextField(blank=True)
     bm_notes  = models.TextField(blank=True)
 
+    # Receipt verification
+    receipt             = models.FileField(
+        upload_to  = 'procurement/receipts/',
+        null       = True,
+        blank      = True,
+        help_text  = 'Uploaded by Operations after purchase. Closes the loop.',
+    )
+    receipt_uploaded_at  = models.DateTimeField(null=True, blank=True)
+    receipt_uploaded_by  = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'procurement_receipt_uploads',
+        null         = True,
+        blank        = True,
+    )
+    receipt_verified     = models.BooleanField(default=False)
+    receipt_verified_by  = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'procurement_receipt_verifications',
+        null         = True,
+        blank        = True,
+    )
+    receipt_verified_at  = models.DateTimeField(null=True, blank=True)
+    receipt_variance_flagged = models.BooleanField(
+        default   = False,
+        help_text = 'True if receipt amount differs from approved budget by >5%.',
+    )
+    disbursement_method    = models.CharField(
+        max_length = 20,
+        choices    = [
+            ('CASH',          'Cash'),
+            ('CHEQUE',        'Cheque'),
+            ('MOMO',          'Mobile Money'),
+            ('BANK_TRANSFER', 'Bank Transfer'),
+        ],
+        blank = True,
+    )
+    disbursement_reference = models.CharField(max_length=100, blank=True)
+
     class Meta:
         ordering            = ['-created_at']
         verbose_name        = 'Replenishment Order'

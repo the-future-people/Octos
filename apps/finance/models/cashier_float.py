@@ -164,6 +164,16 @@ class CashierFloat(AuditModel):
         help_text = 'Cashier notes on incidents or observations during shift',
     )
 
+    # ── Physical confirm dispute (auto-close sheets) ──────────
+    physical_confirm_disputed    = models.BooleanField(
+        default   = False,
+        help_text = 'True if cashier reported not receiving float on an auto-closed sheet',
+    )
+    physical_confirm_disputed_at = models.DateTimeField(
+        null      = True,
+        blank     = True,
+        help_text = 'When the dispute was raised',
+    )
     # ── Overtime ──────────────────────────────────────────────
     is_overtime     = models.BooleanField(default=False)
     overtime_reason = models.TextField(blank=True)
@@ -208,18 +218,26 @@ class CashierFloat(AuditModel):
         """
         Single source of truth for the cashier portal gate logic.
 
-        NO_FLOAT        — no float record (handled by FloatEngine, not here)
-        PENDING_ACK     — staged but cashier hasn't acknowledged
-        ACTIVE          — acknowledged, shift in progress
-        PENDING_HANDOVER— mid-day: cashier must count and hand over
-        PENDING_SIGNOFF — EOD: cashier must count and sign off
-        SIGNED_OFF      — fully signed off
+        NO_FLOAT                — no float record (handled by FloatEngine, not here)
+        PENDING_PHYSICAL_CONFIRM— auto-closed sheet, cashier must confirm physical receipt
+        PENDING_ACK             — staged but cashier hasn't acknowledged denominations
+        ACTIVE                  — acknowledged, shift in progress
+        PENDING_HANDOVER        — mid-day: cashier must count and hand over
+        PENDING_SIGNOFF         — EOD: cashier must count and sign off
+        SIGNED_OFF              — fully signed off
         """
         if self.is_signed_off:
             return 'SIGNED_OFF'
         if self.is_handover and not self.handover_at:
             return 'PENDING_HANDOVER'
         if not self.morning_acknowledged:
+            # Auto-closed sheet — cashier must first confirm physical receipt
+            if (
+                self.daily_sheet and
+                self.daily_sheet.status == 'AUTO_CLOSED' and
+                not self.physical_confirm_disputed
+            ):
+                return 'PENDING_PHYSICAL_CONFIRM'
             return 'PENDING_ACK'
         return 'ACTIVE'
 

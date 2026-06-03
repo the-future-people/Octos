@@ -1,3 +1,5 @@
+from asyncio.log import logger
+
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -23,6 +25,19 @@ from apps.finance.receipt_engine import ReceiptEngine
 from apps.finance.credit_engine import CreditEngine
 from apps.finance.models import MonthlyClose
 from apps.finance.monthly_close_engine import MonthlyCloseEngine
+
+from apps.core.finance_scope import get_finance_scope, REGIONAL_ROLES, NATIONAL_ROLES
+
+FINANCE_ROLES = (
+    'FINANCE',
+    'NATIONAL_FINANCE_HEAD',
+    'NATIONAL_FINANCE_DEPUTY',
+    'BELT_FINANCE_OFFICER',
+    'BELT_FINANCE_DEPUTY',
+    'REGIONAL_FINANCE_OFFICER',
+    'REGIONAL_FINANCE_DEPUTY',
+    'SUPER_ADMIN',
+)
 
 from .serializers import (
     DailySalesSheetListSerializer,
@@ -71,6 +86,7 @@ class DailySalesSheetListView(generics.ListAPIView):
     """
     serializer_class   = DailySalesSheetListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = None
 
     def get_queryset(self):
         user = self.request.user
@@ -84,6 +100,10 @@ class DailySalesSheetListView(generics.ListAPIView):
         date_param = self.request.query_params.get('date')
         if date_param:
             qs = qs.filter(date=date_param)
+
+        year_param = self.request.query_params.get('year')
+        if year_param:
+            qs = qs.filter(date__year=year_param)
 
         period = self.request.query_params.get('period')
         if period:
@@ -125,8 +145,12 @@ class DailySalesSheetDetailView(generics.RetrieveAPIView):
 class DailySalesSheetTodayView(APIView):
     """
     GET /api/v1/finance/sheets/today/
-    Returns today's open sheet for the user's branch.
+    Returns today's sheet for the user's branch.
     Creates one if it doesn't exist (fallback open).
+
+    Returns serialized sheet data only — no live total injection.
+    Live vs frozen revenue is handled by SheetSummaryService via
+    the /summary/ endpoint. This view remains a thin identity fetch.
     """
     permission_classes = [IsAuthenticated]
 
@@ -148,28 +172,80 @@ class DailySalesSheetTodayView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        from django.db.models import Sum
-        from apps.jobs.models import Job
-
         data = DailySalesSheetDetailSerializer(
             sheet, context={'request': request}
         ).data
-
-       # If sheet is still open, inject live totals from actual jobs
-        if sheet.status == DailySalesSheet.Status.OPEN:
-            jobs = Job.objects.filter(
-                daily_sheet=sheet,
-                status=Job.COMPLETE,
-            )
-            data['total_cash']         = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
-            data['total_momo']         = str(jobs.filter(payment_method='MOMO').aggregate(t=Sum('amount_paid'))['t'] or 0)
-            data['total_pos']          = str(jobs.filter(payment_method='POS').aggregate(t=Sum('amount_paid'))['t'] or 0)
-            data['total_jobs_created'] = jobs.count()
-            data['net_cash_in_till']   = str(jobs.filter(payment_method='CASH').aggregate(t=Sum('amount_paid'))['t'] or 0)
-
         return Response(data)
 
+class TodaySummaryView(APIView):
+    """
+    GET /api/v1/finance/sheets/today/summary/
+    Single-call endpoint for the BM portal day sheet.
+    Opens today's sheet if needed, then returns the full
+    SheetSummaryService payload — live revenue, jobs, inventory, alerts.
+    """
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+
+        user = request.user
+        if not hasattr(user, 'branch') or not user.branch:
+            return Response(
+                {'detail': 'User has no branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sheet, _ = SheetEngine(user.branch).get_or_open_today(opened_by=user)
+
+        if sheet is None:
+            return Response(
+                {'detail': 'No sheet today — branch may be closed (Sunday).'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        summary = SheetSummaryService.get_summary(sheet, sheet.branch)
+        return Response(summary)
+
+class DailySalesSheetSummaryView(APIView):
+    """
+    GET /api/v1/finance/sheets/<pk>/summary/
+    Unified day sheet summary for the BM portal.
+
+    Returns one payload covering: revenue (live or frozen),
+    job counts, registration rate, pace, inventory snapshot,
+    and outstanding alerts. Replaces the multi-API client-side
+    join previously done in dashboard.js.
+
+    Access: branch-scoped — BM can only access own branch sheets.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+
+        try:
+            sheet = DailySalesSheet.objects.select_related(
+                'branch', 'opened_by', 'closed_by'
+            ).get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Branch-scope enforcement
+        user_branch = getattr(request.user, 'branch', None)
+        if user_branch and sheet.branch != user_branch:
+            return Response(
+                {'detail': 'Access denied.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        summary = SheetSummaryService.get_summary(sheet, sheet.branch)
+        return Response(summary)
+    
+    
 class DailySalesSheetNotesView(APIView):
     """
     PATCH /api/v1/finance/sheets/<id>/notes/
@@ -531,6 +607,25 @@ class CashierSignOffView(APIView):
         return Response(CashierFloatSerializer(result['float']).data)
 
 
+def _compute_expected_cash(float_record):
+    """
+    Expected cash = opening float + all cash payments collected by this cashier today.
+    This is computed live so the sign-off wizard shows the correct figure
+    before the cashier closes their float.
+    """
+    from django.db.models import Sum
+    from decimal import Decimal
+
+    cash_collected = Receipt.objects.filter(
+        cashier      = float_record.cashier,
+        daily_sheet  = float_record.daily_sheet,
+        payment_method = 'CASH',
+        is_void      = False,
+    ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
+
+    return float_record.opening_float + cash_collected
+
+
 class CashierShiftStatusView(APIView):
     """
     GET /api/v1/finance/cashier/shift-status/
@@ -577,6 +672,11 @@ class CashierShiftStatusView(APIView):
 
         # ── Signed off — return immediately ───────────────────
         if float_status['float_status'] == 'SIGNED_OFF':
+            try:
+                _fr = CashierFloat.objects.get(pk=float_status['float_id'])
+                _exp = str(_fr.expected_cash)
+            except Exception:
+                _exp = '0'
             return Response({
                 'has_shift'        : True,
                 'float_status'     : 'SIGNED_OFF',
@@ -585,6 +685,7 @@ class CashierShiftStatusView(APIView):
                 'sheet_number'     : _sheet_number,
                 'opening_float'    : float_status['opening_float'],
                 'opening_breakdown': float_status['opening_breakdown'],
+                'expected_cash'    : _exp,
                 'shift_end'        : None,
                 'minutes_remaining': 0,
                 'should_prompt'    : False,
@@ -695,6 +796,7 @@ class CashierShiftStatusView(APIView):
             'sheet_number'     : _sheet_number,
             'opening_float'    : float_status['opening_float'],
             'opening_breakdown': float_status['opening_breakdown'],
+            'expected_cash'    : str(_compute_expected_cash(float_record)) if float_record else '0',
             'shift_end'        : shift_end,
             'minutes_remaining': mins_remaining,
             'should_prompt'    : mins_remaining <= 60,
@@ -1138,7 +1240,7 @@ class CreditAccountListView(generics.ListAPIView):
 
     def get_queryset(self):
         return CreditAccount.objects.select_related(
-            'customer', 'recommended_by', 'approved_by'
+            'customer', 'nominated_by', 'approved_by'
         )
 
 
@@ -1374,41 +1476,61 @@ class DailySalesSheetPDFView(APIView):
         except DailySalesSheet.DoesNotExist:
             return Response({'detail': 'Sheet not found.'}, status=404)
 
-        # Only allow access to own branch
         if request.user.branch != sheet.branch:
             return Response({'detail': 'Access denied.'}, status=403)
 
-        # Only closed sheets can be downloaded
-        if sheet.status != DailySalesSheet.Status.CLOSED:
+        if sheet.status not in (DailySalesSheet.Status.CLOSED, DailySalesSheet.Status.AUTO_CLOSED):
             return Response(
                 {'detail': 'Sheet must be closed before downloading.'},
                 status=400
             )
 
-        # Generate PDF
+        # ── Download limit: 2 per BM, then view-only ──────────
+        from apps.finance.models import SheetDownloadLog
+        user_role = getattr(getattr(request.user, 'role', None), 'name', '')
+        hq_roles  = {'SUPER_ADMIN', 'REGIONAL_MANAGER', 'BELT_MANAGER',
+                    'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY'}
+        is_hq     = user_role in hq_roles
+
+        download_count = SheetDownloadLog.objects.filter(
+            sheet=sheet, downloaded_by=request.user
+        ).count()
+
+        view_only = (not is_hq) and (download_count >= 2)
+
+        # ── Generate PDF if not cached ─────────────────────────
         import os
         from django.conf import settings
-        from io import BytesIO
         from django.core.management import call_command
 
-        media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-        sheets_dir = os.path.join(media_root, 'sheets')
+        media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
+        sheets_dir  = os.path.join(media_root, 'sheets')
         os.makedirs(sheets_dir, exist_ok=True)
         output_path = os.path.join(sheets_dir, f"sheet_{sheet.pk}_{sheet.date}.pdf")
 
-        # Regenerate if file doesn't exist
         if not os.path.exists(output_path):
             call_command('generate_sheet_pdf', sheet_id=sheet.pk, output=output_path)
 
-        # Serve the file
+        # ── Log download (only if not view-only) ──────────────
+        if not view_only:
+            ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                or request.META.get('REMOTE_ADDR'))
+            SheetDownloadLog.objects.create(
+                sheet=sheet, downloaded_by=request.user, ip_address=ip or None
+            )
+
+        # ── Serve ──────────────────────────────────────────────
         from django.http import FileResponse
+        disposition = 'inline' if view_only else 'attachment'
         response = FileResponse(
             open(output_path, 'rb'),
             content_type='application/pdf',
         )
         response['Content-Disposition'] = (
-            f'attachment; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
+            f'{disposition}; filename="sheet_{sheet.branch.code}_{sheet.date}.pdf"'
         )
+        if view_only:
+            response['X-Download-Limit-Reached'] = 'true'
         return response
 
 class BranchLockStatusView(APIView):
@@ -1427,7 +1549,28 @@ class BranchLockStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from apps.finance.models import CashierFloat, DailySalesSheet
+        from django.utils import timezone
+
         status_data = SheetEngine(user.branch).get_branch_lock_status()
+
+        # Check for active float dispute — hard blocks BM portal
+        today = timezone.localdate()
+        float_dispute_active = CashierFloat.objects.filter(
+            daily_sheet__branch  = user.branch,
+            daily_sheet__date    = today,
+            physical_confirm_disputed = True,
+            morning_acknowledged = False,
+        ).select_related('cashier').first()
+
+        if float_dispute_active:
+            status_data['float_dispute_active']   = True
+            status_data['dispute_cashier_name']   = float_dispute_active.cashier.full_name
+            status_data['dispute_float_amount']   = str(float_dispute_active.opening_float)
+            status_data['dispute_float_id']       = float_dispute_active.pk
+        else:
+            status_data['float_dispute_active'] = False
+
         return Response(status_data)
 
 class EODSummaryView(APIView):
@@ -1439,13 +1582,8 @@ class EODSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        from django.db.models import Sum, Count, Q
-        from apps.jobs.models import Job
-        from apps.finance.models import (
-            CashierFloat, PettyCash, POSTransaction, CreditAccount
-        )
+        from apps.finance.services.eod_service import EODService
 
-        # ── Fetch sheet ───────────────────────────────────────────
         try:
             sheet = DailySalesSheet.objects.select_related(
                 'branch', 'opened_by', 'closed_by'
@@ -1462,227 +1600,8 @@ class EODSummaryView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        branch = sheet.branch
-        jobs   = Job.objects.filter(daily_sheet=sheet).select_related(
-            'intake_by', 'customer', 'assigned_to'
-        )
-
-        # ── Revenue summary ───────────────────────────────────────
-        # ── Revenue summary — computed live from jobs ─────────────────────────────
-        from decimal import Decimal
-        def _sum_method(method):
-            return jobs.filter(
-                status='COMPLETE', payment_method=method, amount_paid__isnull=False
-            ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
-
-        live_cash   = _sum_method('CASH')
-        live_momo   = _sum_method('MOMO')
-        live_pos    = _sum_method('POS')
-        live_credit = jobs.filter(
-            status='COMPLETE', payment_method='CREDIT', amount_paid__isnull=False
-        ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
-        live_petty    = sheet.total_petty_cash_out  # petty cash has its own model
-        live_settled  = sheet.total_credit_settled  # credit settlements
-        live_net      = live_cash + live_settled - live_petty
-        revenue = {
-            'cash'            : str(live_cash),
-            'momo'            : str(live_momo),
-            'pos'             : str(live_pos),
-            'total'           : str(live_cash + live_momo + live_pos),
-            'credit_issued'   : str(live_credit),
-            'credit_settled'  : str(live_settled),
-            'petty_cash_out'  : str(live_petty),
-            'net_cash_in_till': str(live_net),
-        }
-
-        # ── Jobs summary ──────────────────────────────────────────
-        total_jobs     = jobs.count()
-        completed_jobs = jobs.filter(status='COMPLETE').count()
-        cancelled_jobs = jobs.filter(status='CANCELLED').count()
-        local_jobs     = jobs.filter(is_routed=False).count()
-        routed_out     = jobs.filter(is_routed=True).count()
-
-        # Routed-in: jobs assigned to this branch from another branch
-        routed_in = Job.objects.filter(
-            assigned_to=branch,
-            is_routed=True,
-        ).exclude(branch=branch).count()
-
-        # Pending payment — cashier accepted (in queue)
-        pending_cashier = jobs.filter(status='PENDING_PAYMENT')
-        pending_cashier_list = list(pending_cashier.values(
-            'id', 'job_number', 'title', 'estimated_cost',
-            'intake_by__first_name', 'intake_by__last_name',
-            'created_at',
-        ))
-        for j in pending_cashier_list:
-            fn = j.pop('intake_by__first_name', '') or ''
-            ln = j.pop('intake_by__last_name', '') or ''
-            j['intake_by_name'] = f"{fn} {ln}".strip() or '—'
-            j['estimated_cost'] = str(j['estimated_cost'] or 0)
-            j['created_at']     = j['created_at'].isoformat() if j['created_at'] else None
-
-        # Pending payment — never touched by cashier (no POSTransaction)
-        pending_untouched = pending_cashier.filter(
-            pos_transactions__isnull=True
-        )
-        pending_untouched_list = list(pending_untouched.values(
-            'id', 'job_number', 'title', 'estimated_cost',
-            'intake_by__first_name', 'intake_by__last_name',
-            'created_at',
-        ))
-        for j in pending_untouched_list:
-            fn = j.pop('intake_by__first_name', '') or ''
-            ln = j.pop('intake_by__last_name', '') or ''
-            j['intake_by_name'] = f"{fn} {ln}".strip() or '—'
-            j['estimated_cost'] = str(j['estimated_cost'] or 0)
-            j['created_at']     = j['created_at'].isoformat() if j['created_at'] else None
-
-        jobs_summary = {
-            'total'            : total_jobs,
-            'completed'        : completed_jobs,
-            'cancelled'        : cancelled_jobs,
-            'local'            : local_jobs,
-            'routed_out'       : routed_out,
-            'routed_in'        : routed_in,
-            'pending_payment'  : pending_cashier.count(),
-            'pending_untouched': pending_untouched.count(),
-            'pending_list'     : pending_cashier_list,
-            'untouched_list'   : pending_untouched_list,
-        }
-
-        # ── Cashier activity ──────────────────────────────────────
-        floats = CashierFloat.objects.filter(
-            daily_sheet=sheet
-        ).select_related('cashier', 'float_set_by', 'signed_off_by')
-
-        cashier_activity = []
-        for f in floats:
-            from apps.finance.models import Receipt
-            txns = Receipt.objects.filter(
-                daily_sheet=sheet,
-                cashier=f.cashier,
-            ).order_by('created_at')
-
-            by_method = txns.order_by().values('payment_method').annotate(
-                total=Sum('amount_paid'),
-                count=Count('id'),
-            )
-            method_breakdown = {
-                row['payment_method']: {
-                    'total': str(row['total'] or 0),
-                    'count': row['count'],
-                }
-                for row in by_method
-            }
-
-            first_txn = txns.first()
-            last_txn  = txns.last()
-
-            cashier_activity.append({
-                'cashier_name'     : f.cashier.full_name,
-                'cashier_id'       : f.cashier.id,
-                'opening_float'    : str(f.opening_float),
-                'closing_cash'     : str(f.closing_cash),
-                'expected_cash'    : str(f.expected_cash),
-                'variance'         : str(f.variance),
-                'variance_notes'   : f.variance_notes,
-                'is_signed_off'    : f.is_signed_off,
-                'signed_off_at'    : f.signed_off_at.isoformat() if f.signed_off_at else None,
-                'float_set_at'     : f.float_set_at.isoformat() if f.float_set_at else None,
-                'active_from'      : first_txn.created_at.isoformat() if first_txn else None,
-                'active_to'        : last_txn.created_at.isoformat() if last_txn else None,
-                'total_collected'  : str(txns.aggregate(t=Sum('amount_paid'))['t'] or 0),
-                'transaction_count': txns.count(),
-                'method_breakdown' : method_breakdown,
-            })
-        float_opened = floats.exists()
-
-        # ── Petty cash ────────────────────────────────────────────
-        petty_cash_records = PettyCash.objects.filter(
-            daily_sheet=sheet
-        ).select_related('recorded_by').order_by('created_at')
-
-        petty_cash_list = list(petty_cash_records.values(
-            'id', 'amount', 'purpose', 'created_at',
-            'recorded_by__first_name', 'recorded_by__last_name',
-        ))
-        for p in petty_cash_list:
-            fn = p.pop('recorded_by__first_name', '') or ''
-            ln = p.pop('recorded_by__last_name', '') or ''
-            p['recorded_by_name'] = f"{fn} {ln}".strip() or '—'
-            p['reason']           = p.pop('purpose', '—')
-            p['amount']           = str(p['amount'])
-            p['created_at']       = p['created_at'].isoformat() if p['created_at'] else None
-
-        # ── Credit sales ──────────────────────────────────────────
-        credit_jobs = jobs.filter(
-            customer__credit_account__isnull=False,
-            status__in=['COMPLETE', 'PENDING_PAYMENT'],
-        ).select_related('customer__credit_account')
-
-        credit_list = []
-        for j in credit_jobs:
-            credit_list.append({
-                'job_number'    : j.job_number,
-                'title'         : j.title,
-                'estimated_cost': str(j.estimated_cost or 0),
-                'customer_name' : j.customer.full_name if j.customer else '—',
-            })
-
-        # ── Sheet meta ────────────────────────────────────────────
-        meta = {
-            'sheet_id'     : sheet.pk,
-            'sheet_number' : sheet.sheet_number or f"#{sheet.pk}",
-            'date'         : sheet.date.isoformat(),
-            'status'    : sheet.status,
-            'branch'    : branch.name,
-            'branch_code': branch.code,
-            'opened_at' : sheet.opened_at.isoformat() if sheet.opened_at else None,
-            'opened_by' : sheet.opened_by.full_name if sheet.opened_by else 'System',
-            'is_public_holiday'  : sheet.is_public_holiday,
-            'public_holiday_name': sheet.public_holiday_name,
-        }
-
-        # ── Branch cashiers (for float staging even with no activity) ─
-        from apps.accounts.models import CustomUser
-        branch_cashiers = list(
-            CustomUser.objects.filter(
-                branch    = branch,
-                role__name = 'CASHIER',
-                is_active = True,
-            ).values('id', 'first_name', 'last_name')
-        )
-        branch_cashiers_list = [
-            {
-                'cashier_id'  : c['id'],
-                'cashier_name': f"{c['first_name']} {c['last_name']}".strip(),
-            }
-            for c in branch_cashiers
-        ]
-
-        # ── Inventory consumption snapshot ────────────────────────────────
-        inventory_consumption = []
-        try:
-            from apps.inventory.inventory_engine import InventoryEngine
-            inv_snapshot = InventoryEngine(branch).generate_daily_snapshot(sheet.date)
-            inventory_consumption = inv_snapshot.get('items', [])
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Daily inventory snapshot failed: {e}", exc_info=True)
-
-        return Response({
-            'meta'                 : meta,
-            'revenue'              : revenue,
-            'jobs'                 : jobs_summary,
-            'cashier_activity'     : cashier_activity,
-            'float_opened'         : float_opened,
-            'petty_cash'           : petty_cash_list,
-            'credit_sales'         : credit_list,
-            'branch_cashiers'      : branch_cashiers_list,
-            'inventory_consumption': inventory_consumption,
-        })
-
+        summary = EODService.get_summary(sheet, sheet.branch)
+        return Response(summary)
 # ─────────────────────────────────────────────────────────────────────────────
 # Invoices
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1750,133 +1669,28 @@ class InvoiceCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        from decimal import Decimal
-        from django.utils import timezone
-        from apps.jobs.models import Job, JobLineItem, Service
-        from apps.jobs.pricing_engine import PricingEngine
+        from apps.finance.services.invoice_service import InvoiceService
 
         serializer = InvoiceCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        d      = serializer.validated_data
-        user   = request.user
-        branch = getattr(user, 'branch', None)
-
+        branch = getattr(request.user, 'branch', None)
         if not branch:
             return Response(
                 {'detail': 'No branch assigned.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Resolve job if linked ─────────────────────────────
-        job = None
-        if d.get('job_id'):
-            try:
-                job = Job.objects.get(pk=d['job_id'], branch=branch)
-            except Job.DoesNotExist:
-                return Response(
-                    {'detail': 'Job not found.'},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-        # ── Create invoice ────────────────────────────────────
-        invoice = Invoice.objects.create(
-            branch           = branch,
-            job              = job,
-            generated_by     = user,
-            invoice_type     = d['invoice_type'],
-            due_date         = d.get('due_date'),
-            bm_note          = d.get('bm_note', ''),
-            bill_to_name     = d['bill_to_name'],
-            bill_to_phone    = d.get('bill_to_phone', ''),
-            bill_to_email    = d.get('bill_to_email', ''),
-            bill_to_company  = d.get('bill_to_company', ''),
-            delivery_channel = d['delivery_channel'],
-            vat_rate         = d.get('vat_rate', 0),
-            status           = Invoice.DRAFT,
+        invoice, errors = InvoiceService.create(
+            data   = serializer.validated_data,
+            user   = request.user,
+            branch = branch,
         )
+        if errors:
+            return Response({'detail': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── Build line items ──────────────────────────────────
-        if job:
-            # Pull from job's line items
-            job_items = JobLineItem.objects.filter(
-                job=job
-            ).select_related('service').order_by('position')
-
-            for i, li in enumerate(job_items):
-                InvoiceLineItem.objects.create(
-                    invoice    = invoice,
-                    service    = li.service,
-                    label      = li.label or li.service.name,
-                    quantity   = li.quantity,
-                    pages      = li.pages,
-                    sets       = li.sets,
-                    is_color   = li.is_color,
-                    paper_size = li.paper_size,
-                    sides      = li.sides,
-                    unit_price = li.unit_price,
-                    line_total = li.line_total,
-                    position   = i,
-                )
-        else:
-            # Standalone — build from submitted line items
-            for i, item in enumerate(d.get('line_items', [])):
-                try:
-                    svc = Service.objects.get(pk=item['service'])
-                except Service.DoesNotExist:
-                    continue
-
-                pg       = int(item.get('pages', 1))
-                sets     = int(item.get('sets', 1))
-                is_color = bool(item.get('is_color', False))
-
-                pricing = PricingEngine.get_price(
-                    service  = svc,
-                    branch   = branch,
-                    quantity = sets,
-                    is_color = is_color,
-                    pages    = pg,
-                )
-                line_total  = Decimal(str(pricing.get('total', 0)))
-                unit_price  = line_total / (pg * sets) if (pg * sets) > 0 else Decimal('0')
-
-                InvoiceLineItem.objects.create(
-                    invoice    = invoice,
-                    service    = svc,
-                    label      = svc.name,
-                    quantity   = sets,
-                    pages      = pg,
-                    sets       = sets,
-                    is_color   = is_color,
-                    paper_size = item.get('paper_size', 'A4'),
-                    sides      = item.get('sides', 'SINGLE'),
-                    unit_price = unit_price,
-                    line_total = line_total,
-                    position   = i,
-                )
-
-        # ── Compute totals ────────────────────────────────────
-        invoice.compute_totals()
-        invoice.save(update_fields=[
-            'subtotal', 'vat_amount', 'total', 'updated_at'
-        ])
-
-        # ── Generate PDF ──────────────────────────────────────
-        try:
-            _generate_invoice_pdf(invoice)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"PDF generation failed: {e}", exc_info=True)
-
-        # ── Deliver ───────────────────────────────────────────
-        _deliver_invoice(invoice)
-
-        return Response(
-            InvoiceSerializer(invoice).data,
-            status=status.HTTP_201_CREATED,
-        )
-
+        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 class InvoiceSendView(APIView):
     """
@@ -2732,105 +2546,20 @@ class WeeklyReportPrepareView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        from django.utils import timezone
-        from datetime import timedelta
-        from apps.jobs.models import Job
+        from apps.finance.services.weekly_report_service import WeeklyReportService
 
-        user   = request.user
-        branch = getattr(user, 'branch', None)
+        branch = getattr(request.user, 'branch', None)
         if not branch:
             return Response(
                 {'detail': 'No branch assigned.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Resolve current week Mon–Sat ──────────────────────────────
-        # NEW
-        import calendar
-        today     = timezone.localdate()
-        monday    = today - timedelta(days=today.weekday())
-        saturday  = monday + timedelta(days=5)
-
-        # Cap at month boundaries — weeks cannot cross month lines
-        first_day_of_month = today.replace(day=1)
-        last_day_of_month  = today.replace(
-            day=calendar.monthrange(today.year, today.month)[1]
-        )
-        effective_from = max(monday,   first_day_of_month)
-        effective_to   = min(saturday, last_day_of_month)
-
-        week_number = today.isocalendar()[1]
-        year        = today.isocalendar()[0]
-
-        # ── Get or create the report ──────────────────────────────────
-        # NEW
-        report, created = WeeklyReport.objects.get_or_create(
-            branch      = branch,
-            week_number = week_number,
-            year        = year,
-            defaults    = {
-                'date_from' : effective_from,
-                'date_to'   : effective_to,
-                'status'    : WeeklyReport.Status.DRAFT,
-            }
-        )
-        sheets = DailySalesSheet.objects.filter(
-            branch = branch,
-            date__range = [effective_from, effective_to],
-        )
-        report.date_from = effective_from
-        report.date_to   = effective_to
-        week_jobs = Job.objects.filter(
-            branch      = branch,
-            created_at__date__range = [effective_from, effective_to],
-        )
-
-        # ── Link sheets ───────────────────────────────────────────────
-        report.daily_sheets.set(sheets)
-
-        # ── Aggregate from closed sheets only ─────────────────────────
-        from django.db.models import Sum
-
-        closed_sheets = sheets.exclude(status=DailySalesSheet.Status.OPEN)
-
-        report.total_cash           = closed_sheets.aggregate(t=Sum('total_cash'))['t']           or 0
-        report.total_momo           = closed_sheets.aggregate(t=Sum('total_momo'))['t']           or 0
-        report.total_pos            = closed_sheets.aggregate(t=Sum('total_pos'))['t']            or 0
-        report.total_petty_cash_out = closed_sheets.aggregate(t=Sum('total_petty_cash_out'))['t'] or 0
-        report.total_credit_issued  = closed_sheets.aggregate(t=Sum('total_credit_issued'))['t']  or 0
-        report.net_cash_in_till     = closed_sheets.aggregate(t=Sum('net_cash_in_till'))['t']     or 0
-        report.total_jobs_created   = closed_sheets.aggregate(t=Sum('total_jobs_created'))['t']   or 0
-
-        # Job level counts from actual jobs
-        week_jobs = Job.objects.filter(
-            branch      = branch,
-            created_at__date__range = [monday, saturday],
-        )
-        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
-        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
-        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
-
-        report.date_from = effective_from
-        report.date_to   = effective_to
-
-        # ── Inventory snapshot ────────────────────────────────────────
-        try:
-            from apps.inventory.inventory_engine import InventoryEngine
-            report.inventory_snapshot = InventoryEngine(branch).generate_weekly_snapshot(
-                date_from = monday,
-                date_to   = saturday,
-            )
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Inventory snapshot failed: {e}", exc_info=True)
-
-        report.save()
-
+        report, created = WeeklyReportService.prepare(branch)
         return Response(
             WeeklyReportDetailSerializer(report).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
-
 
 class WeeklyReportNotesView(APIView):
     """
@@ -2866,7 +2595,7 @@ class WeeklyReportSubmitView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        from django.utils import timezone
+        from apps.finance.services.weekly_report_service import WeeklyReportService
 
         try:
             report = WeeklyReport.objects.prefetch_related(
@@ -2875,79 +2604,11 @@ class WeeklyReportSubmitView(APIView):
         except WeeklyReport.DoesNotExist:
             return Response({'detail': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if report.is_locked:
-            return Response({'detail': 'Already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Submit only allowed on Saturday after Saturday's sheet is closed
-        today = timezone.localdate()
-        if today.weekday() != 5:  # 5 = Saturday
-            return Response(
-                {'detail': 'Weekly report can only be submitted on Saturday after closing.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not report.daily_sheets.exists():
-            return Response(
-                {'detail': 'No daily sheets linked. Prepare the report first.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not report.all_sheets_closed:
-            open_sheets = report.daily_sheets.filter(
-                status=DailySalesSheet.Status.OPEN
-            ).values_list('date', flat=True)
-            dates = ', '.join(str(d) for d in open_sheets)
-            return Response(
-                {'detail': f'Cannot submit — sheets still open: {dates}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # ── Re-aggregate to make sure figures are fresh ───────────────
-        from django.db.models import Sum
-        from apps.jobs.models import Job
-
-        closed_sheets = report.daily_sheets.exclude(status=DailySalesSheet.Status.OPEN)
-        report.total_cash           = closed_sheets.aggregate(t=Sum('total_cash'))['t']           or 0
-        report.total_momo           = closed_sheets.aggregate(t=Sum('total_momo'))['t']           or 0
-        report.total_pos            = closed_sheets.aggregate(t=Sum('total_pos'))['t']            or 0
-        report.total_petty_cash_out = closed_sheets.aggregate(t=Sum('total_petty_cash_out'))['t'] or 0
-        report.total_credit_issued  = closed_sheets.aggregate(t=Sum('total_credit_issued'))['t']  or 0
-        report.net_cash_in_till     = closed_sheets.aggregate(t=Sum('net_cash_in_till'))['t']     or 0
-        report.total_jobs_created   = closed_sheets.aggregate(t=Sum('total_jobs_created'))['t']   or 0
-
-        week_jobs = Job.objects.filter(
-            branch                  = report.branch,
-            created_at__date__range = [report.date_from, report.date_to],
-        )
-        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
-        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
-        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
-        # ── Refresh inventory snapshot on submit ──────────────────────
-        try:
-            from apps.inventory.inventory_engine import InventoryEngine
-            report.inventory_snapshot = InventoryEngine(report.branch).generate_weekly_snapshot(
-                date_from = report.date_from,
-                date_to   = report.date_to,
-            )
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Inventory snapshot failed: {e}", exc_info=True)
-
-        # ── Lock the report ───────────────────────────────────────────
-        report.status       = WeeklyReport.Status.LOCKED
-        report.submitted_by = request.user
-        report.submitted_at = timezone.now()
-        report.save()
-
-        # ── Generate PDF ──────────────────────────────────────────────
-        try:
-            _generate_weekly_pdf(report)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Weekly PDF generation failed: {e}", exc_info=True)
+        report, errors = WeeklyReportService.submit(report, submitted_by=request.user)
+        if errors:
+            return Response({'detail': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(WeeklyReportDetailSerializer(report).data)
-
 
 class WeeklyReportPDFView(APIView):
     """
@@ -3040,6 +2701,55 @@ class MonthlyCloseStatusView(APIView):
             'summary_snapshot'         : close.summary_snapshot,
         })
 
+class MonthlyClosePrepareView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/prepare/
+    Builds and persists summary_snapshot on an OPEN monthly close
+    without changing its status. Idempotent — safe to call multiple times.
+    Called by the BM portal before opening the submit modal so the
+    modal can display real numbers.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            month = int(request.data.get('month', timezone.localdate().month))
+            year  = int(request.data.get('year',  timezone.localdate().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine   = MonthlyCloseEngine(branch, month, year)
+        close, _ = engine.get_or_create()
+
+        if close.status != 'OPEN':
+            return Response(
+                {'detail': f'Cannot prepare — current status is {close.status}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        integrity = engine.check_integrity()
+        if not integrity['can_submit']:
+            errors = [c['detail'] for c in integrity['checks'].values() if not c['pass']]
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        snapshot               = engine.build_snapshot()
+        close.summary_snapshot = snapshot
+        close.save(update_fields=['summary_snapshot'])
+
+        return Response({
+            'id'              : close.pk,
+            'month'           : close.month,
+            'year'            : close.year,
+            'status'          : close.status,
+            'can_submit'      : close.can_submit,
+            'integrity'       : integrity,
+            'summary_snapshot': close.summary_snapshot,
+        })
+    
 
 class MonthlyCloseSubmitView(APIView):
     """
@@ -3303,21 +3013,36 @@ class MonthlyCloseMyQueueView(APIView):
         from apps.analytics.models import MonthlyCloseSummary
 
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-            status__in=[
-                MonthlyClose.Status.FINANCE_REVIEWING,
-                MonthlyClose.Status.RESUBMITTED,
-            ],
-        ).select_related(
-            'branch', 'submitted_by', 'finance_reviewer'
-        ).order_by('-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            # Regional Finance sees all closes in their region
+            closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+                status__in=[
+                    MonthlyClose.Status.FINANCE_REVIEWING,
+                    MonthlyClose.Status.RESUBMITTED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('-year', '-month')
+        else:
+            # National Finance sees only closes assigned to them
+            closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+                status__in=[
+                    MonthlyClose.Status.FINANCE_REVIEWING,
+                    MonthlyClose.Status.RESUBMITTED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('-year', '-month')
 
         # Attach risk scores where available
         data = []
@@ -3387,22 +3112,38 @@ class MonthlyCloseMyHistoryView(APIView):
 
     def get(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-            status__in=[
-                MonthlyClose.Status.FINANCE_CLEARED,
-                MonthlyClose.Status.ENDORSED,
-                MonthlyClose.Status.LOCKED,
-            ],
-        ).select_related(
-            'branch', 'submitted_by'
-        ).order_by('-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+                status__in=[
+                    MonthlyClose.Status.FINANCE_CLEARED,
+                    MonthlyClose.Status.ENDORSED,
+                    MonthlyClose.Status.LOCKED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by'
+            ).order_by('-year', '-month')
+        else:
+            closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+                status__in=[
+                    MonthlyClose.Status.FINANCE_CLEARED,
+                    MonthlyClose.Status.ENDORSED,
+                    MonthlyClose.Status.LOCKED,
+                ],
+            ).select_related(
+                'branch', 'submitted_by'
+            ).order_by('-year', '-month')
 
         data = [
             {
@@ -3436,17 +3177,28 @@ class MonthlyCloseMyBranchesView(APIView):
 
     def get(self, request):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
+                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
+                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
             return Response(
                 {'detail': 'Access denied.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        all_closes = MonthlyClose.objects.filter(
-            finance_reviewer=request.user,
-        ).select_related(
-            'branch', 'submitted_by', 'finance_reviewer'
-        ).order_by('branch__name', '-year', '-month')
+        scope = get_finance_scope(request.user)
+
+        if role in REGIONAL_ROLES:
+            all_closes = MonthlyClose.objects.filter(
+                scope['branch_filter'],
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('branch__name', '-year', '-month')
+        else:
+            all_closes = MonthlyClose.objects.filter(
+                finance_reviewer=request.user,
+            ).select_related(
+                'branch', 'submitted_by', 'finance_reviewer'
+            ).order_by('branch__name', '-year', '-month')
 
         # Group by branch
         from collections import defaultdict
@@ -3541,7 +3293,7 @@ class MonthlyCloseClearView(APIView):
 
     def post(self, request, pk):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Only Finance reviewers can clear monthly closes.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -3583,7 +3335,7 @@ class MonthlyCloseRequestClarificationView(APIView):
 
     def post(self, request, pk):
         role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'SUPER_ADMIN'):
+        if role not in FINANCE_ROLES:
             return Response(
                 {'detail': 'Only Finance reviewers can request clarification.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -3619,3 +3371,194 @@ class MonthlyCloseRequestClarificationView(APIView):
             'clarification_due_at' : close.clarification_due_at.isoformat(),
             'message'              : 'Clarification requested. Branch Manager has 24 hours to respond.',
         })
+
+class FloatPhysicalConfirmView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/physical-confirm/
+    Cashier confirms or disputes physical receipt of float on an auto-closed sheet.
+    Body: { received: true|false }
+
+    If received=true  → proceed to denomination count (PENDING_ACK)
+    If received=false → raise dispute, notify RM, hard-block BM portal
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from django.utils import timezone
+
+        try:
+            float_record = CashierFloat.objects.select_related(
+                'daily_sheet', 'cashier'
+            ).get(pk=pk, cashier=request.user)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        received = request.data.get('received', True)
+
+        if received:
+            # Cashier confirmed receipt — proceed to denomination count
+            return Response({
+                'detail'      : 'Receipt confirmed. Please count your float.',
+                'float_status': 'PENDING_ACK',
+                'float_id'    : float_record.pk,
+                'opening_float': str(float_record.opening_float),
+            })
+        else:
+            # Cashier disputes receipt — raise dispute
+            float_record.physical_confirm_disputed    = True
+            float_record.physical_confirm_disputed_at = timezone.now()
+            float_record.save(update_fields=[
+                'physical_confirm_disputed',
+                'physical_confirm_disputed_at',
+                'updated_at',
+            ])
+
+            # Notify RM
+            self._notify_rm_dispute(float_record)
+            # Notify BM
+            self._notify_bm_dispute(float_record)
+
+            return Response({
+                'detail'      : 'Dispute recorded. RM and BM have been notified.',
+                'float_status': 'PENDING_PHYSICAL_CONFIRM',
+                'disputed'    : True,
+            })
+
+    def _notify_rm_dispute(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            rm_users = CustomUser.objects.filter(
+                role__name = 'REGIONAL_MANAGER',
+                is_active  = True,
+                region     = branch.region,
+            )
+            for rm in rm_users:
+                notify(
+                    recipient = rm,
+                    verb      = 'FLOAT_DISPUTE',
+                    message   = (
+                        f"{float_record.cashier.full_name} at {branch.name} "
+                        f"reported not receiving their opening float of "
+                        f"GHS {float_record.opening_float}. "
+                        f"Branch Manager has been notified and portal blocked."
+                    ),
+                    link = '/portal/regional-manager/',
+                )
+        except Exception:
+            logger.exception('FloatPhysicalConfirmView: failed to notify RM of dispute')
+
+    def _notify_bm_dispute(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            bm = CustomUser.objects.filter(
+                branch     = branch,
+                role__name = 'BRANCH_MANAGER',
+                is_active  = True,
+            ).first()
+            if bm:
+                notify(
+                    recipient = bm,
+                    verb      = 'FLOAT_DISPUTE',
+                    message   = (
+                        f"{float_record.cashier.full_name} reported not receiving "
+                        f"their opening float of GHS {float_record.opening_float}. "
+                        f"Please hand over the float and ask them to re-confirm. "
+                        f"Your portal is blocked until this is resolved."
+                    ),
+                    link = '/portal/dashboard/',
+                )
+        except Exception:
+            logger.exception('FloatPhysicalConfirmView: failed to notify BM of dispute')
+
+
+class FloatReConfirmView(APIView):
+    """
+    POST /api/v1/finance/floats/<id>/re-confirm/
+    Cashier re-confirms physical receipt after BM has handed over the float.
+    Clears the dispute, lifts BM hard block, notifies RM of resolution.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import CashierFloat
+        from django.utils import timezone
+
+        try:
+            float_record = CashierFloat.objects.select_related(
+                'daily_sheet', 'cashier'
+            ).get(pk=pk, cashier=request.user)
+        except CashierFloat.DoesNotExist:
+            return Response(
+                {'detail': 'Float record not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not float_record.physical_confirm_disputed:
+            return Response(
+                {'detail': 'No active dispute on this float.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if float_record.morning_acknowledged:
+            return Response(
+                {'detail': 'Float already acknowledged.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Clear dispute
+        float_record.physical_confirm_disputed = False
+        float_record.save(update_fields=[
+            'physical_confirm_disputed',
+            'updated_at',
+        ])
+
+        # Notify RM of resolution
+        self._notify_rm_resolved(float_record)
+
+        return Response({
+            'detail'      : 'Receipt confirmed. Please count your float.',
+            'float_status': 'PENDING_ACK',
+            'float_id'    : float_record.pk,
+            'opening_float': str(float_record.opening_float),
+        })
+
+    def _notify_rm_resolved(self, float_record):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            branch = float_record.daily_sheet.branch
+            rm_users = CustomUser.objects.filter(
+                role__name = 'REGIONAL_MANAGER',
+                is_active  = True,
+                region     = branch.region,
+            )
+            for rm in rm_users:
+                notify(
+                    recipient = rm,
+                    verb      = 'FLOAT_DISPUTE_RESOLVED',
+                    message   = (
+                        f"Float dispute at {branch.name} resolved. "
+                        f"{float_record.cashier.full_name} has confirmed receipt of "
+                        f"GHS {float_record.opening_float}. BM portal unblocked."
+                    ),
+                    link = '/portal/regional-manager/',
+                )
+        except Exception:
+            logger.exception('FloatReConfirmView: failed to notify RM of resolution')

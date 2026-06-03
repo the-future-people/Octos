@@ -368,10 +368,20 @@ const Cashier = (() => {
     }
     // Show/hide partial credit button based on customer credit account
     const pcBtn = document.getElementById('pm-partial-credit');
+    const fullCreditBtn = document.getElementById('pm-credit');
+    const jobAmount = parseFloat(activeJob.estimated_cost || 0);
+    const availableCredit = activeJob.customer_credit
+      ? parseFloat(activeJob.customer_credit.available_credit)
+      : 0;
+
     if (pcBtn) {
-      const hasCredit = !!(activeJob.customer_credit &&
-        parseFloat(activeJob.customer_credit.available_credit) > 0);
+      const hasCredit = !!(activeJob.customer_credit && availableCredit > 0);
       pcBtn.style.display = hasCredit ? 'flex' : 'none';
+    }
+    if (fullCreditBtn) {
+      const canFullCredit = !!(activeJob.customer_credit &&
+        availableCredit >= jobAmount && jobAmount > 0);
+      fullCreditBtn.style.display = canFullCredit ? 'flex' : 'none';
     }
     selectedDeposit = 100;
     selectedMethod  = 'CASH';
@@ -445,7 +455,7 @@ const Cashier = (() => {
     if (momoField) momoField.classList.toggle('visible', method === 'MOMO');
     if (posField)  posField.classList.toggle('visible',  method === 'POS');
     if (cashField) cashField.classList.toggle('visible', method === 'CASH');
-    if (method === 'SPLIT' || method === 'PARTIAL_CREDIT') {
+    if (method === 'SPLIT' || method === 'PARTIAL_CREDIT' || method === 'CREDIT') {
       momoField?.classList.remove('visible');
       posField?.classList.remove('visible');
       cashField?.classList.remove('visible');
@@ -461,10 +471,21 @@ const Cashier = (() => {
     const splitFields = document.getElementById('split-fields');
     if (splitFields) splitFields.style.display = method === 'SPLIT' ? 'block' : 'none';
     if (method === 'SPLIT') _updateSplitFields();
+    if (method !== 'SPLIT') {
+      // Reset split fields when switching away
+      const s1 = document.getElementById('split-amount-1');
+      const s2 = document.getElementById('split-amount-2');
+      if (s1) s1.value = '';
+      if (s2) s2.value = '';
+    }
 
     const pcFields = document.getElementById('partial-credit-fields');
     if (pcFields) pcFields.style.display = method === 'PARTIAL_CREDIT' ? 'block' : 'none';
     if (method === 'PARTIAL_CREDIT') _initPartialCredit();
+
+    const fullCreditFields = document.getElementById('full-credit-fields');
+    if (fullCreditFields) fullCreditFields.style.display = method === 'CREDIT' ? 'block' : 'none';
+    if (method === 'CREDIT') _initFullCredit();
 
     // Style the partial credit button
     const pcBtn = document.getElementById('pm-partial-credit');
@@ -563,6 +584,8 @@ const Cashier = (() => {
       ready = _validateSplitLegs().valid;
     } else if (selectedMethod === 'PARTIAL_CREDIT') {
       ready = _validatePartialCredit().valid;
+    } else if (selectedMethod === 'CREDIT') {
+      ready = !!(activeJob?.customer_credit);
     }
 
     btn.disabled      = !ready;
@@ -574,10 +597,10 @@ const Cashier = (() => {
     }
   }
 
-  // ── Confirm payment ────────────────────────────────────────
-  async function confirmPayment() {
+async function confirmPayment() {
     if (!activeJob) return;
 
+    // ── Validation ─────────────────────────────────────────
     if (selectedMethod === 'CASH') {
       const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
       const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -598,6 +621,11 @@ const Cashier = (() => {
         _toast('POS approval code is required.', 'error'); return;
       }
     }
+    if (selectedMethod === 'CREDIT') {
+      if (!activeJob?.customer_credit) {
+        _toast('No credit account found.', 'error'); return;
+      }
+    }
     if (selectedMethod === 'PARTIAL_CREDIT') {
       const validation = _validatePartialCredit();
       if (!validation.valid) {
@@ -608,17 +636,23 @@ const Cashier = (() => {
     const notes   = document.getElementById('confirm-notes')?.value.trim()  || '';
     const phone   = document.getElementById('confirm-phone')?.value.trim()  || '';
     const company = document.getElementById('confirm-company')?.value.trim() || '';
-    const momoRef = document.getElementById('momo-ref')?.value.trim()       || '';
     const posCode = document.getElementById('pos-ref')?.value.trim()        || '';
     const btn     = document.getElementById('confirm-submit-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
 
     try {
+      // ── Build body ────────────────────────────────────────
       const body = {
         deposit_percentage: selectedDeposit,
         payment_method    : selectedMethod,
         notes,
       };
+
+      if (selectedMethod === 'CREDIT') {
+        body.credit_account_id = activeJob.customer_credit?.account_id
+          || activeJob.customer_credit?.id;
+      }
+
       if (selectedMethod === 'MOMO') {
         const ref = document.getElementById('momo-ref')?.value.trim() || '';
         if (!/^\d{11}$/.test(ref)) {
@@ -628,7 +662,11 @@ const Cashier = (() => {
         }
         body.momo_reference = ref;
       }
-      if (selectedMethod === 'POS')  body.pos_approval_code = posCode;
+
+      if (selectedMethod === 'POS') {
+        body.pos_approval_code = posCode;
+      }
+
       if (selectedMethod === 'SPLIT') {
         const validation = _validateSplitLegs();
         if (!validation.valid) {
@@ -638,22 +676,22 @@ const Cashier = (() => {
         }
         body.split_legs = validation.legs;
       }
+
       if (selectedMethod === 'PARTIAL_CREDIT') {
-        const validation  = _validatePartialCredit();
-        const pcAmount    = parseFloat(document.getElementById('pc-amount')?.value || 0);
-        const pcMethod    = document.getElementById('pc-method')?.value || 'CASH';
-        const pcRef       = document.getElementById('pc-ref')?.value.trim() || '';
-        const due         = parseFloat(activeJob.estimated_cost || 0);
+        const pcAmount      = parseFloat(document.getElementById('pc-amount')?.value || 0);
+        const pcMethod      = document.getElementById('pc-method')?.value || 'CASH';
+        const pcRef         = document.getElementById('pc-ref')?.value.trim() || '';
+        const due           = parseFloat(activeJob.estimated_cost || 0);
         const creditPortion = due - pcAmount;
 
-        body.payment_method          = pcMethod;
-        body.partial_credit_amount   = creditPortion.toFixed(2);
-        body.partial_credit_account  = activeJob.customer_credit.account_id;
+        body.payment_method         = pcMethod;
+        body.partial_credit_amount  = creditPortion.toFixed(2);
+        body.partial_credit_account = activeJob.customer_credit.account_id
+          || activeJob.customer_credit.id;
         if (pcMethod === 'MOMO') body.momo_reference    = pcRef;
         if (pcMethod === 'POS')  body.pos_approval_code = pcRef;
       }
-      if (phone)   body.customer_phone = phone;
-      if (company) body.company_name   = company;
+
       if (selectedMethod === 'CASH') {
         const tendered = parseFloat(document.getElementById('cash-tendered')?.value || 0);
         const due      = parseFloat(activeJob.estimated_cost || 0) * (selectedDeposit / 100);
@@ -663,6 +701,10 @@ const Cashier = (() => {
         }
       }
 
+      if (phone)   body.customer_phone = phone;
+      if (company) body.company_name   = company;
+
+      // ── Submit ────────────────────────────────────────────
       const res = await Auth.fetch(
         `/api/v1/jobs/${activeJob.id}/cashier/confirm/`, {
           method : 'POST',
@@ -906,10 +948,21 @@ const Cashier = (() => {
       return;
     }
  
+    // ── Hard block: auto-closed sheet, physical receipt confirmation ──
+    if (s.float_status === 'PENDING_PHYSICAL_CONFIRM') {
+      _showPhysicalConfirmScreen(s.float_id, parseFloat(s.opening_float || 0));
+      return;
+    }
+
     // ── Hard block: float staged, awaiting acknowledgement ──
     if (s.float_status === 'PENDING_ACK') {
       _showFloatAckScreen(s.float_id, parseFloat(s.opening_float || 0));
       return;
+    }
+
+    // ── Active shift: check for INTAKE_HELD handover jobs ──
+    if (s.float_status === 'ACTIVE' && !document.getElementById('handover-resolution-overlay')) {
+      _checkIntakeHeldJobs();
     }
  
     // ── Already signed off ─────────────────────────────────
@@ -1203,7 +1256,421 @@ const Cashier = (() => {
     return Object.entries(breakdown || {})
       .reduce((sum, [d, c]) => sum + parseInt(d) * parseInt(c), 0);
   }
- 
+
+  function _initFullCredit() {
+    if (!activeJob?.customer_credit) return;
+    const credit  = activeJob.customer_credit;
+    const fmt     = n => `GHS ${parseFloat(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
+    const jobAmt  = parseFloat(activeJob.estimated_cost || 0);
+
+    const el = document.getElementById('full-credit-fields');
+    if (!el) return;
+
+    el.innerHTML = `
+      <div style="margin-top:12px;padding:14px 16px;
+        background:var(--amber-bg);border:1px solid var(--amber-border);
+        border-radius:var(--radius-sm);">
+        <div style="font-size:11px;font-weight:700;color:var(--amber-text);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+          Credit Account
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--amber-text);">${_esc(credit.display_name)}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+            font-weight:700;color:var(--amber-text);">
+            ${fmt(credit.available_credit)} available
+          </span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="font-size:12px;color:var(--amber-text);">Amount to charge</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:14px;
+            font-weight:800;color:var(--amber-text);">${fmt(jobAmt)}</span>
+        </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--amber-border);
+          font-size:11px;color:var(--amber-text);">
+          GHS 0.00 collected now — full amount added to credit account
+        </div>
+      </div>`;
+
+    _updateConfirmBtn();
+  }
+
+  function _showPhysicalConfirmScreen(floatId, openingFloat) {
+    if (document.getElementById('physical-confirm-overlay')) return;
+
+    const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'physical-confirm-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:var(--bg);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;padding:16px;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:440px;
+        box-shadow:0 20px 60px rgba(0,0,0,0.15);overflow:hidden;">
+
+        <div style="padding:24px 24px 0;">
+          <div style="width:48px;height:48px;border-radius:12px;
+            background:var(--amber-bg);border:1px solid var(--amber-border);
+            display:flex;align-items:center;justify-content:center;
+            margin-bottom:16px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
+              viewBox="0 0 24 24" fill="none"
+              stroke="var(--amber-text)" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;
+            font-weight:800;color:var(--text);margin-bottom:6px;">
+            Did you receive your opening float?
+          </div>
+          <div style="font-size:13px;color:var(--text-3);line-height:1.6;
+            margin-bottom:20px;">
+            Yesterday's sheet was auto-closed. Your Branch Manager should have
+            set aside your opening float of
+            <strong style="color:var(--text);">${fmt(openingFloat)}</strong>
+            for you today.
+          </div>
+
+          <div style="padding:14px 16px;background:var(--bg);
+            border:1px solid var(--border);border-radius:var(--radius-sm);
+            display:flex;align-items:center;justify-content:space-between;
+            margin-bottom:24px;">
+            <span style="font-size:12px;color:var(--text-3);">Opening float</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:20px;
+              font-weight:700;color:var(--text);">${fmt(openingFloat)}</span>
+          </div>
+        </div>
+
+        <div style="padding:0 24px 24px;display:flex;flex-direction:column;gap:10px;">
+          <button onclick="Cashier._submitPhysicalConfirm(${floatId}, true)"
+            id="physical-confirm-yes"
+            style="width:100%;padding:13px;background:var(--text);color:#fff;
+              border:none;border-radius:var(--radius-sm);font-size:14px;
+              font-weight:700;cursor:pointer;font-family:inherit;">
+            Yes, I have received ${fmt(openingFloat)}
+          </button>
+          <button onclick="Cashier._submitPhysicalConfirm(${floatId}, false)"
+            id="physical-confirm-no"
+            style="width:100%;padding:13px;background:none;
+              border:1px solid var(--red-border);color:var(--red-text);
+              border-radius:var(--radius-sm);font-size:14px;
+              font-weight:600;cursor:pointer;font-family:inherit;">
+            No, I have not received my float
+          </button>
+          <div style="text-align:center;margin-top:4px;">
+            <button onclick="Auth.logout()"
+              style="background:none;border:none;font-size:12px;
+                color:var(--text-3);cursor:pointer;font-family:inherit;">
+              Sign out instead
+            </button>
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+  }
+
+  async function _submitPhysicalConfirm(floatId, received) {
+    const yesBtn = document.getElementById('physical-confirm-yes');
+    const noBtn  = document.getElementById('physical-confirm-no');
+    if (yesBtn) yesBtn.disabled = true;
+    if (noBtn)  noBtn.disabled  = true;
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/floats/${floatId}/physical-confirm/`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ received }),
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not confirm.', 'error');
+        if (yesBtn) yesBtn.disabled = false;
+        if (noBtn)  noBtn.disabled  = false;
+        return;
+      }
+
+      const data = await res.json();
+      document.getElementById('physical-confirm-overlay')?.remove();
+
+      if (received) {
+        // Proceed to denomination count
+        _showFloatAckScreen(floatId, parseFloat(data.opening_float || 0));
+      } else {
+        // Show dispute screen
+        _showDisputeScreen(floatId);
+      }
+
+    } catch {
+      _toast('Network error.', 'error');
+      if (yesBtn) yesBtn.disabled = false;
+      if (noBtn)  noBtn.disabled  = false;
+    }
+  }
+
+  function _showDisputeScreen(floatId) {
+    const overlay = document.createElement('div');
+    overlay.id    = 'dispute-screen-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      background:var(--bg);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;padding:16px;`;
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:440px;
+        box-shadow:0 20px 60px rgba(0,0,0,0.15);padding:32px;text-align:center;">
+
+        <div style="width:56px;height:56px;border-radius:50%;
+          background:var(--amber-bg);border:2px solid var(--amber-border);
+          display:flex;align-items:center;justify-content:center;
+          margin:0 auto 20px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+            viewBox="0 0 24 24" fill="none"
+            stroke="var(--amber-text)" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+
+        <div style="font-family:'Syne',sans-serif;font-size:18px;
+          font-weight:800;color:var(--text);margin-bottom:8px;">
+          Dispute Reported
+        </div>
+        <div style="font-size:13px;color:var(--text-3);line-height:1.6;
+          margin-bottom:24px;">
+          Your Branch Manager and Regional Manager have been notified.
+          Please wait for your Branch Manager to hand you the float,
+          then tap the button below to confirm receipt.
+        </div>
+
+        <button onclick="Cashier._submitReConfirm(${floatId})"
+          id="re-confirm-btn"
+          style="width:100%;padding:13px;background:var(--text);color:#fff;
+            border:none;border-radius:var(--radius-sm);font-size:14px;
+            font-weight:700;cursor:pointer;font-family:inherit;
+            margin-bottom:12px;">
+          I have now received my float
+        </button>
+        <div>
+          <button onclick="Auth.logout()"
+            style="background:none;border:none;font-size:12px;
+              color:var(--text-3);cursor:pointer;font-family:inherit;">
+            Sign out
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+  }
+
+  async function _submitReConfirm(floatId) {
+    const btn = document.getElementById('re-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/finance/floats/${floatId}/re-confirm/`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({}),
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not confirm.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'I have now received my float'; }
+        return;
+      }
+
+      const data = await res.json();
+      document.getElementById('dispute-screen-overlay')?.remove();
+      _toast('Float receipt confirmed. RM notified.', 'success');
+      _showFloatAckScreen(floatId, parseFloat(data.opening_float || 0));
+
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'I have now received my float'; }
+    }
+  }
+
+
+async function _checkIntakeHeldJobs() {
+    try {
+      const res = await Auth.fetch('/api/v1/jobs/intake-held/');
+      if (!res.ok) return;
+      const jobs = await res.json();
+      if (jobs.length > 0) {
+        _showHandoverResolutionModal(jobs);
+      }
+    } catch { /* silent */ }
+  }
+
+  function _showHandoverResolutionModal(jobs) {
+    if (document.getElementById('handover-resolution-overlay')) return;
+
+    const fmt = n => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+
+    const overlay = document.createElement('div');
+    overlay.id    = 'handover-resolution-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9998;
+      background:rgba(0,0,0,0.75);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'DM Sans',sans-serif;padding:16px;`;
+
+    const jobRows = jobs.map(j => `
+      <div id="handover-job-${j.id}"
+        style="border:1px solid var(--border);border-radius:var(--radius);
+          overflow:hidden;margin-bottom:10px;">
+        <div style="padding:14px 16px;background:var(--panel);">
+          <div style="display:flex;align-items:flex-start;
+            justify-content:space-between;margin-bottom:8px;">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--text);">
+                ${j.job_number}
+                <span style="font-size:11px;font-weight:400;
+                  color:var(--text-3);margin-left:6px;">${j.title}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">
+                Recorded by ${j.recorded_by}
+                · ${new Date(j.recorded_at).toLocaleString('en-GB', {
+                    day: 'numeric', month: 'short',
+                    hour: '2-digit', minute: '2-digit'
+                  })}
+              </div>
+              ${j.post_closing_reason ? `
+                <div style="font-size:11px;color:var(--amber-text);margin-top:2px;">
+                  Reason: ${j.post_closing_reason}
+                </div>` : ''}
+            </div>
+            <div style="text-align:right;flex-shrink:0;margin-left:12px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;
+                font-weight:700;color:var(--text);">${fmt(j.estimated_cost)}</div>
+              <div style="font-size:10px;color:var(--text-3);margin-top:2px;">
+                Cash held by BM
+              </div>
+            </div>
+          </div>
+          <button
+            id="handover-btn-${j.id}"
+            onclick="Cashier._confirmHandover(${j.id})"
+            style="width:100%;padding:9px;background:var(--text);color:#fff;
+              border:none;border-radius:var(--radius-sm);font-size:13px;
+              font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">
+            I have received ${fmt(j.cash_tendered || j.estimated_cost)} from BM
+          </button>
+        </div>
+      </div>`).join('');
+
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--border);
+        border-radius:var(--radius);width:100%;max-width:520px;
+        max-height:88vh;display:flex;flex-direction:column;
+        box-shadow:0 24px 64px rgba(0,0,0,0.3);overflow:hidden;">
+
+        <div style="padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0;">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;
+            font-weight:800;color:var(--text);margin-bottom:4px;">
+            Cash Handover Required
+          </div>
+          <div style="font-size:13px;color:var(--text-3);line-height:1.5;">
+            ${jobs.length} job${jobs.length !== 1 ? 's were' : ' was'} recorded
+            after your shift ended. The Branch Manager collected payment on your behalf.
+            Confirm receipt of each amount before starting work.
+          </div>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <div id="handover-jobs-list">${jobRows}</div>
+          <div id="handover-all-done" style="display:none;
+            padding:20px;text-align:center;color:var(--green-text);
+            font-weight:700;font-size:14px;">
+            ✓ All handovers confirmed — you're good to go!
+          </div>
+        </div>
+
+        <div style="padding:16px 24px;border-top:1px solid var(--border);
+          flex-shrink:0;background:var(--panel);">
+          <div style="font-size:11px;color:var(--text-3);text-align:center;">
+            You must confirm all handovers before accessing the payment queue
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Store pending count
+    overlay._pendingCount = jobs.length;
+  }
+
+  async function _confirmHandover(jobId) {
+    const btn = document.getElementById(`handover-btn-${jobId}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+
+    try {
+      const res = await Auth.fetch(
+        `/api/v1/jobs/${jobId}/resolve-handover/`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({}),
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _toast(err.detail || 'Could not confirm handover.', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm Receipt'; }
+        return;
+      }
+
+      // Mark this job as resolved
+      const jobRow = document.getElementById(`handover-job-${jobId}`);
+      if (jobRow) {
+        jobRow.style.opacity = '0.5';
+        jobRow.innerHTML = `
+          <div style="padding:14px 16px;background:var(--green-bg);
+            border-top:none;display:flex;align-items:center;gap:10px;">
+            <span style="color:var(--green-text);font-size:18px;">✓</span>
+            <span style="font-size:13px;font-weight:600;color:var(--green-text);">
+              Handover confirmed
+            </span>
+          </div>`;
+      }
+
+      // Check if all done
+      const overlay = document.getElementById('handover-resolution-overlay');
+      if (overlay) {
+        overlay._pendingCount = (overlay._pendingCount || 1) - 1;
+        if (overlay._pendingCount <= 0) {
+          const doneEl = document.getElementById('handover-all-done');
+          if (doneEl) doneEl.style.display = 'block';
+          setTimeout(() => {
+            overlay.remove();
+            _toast('All handovers confirmed. Queue is ready.', 'success');
+            loadQueue();
+          }, 1200);
+        }
+      }
+
+    } catch {
+      _toast('Network error.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirm Receipt'; }
+    }
+  }
 
 function _showSignOffBanner(minsRemaining, shiftEnd) {
     // Only show once per session
@@ -3111,6 +3578,11 @@ function _renderCreditPane(container) {
     _updatePartialCredit,
     _floatDenomChange,
     _submitFloatAck,
+    _confirmHandover,
+    _checkIntakeHeldJobs,
+    _initFullCredit,
+    _submitPhysicalConfirm,
+    _submitReConfirm,
   };
 })();
 

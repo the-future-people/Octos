@@ -1,476 +1,346 @@
-{% load static %}
+﻿{% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Octos — Finance</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
   <link rel="stylesheet" href="{% static 'css/regional_manager.css' %}">
+  <style>
+    .fin-shell{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+    .fin-topbar{height:56px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0;background:var(--panel);flex-shrink:0;justify-content:center;}
+    .fin-topbar-inner{max-width:1200px;width:100%;margin:0 auto;display:flex;align-items:center;height:100%;padding:0 20px;gap:16px;}
+    .fin-infostrip{height:36px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0;flex-shrink:0;justify-content:center;}
+    .fin-infostrip-inner{max-width:1200px;width:100%;margin:0 auto;display:flex;align-items:center;height:100%;padding:0 24px;}
+    .fin-body-wrapper{flex:1;overflow:hidden;display:flex;justify-content:center;}
+    .fin-body{max-width:1200px;width:100%;display:flex;overflow:hidden;}
+    .fin-brand{display:flex;align-items:center;gap:8px}
+    .fin-brand-logo{font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:var(--text)}
+    .fin-brand-divider{width:1px;height:18px;background:var(--border)}
+    .fin-brand-role{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.8px}
+    .fin-infostrip{height:36px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;flex-shrink:0}
+    .fin-strip-item{display:flex;align-items:center;gap:6px;padding:0 16px;border-right:1px solid var(--border);height:100%}
+    .fin-strip-item:first-child{padding-left:0}
+    .fin-strip-item:last-child{border-right:none}
+    .fin-strip-label{font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+    .fin-strip-value{font-size:12px;font-weight:700;color:var(--text);font-family:'JetBrains Mono',monospace}
+    .fin-strip-value.alert{color:var(--red-text)}
+    .fin-strip-value.warning{color:var(--amber-text)}
+    .fin-strip-value.good{color:var(--green-text)}
+    .fin-body{display:flex;flex:1;overflow:hidden}
+    .fin-sidebar{width:240px;border-right:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;padding:8px 12px;flex-shrink:0;overflow-y:auto}
+    .fin-nav-section{font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.6px;padding:12px 8px 4px}
+    .fin-nav-item{width:100%;height:40px;border-radius:8px;display:flex;flex-direction:row;align-items:center;gap:10px;padding:0 12px;cursor:pointer;transition:all 0.15s;color:var(--text-3);border:none;background:none;font-family:inherit;position:relative;text-align:left}
+    .fin-nav-item:hover{background:var(--bg);color:var(--text)}
+    .fin-nav-item.active{background:var(--bg);color:var(--text);box-shadow:inset 3px 0 0 var(--text)}
+    .fin-nav-item.active .fin-nav-label{font-weight:700;color:var(--text)}
+    .fin-nav-label{font-size:13px;font-weight:500;line-height:1;color:inherit}
+    .fin-nav-badge{margin-left:auto;min-width:18px;height:18px;border-radius:9px;background:var(--red-text);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
+    .fin-nav-divider{width:100%;height:1px;background:var(--border);margin:6px 0}
+    .fin-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+    .fin-tabbar{height:44px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;background:var(--panel);flex-shrink:0}
+    .fin-tab{padding:0 16px;height:44px;display:flex;align-items:center;font-size:13px;font-weight:600;color:var(--text-3);border-bottom:2px solid transparent;cursor:pointer;transition:all 0.15s;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+    .fin-tab:hover{color:var(--text)}
+    .fin-tab.active{color:var(--text);border-bottom-color:var(--text)}
+    .fin-tab-badge{margin-left:6px;padding:1px 6px;border-radius:10px;background:var(--red-text);color:#fff;font-size:10px;font-weight:700}
+    .fin-content{flex:1;overflow-y:auto;padding:28px 32px}
+    .fin-kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+    .fin-kpi-card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}
+    .fin-kpi-label{font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+    .fin-kpi-value{font-size:28px;font-weight:800;color:var(--text);font-family:'Syne',sans-serif;line-height:1}
+    .fin-kpi-sub{font-size:11px;color:var(--text-3);margin-top:4px}
+    .fin-profile-btn{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;background:none;border:1px solid var(--border);border-radius:20px;cursor:pointer;transition:border-color 0.15s;font-family:inherit}
+    .fin-profile-btn:hover{border-color:var(--border-dark,#ccc)}
+    .fin-dropdown{display:none;position:absolute;top:46px;right:0;width:220px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:200;overflow:hidden}
+    .fin-dropdown.open{display:block}
+    .fin-dropdown-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 16px;font-size:13px;color:var(--text-2);background:none;border:none;cursor:pointer;font-family:inherit;text-align:left;transition:background 0.12s}
+    .fin-dropdown-item:hover{background:var(--bg)}
+    .fin-dropdown-item.danger{color:var(--red-text)}
+    .fin-dropdown-item.danger:hover{background:var(--red-bg,#fef2f2)}
+  </style>
 </head>
 <body>
+<div class="fin-shell">
 
-<div class="app-shell" id="app-shell">
-
-  <!-- ── Topbar ── -->
-  <header class="topbar">
-    <div class="topbar-inner">
-
-      <div class="topbar-toggle">
-        <span class="brand-logo">Octos</span>
-        <span class="brand-divider"></span>
-        <div style="display:flex;flex-direction:column;line-height:1.1;">
-          <span class="brand-role">Finance</span>
+  <header class="fin-topbar">
+    <div class="fin-topbar-inner">
+    <div class="fin-brand">
+      <span class="fin-brand-logo">Octos</span>
+      <span class="fin-brand-divider"></span>
+      <span class="fin-brand-role">Finance</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="position:relative;margin-right:8px;">
+      <button style="width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-2);" onclick="FinancePortal.toggleNotifications()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      </button>
+    </div>
+    <div style="position:relative;">
+      <button class="fin-profile-btn" id="fin-profile-btn" onclick="FinancePortal.toggleProfileMenu()">
+        <div class="user-avatar" id="fin-avatar">--</div>
+        <span style="font-size:13px;font-weight:600;color:var(--text)" id="fin-user-name">--</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" id="fin-profile-arrow" style="color:var(--text-3);transition:transform 0.2s"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="fin-dropdown" id="fin-profile-dropdown">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:700;color:var(--text)" id="fin-profile-fullname">--</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px" id="fin-profile-role">Finance</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:1px;font-family:'JetBrains Mono',monospace" id="fin-profile-empid">--</div>
         </div>
-      </div>
-
-      <div class="topbar-center"></div>
-
-      <div class="topbar-right">
-        <div style="position:relative;">
-          <button id="fin-profile-btn" onclick="FinProfile.toggle()"
-            style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
-              background:none;border:1px solid var(--border);border-radius:20px;
-              cursor:pointer;transition:all 0.15s;"
-            onmouseover="this.style.borderColor='var(--border-dark)'"
-            onmouseout="this.style.borderColor='var(--border)'">
-            <div class="user-avatar" id="fin-avatar">—</div>
-            <span style="font-size:13px;font-weight:600;color:var(--text);"
-              id="fin-user-name">—</span>
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-              id="fin-profile-arrow"
-              style="color:var(--text-3);transition:transform 0.2s;">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
+        <div style="padding:6px 0">
+          <button class="fin-dropdown-item" onclick="FinancePortal.openSettings()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
           </button>
-          <div id="fin-profile-dropdown"
-            style="display:none;position:absolute;top:46px;right:0;width:200px;
-              background:var(--panel);border:1px solid var(--border);
-              border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,0.12);
-              z-index:1000;overflow:hidden;">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
-              <div style="font-size:13px;font-weight:700;color:var(--text);"
-                id="fin-profile-name">—</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px;">Finance</div>
-            </div>
-            <div style="padding:6px 0;">
-              <div style="height:1px;background:var(--border);margin:4px 0;"></div>
-              <button onclick="Auth.logout()"
-                style="width:100%;padding:9px 16px;text-align:left;background:none;border:none;
-                  cursor:pointer;font-size:13px;color:var(--red-text);font-family:inherit;
-                  display:flex;align-items:center;gap:10px;transition:background 0.12s;"
-                onmouseover="this.style.background='var(--red-bg)'"
-                onmouseout="this.style.background='none'">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13"
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-                Sign Out
-              </button>
-            </div>
-          </div>
+          <button class="fin-dropdown-item" onclick="FinancePortal.toggleTheme()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <span id="theme-label">Dark Mode</span>
+          </button>
+          <div style="height:1px;background:var(--border);margin:4px 0"></div>
+          <button class="fin-dropdown-item danger" onclick="Auth.logout()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign Out
+          </button>
         </div>
       </div>
-
+    </div>
     </div>
   </header>
 
-  <!-- ── Body ── -->
-  <div class="body-layout">
+  <div class="fin-infostrip">
+    <div class="fin-infostrip-inner">
+    <div class="fin-strip-item"><span class="fin-strip-label">Scope</span><span class="fin-strip-value" id="strip-scope">--</span></div>
+    <div class="fin-strip-item"><span class="fin-strip-label">Reviews</span><span class="fin-strip-value" id="strip-reviews">--</span></div>
+    <div class="fin-strip-item"><span class="fin-strip-label">Budget</span><span class="fin-strip-value" id="strip-budget">--</span></div>
+    <div class="fin-strip-item"><span class="fin-strip-label">Orders</span><span class="fin-strip-value" id="strip-orders">--</span></div>
+    <div class="fin-strip-item"><span class="fin-strip-label">Alerts</span><span class="fin-strip-value" id="strip-alerts">0</span></div>
+    </div>
+  </div>
 
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-inner">
+  <div class="fin-body-wrapper">
+  <div class="fin-body">
+    <nav class="fin-sidebar">
+      <div class="fin-nav-section">Workspace</div>
+      <button class="fin-nav-item active" id="nav-home" onclick="FinancePortal.switchSection('home')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span class="fin-nav-label">Overview</span>
+      </button>
+      <button class="fin-nav-item" id="nav-reviews" onclick="FinancePortal.switchSection('reviews')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span class="fin-nav-label">Reviews</span>
+        <span class="fin-nav-badge" id="nav-reviews-badge" style="display:none"></span>
+      </button>
+      <button class="fin-nav-item" id="nav-reports" onclick="FinancePortal.switchSection('reports')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span class="fin-nav-label">Reports</span>
+      </button>
+      <div class="fin-nav-section" style="margin-top:4px">Finance</div>
+      <button class="fin-nav-item" id="nav-budget" onclick="FinancePortal.switchSection('budget')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span class="fin-nav-label">Budget</span>
+      </button>
+      <button class="fin-nav-item" id="nav-procurement" onclick="FinancePortal.switchSection('procurement')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/><rect x="9" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1"/><circle cx="20" cy="16" r="1"/></svg>
+        <span class="fin-nav-label">Procurement</span>
+        <span class="fin-nav-badge" id="nav-procurement-badge" style="display:none"></span>
+      </button>
+      <button class="fin-nav-item" id="nav-vendors" onclick="FinancePortal.switchSection('vendors')">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        <span class="fin-nav-label">Vendors</span>
+      </button>
+    </nav>
 
-        <div class="sidebar-section">Reviews</div>
-
-        <div class="sidebar-item active" data-pane="queue" data-label="My Queue"
-          onclick="FinancePortal.switchPane('queue')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-          </svg>
-          <span class="sidebar-label">My Queue</span>
-          <span class="sidebar-badge" id="queue-badge" style="display:none;">0</span>
-        </div>
-
-        <div class="sidebar-item" data-pane="history" data-label="History"
-          onclick="FinancePortal.switchPane('history')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="12 8 12 12 14 14"/>
-            <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
-          </svg>
-          <span class="sidebar-label">History</span>
-        </div>
-
-        <!-- ── Procurement section ── -->
-        <div class="sidebar-section" style="margin-top:8px;">Procurement</div>
-
-        <div class="sidebar-item" data-pane="procurement" data-label="Approvals"
-          onclick="FinancePortal.switchPane('procurement')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/>
-            <rect x="9" y="11" width="14" height="10" rx="2"/>
-            <circle cx="12" cy="16" r="1"/><circle cx="20" cy="16" r="1"/>
-          </svg>
-          <span class="sidebar-label">Replenishment</span>
-          <span class="sidebar-badge" id="procurement-badge" style="display:none;">0</span>
-        </div>
-
+    <div class="fin-main">
+      <div class="fin-tabbar" id="fin-tabbar"></div>
+      <div class="fin-content" id="fin-content">
+        <div class="loading-cell"><span class="spin"></span> Loading...</div>
       </div>
-    </aside>
+    </div>
+  </div>
+  </div>
+</div>
 
-    <!-- Main -->
-    <div class="main-content">
-      <div class="pane-area">
-
-        <!-- Queue pane -->
-        <div class="pane active" id="pane-queue">
-          <div class="section-head">
-            <span class="section-title">My Review Queue</span>
-          </div>
-          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-            Monthly closes assigned to you for review. Clear when satisfied or
-            request clarification from the Branch Manager.
-          </p>
-          <div id="queue-content">
-            <div class="loading-cell"><span class="spin"></span> Loading…</div>
-          </div>
-        </div>
-
-        <!-- History pane -->
-        <div class="pane" id="pane-history">
-          <div class="section-head">
-            <span class="section-title">Cleared History</span>
-          </div>
-          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-            Monthly closes you have reviewed and cleared.
-          </p>
-          <div id="history-content">
-            <div class="loading-cell"><span class="spin"></span> Loading…</div>
-          </div>
-        </div>
-
-        <!-- ── Procurement pane ── -->
-        <div class="pane" id="pane-procurement">
-          <div class="section-head">
-            <span class="section-title">Replenishment Approvals</span>
-            <span id="procurement-count-pill"
-              style="margin-left:auto;padding:4px 12px;background:var(--bg);
-                border:1px solid var(--border);border-radius:20px;
-                font-size:12px;font-weight:600;color:var(--text-2);">— orders</span>
-          </div>
-          <p style="font-size:13px;color:var(--text-3);margin-bottom:20px;">
-            Review itemised stock costs and approve the budget before Operations
-            can execute delivery.
-          </p>
-          <div id="procurement-content">
-            <div class="loading-cell"><span class="spin"></span> Loading…</div>
-          </div>
-        </div>
-
+<!-- Clarification modal -->
+<div id="clarify-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:480px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Request Clarification</div>
+      <button onclick="FinancePortal.closeClarifyModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
+    </div>
+    <div style="padding:24px">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px">The Branch Manager has <strong>24 hours</strong> to respond before escalation.</div>
+      <textarea id="clarify-text" rows="4" placeholder="Describe what needs clarification..." style="width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;resize:vertical;box-sizing:border-box;font-family:'DM Sans',sans-serif"></textarea>
+      <div id="clarify-error" style="display:none;font-size:12px;color:var(--red-text);margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button onclick="FinancePortal.closeClarifyModal()" style="padding:8px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+        <button onclick="FinancePortal.confirmClarify()" style="padding:8px 18px;background:var(--amber-text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Send Request</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ── Clarification modal (existing) ── -->
-<div id="clarify-modal-overlay" style="display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-    max-width:480px;border:1px solid var(--border);overflow:hidden;">
-    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-      display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:16px;font-weight:700;color:var(--text);">
-        Request Clarification
-      </div>
-      <button onclick="FinancePortal.closeClarifyModal()"
-        style="background:none;border:none;font-size:20px;cursor:pointer;
-          color:var(--text-3);">×</button>
+<!-- Clear modal -->
+<div id="clear-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:460px;border:1px solid var(--border);overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Clear Monthly Close</div>
+      <button onclick="FinancePortal.closeClearModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
     </div>
-    <div style="padding:24px;">
-      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
-        Describe what the Branch Manager needs to clarify. They will have
-        <strong>24 hours</strong> to respond before the case escalates to the
-        Regional Manager.
-      </div>
-      <textarea id="clarify-text" rows="4"
-        placeholder="Describe the items that require clarification…"
-        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-          font-size:13px;resize:vertical;box-sizing:border-box;
-          font-family:'DM Sans',sans-serif;"></textarea>
-      <div id="clarify-error" style="display:none;font-size:12px;
-        color:var(--red-text);margin-top:8px;"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-        <button onclick="FinancePortal.closeClarifyModal()"
-          style="padding:8px 18px;border:1px solid var(--border);
-            border-radius:var(--radius-sm);background:none;color:var(--text-2);
-            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-          Cancel
-        </button>
-        <button onclick="FinancePortal.confirmClarify()"
-          style="padding:8px 18px;background:var(--amber-text);color:#fff;
-            border:none;border-radius:var(--radius-sm);font-size:13px;
-            font-weight:700;cursor:pointer;font-family:inherit;">
-          Send Request
-        </button>
+    <div style="padding:24px">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px">Clearing notifies the Regional Manager to endorse.</div>
+      <textarea id="clear-notes" rows="3" placeholder="Finance notes (optional)..." style="width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;resize:vertical;box-sizing:border-box;font-family:'DM Sans',sans-serif"></textarea>
+      <div id="clear-error" style="display:none;font-size:12px;color:var(--red-text);margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button onclick="FinancePortal.closeClearModal()" style="padding:8px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+        <button onclick="FinancePortal.confirmClear()" style="padding:8px 18px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Confirm Clear</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ── Clear modal (existing) ── -->
-<div id="clear-modal-overlay" style="display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-    max-width:460px;border:1px solid var(--border);overflow:hidden;">
-    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-      display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:16px;font-weight:700;color:var(--text);">
-        Clear Monthly Close
-      </div>
-      <button onclick="FinancePortal.closeClearModal()"
-        style="background:none;border:none;font-size:20px;cursor:pointer;
-          color:var(--text-3);">×</button>
+<!-- Procurement approve modal -->
+<div id="proc-approve-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:600px;max-height:90vh;overflow-y:auto;border:1px solid var(--border)">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel);z-index:1">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Approve Budget</div>
+      <button onclick="FinancePortal.closeProcApproveModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
     </div>
-    <div style="padding:24px;">
-      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px;">
-        Clearing this close will mark it as <strong>Finance Cleared</strong> and
-        notify the Regional Manager to endorse. Add any notes for the record.
-      </div>
-      <textarea id="clear-notes" rows="3"
-        placeholder="Finance notes (optional)…"
-        style="width:100%;padding:10px 14px;border:1.5px solid var(--border);
-          border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
-          font-size:13px;resize:vertical;box-sizing:border-box;
-          font-family:'DM Sans',sans-serif;"></textarea>
-      <div id="clear-error" style="display:none;font-size:12px;
-        color:var(--red-text);margin-top:8px;"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-        <button onclick="FinancePortal.closeClearModal()"
-          style="padding:8px 18px;border:1px solid var(--border);
-            border-radius:var(--radius-sm);background:none;color:var(--text-2);
-            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-          Cancel
-        </button>
-        <button onclick="FinancePortal.confirmClear()"
-          style="padding:8px 18px;background:var(--text);color:#fff;
-            border:none;border-radius:var(--radius-sm);font-size:13px;
-            font-weight:700;cursor:pointer;font-family:inherit;">
-          ✓ Confirm Clear
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ── Procurement approve modal ── -->
-<div id="proc-approve-overlay" style="display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;
-  padding:20px;">
-  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-    max-width:600px;max-height:90vh;overflow-y:auto;
-    border:1px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,0.2);">
-    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-      display:flex;justify-content:space-between;align-items:center;
-      position:sticky;top:0;background:var(--panel);z-index:1;">
-      <div style="font-size:16px;font-weight:700;color:var(--text);">Approve Budget</div>
-      <button onclick="FinancePortal.closeProcApproveModal()"
-        style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3);">×</button>
-    </div>
-    <div style="padding:24px;">
-      <!-- Order summary -->
-      <div style="background:var(--bg);border-radius:var(--radius-sm);
-        padding:12px 16px;margin-bottom:20px;
-        display:flex;justify-content:space-between;align-items:center;">
+    <div style="padding:24px">
+      <div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">Order</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
-            font-weight:700;" id="proc-approve-number">—</div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:2px;"
-            id="proc-approve-branch">—</div>
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:2px">Order</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700" id="proc-approve-number">--</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px" id="proc-approve-branch">--</div>
         </div>
-        <div style="text-align:right;">
-          <div style="font-size:11px;color:var(--text-3);margin-bottom:2px;">Estimated Total</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:20px;
-            font-weight:700;color:var(--text);" id="proc-approve-estimated">—</div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:2px">Estimated Total</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700" id="proc-approve-estimated">--</div>
         </div>
       </div>
-
-      <!-- Line items -->
-      <div style="margin-bottom:20px;">
-        <div style="font-size:10px;font-weight:700;color:var(--text-3);
-          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
-          Itemised Cost Breakdown
-        </div>
-        <div style="background:var(--bg);border:1px solid var(--border);
-          border-radius:var(--radius-sm);overflow:hidden;">
-          <table style="width:100%;border-collapse:collapse;" id="proc-approve-table">
-            <thead>
-              <tr style="background:var(--panel);">
-                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:1px solid var(--border);">Item</th>
-                <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:1px solid var(--border);">Qty</th>
-                <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:1px solid var(--border);">Unit Cost</th>
-                <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;
-                  color:var(--text-3);text-transform:uppercase;letter-spacing:0.5px;
-                  border-bottom:1px solid var(--border);">Line Total</th>
-              </tr>
-            </thead>
+      <div style="margin-bottom:20px">
+        <div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px">Itemised Cost Breakdown</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+          <table style="width:100%;border-collapse:collapse" id="proc-approve-table">
+            <thead><tr style="background:var(--panel)">
+              <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;border-bottom:1px solid var(--border)">Item</th>
+              <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;border-bottom:1px solid var(--border)">Qty</th>
+              <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;border-bottom:1px solid var(--border)">Unit Cost</th>
+              <th style="padding:9px 14px;text-align:right;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th>
+            </tr></thead>
             <tbody id="proc-approve-tbody"></tbody>
           </table>
         </div>
       </div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Approved Budget (GHS) <span style="color:var(--red-text)">*</span></label>
+        <input type="number" id="proc-budget-input" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text);background:var(--panel)">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Finance Notes</label>
+        <textarea id="proc-approve-notes" rows="2" placeholder="Notes for Operations..." style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;resize:none;font-family:'DM Sans',sans-serif;color:var(--text);background:var(--panel);box-sizing:border-box"></textarea>
+      </div>
+      <div id="proc-approve-error" style="display:none;font-size:12px;color:var(--red-text);margin-top:8px"></div>
+    </div>
+    <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel)">
+      <button onclick="FinancePortal.openProcRejectModal()" style="margin-right:auto;padding:9px 18px;background:var(--red-bg);color:var(--red-text);border:1px solid var(--red-border,#fca5a5);border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Reject</button>
+      <button onclick="FinancePortal.closeProcApproveModal()" style="padding:9px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      <button onclick="FinancePortal.confirmProcApprove()" id="btn-proc-approve" style="padding:9px 18px;background:var(--green-text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Approve Budget</button>
+    </div>
+  </div>
+</div>
 
-      <!-- Budget input -->
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:12px;font-weight:600;
-          color:var(--text-2);margin-bottom:6px;">
-          Approved Budget (GHS) <span style="color:var(--red-text);">*</span>
-        </label>
-        <input type="number" id="proc-budget-input" min="0" step="0.01"
-          placeholder="0.00"
-          style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);font-size:14px;font-weight:600;
-            font-family:'JetBrains Mono',monospace;color:var(--text);
-            background:var(--panel);">
-        <div style="font-size:11px;color:var(--text-3);margin-top:5px;">
-          You may approve a different amount if budget constraints apply.
+<!-- Procurement reject modal -->
+<div id="proc-reject-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1100;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:440px;border:1px solid var(--border);overflow:hidden">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Reject Order</div>
+      <button onclick="FinancePortal.closeProcRejectModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
+    </div>
+    <div style="padding:24px">
+      <p style="font-size:13px;color:var(--text-2);margin-bottom:16px">The order returns to Operations as a Draft for revision.</p>
+      <textarea id="proc-reject-notes" rows="4" placeholder="Reason for rejection..." style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;resize:vertical;font-family:'DM Sans',sans-serif;color:var(--text);background:var(--panel);box-sizing:border-box"></textarea>
+      <div id="proc-reject-error" style="display:none;font-size:12px;color:var(--red-text);margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button onclick="FinancePortal.closeProcRejectModal()" style="padding:9px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+        <button onclick="FinancePortal.confirmProcReject()" id="btn-proc-reject" style="padding:9px 18px;background:var(--red-text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Confirm Rejection</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Propose Budget modal -->
+<div id="propose-budget-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:600px;max-height:90vh;overflow-y:auto;border:1px solid var(--border)">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel);z-index:1">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Propose Annual Budget</div>
+      <button onclick="FinancePortal.closeProposeBudgetModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
+    </div>
+    <div style="padding:24px">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Year <span style="color:var(--red-text)">*</span></label>
+        <input type="number" id="budget-year" min="2024" max="2100" style="width:160px;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;color:var(--text);background:var(--panel)">
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px">Budget Envelopes (GHS) - Annual ceilings, split equally across quarters</div>
+      <div id="budget-envelopes-form" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="propose-budget-error" style="display:none;font-size:12px;color:var(--red-text);margin-top:12px"></div>
+    </div>
+    <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel)">
+      <button onclick="FinancePortal.closeProposeBudgetModal()" style="padding:9px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      <button onclick="FinancePortal.confirmProposeBudget()" id="btn-propose-budget" style="padding:9px 18px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Submit for Approval</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Vendor modal -->
+<div id="add-vendor-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border-radius:var(--radius);width:100%;max-width:480px;border:1px solid var(--border);overflow:hidden">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Add Vendor</div>
+      <button onclick="FinancePortal.closeAddVendorModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3)">x</button>
+    </div>
+    <div style="padding:24px;display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Vendor Name <span style="color:var(--red-text)">*</span></label>
+        <input type="text" id="vendor-name" placeholder="e.g. Perez Stationeries" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--panel);box-sizing:border-box">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Phone</label>
+          <input type="text" id="vendor-phone" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--panel);box-sizing:border-box">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Email</label>
+          <input type="email" id="vendor-email" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--panel);box-sizing:border-box">
         </div>
       </div>
-      <div style="margin-bottom:4px;">
-        <label style="display:block;font-size:12px;font-weight:600;
-          color:var(--text-2);margin-bottom:6px;">Finance Notes (optional)</label>
-        <textarea id="proc-approve-notes" rows="2"
-          placeholder="Any notes for Operations…"
-          style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-            border-radius:var(--radius-sm);font-size:13px;resize:none;
-            font-family:'DM Sans',sans-serif;color:var(--text);
-            background:var(--panel);box-sizing:border-box;"></textarea>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Payment Term</label>
+        <select id="vendor-payment-term" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--panel)">
+          <option value="CASH">Cash</option>
+          <option value="CHEQUE">Cheque</option>
+          <option value="MOMO">Mobile Money</option>
+          <option value="BANK_TRANSFER">Bank Transfer</option>
+        </select>
       </div>
-      <div id="proc-approve-error" style="display:none;font-size:12px;
-        color:var(--red-text);margin-top:8px;"></div>
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Address</label>
+        <textarea id="vendor-address" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);background:var(--panel);resize:none;box-sizing:border-box;font-family:'DM Sans',sans-serif"></textarea>
+      </div>
+      <div id="add-vendor-error" style="display:none;font-size:12px;color:var(--red-text)"></div>
     </div>
-    <div style="padding:16px 24px;border-top:1px solid var(--border);
-      display:flex;gap:10px;justify-content:flex-end;
-      position:sticky;bottom:0;background:var(--panel);">
-      <button onclick="FinancePortal.openProcRejectModal()"
-        style="margin-right:auto;padding:9px 18px;background:var(--red-bg);
-          color:var(--red-text);border:1px solid var(--red-border);
-          border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-          cursor:pointer;font-family:inherit;">
-        Reject
-      </button>
-      <button onclick="FinancePortal.closeProcApproveModal()"
-        style="padding:9px 18px;border:1px solid var(--border);
-          border-radius:var(--radius-sm);background:none;color:var(--text-2);
-          font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-        Cancel
-      </button>
-      <button onclick="FinancePortal.confirmProcApprove()" id="btn-proc-approve"
-        style="padding:9px 18px;background:var(--green-text);color:#fff;
-          border:none;border-radius:var(--radius-sm);font-size:13px;
-          font-weight:700;cursor:pointer;font-family:inherit;">
-        Approve Budget
-      </button>
+    <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="FinancePortal.closeAddVendorModal()" style="padding:9px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancel</button>
+      <button onclick="FinancePortal.confirmAddVendor()" id="btn-add-vendor" style="padding:9px 18px;background:var(--text);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Add Vendor</button>
     </div>
   </div>
 </div>
 
-<!-- ── Procurement reject modal ── -->
-<div id="proc-reject-overlay" style="display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,0.5);z-index:1100;align-items:center;justify-content:center;
-  padding:20px;">
-  <div style="background:var(--panel);border-radius:var(--radius);width:100%;
-    max-width:440px;border:1px solid var(--border);overflow:hidden;">
-    <div style="padding:18px 24px;border-bottom:1px solid var(--border);
-      display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:16px;font-weight:700;color:var(--text);">Reject Order</div>
-      <button onclick="FinancePortal.closeProcRejectModal()"
-        style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-3);">×</button>
-    </div>
-    <div style="padding:24px;">
-      <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">
-        The order will be returned to Operations as a Draft for revision and resubmission.
-      </p>
-      <label style="display:block;font-size:12px;font-weight:600;
-        color:var(--text-2);margin-bottom:6px;">
-        Reason <span style="color:var(--red-text);">*</span>
-      </label>
-      <textarea id="proc-reject-notes" rows="4"
-        placeholder="Explain why this order is being rejected…"
-        style="width:100%;padding:9px 12px;border:1.5px solid var(--border);
-          border-radius:var(--radius-sm);font-size:13px;resize:vertical;
-          font-family:'DM Sans',sans-serif;color:var(--text);
-          background:var(--panel);box-sizing:border-box;"></textarea>
-      <div id="proc-reject-error" style="display:none;font-size:12px;
-        color:var(--red-text);margin-top:8px;"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
-        <button onclick="FinancePortal.closeProcRejectModal()"
-          style="padding:9px 18px;border:1px solid var(--border);
-            border-radius:var(--radius-sm);background:none;color:var(--text-2);
-            font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
-          Cancel
-        </button>
-        <button onclick="FinancePortal.confirmProcReject()" id="btn-proc-reject"
-          style="padding:9px 18px;background:var(--red-text);color:#fff;
-            border:none;border-radius:var(--radius-sm);font-size:13px;
-            font-weight:700;cursor:pointer;font-family:inherit;">
-          Confirm Rejection
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
 <div id="toast-container"></div>
-
 <script src="{% static 'js/auth.js' %}"></script>
 <script src="{% static 'js/finance_portal.js' %}"></script>
-<script>
-  const FinProfile = (() => {
-    let open = false;
-    function toggle() { open ? close() : _open(); }
-    function _open() {
-      open = true;
-      const dd    = document.getElementById('fin-profile-dropdown');
-      const arrow = document.getElementById('fin-profile-arrow');
-      if (dd)    dd.style.display      = 'block';
-      if (arrow) arrow.style.transform = 'rotate(180deg)';
-      const name = document.getElementById('fin-profile-name');
-      if (name)  name.textContent =
-        document.getElementById('fin-user-name')?.textContent || '—';
-    }
-    function close() {
-      open = false;
-      const dd    = document.getElementById('fin-profile-dropdown');
-      const arrow = document.getElementById('fin-profile-arrow');
-      if (dd)    dd.style.display      = 'none';
-      if (arrow) arrow.style.transform = 'rotate(0deg)';
-    }
-    document.addEventListener('click', e => {
-      if (open && !e.target.closest('#fin-profile-btn') &&
-          !e.target.closest('#fin-profile-dropdown')) close();
-    });
-    return { toggle, close };
-  })();
-</script>
+<script src="{% static 'js/finance_budget.js' %}"></script>
 </body>
 </html>

@@ -51,7 +51,7 @@ class ReplenishmentOrderListView(APIView):
         if role_name in ('OPERATIONS_MANAGER', 'SUPER_ADMIN'):
             orders = selectors.get_orders_for_operations_manager()
 
-        elif role_name == 'FINANCE':
+        elif role_name in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY', 'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY', 'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY'):
             orders = selectors.get_orders_pending_finance_approval()
 
         elif role_name == 'REGIONAL_MANAGER' and user.region:
@@ -167,7 +167,7 @@ class ApproveOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        _require_role(request.user, {'FINANCE', 'SUPER_ADMIN'})
+        _require_role(request.user, {'FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY', 'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY', 'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'})
 
         order = _get_order_or_404(pk)
         if order is None:
@@ -198,7 +198,7 @@ class RejectOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        _require_role(request.user, {'FINANCE', 'SUPER_ADMIN'})
+        _require_role(request.user, {'FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY', 'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY', 'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'})
 
         order = _get_order_or_404(pk)
         if order is None:
@@ -383,7 +383,7 @@ def _require_role(user, allowed_roles: set) -> None:
 
 def _can_view_order(user, order) -> bool:
     role_name = getattr(getattr(user, 'role', None), 'name', '')
-    if role_name in ('OPERATIONS_MANAGER', 'FINANCE', 'SUPER_ADMIN'):
+    if role_name in ('OPERATIONS_MANAGER', 'FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY', 'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY', 'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
         return True
     if role_name == 'REGIONAL_MANAGER':
         return order.branch.region_id == getattr(user, 'region_id', None)

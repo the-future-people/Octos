@@ -6,7 +6,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from config.views import (
     home_view, hr_portal_view, login_view, dashboard_view, inbox_view, jobs_view,
-    cashier_view, attendant_view, belt_manager_view, regional_manager_view,
+    cashier_view, attendant_view, belt_manager_view, onboarding_view, regional_manager_view,
     finance_portal_view, ops_portal_view, finance_ops_portal_view,
     careers_view,  careers_view,
     home_view,
@@ -49,6 +49,7 @@ urlpatterns = [
     path('portal/finance/',          finance_portal_view,     name='finance-portal'),
     path('portal/ops/',              ops_portal_view,         name='ops-portal'),
     path('portal/finance-ops/',      finance_ops_portal_view, name='finance-ops-portal'),
+    path('onboarding/<str:token>/', onboarding_view, name='onboarding'),
 
 path('portal/hr/', hr_portal_view, name='hr-portal'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -833,7 +833,7 @@ const Attendant = (() => {
     try {
       const [svcRes, custRes] = await Promise.all([
         Auth.fetch('/api/v1/jobs/services/'),
-        Auth.fetch('/api/v1/customers/'),
+        Auth.fetch('/api/v1/customers/?page_size=200'),
       ]);
       if (svcRes.ok) {
         const data = await svcRes.json();

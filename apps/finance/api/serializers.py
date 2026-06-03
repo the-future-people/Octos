@@ -22,8 +22,10 @@ from apps.finance.models import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DailySalesSheetListSerializer(serializers.ModelSerializer):
-    branch_name  = serializers.CharField(source='branch.name', read_only=True)
-    branch_code  = serializers.CharField(source='branch.code', read_only=True)
+    branch_name    = serializers.CharField(source='branch.name', read_only=True)
+    branch_code    = serializers.CharField(source='branch.code', read_only=True)
+    sheet_number   = serializers.CharField(read_only=True)
+    closing_time   = serializers.SerializerMethodField()
     opened_by_name = serializers.SerializerMethodField()
     closed_by_name = serializers.SerializerMethodField()
 
@@ -31,6 +33,7 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
         model  = DailySalesSheet
         fields = [
             'id', 'branch', 'branch_name', 'branch_code',
+            'sheet_number', 'closing_time',
             'date', 'status',
             'opened_by_name', 'opened_at',
             'closed_by_name', 'closed_at',
@@ -43,6 +46,20 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
             'net_cash_in_till', 'vat_collected',
             'notes', 'created_at',
         ]
+    
+    def get_closing_time(self, obj) -> str:
+        try:
+            from apps.hr.shift_engine import ShiftEngine
+            schedule = ShiftEngine(obj.branch).get_role_schedule(
+                'BRANCH_MANAGER', target_date=obj.date
+            )
+            shift_end = schedule.get('shift_end')
+            if shift_end:
+                from datetime import datetime
+                return datetime.fromisoformat(shift_end).strftime('%I:%M %p')
+        except Exception:
+            pass
+        return '—'
 
     def get_opened_by_name(self, obj) -> str:
         if obj.opened_by:

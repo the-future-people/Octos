@@ -100,26 +100,39 @@ class SheetEngine:
 
     def get_or_open_today(self, opened_by=None):
         """
-        Fallback: get today's open sheet or create one on the spot.
-        Called when the scheduled task may have missed.
-        Never blocks an operation waiting for a sheet.
-        On Sundays, returns existing sheet if present — never creates.
+        Get today's open sheet or create one — race-condition safe.
+        Uses get_or_create directly against the DB unique constraint.
+        Never creates on Sundays.
         """
         from apps.finance.models import DailySalesSheet
         today = timezone.localdate()
 
-        existing = DailySalesSheet.objects.filter(
-            branch = self.branch,
-            date   = today,
-        ).first()
-        if existing:
-            return existing, False
-
         if today.weekday() == 6:
             return None, False
 
-        return self.open_sheet(target_date=today, opened_by=opened_by)
-
+        try:
+            sheet, created = DailySalesSheet.objects.get_or_create(
+                branch = self.branch,
+                date   = today,
+                defaults = {
+                    'status'   : DailySalesSheet.Status.OPEN,
+                    'opened_by': opened_by,
+                },
+            )
+            if created:
+                self._assign_sheet_number(sheet, today)
+                self._link_staged_floats(sheet)
+                self._link_intake_held_jobs(sheet)
+                logger.info(
+                    'SheetEngine: opened sheet %s for branch %s on %s',
+                    sheet.pk, self.branch.code, today,
+                )
+            return sheet, created
+        except Exception:
+            # Integrity error from concurrent create — fetch the winner
+            sheet = DailySalesSheet.objects.get(branch=self.branch, date=today)
+            return sheet, False
+    
     def set_first_job_opener(self, sheet, user) -> None:
         """
         Record the first job creator as the operational sheet opener.
@@ -165,6 +178,26 @@ class SheetEngine:
         """
         from apps.finance.float_engine import FloatEngine
         return FloatEngine.link_staged_floats(sheet)
+
+    def _link_intake_held_jobs(self, sheet) -> int:
+        """
+        Detect INTAKE_HELD jobs for this branch with no daily_sheet.
+        Does NOT link them — that happens when cashier resolves each one.
+        Returns count so the cashier portal knows to show the handover modal.
+        """
+        from apps.jobs.models import Job
+        count = Job.objects.filter(
+            branch      = self.branch,
+            status      = Job.INTAKE_HELD,
+            daily_sheet = None,
+        ).count()
+        if count:
+            logger.info(
+                'SheetEngine: %d INTAKE_HELD job(s) pending handover resolution '
+                'for branch %s on sheet %s',
+                count, self.branch.code, sheet.pk,
+            )
+        return count
 
     # ── Lock status ───────────────────────────────────────────────────────────
 
@@ -387,6 +420,7 @@ class SheetEngine:
 
         if auto:
             self._notify_auto_close(sheet)
+            self._stage_tomorrow_floats(sheet)
 
         logger.info('SheetEngine: sheet %s closed — %s', sheet.pk, sheet.status)
         return sheet
@@ -408,6 +442,8 @@ class SheetEngine:
             is_void     = False,
         )
 
+        from apps.finance.models import PaymentLeg
+
         total_cash = receipts.filter(
             payment_method='CASH'
         ).aggregate(t=Sum('amount_paid'))['t'] or 0
@@ -419,6 +455,15 @@ class SheetEngine:
         total_pos = receipts.filter(
             payment_method='POS'
         ).aggregate(t=Sum('amount_paid'))['t'] or 0
+
+        # Add SPLIT payment legs to their respective method totals
+        split_receipts = receipts.filter(payment_method='SPLIT')
+        split_job_ids  = split_receipts.values_list('job_id', flat=True)
+        split_legs     = PaymentLeg.objects.filter(job_id__in=split_job_ids)
+
+        total_cash += split_legs.filter(payment_method='CASH').aggregate(t=Sum('amount'))['t'] or 0
+        total_momo += split_legs.filter(payment_method='MOMO').aggregate(t=Sum('amount'))['t'] or 0
+        total_pos  += split_legs.filter(payment_method='POS').aggregate(t=Sum('amount'))['t'] or 0
 
         total_credit_issued = receipts.filter(
             payment_method='CREDIT'
@@ -460,7 +505,66 @@ class SheetEngine:
             'net_cash_in_till',
         ])
 
-    # ── Carry forward ─────────────────────────────────────────────────────────
+    def _stage_tomorrow_floats(self, sheet) -> None:
+        """
+        On auto-close, stage tomorrow's floats for all active cashiers
+        using their closing cash as the opening float.
+        Called only on auto-close — manual close handles this in the view.
+        """
+        try:
+            from apps.finance.models import CashierFloat
+            from apps.finance.float_engine import FloatEngine
+            from apps.accounts.models import CustomUser
+            from decimal import Decimal
+
+            tomorrow = sheet.date + timedelta(days=1)
+            if tomorrow.weekday() == 6:
+                tomorrow = tomorrow + timedelta(days=1)
+
+            cashiers = CustomUser.objects.filter(
+                branch     = self.branch,
+                role__name = 'CASHIER',
+                is_active  = True,
+            )
+
+            for cashier in cashiers:
+                try:
+                    float_record = CashierFloat.objects.filter(
+                        daily_sheet = sheet,
+                        cashier     = cashier,
+                    ).first()
+
+                    DEFAULT_FLOAT = Decimal('100.00')
+                    opening = DEFAULT_FLOAT
+                    if float_record and float_record.closing_cash:
+                        opening = float_record.closing_cash
+                    # Never stage zero — fall back to default
+                    if opening <= Decimal('0.00'):
+                        opening = DEFAULT_FLOAT
+
+                    FloatEngine.stage_float(
+                        cashier     = cashier,
+                        amount      = opening,
+                        set_by      = None,
+                        target_date = tomorrow,
+                        branch      = self.branch,
+                    )
+                    logger.info(
+                        'SheetEngine: staged float GHS %s for %s on %s (auto-close)',
+                        opening, cashier.full_name, tomorrow,
+                    )
+                except Exception:
+                    logger.exception(
+                        'SheetEngine: failed to stage float for cashier %s',
+                        cashier.pk,
+                    )
+        except Exception:
+            logger.exception(
+                'SheetEngine: _stage_tomorrow_floats failed for sheet %s',
+                sheet.pk,
+            )
+
+    # ── Carry forward ──────────────────────────────────────────────────────────
 
     @transaction.atomic
     def carry_forward_pending_jobs(self, sheet) -> int:

@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 
 urlpatterns = [
     # Jobs CRUD
@@ -24,7 +25,10 @@ urlpatterns = [
     path('services/', views.ServiceListView.as_view(), name='service-list'),
 
     # Pricing
-    path('pricing/',          views.PricingRuleListView.as_view(), name='pricing-list'),
+    path('pricing/',          views.PricingRuleListView.as_view(),   name='pricing-list'),
+    path('pricing/create/',   views.PricingRuleCreateView.as_view(), name='pricing-create'),
+    path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
+    path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
     path('price/calculate/',  views.PriceCalculateView.as_view(),  name='price-calculate'),
     # Drafts
     path('drafts/',              views.DraftListView.as_view(),   name='draft-list'),
@@ -32,8 +36,11 @@ urlpatterns = [
     path('drafts/<int:pk>/discard/', views.DiscardDraftView.as_view(), name='draft-discard'),
     path('reports/services/', views.ServicePerformanceView.as_view(), name='service-performance'),
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
+    path('performance/',      views.BranchPerformanceView.as_view(),  name='branch-performance'),
     path('history/', views.JobHistoryView.as_view(), name='job-history'),
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),
     path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),
     path('late/', views.LateJobView.as_view(), name='late-job'),
+    path('intake-held/', views.IntakeHeldQueueView.as_view(), name='intake-held-queue'),
+    path('<int:pk>/resolve-handover/', views.ResolveHandoverView.as_view(), name='resolve-handover'),
 ]

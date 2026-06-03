@@ -70,6 +70,7 @@ class RoleDropdownView(generics.ListAPIView):
     queryset = Role.objects.all()
     serializer_class = RoleListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
 
 class PermissionListView(generics.ListAPIView):
@@ -226,3 +227,113 @@ class AuditedTokenObtainPairView(TokenObtainPairView):
                 pass
 
         return response
+
+class PendingActivationMeView(APIView):
+    """
+    GET /api/v1/accounts/pending-activation/me/
+    Returns the current user's own PendingActivation (for shadow employees).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import PendingActivation
+        try:
+            pa = PendingActivation.objects.select_related(
+                'role', 'branch', 'region'
+            ).get(user=request.user)
+        except PendingActivation.DoesNotExist:
+            return Response({'detail': 'No pending activation found.'}, status=404)
+
+        return Response({
+            'id'              : pa.id,
+            'start_date'      : str(pa.start_date),
+            'days_until_start': pa.days_until_start,
+            'role'            : pa.role.display_name,
+            'designation'     : pa.designation,
+            'status'          : pa.status,
+            'shadow_days'     : pa.shadow_days,
+        })
+class SelfActivateView(APIView):
+    """
+    POST /api/v1/accounts/pending-activation/self-activate/
+    Called by the frontend when daysLeft <= 0 on the activation modal.
+    Triggers the same activation logic as the Celery task.
+    Only fires if start_date <= today and status is SHADOW/PENDING.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from apps.accounts.models import PendingActivation
+        from apps.accounts.tasks import _activate_employee
+        from django.db import transaction
+        from django.utils import timezone
+
+        today = timezone.localdate()
+
+        try:
+            pa = PendingActivation.objects.select_related(
+                'user', 'role', 'branch', 'region',
+                'conflict_user', 'created_by',
+            ).get(
+                user=request.user,
+                status__in=[PendingActivation.PENDING, PendingActivation.SHADOW],
+            )
+        except PendingActivation.DoesNotExist:
+            return Response(
+                {'detail': 'No pending activation found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if pa.start_date > today:
+            return Response(
+                {'detail': f'Activation date is {pa.start_date}. Not yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                _activate_employee(pa, today)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(
+                'SelfActivateView: activation failed for user %s', request.user.pk
+            )
+            return Response(
+                {'detail': 'Activation failed. Please contact HR.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({
+            'detail'    : 'Activated successfully.',
+            'role'      : pa.role.display_name,
+            'branch'    : pa.branch.name if pa.branch else None,
+        })
+
+class PendingActivationDisplacingMeView(APIView):
+    """
+    GET /api/v1/accounts/pending-activation/displacing-me/
+    Returns activation details for the incoming employee who will
+    replace the current user (for outgoing BM countdown banner).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.accounts.models import PendingActivation
+        pa = PendingActivation.objects.select_related(
+            'user', 'role', 'branch',
+        ).filter(
+            conflict_user=request.user,
+            status__in=[PendingActivation.PENDING, PendingActivation.SHADOW],
+        ).order_by('start_date').first()
+
+        if not pa:
+            return Response({'detail': 'No incoming replacement found.'}, status=404)
+
+        return Response({
+            'id'              : pa.id,
+            'start_date'      : str(pa.start_date),
+            'days_until_start': pa.days_until_start,
+            'incoming_name'   : pa.user.full_name,
+            'role'            : pa.role.display_name,
+            'status'          : pa.status,
+        })

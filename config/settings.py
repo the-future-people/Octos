@@ -4,6 +4,7 @@ from celery.schedules import crontab
 
 
 import os
+import os as _os
 from decouple import config as decouple_config
 # Override decouple with actual OS env vars (for Docker)
 class EnvConfig:
@@ -16,7 +17,7 @@ class EnvConfig:
         if cast is not None:
             return decouple_config(key, default=default, cast=cast)
         return decouple_config(key, default=default)
-config = EnvConfig()
+
 
 config = EnvConfig()
 
@@ -30,6 +31,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost').split(','
 
 # Applications
 DJANGO_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -41,6 +43,8 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
+    'corsheaders',
+    'channels',
 ]
 
 LOCAL_APPS = [
@@ -62,12 +66,15 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'apps.core.middleware.ShadowUserMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -118,23 +125,14 @@ USE_TZ = True
 
 # Static & Media
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-# REST Framework
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
-    ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ],
-}
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.CustomUser'
@@ -146,6 +144,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
+        'apps.core.permissions.IsNotShadowUser',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -158,12 +157,23 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
 }
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
+# ── ASGI & WebSocket ───────────────────────────────────────────────────────────
+ASGI_APPLICATION = 'config.asgi.application'
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+_REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [_REDIS_URL],
+            'capacity': 1500,
+            'expiry': 10,
+        },
+    },
+}
+CELERY_BROKER_URL = _os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = _os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
 CELERY_BEAT_SCHEDULE = {
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
@@ -189,4 +199,16 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.check_credit_due',
         'schedule': crontab(hour=7, minute=30),
     },
+    'process-staff-activations-daily': {
+        'task': 'apps.accounts.tasks.process_staff_activations',
+        'schedule': crontab(hour=0, minute=1),  # 00:01 WAT daily
+    },
 }
+
+# CORS
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://octos-web.vercel.app',
+    'https://octos-production.up.railway.app',
+]
