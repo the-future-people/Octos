@@ -1,5 +1,9 @@
 from django.contrib import admin
 from django.urls import include, path
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({'status': 'ok'})
 from rest_framework_simplejwt.views import TokenRefreshView
 from apps.accounts.api.views import AuditedTokenObtainPairView
 from django.conf import settings
@@ -13,6 +17,8 @@ from config.views import (
 )
 
 urlpatterns = [
+    # Health check
+    path('api/v1/health/', health_check, name='health'),
     # Admin
     path('admin/', admin.site.urls),
 
