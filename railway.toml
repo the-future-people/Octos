@@ -1,6 +1,6 @@
 # railway.toml
 [deploy]
-startCommand = "python manage.py migrate --noinput ; daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+startCommand = "bash start.sh"
 healthcheckPath = "/api/v1/health/"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
