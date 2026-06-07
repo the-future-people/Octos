@@ -31,7 +31,7 @@ class BranchMinimalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = Branch
-        fields = ['id', 'name', 'code', 'region_name', 'belt_name']
+        fields = ['id', 'name', 'code', 'region_name', 'belt_name', 'phone', 'whatsapp_number', 'email', 'address']
 
 
 class RegionMinimalSerializer(serializers.ModelSerializer):
