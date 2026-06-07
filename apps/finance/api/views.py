@@ -1725,25 +1725,15 @@ class InvoicePDFView(APIView):
         except Invoice.DoesNotExist:
             return Response({'detail': 'Invoice not found.'}, status=404)
 
-        # Regenerate if missing
-        if not invoice.pdf_path:
-            try:
-                _generate_invoice_pdf(invoice)
-            except Exception as e:
-                return Response(
-                    {'detail': f'PDF generation failed: {e}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
         import os
-        if not os.path.exists(invoice.pdf_path):
-            try:
-                _generate_invoice_pdf(invoice)
-            except Exception as e:
-                return Response(
-                    {'detail': f'PDF generation failed: {e}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+        # Always regenerate — ensures latest template is used
+        try:
+            _generate_invoice_pdf(invoice)
+        except Exception as e:
+            return Response(
+                {'detail': f'PDF generation failed: {e}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         from django.http import FileResponse
         response = FileResponse(
