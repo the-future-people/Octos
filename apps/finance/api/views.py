@@ -1,4 +1,4 @@
-from asyncio.log import logger
+﻿from asyncio.log import logger
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -64,9 +64,9 @@ from .serializers import (
     WeeklyReportDetailSerializer,
     WeeklyReportNotesSerializer,
 )
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Pagination
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from rest_framework.pagination import PageNumberPagination
 
 class StandardResultsPagination(PageNumberPagination):
@@ -74,9 +74,9 @@ class StandardResultsPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size        = 100
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Daily Sales Sheet
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class DailySalesSheetListView(generics.ListAPIView):
     """
@@ -148,7 +148,7 @@ class DailySalesSheetTodayView(APIView):
     Returns today's sheet for the user's branch.
     Creates one if it doesn't exist (fallback open).
 
-    Returns serialized sheet data only — no live total injection.
+    Returns serialized sheet data only â€” no live total injection.
     Live vs frozen revenue is handled by SheetSummaryService via
     the /summary/ endpoint. This view remains a thin identity fetch.
     """
@@ -168,7 +168,7 @@ class DailySalesSheetTodayView(APIView):
 
         if sheet is None:
             return Response(
-                {'detail': 'No sheet today — branch may be closed (Sunday).'},
+                {'detail': 'No sheet today â€” branch may be closed (Sunday).'},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -182,7 +182,7 @@ class TodaySummaryView(APIView):
     GET /api/v1/finance/sheets/today/summary/
     Single-call endpoint for the BM portal day sheet.
     Opens today's sheet if needed, then returns the full
-    SheetSummaryService payload — live revenue, jobs, inventory, alerts.
+    SheetSummaryService payload â€” live revenue, jobs, inventory, alerts.
     """
     permission_classes = [IsAuthenticated]
 
@@ -200,7 +200,7 @@ class TodaySummaryView(APIView):
 
         if sheet is None:
             return Response(
-                {'detail': 'No sheet today — branch may be closed (Sunday).'},
+                {'detail': 'No sheet today â€” branch may be closed (Sunday).'},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -217,7 +217,7 @@ class DailySalesSheetSummaryView(APIView):
     and outstanding alerts. Replaces the multi-API client-side
     join previously done in dashboard.js.
 
-    Access: branch-scoped — BM can only access own branch sheets.
+    Access: branch-scoped â€” BM can only access own branch sheets.
     """
     permission_classes = [IsAuthenticated]
 
@@ -312,12 +312,12 @@ class DailySalesSheetCloseView(APIView):
 
         errors = []
 
-        # ── Gate 1: All cashiers signed off ───────────────────
+        # â”€â”€ Gate 1: All cashiers signed off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         signoff_gate = FloatEngine.validate_signoff_gate(sheet)
         if not signoff_gate['passed']:
             errors.extend(signoff_gate['errors'])
 
-        # ── Gate 2: No pending instant payments ───────────────
+        # â”€â”€ Gate 2: No pending instant payments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from apps.jobs.models import Job
         pending = Job.objects.filter(
             daily_sheet  = sheet,
@@ -330,7 +330,7 @@ class DailySalesSheetCloseView(APIView):
                 f"Resolve before closing."
             )
 
-        # ── Stage tomorrow's floats BEFORE Gate 3 ─────────────
+        # â”€â”€ Stage tomorrow's floats BEFORE Gate 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from apps.accounts.models import CustomUser
         from datetime import timedelta
         from decimal import Decimal
@@ -356,7 +356,7 @@ class DailySalesSheetCloseView(APIView):
             except Exception:
                 pass
 
-        # ── Gate 3: Tomorrow's float set ──────────────────────
+        # â”€â”€ Gate 3: Tomorrow's float set â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         float_gate = FloatEngine.validate_tomorrow_float_gate(sheet)
         if not float_gate['passed']:
             errors.extend(float_gate['errors'])
@@ -370,7 +370,7 @@ class DailySalesSheetCloseView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── All gates passed — close the sheet ────────────────
+        # â”€â”€ All gates passed â€” close the sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         try:
             engine = SheetEngine(sheet.branch)
             closed = engine.close_sheet(
@@ -387,9 +387,9 @@ class DailySalesSheetCloseView(APIView):
         from apps.finance.serializers import DailySalesSheetListSerializer
         return Response(DailySalesSheetListSerializer(closed).data)
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Cashier Float
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class CashierFloatSetView(APIView):
     """
@@ -481,9 +481,9 @@ class CashierFloatCloseView(APIView):
 
         return Response(CashierFloatSerializer(float_record).data)
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Cashier Sign-Off
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class CashierSignOffView(APIView):
     """
     POST /api/v1/finance/floats/<id>/sign-off/
@@ -516,7 +516,7 @@ class CashierSignOffView(APIView):
         is_overtime  = request.data.get('is_overtime', False)
         is_cover     = request.data.get('is_cover', False)
 
-        # ── Mid-day handover ──────────────────────────────────
+        # â”€â”€ Mid-day handover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if is_handover:
             handover_amount = request.data.get('handover_amount', 0)
             breakdown       = request.data.get('breakdown', {})
@@ -543,7 +543,7 @@ class CashierSignOffView(APIView):
                 'next_float_id'  : result['next_staged'].pk,
             })
 
-        # ── Overtime extension ────────────────────────────────
+        # â”€â”€ Overtime extension â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if is_overtime or is_cover:
             overtime_until  = request.data.get('overtime_until')
             overtime_reason = request.data.get('overtime_reason', '')
@@ -581,7 +581,7 @@ class CashierSignOffView(APIView):
                 'cover_until'   : float_record.cover_until,
             })
 
-        # ── EOD sign-off ──────────────────────────────────────
+        # â”€â”€ EOD sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         closing_cash   = request.data.get('closing_cash', 0)
         breakdown      = request.data.get('breakdown', {})
         variance_notes = request.data.get('variance_notes', '')
@@ -652,14 +652,14 @@ class CashierShiftStatusView(APIView):
         today = timezone.localdate()
         now   = timezone.now()
 
-        # ── Float status via FloatEngine ──────────────────────
+        # â”€â”€ Float status via FloatEngine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         float_status = FloatEngine.get_float_status(
             cashier = user,
             branch  = branch,
             date    = today,
         )
 
-        # ── Resolve sheet_number ───────────────────────────────
+        # â”€â”€ Resolve sheet_number â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from apps.finance.models import DailySalesSheet as DSS
         _sheet_number = ''
         if float_status.get('sheet_id'):
@@ -670,7 +670,7 @@ class CashierShiftStatusView(APIView):
             except Exception:
                 pass
 
-        # ── Signed off — return immediately ───────────────────
+        # â”€â”€ Signed off â€” return immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if float_status['float_status'] == 'SIGNED_OFF':
             try:
                 _fr = CashierFloat.objects.get(pk=float_status['float_id'])
@@ -697,7 +697,7 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : None,
             })
 
-        # ── No float — return immediately ─────────────────────
+        # â”€â”€ No float â€” return immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if float_status['float_status'] == 'NO_FLOAT':
             return Response({
                 'has_shift'        : False,
@@ -718,7 +718,7 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : None,
             })
 
-        # ── Pending acknowledgement ───────────────────────────
+        # â”€â”€ Pending acknowledgement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if float_status['float_status'] == 'PENDING_ACK':
             return Response({
                 'has_shift'        : True,
@@ -739,7 +739,7 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : None,
             })
 
-        # ── Active shift — compute timing ─────────────────────
+        # â”€â”€ Active shift â€” compute timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from apps.finance.models import CashierFloat
 
         float_record = None
@@ -775,7 +775,7 @@ class CashierShiftStatusView(APIView):
                 'cover_until'      : float_record.cover_until,
             })
 
-        # Normal active shift — get role schedule
+        # Normal active shift â€” get role schedule
         cash_schedule  = HRShiftEngine(branch).get_role_schedule(
             'CASHIER', target_date=today
         )
@@ -808,19 +808,19 @@ class CashierShiftStatusView(APIView):
             'cover_until'      : float_record.cover_until if float_record else None,
         })
     
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Petty Cash
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class CashierHistoryView(APIView):
     """
     GET /api/v1/finance/cashier/history/
     Returns the logged-in cashier's personal collection history.
 
     Query params:
-      ?level=year                     — yearly totals
-      ?level=month&year=2026          — monthly breakdown for a year
-      ?level=week&year=2026&month=3   — weekly breakdown for a month
-      ?level=day&year=2026&month=3&week=12 — daily breakdown for a week (ISO week)
+      ?level=year                     â€” yearly totals
+      ?level=month&year=2026          â€” monthly breakdown for a year
+      ?level=week&year=2026&month=3   â€” weekly breakdown for a month
+      ?level=day&year=2026&month=3&week=12 â€” daily breakdown for a week (ISO week)
     """
     permission_classes = [IsAuthenticated]
 
@@ -840,7 +840,7 @@ class CashierHistoryView(APIView):
             is_void  = False,
         ).select_related('daily_sheet')
 
-        # ── Apply drill-down filters ──────────────────────────
+        # â”€â”€ Apply drill-down filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         year_param  = request.query_params.get('year')
         month_param = request.query_params.get('month')
         week_param  = request.query_params.get('week')
@@ -852,7 +852,7 @@ class CashierHistoryView(APIView):
         if week_param:
             qs = qs.filter(created_at__week=int(week_param))
 
-        # ── Aggregate per method ──────────────────────────────
+        # â”€â”€ Aggregate per method â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         def _totals(queryset):
             return {
                 'cash' : float(queryset.filter(payment_method='CASH').aggregate(
@@ -864,7 +864,7 @@ class CashierHistoryView(APIView):
                 'count': queryset.count(),
             }
 
-        # ── Year level ────────────────────────────────────────
+        # â”€â”€ Year level â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if level == 'year':
             years = (
                 qs.annotate(yr=ExtractYear('created_at'))
@@ -888,7 +888,7 @@ class CashierHistoryView(APIView):
                 })
             return Response({'level': 'year', 'results': result})
 
-        # ── Month level ───────────────────────────────────────
+        # â”€â”€ Month level â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if level == 'month':
             import calendar
             months = (
@@ -914,7 +914,7 @@ class CashierHistoryView(APIView):
                 })
             return Response({'level': 'month', 'results': result})
 
-        # ── Week level ────────────────────────────────────────
+        # â”€â”€ Week level â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if level == 'week':
             weeks = (
                 qs.annotate(wk=ExtractWeek('created_at'))
@@ -940,7 +940,7 @@ class CashierHistoryView(APIView):
                 })
             return Response({'level': 'week', 'results': result})
 
-        # ── Day level ─────────────────────────────────────────
+        # â”€â”€ Day level â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if level == 'day':
             from django.db.models.functions import ExtractDay
             days = (
@@ -977,7 +977,7 @@ class CashierHistoryView(APIView):
 class PettyCashCreateView(APIView):
     """
     POST /api/v1/finance/sheets/<id>/petty-cash/
-    Record a petty cash disbursement — requires BM approval.
+    Record a petty cash disbursement â€” requires BM approval.
     """
     permission_classes = [IsAuthenticated]
 
@@ -1030,9 +1030,9 @@ class PettyCashCreateView(APIView):
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POS Transactions
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class POSTransactionListView(generics.ListAPIView):
     """
@@ -1094,9 +1094,9 @@ class POSTransactionSettleView(APIView):
         return Response(POSTransactionSerializer(txn).data)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Receipts
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ReceiptDetailView(generics.RetrieveAPIView):
     """
@@ -1133,7 +1133,7 @@ class ReceiptSendWhatsAppView(APIView):
         if success:
             return Response({'detail': 'Receipt sent via WhatsApp.'})
         return Response(
-            {'detail': 'WhatsApp delivery failed — check phone number.'},
+            {'detail': 'WhatsApp delivery failed â€” check phone number.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1194,7 +1194,7 @@ class ReceiptListView(generics.ListAPIView):
         if period == 'day':
             qs = qs.filter(created_at__date=today)
         elif period == 'week':
-            # Monday → today
+            # Monday â†’ today
             week_start = today - __import__('datetime').timedelta(days=today.weekday())
             qs = qs.filter(created_at__date__gte=week_start)
         elif period == 'month':
@@ -1227,9 +1227,9 @@ class CashierReceiptListView(generics.ListAPIView):
             qs = qs.filter(created_at__date=date_param)
 
         return qs
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Credit Accounts
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class CreditAccountListView(generics.ListAPIView):
     """
@@ -1296,7 +1296,7 @@ class CreditAccountCreateView(APIView):
             contact_phone     = serializer.validated_data.get('contact_phone', ''),
             notes             = serializer.validated_data.get('notes', ''),
             recommended_by    = request.user,
-            approved_by       = request.user,  # placeholder — overwritten on approval
+            approved_by       = request.user,  # placeholder â€” overwritten on approval
             status            = CreditAccount.Status.SUSPENDED,  # inactive until approved
         )
 
@@ -1342,9 +1342,9 @@ class CreditAccountApproveView(APIView):
         return Response(CreditAccountSerializer(account).data)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Credit Settlements
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class CreditSettlementView(APIView):
     """
@@ -1370,7 +1370,7 @@ class CreditSettlementView(APIView):
         sheet = self._get_today_sheet(user)
         if not sheet:
             return Response(
-                {'detail': 'No open sheet for today — cannot process settlement.'},
+                {'detail': 'No open sheet for today â€” cannot process settlement.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1405,9 +1405,9 @@ class CreditSettlementView(APIView):
             return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Branch Transfer Credits
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BranchTransferCreditListView(generics.ListAPIView):
     """
@@ -1485,7 +1485,7 @@ class DailySalesSheetPDFView(APIView):
                 status=400
             )
 
-        # ── Download limit: 2 per BM, then view-only ──────────
+        # â”€â”€ Download limit: 2 per BM, then view-only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from apps.finance.models import SheetDownloadLog
         user_role = getattr(getattr(request.user, 'role', None), 'name', '')
         hq_roles  = {'SUPER_ADMIN', 'REGIONAL_MANAGER', 'BELT_MANAGER',
@@ -1498,7 +1498,7 @@ class DailySalesSheetPDFView(APIView):
 
         view_only = (not is_hq) and (download_count >= 2)
 
-        # ── Generate PDF if not cached ─────────────────────────
+        # â”€â”€ Generate PDF if not cached â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         import os
         from django.conf import settings
         from django.core.management import call_command
@@ -1511,7 +1511,7 @@ class DailySalesSheetPDFView(APIView):
         if not os.path.exists(output_path):
             call_command('generate_sheet_pdf', sheet_id=sheet.pk, output=output_path)
 
-        # ── Log download (only if not view-only) ──────────────
+        # â”€â”€ Log download (only if not view-only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if not view_only:
             ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
                 or request.META.get('REMOTE_ADDR'))
@@ -1519,7 +1519,7 @@ class DailySalesSheetPDFView(APIView):
                 sheet=sheet, downloaded_by=request.user, ip_address=ip or None
             )
 
-        # ── Serve ──────────────────────────────────────────────
+        # â”€â”€ Serve â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from django.http import FileResponse
         disposition = 'inline' if view_only else 'attachment'
         response = FileResponse(
@@ -1536,7 +1536,7 @@ class DailySalesSheetPDFView(APIView):
 class BranchLockStatusView(APIView):
     """
     GET /api/v1/finance/lock-status/
-    Returns current branch lock state — can jobs be created?
+    Returns current branch lock state â€” can jobs be created?
     Frontend uses this to show/hide New Job button.
     """
     permission_classes = [IsAuthenticated]
@@ -1554,7 +1554,7 @@ class BranchLockStatusView(APIView):
 
         status_data = SheetEngine(user.branch).get_branch_lock_status()
 
-        # Check for active float dispute — hard blocks BM portal
+        # Check for active float dispute â€” hard blocks BM portal
         today = timezone.localdate()
         float_dispute_active = CashierFloat.objects.filter(
             daily_sheet__branch  = user.branch,
@@ -1602,9 +1602,9 @@ class EODSummaryView(APIView):
 
         summary = EODService.get_summary(sheet, sheet.branch)
         return Response(summary)
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Invoices
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class InvoiceListView(generics.ListAPIView):
     """
@@ -1756,32 +1756,24 @@ class InvoicePDFView(APIView):
         return response
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Invoice helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _generate_invoice_pdf(invoice):
     """Generate a PDF for the invoice and save path to invoice.pdf_path."""
     import os
     from django.conf import settings
-    from django.utils import timezone
 
-    media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
+    media_root   = getattr(settings, 'MEDIA_ROOT', 'media')
     invoices_dir = os.path.join(media_root, 'invoices')
     os.makedirs(invoices_dir, exist_ok=True)
+    output_path  = os.path.join(invoices_dir, f"{invoice.invoice_number}.pdf")
 
-    output_path = os.path.join(
-        invoices_dir, f"{invoice.invoice_number}.pdf"
-    )
-
-    # Build PDF using reportlab
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle,
-        Paragraph, Spacer, HRFlowable,
-    )
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
@@ -1791,79 +1783,92 @@ def _generate_invoice_pdf(invoice):
         rightMargin=20*mm, leftMargin=20*mm,
         topMargin=20*mm,   bottomMargin=20*mm,
     )
-    styles = getSampleStyleSheet()
-    W      = A4[0] - 40*mm
+    W = A4[0] - 40*mm
 
-    # ── Custom styles ─────────────────────────────────────────
+    # ── Styles ────────────────────────────────────────────────────────────
     h1 = ParagraphStyle('h1', fontSize=20, fontName='Helvetica-Bold',
                          textColor=colors.HexColor('#111111'))
-    h2 = ParagraphStyle('h2', fontSize=11, fontName='Helvetica-Bold',
-                         textColor=colors.HexColor('#111111'))
-    sm = ParagraphStyle('sm', fontSize=9,  fontName='Helvetica',
+    sm = ParagraphStyle('sm', fontSize=9, fontName='Helvetica',
                          textColor=colors.HexColor('#666666'))
     sm_bold = ParagraphStyle('smb', fontSize=9, fontName='Helvetica-Bold',
                               textColor=colors.HexColor('#111111'))
+    sm_dark = ParagraphStyle('smd', fontSize=9, fontName='Helvetica',
+                              textColor=colors.HexColor('#444444'))
     right = ParagraphStyle('right', fontSize=9, fontName='Helvetica',
-                            alignment=TA_RIGHT,
-                            textColor=colors.HexColor('#666666'))
+                            alignment=TA_RIGHT, textColor=colors.HexColor('#666666'))
     right_bold = ParagraphStyle('rightb', fontSize=11, fontName='Helvetica-Bold',
-                                 alignment=TA_RIGHT,
-                                 textColor=colors.HexColor('#111111'))
+                                 alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))
+    center_sm = ParagraphStyle('csm', fontSize=9, fontName='Helvetica',
+                                alignment=TA_CENTER, textColor=colors.HexColor('#444444'))
+    right_sm = ParagraphStyle('rsm', fontSize=9, fontName='Helvetica',
+                               alignment=TA_RIGHT, textColor=colors.HexColor('#444444'))
+    right_sm_bold = ParagraphStyle('rsmb', fontSize=9, fontName='Helvetica-Bold',
+                                    alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))
 
     def fmt(n):
         return f"GHS {float(n or 0):,.2f}"
 
     story = []
+    branch = invoice.branch
 
-    # ── Header ────────────────────────────────────────────────
+    # ── Header: company name + invoice type badge ─────────────────────────
+    type_color = '#1a4fd6' if invoice.invoice_type == 'PROFORMA' else '#1a7a4a'
     header_data = [[
         Paragraph('Farhat Printing Press', h1),
         Paragraph(
             f"<b>{invoice.invoice_type} INVOICE</b>",
             ParagraphStyle('inv', fontSize=14, fontName='Helvetica-Bold',
                            alignment=TA_RIGHT,
-                           textColor=colors.HexColor(
-                               '#1a4fd6' if invoice.invoice_type == 'PROFORMA'
-                               else '#1a7a4a'
-                           ))
+                           textColor=colors.HexColor(type_color))
         ),
     ]]
     header_table = Table(header_data, colWidths=[W*0.6, W*0.4])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(header_table)
 
-    # Branch info
-    branch = invoice.branch
-    story.append(Paragraph(
-        f"{branch.name} &nbsp;·&nbsp; {branch.code}",
-        sm
-    ))
+    # Branch info block
+    branch_info_parts = [branch.name]
+    if branch.phone or branch.whatsapp_number:
+        branch_info_parts.append(branch.phone or branch.whatsapp_number)
+    if branch.email:
+        branch_info_parts.append(branch.email)
+    if branch.address:
+        branch_info_parts.append(branch.address)
+
+    for part in branch_info_parts:
+        story.append(Paragraph(part, sm))
+
     story.append(Spacer(1, 6*mm))
-    story.append(HRFlowable(width=W, thickness=1,
-                             color=colors.HexColor('#eeeeee')))
+    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor('#eeeeee')))
     story.append(Spacer(1, 6*mm))
 
-    # ── Invoice meta + Bill To ────────────────────────────────
-    issued  = invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '—'
-    due     = invoice.due_date.strftime('%d %b %Y')   if invoice.due_date   else '—'
+    # ── Bill To + Invoice meta ────────────────────────────────────────────
+    issued = invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '—'
+    due    = invoice.due_date.strftime('%d %b %Y')   if invoice.due_date   else '—'
 
-    bill_lines = [invoice.bill_to_name]
-    if invoice.bill_to_company: bill_lines.append(invoice.bill_to_company)
-    if invoice.bill_to_phone:   bill_lines.append(invoice.bill_to_phone)
-    if invoice.bill_to_email:   bill_lines.append(invoice.bill_to_email)
+    # Company first (bold), then rep name, phone, email
+    bill_paragraphs = [
+        Paragraph('BILL TO', ParagraphStyle('lbl', fontSize=8,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#aaaaaa'),
+            spaceAfter=3)),
+    ]
+    # Primary display name — company if available, else personal name
+    primary   = invoice.bill_to_company or invoice.bill_to_name
+    secondary = invoice.bill_to_name if invoice.bill_to_company else None
+    bill_paragraphs.append(Paragraph(primary, sm_bold))
+    if secondary:
+        bill_paragraphs.append(Paragraph(secondary, sm_dark))
+    if invoice.bill_to_phone:
+        bill_paragraphs.append(Paragraph(invoice.bill_to_phone, sm))
+    if invoice.bill_to_email:
+        bill_paragraphs.append(Paragraph(invoice.bill_to_email, sm))
 
     meta_data = [[
-        [
-            Paragraph('BILL TO', ParagraphStyle('lbl', fontSize=8,
-                fontName='Helvetica-Bold',
-                textColor=colors.HexColor('#aaaaaa'),
-                spaceAfter=3)),
-            *[Paragraph(line, sm_bold if i == 0 else sm)
-              for i, line in enumerate(bill_lines)],
-        ],
+        bill_paragraphs,
         [
             Paragraph('INVOICE NO', ParagraphStyle('lbl', fontSize=8,
                 fontName='Helvetica-Bold',
@@ -1884,62 +1889,54 @@ def _generate_invoice_pdf(invoice):
             Paragraph(due, right),
         ],
     ]]
-
     meta_table = Table(meta_data, colWidths=[W*0.5, W*0.5])
-    meta_table.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    ]))
+    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
     story.append(meta_table)
     story.append(Spacer(1, 8*mm))
 
-    # Job ref if linked
+    # Job ref
     if invoice.job:
-        story.append(Paragraph(
-            f"Job Reference: <b>{invoice.job.job_number}</b>",
-            sm
-        ))
+        story.append(Paragraph(f"Job Reference: <b>{invoice.job.job_number}</b>", sm))
         story.append(Spacer(1, 4*mm))
 
-    # ── Line items table ──────────────────────────────────────
+    # ── Line items: # | DESCRIPTION | QTY | UNIT PRICE | AMOUNT ─────────
+    th_style = ParagraphStyle('th', fontSize=8, fontName='Helvetica-Bold',
+                               textColor=colors.HexColor('#aaaaaa'))
+    th_center = ParagraphStyle('thc', fontSize=8, fontName='Helvetica-Bold',
+                                textColor=colors.HexColor('#aaaaaa'), alignment=TA_CENTER)
+    th_right  = ParagraphStyle('thr', fontSize=8, fontName='Helvetica-Bold',
+                                textColor=colors.HexColor('#aaaaaa'), alignment=TA_RIGHT)
+
     table_data = [[
-        Paragraph('SERVICE', ParagraphStyle('th', fontSize=8,
-            fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#aaaaaa'))),
-        Paragraph('QTY', ParagraphStyle('th2', fontSize=8,
-            fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#aaaaaa'),
-            alignment=TA_CENTER)),
-        Paragraph('UNIT PRICE', ParagraphStyle('th3', fontSize=8,
-            fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#aaaaaa'),
-            alignment=TA_RIGHT)),
-        Paragraph('TOTAL', ParagraphStyle('th4', fontSize=8,
-            fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#aaaaaa'),
-            alignment=TA_RIGHT)),
+        Paragraph('#',          th_style),
+        Paragraph('DESCRIPTION', th_style),
+        Paragraph('QTY',        th_center),
+        Paragraph('UNIT PRICE', th_right),
+        Paragraph('AMOUNT',     th_right),
     ]]
 
-    for li in invoice.line_items.all():
-        detail = f"{li.paper_size} · {'Colour' if li.is_color else 'B&W'}"
-        if li.pages > 1:
-            detail += f" · {li.pages}pp × {li.sets} sets"
+    for idx, li in enumerate(invoice.line_items.all().order_by('position'), start=1):
+        qty        = (li.quantity or 1) * (li.pages or 1)
+        line_total = float(li.line_total or 0)
+        unit_price = line_total / qty if qty > 0 else 0
+
+        sets_label = li.sets or li.quantity or 1
+        pages_label = li.pages or 1
+        color_label = 'Colour' if li.is_color else 'B&W'
+        detail = f"{sets_label} set{'s' if sets_label != 1 else ''} × {pages_label}pp · {color_label}"
+
         table_data.append([
+            Paragraph(str(idx), sm_dark),
             [
-            Paragraph(li.label, sm_bold),
-            Paragraph(detail, sm),
+                Paragraph(li.label or li.service.name if li.service else li.label, sm_bold),
+                Paragraph(detail, sm),
             ],
-            Paragraph(str(li.quantity), ParagraphStyle('c', fontSize=9,
-                fontName='Helvetica', alignment=TA_CENTER,
-                textColor=colors.HexColor('#444444'))),
-            Paragraph(fmt(li.unit_price), ParagraphStyle('r', fontSize=9,
-                fontName='Helvetica', alignment=TA_RIGHT,
-                textColor=colors.HexColor('#444444'))),
-            Paragraph(fmt(li.line_total), ParagraphStyle('rb', fontSize=9,
-                fontName='Helvetica-Bold', alignment=TA_RIGHT,
-                textColor=colors.HexColor('#111111'))),
+            Paragraph(str(qty), center_sm),
+            Paragraph(fmt(unit_price), right_sm),
+            Paragraph(fmt(li.line_total), right_sm_bold),
         ])
 
-    col_w = [W*0.5, W*0.1, W*0.2, W*0.2]
+    col_w = [W*0.05, W*0.45, W*0.1, W*0.2, W*0.2]
     items_table = Table(table_data, colWidths=col_w, repeatRows=1)
     items_table.setStyle(TableStyle([
         ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f7f7f7')),
@@ -1954,12 +1951,11 @@ def _generate_invoice_pdf(invoice):
     story.append(items_table)
     story.append(Spacer(1, 6*mm))
 
-    # ── Totals ────────────────────────────────────────────────
-    totals_data = []
-    totals_data.append([
+    # ── Totals ────────────────────────────────────────────────────────────
+    totals_data = [[
         Paragraph('Subtotal', sm),
         Paragraph(fmt(invoice.subtotal), right),
-    ])
+    ]]
     if invoice.vat_rate:
         totals_data.append([
             Paragraph(f'VAT ({invoice.vat_rate}%)', sm),
@@ -1967,14 +1963,11 @@ def _generate_invoice_pdf(invoice):
         ])
     totals_data.append([
         Paragraph('<b>Total</b>', ParagraphStyle('tb', fontSize=11,
-            fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#111111'))),
+            fontName='Helvetica-Bold', textColor=colors.HexColor('#111111'))),
         Paragraph(f'<b>{fmt(invoice.total)}</b>',
-            ParagraphStyle('trb', fontSize=11,
-            fontName='Helvetica-Bold', alignment=TA_RIGHT,
-            textColor=colors.HexColor('#111111'))),
+            ParagraphStyle('trb', fontSize=11, fontName='Helvetica-Bold',
+                           alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))),
     ])
-
     totals_table = Table(totals_data, colWidths=[W*0.75, W*0.25])
     totals_table.setStyle(TableStyle([
         ('ALIGN',         (1,0), (1,-1), 'RIGHT'),
@@ -1984,19 +1977,7 @@ def _generate_invoice_pdf(invoice):
     ]))
     story.append(totals_table)
 
-    # ── Status badge ──────────────────────────────────────────
-    story.append(Spacer(1, 6*mm))
-    status_color = {
-        'DRAFT': '#888888', 'SENT': '#3355cc',
-        'VIEWED': '#cc8800', 'PAID': '#1a7a4a',
-    }.get(invoice.status, '#888888')
-
-    story.append(Paragraph(
-        f'<font color="{status_color}"><b>STATUS: {invoice.status}</b></font>',
-        ParagraphStyle('st', fontSize=10, fontName='Helvetica-Bold')
-    ))
-
-    # ── BM note ───────────────────────────────────────────────
+    # ── BM note ───────────────────────────────────────────────────────────
     if invoice.bm_note:
         story.append(Spacer(1, 6*mm))
         story.append(HRFlowable(width=W, thickness=0.5,
@@ -2004,7 +1985,7 @@ def _generate_invoice_pdf(invoice):
         story.append(Spacer(1, 4*mm))
         story.append(Paragraph(invoice.bm_note, sm))
 
-    # ── Footer ────────────────────────────────────────────────
+    # ── Footer ────────────────────────────────────────────────────────────
     story.append(Spacer(1, 10*mm))
     story.append(HRFlowable(width=W, thickness=0.5,
                              color=colors.HexColor('#eeeeee')))
@@ -2017,1548 +1998,6 @@ def _generate_invoice_pdf(invoice):
     ))
 
     doc.build(story)
-
-    # Save path
     invoice.pdf_path = output_path
     invoice.save(update_fields=['pdf_path', 'updated_at'])
 
-
-def _deliver_invoice(invoice):
-    """Send invoice via its delivery channel. Marks status as SENT."""
-    from django.utils import timezone
-
-    # Mark as SENT — PDF is available for download via the PDF endpoint
-    # WhatsApp/Email delivery stubs until integrations are wired
-    invoice.status  = Invoice.SENT
-    invoice.sent_at = timezone.now()
-    invoice.save(update_fields=['status', 'sent_at', 'updated_at'])
-
-
-def _send_invoice_whatsapp(invoice):
-    """Stub — wire to WhatsApp Business API when ready."""
-    # TODO: integrate with WhatsApp Business API
-    # For now just log and return True for testing
-    print(f"[WhatsApp] Sending invoice {invoice.invoice_number} to {invoice.bill_to_phone}")
-    return True
-
-def _generate_weekly_pdf(report):
-    """
-    Generate the weekly filing PDF.
-    Page 1: Cover page matching Farhat brand template
-    Page 2+: Filing content — revenue, jobs, cashiers, notes
-    """
-    import os
-    import calendar
-    from django.conf import settings
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle,
-        Paragraph, Spacer, HRFlowable, PageBreak,
-    )
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
-    from reportlab.platypus.flowables import Flowable
-
-    media_root  = getattr(settings, 'MEDIA_ROOT', 'media')
-    weekly_dir  = os.path.join(media_root, 'weekly')
-    os.makedirs(weekly_dir, exist_ok=True)
-
-    output_path = os.path.join(
-        weekly_dir,
-        f"weekly_{report.branch.code}_W{report.week_number}_{report.year}.pdf"
-    )
-
-    branch = report.branch
-    W, H   = A4  # 595 x 842 pts
-
-    # ── Colors ────────────────────────────────────────────────────────────
-    FARHAT_RED   = colors.HexColor('#E31E24')
-    FARHAT_GOLD  = colors.HexColor('#F5A623')
-    WHITE        = colors.white
-    BLACK        = colors.HexColor('#111111')
-    GREY         = colors.HexColor('#666666')
-    LIGHT_GREY   = colors.HexColor('#f5f5f5')
-    BORDER_GREY  = colors.HexColor('#e0e0e0')
-
-    # ── Styles ────────────────────────────────────────────────────────────
-    def fmt(n):
-        return f"GHS {float(n or 0):,.2f}"
-
-    # ── Custom cover page flowable ─────────────────────────────────────────
-    class CoverPage(Flowable):
-        def __init__(self, width, height, branch, report):
-            Flowable.__init__(self)
-            self.width   = width
-            self.height  = height
-            self.branch  = branch
-            self.report  = report
-
-        def draw(self):
-            c = self.canv
-            W = self.width
-            H = self.height
-
-            # White background
-            c.setFillColor(colors.white)
-            c.rect(0, 0, W, H, fill=1, stroke=0)
-
-            # Red center panel (60% width, full height)
-            panel_x = W * 0.20
-            panel_w = W * 0.60
-            c.setFillColor(FARHAT_RED)
-            c.rect(panel_x, 0, panel_w, H, fill=1, stroke=0)
-
-            # ── Logo area (white bird silhouette approximation) ──────────
-            # Draw a simple white circle as logo placeholder
-            logo_cx = panel_x + panel_w / 2
-            logo_cy = H * 0.72
-            logo_r  = 28
-
-            c.setFillColor(WHITE)
-            c.circle(logo_cx, logo_cy, logo_r, fill=1, stroke=0)
-
-            # Draw stylized F in the circle
-            c.setFillColor(FARHAT_RED)
-            c.setFont('Helvetica-Bold', 22)
-            c.drawCentredString(logo_cx, logo_cy - 8, 'F')
-
-            # ── Branch name ───────────────────────────────────────────────
-            branch_name = self.branch.name.upper()
-            # Split into two lines if long
-            words = branch_name.split()
-            if len(words) >= 2:
-                line1 = ' '.join(words[:-1])
-                line2 = words[-1]
-            else:
-                line1 = branch_name
-                line2 = ''
-
-            c.setFillColor(WHITE)
-            c.setFont('Helvetica-Bold', 32)
-            c.drawCentredString(logo_cx, H * 0.55, line1)
-            if line2:
-                c.drawCentredString(logo_cx, H * 0.47, line2)
-
-            # ── Week / Month / Year ───────────────────────────────────────
-            month_name = calendar.month_name[self.report.date_from.month].upper()
-            week_str   = f"WEEK {self.report.week_number},  {month_name},  {self.report.year}"
-
-            c.setFillColor(FARHAT_GOLD)
-            c.setFont('Helvetica-Bold', 14)
-            c.drawCentredString(logo_cx, H * 0.36, week_str)
-
-            # ── Contact info ──────────────────────────────────────────────
-            email = self.branch.email or 'info@farhatprintingpress.com'
-            phone = self.branch.phone or self.branch.whatsapp_number or '+233 556244194'
-
-            c.setFillColor(WHITE)
-            c.setFont('Helvetica-Bold', 11)
-            c.drawCentredString(logo_cx, H * 0.26, email)
-            c.drawCentredString(logo_cx, H * 0.21, phone)
-
-            # ── Footer ────────────────────────────────────────────────────
-            c.setFillColor(FARHAT_GOLD)
-            c.setFont('Helvetica-Bold', 7)
-            c.drawCentredString(logo_cx, H * 0.07, 'MANDATORY WEEKLY FILING')
-            c.drawCentredString(logo_cx, H * 0.055, 'STRICTLY CONFIDENTIAL')
-
-            c.setFillColor(WHITE)
-            c.setFont('Helvetica', 7)
-            c.drawCentredString(logo_cx, H * 0.035, 'Property of Farhat Printing Press')
-
-    # ── Build document ────────────────────────────────────────────────────
-    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate
-
-    doc = BaseDocTemplate(
-        output_path,
-        pagesize     = A4,
-        rightMargin  = 20*mm,
-        leftMargin   = 20*mm,
-        topMargin    = 20*mm,
-        bottomMargin = 20*mm,
-    )
-
-    # Cover page template — full bleed, no margins
-    cover_frame   = Frame(0, 0, W, H, leftPadding=0, rightPadding=0,
-                          topPadding=0, bottomPadding=0, id='cover')
-    content_frame = Frame(20*mm, 20*mm, W - 40*mm, H - 40*mm, id='normal')
-
-    doc.addPageTemplates([
-        PageTemplate(id='Cover',  frames=cover_frame),
-        PageTemplate(id='Later',  frames=content_frame),
-    ])
-
-    styles = getSampleStyleSheet()
-    from reportlab.platypus import NextPageTemplate
-
-    story  = []
-
-    # Page 1 — Cover (full bleed)
-    story.append(NextPageTemplate('Later'))
-    story.append(CoverPage(W, H, branch, report))
-    story.append(PageBreak())
-
-    # ── Content page styles ───────────────────────────────────────────────
-    CW = A4[0] - 40*mm  # content width
-
-    h1_style = ParagraphStyle('h1', fontSize=18, fontName='Helvetica-Bold',
-                               textColor=BLACK, spaceAfter=4)
-    h2_style = ParagraphStyle('h2', fontSize=11, fontName='Helvetica-Bold',
-                               textColor=BLACK, spaceAfter=4)
-    label_style = ParagraphStyle('lbl', fontSize=8, fontName='Helvetica-Bold',
-                                  textColor=GREY, letterSpacing=0.5,
-                                  spaceAfter=8)
-    body_style  = ParagraphStyle('body', fontSize=9, fontName='Helvetica',
-                                  textColor=GREY)
-    right_style = ParagraphStyle('right', fontSize=9, fontName='Helvetica',
-                                  alignment=TA_RIGHT, textColor=BLACK)
-    right_bold  = ParagraphStyle('rightb', fontSize=10, fontName='Helvetica-Bold',
-                                  alignment=TA_RIGHT, textColor=BLACK)
-
-    # ── Page 2 header ─────────────────────────────────────────────────────
-    month_name = calendar.month_name[report.date_from.month]
-    story.append(Paragraph(f"{branch.name}", h1_style))
-    story.append(Paragraph(
-        f"Weekly Filing — Week {report.week_number}, {month_name} {report.year}  "
-        f"({report.date_from.strftime('%d %b')} – {report.date_to.strftime('%d %b %Y')})",
-        label_style
-    ))
-    story.append(HRFlowable(width=CW, thickness=2, color=FARHAT_RED))
-    story.append(Spacer(1, 6*mm))
-
-    # ── Revenue summary ───────────────────────────────────────────────────
-    story.append(Paragraph('REVENUE SUMMARY', label_style))
-
-    rev_data = [
-        ['Method', 'Amount (GHS)', '% of Total'],
-        ['Cash',   f"{float(report.total_cash):,.2f}",
-         f"{float(report.total_cash)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
-        ['Mobile Money', f"{float(report.total_momo):,.2f}",
-         f"{float(report.total_momo)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
-        ['POS',    f"{float(report.total_pos):,.2f}",
-         f"{float(report.total_pos)/float(report.total_collected)*100:.1f}%" if report.total_collected else '0%'],
-        ['TOTAL COLLECTED', f"{float(report.total_collected):,.2f}", '100%'],
-        ['Petty Cash Out', f"({float(report.total_petty_cash_out):,.2f})", ''],
-        ['Net Cash in Till', f"{float(report.net_cash_in_till):,.2f}", ''],
-    ]
-
-    rev_table = Table(rev_data, colWidths=[CW*0.45, CW*0.30, CW*0.25])
-    rev_table.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
-        ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
-        ('FONTSIZE',      (0,0), (-1,-1), 9),
-        ('FONTNAME',      (0,4), (-1,4),  'Helvetica-Bold'),
-        ('BACKGROUND',    (0,4), (-1,4),  colors.HexColor('#fff0f0')),
-        ('TEXTCOLOR',     (0,4), (-1,4),  FARHAT_RED),
-        ('ALIGN',         (1,0), (-1,-1), 'RIGHT'),
-        ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
-        ('TOPPADDING',    (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING',   (0,0), (-1,-1), 8),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
-    ]))
-    story.append(rev_table)
-    story.append(Spacer(1, 6*mm))
-
-    # ── Daily breakdown ───────────────────────────────────────────────────
-    story.append(Paragraph('DAILY BREAKDOWN', label_style))
-
-    day_headers = ['Date', 'Day', 'Status', 'Cash', 'MoMo', 'POS', 'Total', 'Jobs']
-    day_data    = [day_headers]
-
-    sheets = report.daily_sheets.all().order_by('date')
-    for sheet in sheets:
-        day_name = sheet.date.strftime('%A')
-        total    = float(sheet.total_cash + sheet.total_momo + sheet.total_pos)
-        day_data.append([
-            sheet.date.strftime('%d %b'),
-            day_name,
-            sheet.status,
-            f"{float(sheet.total_cash):,.2f}",
-            f"{float(sheet.total_momo):,.2f}",
-            f"{float(sheet.total_pos):,.2f}",
-            f"{total:,.2f}",
-            str(sheet.total_jobs_created),
-        ])
-
-    if day_data[1:]:
-        day_table = Table(
-            day_data,
-            colWidths=[CW*0.1, CW*0.12, CW*0.11, CW*0.14, CW*0.14, CW*0.12, CW*0.14, CW*0.09]
-        )
-        day_table.setStyle(TableStyle([
-            ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
-            ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
-            ('FONTSIZE',      (0,0), (-1,-1), 8),
-            ('ALIGN',         (3,0), (-1,-1), 'RIGHT'),
-            ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
-            ('TOPPADDING',    (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-            ('LEFTPADDING',   (0,0), (-1,-1), 6),
-            ('RIGHTPADDING',  (0,0), (-1,-1), 6),
-            ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
-        ]))
-        story.append(day_table)
-    else:
-        story.append(Paragraph('No daily sheets linked.', body_style))
-
-    story.append(Spacer(1, 6*mm))
-
-    # ── Jobs summary ──────────────────────────────────────────────────────
-    story.append(Paragraph('JOBS SUMMARY', label_style))
-
-    jobs_data = [
-        ['Metric', 'Count'],
-        ['Total Jobs Created',   str(report.total_jobs_created)],
-        ['Completed',            str(report.total_jobs_complete)],
-        ['Cancelled',            str(report.total_jobs_cancelled)],
-        ['Carry Forward (Unpaid)', str(report.carry_forward_count)],
-    ]
-
-    jobs_table = Table(jobs_data, colWidths=[CW*0.65, CW*0.35])
-    jobs_table.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
-        ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
-        ('FONTSIZE',      (0,0), (-1,-1), 9),
-        ('ALIGN',         (1,0), (1,-1),  'RIGHT'),
-        ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
-        ('TOPPADDING',    (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING',   (0,0), (-1,-1), 8),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
-        ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
-    ]))
-    story.append(jobs_table)
-    story.append(Spacer(1, 6*mm))
-
-    # ── Inventory ─────────────────────────────────────────────────────────
-    story.append(Paragraph('INVENTORY', label_style))
-    snapshot = report.inventory_snapshot
-    items    = snapshot.get('items', []) if snapshot else []
-    low_stock = snapshot.get('low_stock', []) if snapshot else []
-
-    if items:
-        inv_headers = ['Consumable', 'Category', 'Unit', 'Opening', 'Received', 'Consumed', 'Closing', 'Status']
-        inv_data    = [inv_headers]
-        for item in items:
-            is_low  = item.get('is_low', False)
-            status_label = 'LOW' if is_low else 'OK'
-            inv_data.append([
-                item.get('consumable', '—'),
-                item.get('category', '—'),
-                item.get('unit', '—'),
-                str(item.get('opening', 0)),
-                str(item.get('received', 0)),
-                str(item.get('consumed', 0)),
-                str(item.get('closing', 0)),
-                status_label,
-            ])
-
-        col_w = [CW*0.28, CW*0.12, CW*0.07, CW*0.08, CW*0.09, CW*0.09, CW*0.08, CW*0.09]
-        inv_table = Table(inv_data, colWidths=col_w, repeatRows=1)
-
-        # Build row styles — highlight low stock rows red
-        row_styles = [
-            ('BACKGROUND',    (0,0), (-1,0),  colors.HexColor('#f5f5f5')),
-            ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
-            ('FONTSIZE',      (0,0), (-1,-1), 8),
-            ('ALIGN',         (3,0), (-1,-1), 'RIGHT'),
-            ('GRID',          (0,0), (-1,-1), 0.5, BORDER_GREY),
-            ('TOPPADDING',    (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-            ('LEFTPADDING',   (0,0), (-1,-1), 6),
-            ('RIGHTPADDING',  (0,0), (-1,-1), 6),
-            ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
-        ]
-        for i, item in enumerate(items, start=1):
-            if item.get('is_low', False):
-                row_styles.append(('TEXTCOLOR', (7,i), (7,i), FARHAT_RED))
-                row_styles.append(('FONTNAME',  (7,i), (7,i), 'Helvetica-Bold'))
-
-        inv_table.setStyle(TableStyle(row_styles))
-        story.append(inv_table)
-
-        if low_stock:
-            story.append(Spacer(1, 3*mm))
-            story.append(Paragraph(
-                f"<font color='#E31E24'><b>Low stock alert:</b></font> {', '.join(low_stock)}",
-                body_style
-            ))
-    else:
-        inv_placeholder = Table(
-            [['No inventory data available for this period.']],
-            colWidths=[CW]
-        )
-        inv_placeholder.setStyle(TableStyle([
-            ('BACKGROUND',    (0,0), (-1,-1), colors.HexColor('#fffbec')),
-            ('FONTNAME',      (0,0), (-1,-1), 'Helvetica'),
-            ('FONTSIZE',      (0,0), (-1,-1), 9),
-            ('TEXTCOLOR',     (0,0), (-1,-1), colors.HexColor('#7a5c00')),
-            ('BOX',           (0,0), (-1,-1), 0.5, colors.HexColor('#f0d878')),
-            ('TOPPADDING',    (0,0), (-1,-1), 10),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-            ('LEFTPADDING',   (0,0), (-1,-1), 12),
-        ]))
-        story.append(inv_placeholder)
-
-    story.append(Spacer(1, 6*mm))
-
-    # ── BM Notes ──────────────────────────────────────────────────────────
-    story.append(Paragraph('BRANCH MANAGER NOTES', label_style))
-    notes_text = report.bm_notes or '—'
-    notes_table = Table([[notes_text]], colWidths=[CW])
-    notes_table.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,-1), colors.HexColor('#f9f9f9')),
-        ('FONTNAME',      (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE',      (0,0), (-1,-1), 9),
-        ('TEXTCOLOR',     (0,0), (-1,-1), BLACK),
-        ('BOX',           (0,0), (-1,-1), 0.5, BORDER_GREY),
-        ('TOPPADDING',    (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-        ('LEFTPADDING',   (0,0), (-1,-1), 12),
-    ]))
-    story.append(notes_table)
-    story.append(Spacer(1, 8*mm))
-
-    # ── Sign-off block ────────────────────────────────────────────────────
-    story.append(HRFlowable(width=CW, thickness=1, color=BORDER_GREY))
-    story.append(Spacer(1, 4*mm))
-
-    submitted_by = report.submitted_by.full_name if report.submitted_by else '—'
-    submitted_at = (
-        report.submitted_at.strftime('%d %b %Y, %I:%M %p')
-        if report.submitted_at else '—'
-    )
-
-    signoff_data = [
-        ['Filed by', submitted_by, 'Date', submitted_at],
-        ['Branch',   branch.name,  'Week', f"W{report.week_number}/{report.year}"],
-    ]
-    signoff_table = Table(signoff_data, colWidths=[CW*0.15, CW*0.35, CW*0.15, CW*0.35])
-    signoff_table.setStyle(TableStyle([
-        ('FONTNAME',      (0,0), (0,-1),  'Helvetica-Bold'),
-        ('FONTNAME',      (2,0), (2,-1),  'Helvetica-Bold'),
-        ('FONTSIZE',      (0,0), (-1,-1), 9),
-        ('TEXTCOLOR',     (0,0), (0,-1),  GREY),
-        ('TEXTCOLOR',     (2,0), (2,-1),  GREY),
-        ('TOPPADDING',    (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(signoff_table)
-    story.append(Spacer(1, 4*mm))
-    story.append(Paragraph(
-        'This document is the property of Farhat Printing Press. '
-        'Strictly confidential — for internal use only.',
-        ParagraphStyle('ft', fontSize=7, fontName='Helvetica',
-                       textColor=GREY, alignment=TA_CENTER)
-    ))
-
-    doc.build(story)
-
-    # Save path
-    report.pdf_path = output_path
-    report.save(update_fields=['pdf_path', 'updated_at'])
-
-def _send_invoice_email(invoice):
-    """Send invoice PDF via Django email."""
-    if not invoice.bill_to_email:
-        return False
-
-    try:
-        from django.core.mail import EmailMessage
-        import os
-
-        subject = f"Invoice {invoice.invoice_number} — Farhat Printing Press"
-        body    = invoice.bm_note or (
-            f"Dear {invoice.bill_to_name},\n\n"
-            f"Please find attached your {invoice.get_invoice_type_display()} "
-            f"from Farhat Printing Press.\n\n"
-            f"Invoice No: {invoice.invoice_number}\n"
-            f"Amount: GHS {invoice.total}\n\n"
-            f"Thank you for your business."
-        )
-
-        email = EmailMessage(
-            subject = subject,
-            body    = body,
-            to      = [invoice.bill_to_email],
-        )
-
-        if invoice.pdf_path and os.path.exists(invoice.pdf_path):
-            email.attach_file(invoice.pdf_path)
-
-        email.send()
-        return True
-
-    except Exception as e:
-        print(f"[Email] Failed to send invoice {invoice.invoice_number}: {e}")
-        return False
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Weekly Report
-# ─────────────────────────────────────────────────────────────────────────────
-
-class WeeklyReportListView(generics.ListAPIView):
-    """
-    GET /api/v1/finance/weekly/
-    Returns weekly reports for the requesting user's branch.
-    """
-    serializer_class   = WeeklyReportListSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        user = self.request.user
-        qs   = WeeklyReport.objects.select_related(
-            'branch', 'submitted_by'
-        ).prefetch_related('daily_sheets')
-        if hasattr(user, 'branch') and user.branch:
-            qs = qs.filter(branch=user.branch)
-        return qs
-
-
-class WeeklyReportDetailView(generics.RetrieveAPIView):
-    """
-    GET /api/v1/finance/weekly/<id>/
-    Full weekly report detail including daily sheets.
-    """
-    serializer_class   = WeeklyReportDetailSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        user = self.request.user
-        qs   = WeeklyReport.objects.select_related(
-            'branch', 'submitted_by'
-        ).prefetch_related('daily_sheets')
-        if hasattr(user, 'branch') and user.branch:
-            qs = qs.filter(branch=user.branch)
-        return qs
-
-
-class WeeklyReportPrepareView(APIView):
-    """
-    POST /api/v1/finance/weekly/prepare/
-    Creates or refreshes a DRAFT weekly report for the current week.
-    Aggregates all closed daily sheets Mon–Sat into the report.
-    Can be called multiple times — safe to re-prepare a DRAFT.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        from apps.finance.services.weekly_report_service import WeeklyReportService
-
-        branch = getattr(request.user, 'branch', None)
-        if not branch:
-            return Response(
-                {'detail': 'No branch assigned.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        report, created = WeeklyReportService.prepare(branch)
-        return Response(
-            WeeklyReportDetailSerializer(report).data,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
-
-class WeeklyReportNotesView(APIView):
-    """
-    PATCH /api/v1/finance/weekly/<id>/notes/
-    BM adds or updates notes on a draft report.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def patch(self, request, pk):
-        try:
-            report = WeeklyReport.objects.get(pk=pk, branch=request.user.branch)
-        except WeeklyReport.DoesNotExist:
-            return Response({'detail': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if report.is_locked:
-            return Response({'detail': 'Report is locked.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        serializer = WeeklyReportNotesSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        report.bm_notes = serializer.validated_data['bm_notes']
-        report.save(update_fields=['bm_notes', 'updated_at'])
-        return Response(WeeklyReportDetailSerializer(report).data)
-
-
-class WeeklyReportSubmitView(APIView):
-    """
-    POST /api/v1/finance/weekly/<id>/submit/
-    BM submits and locks the weekly report.
-    All sheets must be closed before submission is allowed.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        from apps.finance.services.weekly_report_service import WeeklyReportService
-
-        try:
-            report = WeeklyReport.objects.prefetch_related(
-                'daily_sheets'
-            ).get(pk=pk, branch=request.user.branch)
-        except WeeklyReport.DoesNotExist:
-            return Response({'detail': 'Report not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        report, errors = WeeklyReportService.submit(report, submitted_by=request.user)
-        if errors:
-            return Response({'detail': errors[0]}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(WeeklyReportDetailSerializer(report).data)
-
-class WeeklyReportPDFView(APIView):
-    """
-    GET /api/v1/finance/weekly/<id>/pdf/
-    Download the weekly report PDF.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        try:
-            report = WeeklyReport.objects.get(pk=pk, branch=request.user.branch)
-        except WeeklyReport.DoesNotExist:
-            return Response({'detail': 'Report not found.'}, status=404)
-
-        if not report.pdf_path:
-            try:
-                _generate_weekly_pdf(report)
-            except Exception as e:
-                return Response({'detail': f'PDF generation failed: {e}'}, status=500)
-
-        import os
-        if not os.path.exists(report.pdf_path):
-            try:
-                _generate_weekly_pdf(report)
-            except Exception as e:
-                return Response({'detail': f'PDF generation failed: {e}'}, status=500)
-
-        from django.http import FileResponse
-        response = FileResponse(
-            open(report.pdf_path, 'rb'),
-            content_type='application/pdf',
-        )
-        response['Content-Disposition'] = (
-            f'attachment; filename="weekly_{report.branch.code}_W{report.week_number}_{report.year}.pdf"'
-        )
-        return response
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Monthly Close
-# ─────────────────────────────────────────────────────────────────────────────
-
-class MonthlyCloseStatusView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/?month=3&year=2026
-    Returns the monthly close record + integrity check status.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        branch = getattr(request.user, 'branch', None)
-        if not branch:
-            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            month = int(request.query_params.get('month', timezone.localdate().month))
-            year  = int(request.query_params.get('year',  timezone.localdate().year))
-        except ValueError:
-            return Response({'detail': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine    = MonthlyCloseEngine(branch, month, year)
-        close, _  = engine.get_or_create()
-        integrity = engine.check_integrity()
-
-        return Response({
-            'id'               : close.pk,
-            'month'            : close.month,
-            'year'             : close.year,
-            'month_name'       : close.month_name,
-            'status'           : close.status,
-            'can_submit'       : close.can_submit,
-            'can_endorse'      : close.can_endorse,
-            'can_reject'       : close.can_reject,
-            'is_locked'        : close.is_locked,
-            'integrity'        : integrity,
-            'submitted_by'     : close.submitted_by.full_name if close.submitted_by else None,
-            'submitted_at'     : close.submitted_at.isoformat() if close.submitted_at else None,
-            'endorsed_by'      : close.endorsed_by.full_name if close.endorsed_by else None,
-            'endorsed_at'      : close.endorsed_at.isoformat() if close.endorsed_at else None,
-            'rejected_by'      : close.rejected_by.full_name if close.rejected_by else None,
-            'rejected_at'      : close.rejected_at.isoformat() if close.rejected_at else None,
-            'rejection_reason' : close.rejection_reason,
-            # NEW
-            'bm_notes'                 : close.bm_notes,
-            'finance_reviewer'         : close.finance_reviewer.full_name if close.finance_reviewer else None,
-            'finance_cleared_at'       : close.finance_cleared_at.isoformat() if close.finance_cleared_at else None,
-            'clarification_request'    : close.clarification_request,
-            'clarification_response'   : close.clarification_response,
-            'clarification_due_at'     : close.clarification_due_at.isoformat() if close.clarification_due_at else None,
-            'rm_notes'                 : close.rm_notes,
-            'summary_snapshot'         : close.summary_snapshot,
-        })
-
-class MonthlyClosePrepareView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/prepare/
-    Builds and persists summary_snapshot on an OPEN monthly close
-    without changing its status. Idempotent — safe to call multiple times.
-    Called by the BM portal before opening the submit modal so the
-    modal can display real numbers.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        branch = getattr(request.user, 'branch', None)
-        if not branch:
-            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            month = int(request.data.get('month', timezone.localdate().month))
-            year  = int(request.data.get('year',  timezone.localdate().year))
-        except (ValueError, TypeError):
-            return Response({'detail': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine   = MonthlyCloseEngine(branch, month, year)
-        close, _ = engine.get_or_create()
-
-        if close.status != 'OPEN':
-            return Response(
-                {'detail': f'Cannot prepare — current status is {close.status}.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        integrity = engine.check_integrity()
-        if not integrity['can_submit']:
-            errors = [c['detail'] for c in integrity['checks'].values() if not c['pass']]
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        snapshot               = engine.build_snapshot()
-        close.summary_snapshot = snapshot
-        close.save(update_fields=['summary_snapshot'])
-
-        return Response({
-            'id'              : close.pk,
-            'month'           : close.month,
-            'year'            : close.year,
-            'status'          : close.status,
-            'can_submit'      : close.can_submit,
-            'integrity'       : integrity,
-            'summary_snapshot': close.summary_snapshot,
-        })
-    
-
-class MonthlyCloseSubmitView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/submit/
-    BM submits the monthly close.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        from django.utils import timezone
-        branch = getattr(request.user, 'branch', None)
-        if not branch:
-            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        today = timezone.localdate()
-        month = request.data.get('month', today.month)
-        year  = request.data.get('year',  today.year)
-        notes = request.data.get('bm_notes', '')
-
-        engine = MonthlyCloseEngine(branch, int(month), int(year))
-        close, errors = engine.submit(request.user, notes)
-
-        if errors:
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'id'          : close.pk,
-            'status'      : close.status,
-            'submitted_at': close.submitted_at.isoformat(),
-            'message'     : f"{close.month_name} {close.year} submitted successfully. Assigned to Finance for review.",
-        })
-
-
-class MonthlyCloseEndorseView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/<id>/endorse/
-    Belt Manager endorses the monthly close.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('REGIONAL_MANAGER', 'SUPER_ADMIN'):
-            return Response(
-                {'detail': 'Only a Regional Manager can endorse monthly closes.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        try:
-            close = MonthlyClose.objects.get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        notes  = request.data.get('rm_notes', '')
-        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
-        close, errors = engine.endorse(request.user, notes)
-
-        if errors:
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'id'         : close.pk,
-            'status'     : close.status,
-            'endorsed_at': close.endorsed_at.isoformat(),
-            'message'    : f"{close.month_name} {close.year} endorsed. Awaiting lock on PDF download.",
-        })
-
-
-class MonthlyCloseRejectView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/<id>/reject/
-    Belt Manager rejects the monthly close.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        try:
-            close = MonthlyClose.objects.get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        reason = request.data.get('reason', '').strip()
-        if not reason:
-            return Response({'detail': 'Rejection reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
-        close, errors = engine.reject(request.user, reason)
-
-        if errors:
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'id'         : close.pk,
-            'status'     : close.status,
-            'rejected_at': close.rejected_at.isoformat(),
-            'message'    : 'Monthly close rejected. BM has been notified.',
-        })
-
-
-class MonthlyClosePDFView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/<id>/pdf/
-    Generate and download the monthly close PDF.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        try:
-            close = MonthlyClose.objects.get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if not close.summary_snapshot:
-            return Response(
-                {'detail': 'No snapshot available — monthly close has not been submitted yet.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        from django.http import HttpResponse
-        engine   = MonthlyCloseEngine(close.branch, close.month, close.year)
-        pdf_bytes = engine.generate_pdf(close)
-
-        import calendar
-        filename = f"monthly_close_{close.branch.code}_{calendar.month_name[close.month]}_{close.year}.pdf"
-
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
-
-
-class MonthlyClosePendingView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/pending/
-    Belt Manager: list all monthly closes awaiting endorsement.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        """RM sees closes that Finance has cleared — ready for endorsement."""
-        pending = MonthlyClose.objects.filter(
-            status=MonthlyClose.Status.FINANCE_CLEARED,
-        ).select_related(
-            'branch', 'submitted_by', 'finance_reviewer'
-        ).order_by('-year', '-month')
-
-        data = [
-            {
-                'id'                 : c.pk,
-                'branch'             : c.branch.name,
-                'branch_code'        : c.branch.code,
-                'month'              : c.month,
-                'year'               : c.year,
-                'month_name'         : c.month_name,
-                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
-                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
-                'finance_reviewer'   : c.finance_reviewer.full_name if c.finance_reviewer else '—',
-                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
-                'bm_notes'           : c.bm_notes,
-                'finance_notes'      : c.finance_notes,
-                'total_collected'    : str(
-                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
-                ),
-                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
-            }
-            for c in pending
-        ]
-        return Response(data)
-
-class FloatAcknowledgeView(APIView):
-    """
-    POST /api/v1/finance/floats/<id>/acknowledge/
-    Cashier confirms receipt of opening float with denomination breakdown.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        from apps.finance.models import CashierFloat
-        from apps.finance.float_engine import FloatEngine
-
-        try:
-            float_record = CashierFloat.objects.get(pk=pk)
-        except CashierFloat.DoesNotExist:
-            return Response(
-                {'detail': 'Float record not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        breakdown = request.data.get('breakdown')
-        if not breakdown or not isinstance(breakdown, dict):
-            return Response(
-                {'detail': 'Denomination breakdown is required.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        result = FloatEngine.acknowledge(
-            float_record = float_record,
-            breakdown    = breakdown,
-            cashier      = request.user,
-        )
-
-        if not result['ok']:
-            return Response(
-                {'detail': result['error']},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        f = result['float']
-        return Response({
-            'detail'              : 'Float acknowledged. Have a great shift!',
-            'float_id'            : f.pk,
-            'opening_float'       : str(f.opening_float),
-            'morning_acknowledged': True,
-            'acknowledged_at'     : f.morning_acknowledged_at.isoformat(),
-        })
-
-        
-class MonthlyCloseDetailView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/<pk>/
-    Returns full monthly close detail including summary_snapshot.
-    Used by RM review panel.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        try:
-            close = MonthlyClose.objects.select_related(
-                'branch', 'submitted_by', 'endorsed_by', 'rejected_by'
-            ).get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        return Response({
-            'id'              : close.pk,
-            'branch'          : close.branch.name,
-            'branch_code'     : close.branch.code,
-            'month'           : close.month,
-            'year'            : close.year,
-            'month_name'      : close.month_name,
-            'status'          : close.status,
-            'submitted_by'    : close.submitted_by.full_name if close.submitted_by else '—',
-            'submitted_at'    : close.submitted_at.isoformat() if close.submitted_at else None,
-            'endorsed_by'     : close.endorsed_by.full_name if close.endorsed_by else None,
-            'endorsed_at'     : close.endorsed_at.isoformat() if close.endorsed_at else None,
-            'rejected_by'     : close.rejected_by.full_name if close.rejected_by else None,
-            'rejected_at'     : close.rejected_at.isoformat() if close.rejected_at else None,
-            'rejection_reason': close.rejection_reason,
-            'bm_notes'        : close.bm_notes,
-            'summary_snapshot': close.summary_snapshot,
-        })
-
-class MonthlyCloseMyQueueView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/my-queue/
-    Finance: list closes assigned to the current user in FINANCE_REVIEWING or RESUBMITTED.
-    Ordered by risk score descending (highest risk first).
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        from apps.analytics.models import MonthlyCloseSummary
-
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in FINANCE_ROLES:
-            return Response(
-                {'detail': 'Access denied.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        scope = get_finance_scope(request.user)
-
-        if role in REGIONAL_ROLES:
-            # Regional Finance sees all closes in their region
-            closes = MonthlyClose.objects.filter(
-                scope['branch_filter'],
-                status__in=[
-                    MonthlyClose.Status.FINANCE_REVIEWING,
-                    MonthlyClose.Status.RESUBMITTED,
-                ],
-            ).select_related(
-                'branch', 'submitted_by', 'finance_reviewer'
-            ).order_by('-year', '-month')
-        else:
-            # National Finance sees only closes assigned to them
-            closes = MonthlyClose.objects.filter(
-                finance_reviewer=request.user,
-                status__in=[
-                    MonthlyClose.Status.FINANCE_REVIEWING,
-                    MonthlyClose.Status.RESUBMITTED,
-                ],
-            ).select_related(
-                'branch', 'submitted_by', 'finance_reviewer'
-            ).order_by('-year', '-month')
-
-        # Attach risk scores where available
-        data = []
-        for c in closes:
-            risk_score = None
-            try:
-                summary    = MonthlyCloseSummary.objects.filter(
-                    monthly_close=c
-                ).first()
-                if summary:
-                    risk_score = summary.risk_score
-            except Exception:
-                pass
-
-            snap    = c.summary_snapshot or {}
-            revenue = snap.get('revenue', {})
-            jobs    = snap.get('jobs', {})
-
-            data.append({
-                'id'                    : c.pk,
-                'branch'                : c.branch.name,
-                'branch_code'           : c.branch.code,
-                'month'                 : c.month,
-                'year'                  : c.year,
-                'month_name'            : c.month_name,
-                'status'                : c.status,
-                'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
-                'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
-                'bm_notes'              : c.bm_notes,
-                'clarification_request' : c.clarification_request,
-                'clarification_response': c.clarification_response,
-                'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
-                'risk_score'            : risk_score,
-                # Revenue
-                'total_collected'       : revenue.get('total_collected', '0'),
-                'total_cash'            : revenue.get('total_cash', '0'),
-                'total_momo'            : revenue.get('total_momo', '0'),
-                'total_pos'             : revenue.get('total_pos', '0'),
-                'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
-                'total_credit_issued'   : revenue.get('total_credit_issued', '0'),
-                'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
-                'cash_pct'              : revenue.get('cash_pct', 0),
-                'momo_pct'              : revenue.get('momo_pct', 0),
-                'pos_pct'               : revenue.get('pos_pct', 0),
-                # Jobs
-                'total_jobs'            : jobs.get('total', 0),
-                'jobs_complete'         : jobs.get('complete', 0),
-                'jobs_cancelled'        : jobs.get('cancelled', 0),
-                'completion_rate'       : jobs.get('completion_rate', 0),
-                # Top services
-                'top_services'          : snap.get('top_services', [])[:3],
-                # Weekly breakdown
-                'weekly_breakdown'      : snap.get('weekly_breakdown', []),
-            })
-
-        # Sort highest risk first
-        data.sort(key=lambda x: (x['risk_score'] or 0), reverse=True)
-        return Response(data)
-
-
-class MonthlyCloseMyHistoryView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/my-history/
-    Finance: list closes this user has cleared (FINANCE_CLEARED, ENDORSED, LOCKED).
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
-                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
-                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
-            return Response(
-                {'detail': 'Access denied.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        scope = get_finance_scope(request.user)
-
-        if role in REGIONAL_ROLES:
-            closes = MonthlyClose.objects.filter(
-                scope['branch_filter'],
-                status__in=[
-                    MonthlyClose.Status.FINANCE_CLEARED,
-                    MonthlyClose.Status.ENDORSED,
-                    MonthlyClose.Status.LOCKED,
-                ],
-            ).select_related(
-                'branch', 'submitted_by'
-            ).order_by('-year', '-month')
-        else:
-            closes = MonthlyClose.objects.filter(
-                finance_reviewer=request.user,
-                status__in=[
-                    MonthlyClose.Status.FINANCE_CLEARED,
-                    MonthlyClose.Status.ENDORSED,
-                    MonthlyClose.Status.LOCKED,
-                ],
-            ).select_related(
-                'branch', 'submitted_by'
-            ).order_by('-year', '-month')
-
-        data = [
-            {
-                'id'                 : c.pk,
-                'branch'             : c.branch.name,
-                'branch_code'        : c.branch.code,
-                'month'              : c.month,
-                'year'               : c.year,
-                'month_name'         : c.month_name,
-                'status'             : c.status,
-                'submitted_by'       : c.submitted_by.full_name if c.submitted_by else '—',
-                'submitted_at'       : c.submitted_at.isoformat() if c.submitted_at else None,
-                'finance_cleared_at' : c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
-                'total_collected'    : str(
-                    c.summary_snapshot.get('revenue', {}).get('total_collected', 0)
-                ),
-                'total_jobs'         : c.summary_snapshot.get('jobs', {}).get('total', 0),
-            }
-            for c in closes
-        ]
-        return Response(data)
-
-class MonthlyCloseMyBranchesView(APIView):
-    """
-    GET /api/v1/finance/monthly-close/my-branches/
-    Finance: all closes assigned to this user, grouped by branch.
-    Active close (FINANCE_REVIEWING/RESUBMITTED) is expanded.
-    History (FINANCE_CLEARED/ENDORSED/LOCKED) is compact.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in ('FINANCE', 'NATIONAL_FINANCE_HEAD', 'NATIONAL_FINANCE_DEPUTY',
-                        'BELT_FINANCE_OFFICER', 'BELT_FINANCE_DEPUTY',
-                        'REGIONAL_FINANCE_OFFICER', 'REGIONAL_FINANCE_DEPUTY', 'SUPER_ADMIN'):
-            return Response(
-                {'detail': 'Access denied.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        scope = get_finance_scope(request.user)
-
-        if role in REGIONAL_ROLES:
-            all_closes = MonthlyClose.objects.filter(
-                scope['branch_filter'],
-            ).select_related(
-                'branch', 'submitted_by', 'finance_reviewer'
-            ).order_by('branch__name', '-year', '-month')
-        else:
-            all_closes = MonthlyClose.objects.filter(
-                finance_reviewer=request.user,
-            ).select_related(
-                'branch', 'submitted_by', 'finance_reviewer'
-            ).order_by('branch__name', '-year', '-month')
-
-        # Group by branch
-        from collections import defaultdict
-        branches = defaultdict(lambda: {'active': None, 'history': []})
-
-        active_statuses = {
-            MonthlyClose.Status.FINANCE_REVIEWING,
-            MonthlyClose.Status.RESUBMITTED,
-            MonthlyClose.Status.NEEDS_CLARIFICATION,
-        }
-        history_statuses = {
-            MonthlyClose.Status.FINANCE_CLEARED,
-            MonthlyClose.Status.ENDORSED,
-            MonthlyClose.Status.LOCKED,
-        }
-
-        for c in all_closes:
-            key = c.branch.code
-            snap    = c.summary_snapshot or {}
-            revenue = snap.get('revenue', {})
-            jobs    = snap.get('jobs', {})
-
-            if c.status in active_statuses:
-                branches[key]['branch']      = c.branch.name
-                branches[key]['branch_code'] = c.branch.code
-                branches[key]['active'] = {
-                    'id'                    : c.pk,
-                    'month'                 : c.month,
-                    'year'                  : c.year,
-                    'month_name'            : c.month_name,
-                    'status'                : c.status,
-                    'submitted_by'          : c.submitted_by.full_name if c.submitted_by else '—',
-                    'submitted_at'          : c.submitted_at.isoformat() if c.submitted_at else None,
-                    'bm_notes'              : c.bm_notes,
-                    'clarification_request' : c.clarification_request,
-                    'clarification_response': c.clarification_response,
-                    'clarification_due_at'  : c.clarification_due_at.isoformat() if c.clarification_due_at else None,
-                    'total_collected'       : revenue.get('total_collected', '0'),
-                    'total_cash'            : revenue.get('total_cash', '0'),
-                    'total_momo'            : revenue.get('total_momo', '0'),
-                    'total_pos'             : revenue.get('total_pos', '0'),
-                    'total_petty_cash_out'  : revenue.get('total_petty_cash_out', '0'),
-                    'total_credit_settled'  : revenue.get('total_credit_settled', '0'),
-                    'cash_pct'              : revenue.get('cash_pct', 0),
-                    'momo_pct'              : revenue.get('momo_pct', 0),
-                    'pos_pct'               : revenue.get('pos_pct', 0),
-                    'total_jobs'            : jobs.get('total', 0),
-                    'jobs_complete'         : jobs.get('complete', 0),
-                    'jobs_cancelled'        : jobs.get('cancelled', 0),
-                    'completion_rate'       : jobs.get('completion_rate', 0),
-                    'top_services'          : snap.get('top_services', [])[:3],
-                    'weekly_breakdown'      : snap.get('weekly_breakdown', []),
-                }
-            elif c.status in history_statuses:
-                if 'branch' not in branches[key]:
-                    branches[key]['branch']      = c.branch.name
-                    branches[key]['branch_code'] = c.branch.code
-                branches[key]['history'].append({
-                    'id'                : c.pk,
-                    'month'             : c.month,
-                    'year'              : c.year,
-                    'month_name'        : c.month_name,
-                    'status'            : c.status,
-                    'total_collected'   : revenue.get('total_collected', '0'),
-                    'finance_cleared_at': c.finance_cleared_at.isoformat() if c.finance_cleared_at else None,
-                })
-
-        # Build ordered list — branches with active close first
-        result = []
-        for key, data in branches.items():
-            if 'branch' not in data:
-                continue
-            result.append({
-                'branch'      : data['branch'],
-                'branch_code' : data['branch_code'],
-                'active'      : data['active'],
-                'history'     : data['history'],
-            })
-
-        # Sort: branches with active close first, then alphabetically
-        result.sort(key=lambda x: (0 if x['active'] else 1, x['branch']))
-
-        return Response(result)
-    
-    
-class MonthlyCloseClearView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/<id>/clear/
-    Finance clears the monthly close. Notifies RM.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in FINANCE_ROLES:
-            return Response(
-                {'detail': 'Only Finance reviewers can clear monthly closes.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        try:
-            close = MonthlyClose.objects.get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        # Ensure this Finance user is the assigned reviewer
-        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
-            return Response(
-                {'detail': 'This close is not assigned to you.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        notes  = request.data.get('finance_notes', '')
-        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
-        close, errors = engine.clear(request.user, notes)
-
-        if errors:
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'id'                 : close.pk,
-            'status'             : close.status,
-            'finance_cleared_at' : close.finance_cleared_at.isoformat(),
-            'message'            : f"{close.month_name} {close.year} cleared. Regional Manager notified.",
-        })
-
-
-class MonthlyCloseRequestClarificationView(APIView):
-    """
-    POST /api/v1/finance/monthly-close/<id>/request-clarification/
-    Finance flags items requiring BM clarification. BM has 24 hours.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        role = getattr(getattr(request.user, 'role', None), 'name', '')
-        if role not in FINANCE_ROLES:
-            return Response(
-                {'detail': 'Only Finance reviewers can request clarification.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        try:
-            close = MonthlyClose.objects.get(pk=pk)
-        except MonthlyClose.DoesNotExist:
-            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if close.finance_reviewer != request.user and role != 'SUPER_ADMIN':
-            return Response(
-                {'detail': 'This close is not assigned to you.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        clarification = request.data.get('clarification', '').strip()
-        if not clarification:
-            return Response(
-                {'detail': 'Clarification request cannot be empty.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
-        close, errors = engine.request_clarification(request.user, clarification)
-
-        if errors:
-            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'id'                   : close.pk,
-            'status'               : close.status,
-            'clarification_due_at' : close.clarification_due_at.isoformat(),
-            'message'              : 'Clarification requested. Branch Manager has 24 hours to respond.',
-        })
-
-class FloatPhysicalConfirmView(APIView):
-    """
-    POST /api/v1/finance/floats/<id>/physical-confirm/
-    Cashier confirms or disputes physical receipt of float on an auto-closed sheet.
-    Body: { received: true|false }
-
-    If received=true  → proceed to denomination count (PENDING_ACK)
-    If received=false → raise dispute, notify RM, hard-block BM portal
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        from apps.finance.models import CashierFloat
-        from django.utils import timezone
-
-        try:
-            float_record = CashierFloat.objects.select_related(
-                'daily_sheet', 'cashier'
-            ).get(pk=pk, cashier=request.user)
-        except CashierFloat.DoesNotExist:
-            return Response(
-                {'detail': 'Float record not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if float_record.morning_acknowledged:
-            return Response(
-                {'detail': 'Float already acknowledged.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        received = request.data.get('received', True)
-
-        if received:
-            # Cashier confirmed receipt — proceed to denomination count
-            return Response({
-                'detail'      : 'Receipt confirmed. Please count your float.',
-                'float_status': 'PENDING_ACK',
-                'float_id'    : float_record.pk,
-                'opening_float': str(float_record.opening_float),
-            })
-        else:
-            # Cashier disputes receipt — raise dispute
-            float_record.physical_confirm_disputed    = True
-            float_record.physical_confirm_disputed_at = timezone.now()
-            float_record.save(update_fields=[
-                'physical_confirm_disputed',
-                'physical_confirm_disputed_at',
-                'updated_at',
-            ])
-
-            # Notify RM
-            self._notify_rm_dispute(float_record)
-            # Notify BM
-            self._notify_bm_dispute(float_record)
-
-            return Response({
-                'detail'      : 'Dispute recorded. RM and BM have been notified.',
-                'float_status': 'PENDING_PHYSICAL_CONFIRM',
-                'disputed'    : True,
-            })
-
-    def _notify_rm_dispute(self, float_record):
-        try:
-            from apps.notifications.services import notify
-            from apps.accounts.models import CustomUser
-
-            branch = float_record.daily_sheet.branch
-            rm_users = CustomUser.objects.filter(
-                role__name = 'REGIONAL_MANAGER',
-                is_active  = True,
-                region     = branch.region,
-            )
-            for rm in rm_users:
-                notify(
-                    recipient = rm,
-                    verb      = 'FLOAT_DISPUTE',
-                    message   = (
-                        f"{float_record.cashier.full_name} at {branch.name} "
-                        f"reported not receiving their opening float of "
-                        f"GHS {float_record.opening_float}. "
-                        f"Branch Manager has been notified and portal blocked."
-                    ),
-                    link = '/portal/regional-manager/',
-                )
-        except Exception:
-            logger.exception('FloatPhysicalConfirmView: failed to notify RM of dispute')
-
-    def _notify_bm_dispute(self, float_record):
-        try:
-            from apps.notifications.services import notify
-            from apps.accounts.models import CustomUser
-
-            branch = float_record.daily_sheet.branch
-            bm = CustomUser.objects.filter(
-                branch     = branch,
-                role__name = 'BRANCH_MANAGER',
-                is_active  = True,
-            ).first()
-            if bm:
-                notify(
-                    recipient = bm,
-                    verb      = 'FLOAT_DISPUTE',
-                    message   = (
-                        f"{float_record.cashier.full_name} reported not receiving "
-                        f"their opening float of GHS {float_record.opening_float}. "
-                        f"Please hand over the float and ask them to re-confirm. "
-                        f"Your portal is blocked until this is resolved."
-                    ),
-                    link = '/portal/dashboard/',
-                )
-        except Exception:
-            logger.exception('FloatPhysicalConfirmView: failed to notify BM of dispute')
-
-
-class FloatReConfirmView(APIView):
-    """
-    POST /api/v1/finance/floats/<id>/re-confirm/
-    Cashier re-confirms physical receipt after BM has handed over the float.
-    Clears the dispute, lifts BM hard block, notifies RM of resolution.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        from apps.finance.models import CashierFloat
-        from django.utils import timezone
-
-        try:
-            float_record = CashierFloat.objects.select_related(
-                'daily_sheet', 'cashier'
-            ).get(pk=pk, cashier=request.user)
-        except CashierFloat.DoesNotExist:
-            return Response(
-                {'detail': 'Float record not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if not float_record.physical_confirm_disputed:
-            return Response(
-                {'detail': 'No active dispute on this float.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if float_record.morning_acknowledged:
-            return Response(
-                {'detail': 'Float already acknowledged.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Clear dispute
-        float_record.physical_confirm_disputed = False
-        float_record.save(update_fields=[
-            'physical_confirm_disputed',
-            'updated_at',
-        ])
-
-        # Notify RM of resolution
-        self._notify_rm_resolved(float_record)
-
-        return Response({
-            'detail'      : 'Receipt confirmed. Please count your float.',
-            'float_status': 'PENDING_ACK',
-            'float_id'    : float_record.pk,
-            'opening_float': str(float_record.opening_float),
-        })
-
-    def _notify_rm_resolved(self, float_record):
-        try:
-            from apps.notifications.services import notify
-            from apps.accounts.models import CustomUser
-
-            branch = float_record.daily_sheet.branch
-            rm_users = CustomUser.objects.filter(
-                role__name = 'REGIONAL_MANAGER',
-                is_active  = True,
-                region     = branch.region,
-            )
-            for rm in rm_users:
-                notify(
-                    recipient = rm,
-                    verb      = 'FLOAT_DISPUTE_RESOLVED',
-                    message   = (
-                        f"Float dispute at {branch.name} resolved. "
-                        f"{float_record.cashier.full_name} has confirmed receipt of "
-                        f"GHS {float_record.opening_float}. BM portal unblocked."
-                    ),
-                    link = '/portal/regional-manager/',
-                )
-        except Exception:
-            logger.exception('FloatReConfirmView: failed to notify RM of resolution')
