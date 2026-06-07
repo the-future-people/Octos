@@ -1912,7 +1912,7 @@ def _generate_invoice_pdf(invoice):
 
         sets_label = li.sets or li.quantity or 1
         pages_label = li.pages or 1
-        color_label = 'Colour' if li.is_color else 'B&W'
+        color_label = 'Colour' if li.is_color else 'B&amp;W'
         detail = f"{sets_label} set{'s' if sets_label != 1 else ''} × {pages_label}pp · {color_label}"
 
         table_data.append([
