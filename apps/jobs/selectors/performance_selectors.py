@@ -101,6 +101,26 @@ def get_performance(branch, period='day'):
     hourly = get_hourly_distribution(qs)
     peak   = max(hourly, key=lambda x: x['count']) if hourly else None
 
+    # Daily breakdown for week/month charts
+    from django.db.models.functions import TruncDate
+    daily = []
+    if period in ('week', 'month'):
+        daily_raw = list(
+            qs.annotate(day=TruncDate('created_at'))
+            .values('day')
+            .annotate(count=Count('id'), revenue=Sum('amount_paid'))
+            .order_by('day')
+        )
+        daily = [
+            {
+                'label':   d['day'].strftime('%-d %b'),
+                'day':     d['day'].isoformat(),
+                'count':   d['count'],
+                'revenue': float(d['revenue'] or 0),
+            }
+            for d in daily_raw
+        ]
+
     return {
         'period': period,
         'since':  since.isoformat(),
@@ -113,6 +133,7 @@ def get_performance(branch, period='day'):
             'rate':     round((agg['complete'] or 0) / max(agg['total'] or 1, 1) * 100),
         },
         'hourly':   hourly,
+        'daily':    daily,
         'peak':     peak,
         'services': get_service_breakdown(branch, since),
         'staff':    get_staff_breakdown(qs),
