@@ -81,6 +81,16 @@ class DailySalesSheet(AuditModel):
         unique_together      = [['branch', 'date']]
         verbose_name         = 'Daily Sales Sheet'
         verbose_name_plural  = 'Daily Sales Sheets'
+        indexes = [
+            models.Index(fields=['branch', 'date'],   name='sheet_branch_date_idx'),
+            models.Index(fields=['branch', 'status'], name='sheet_branch_status_idx'),
+            models.Index(fields=['status'],           name='sheet_status_idx'),
+        ]
+        indexes = [
+            models.Index(fields=['branch', 'date'],   name='sheet_branch_date_idx'),
+            models.Index(fields=['branch', 'status'], name='sheet_branch_status_idx'),
+            models.Index(fields=['status'],           name='sheet_status_idx'),
+        ]
 
     def __str__(self):
         ref = self.sheet_number or str(self.pk)
