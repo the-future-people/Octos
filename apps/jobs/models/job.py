@@ -343,6 +343,15 @@ class Job(AuditModel):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'daily_sheet'], name='job_branch_sheet_idx'),
+            models.Index(fields=['branch', 'status'],      name='job_branch_status_idx'),
+            models.Index(fields=['daily_sheet', 'status'], name='job_sheet_status_idx'),
+            models.Index(fields=['branch', 'intake_by'],   name='job_branch_intake_idx'),
+            models.Index(fields=['branch', 'created_at'],  name='job_branch_created_idx'),
+            models.Index(fields=['daily_sheet', 'status', 'job_type'], name='job_sheet_status_type_idx'),
+            models.Index(fields=['status'],                name='job_status_idx'),
+        ]
 
     def __str__(self) -> str:
         return f"{self.job_number} — {self.title}"
