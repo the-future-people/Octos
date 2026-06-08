@@ -16,8 +16,15 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
     Branch-wide job counts and revenue for a given sheet (or all time).
     Called by JobStatsView.
     """
+    from django.core.cache import cache
     from apps.jobs.models import Job
     from django.db import models
+
+    if sheet_id and not period and not job_type:
+        _cache_key = f'jobstats:branch:{branch.pk}:sheet:{sheet_id}'
+        _cached = cache.get(_cache_key)
+        if _cached is not None:
+            return _cached
 
     qs = Job.objects.filter(branch=branch)
     if sheet_id:
@@ -47,7 +54,7 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
     registered = qs.filter(customer__isnull=False).count()
     walkin     = (totals['total'] or 0) - registered
 
-    return {
+    result = {
         'total'      : totals['total']      or 0,
         'complete'   : totals['complete']   or 0,
         'in_progress': totals['in_progress'] or 0,
@@ -58,6 +65,9 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
         'registered' : registered,
         'walkin'     : walkin,
     }
+    if sheet_id and not period and not job_type:
+        cache.set(_cache_key, result, 90)
+    return result
 
 
 def get_personal_stats(user, branch, sheet_id=None) -> dict:
@@ -66,8 +76,15 @@ def get_personal_stats(user, branch, sheet_id=None) -> dict:
     Called by JobStatsView. Never raises — returns {} on any error
     so branch stats are never broken by a personal stats failure.
     """
+    from django.core.cache import cache
     from apps.jobs.models import Job
     from apps.finance.models import DailySalesSheet
+
+    if sheet_id:
+        _personal_key = f'jobstats:personal:{user.pk}:sheet:{sheet_id}'
+        _cached = cache.get(_personal_key)
+        if _cached is not None:
+            return _cached
 
     today = timezone.localdate()
     now   = timezone.now()
@@ -246,7 +263,7 @@ def get_personal_stats(user, branch, sheet_id=None) -> dict:
     except Exception:
         pass
 
-    return {
+    _result = {
         'my_total'          : my_total,
         'my_confirmed'      : my_confirmed,
         'my_value'          : round(my_value, 2),
@@ -263,3 +280,6 @@ def get_personal_stats(user, branch, sheet_id=None) -> dict:
         'daily_target'      : daily_target,
         'sheet_number'      : sheet_number,
     }
+    if sheet_id:
+        cache.set(_personal_key, _result, 90)
+    return _result

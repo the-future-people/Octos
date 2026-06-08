@@ -352,12 +352,25 @@ class ServiceListView(generics.ListAPIView):
     serializer_class   = ServiceSerializer
     permission_classes = [IsAuthenticated]
     pagination_class   = None
+
     def get_queryset(self):
         qs       = Service.objects.filter(is_active=True)
         category = self.request.query_params.get('category')
         if category:
             qs = qs.filter(category=category)
         return qs
+
+    def list(self, request, *args, **kwargs):
+        from django.core.cache import cache
+        category   = request.query_params.get('category', '__all__')
+        cache_key  = f'services:list:{category}'
+        cached     = cache.get(cache_key)
+        if cached is not None:
+            from rest_framework.response import Response
+            return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        cache.set(cache_key, response.data, 1800)
+        return response
 
 class ServiceCreateView(APIView):
     """

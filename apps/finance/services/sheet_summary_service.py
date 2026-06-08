@@ -1,4 +1,4 @@
-# apps/finance/services/sheet_summary_service.py
+﻿# apps/finance/services/sheet_summary_service.py
 """
 SheetSummaryService
 ===================
@@ -29,31 +29,33 @@ logger = logging.getLogger(__name__)
 class SheetSummaryService:
 
     @staticmethod
-    def get_summary(sheet, branch) -> dict:
+    def get_summary(sheet, branch, force_refresh: bool = False) -> dict:
         """
         Build the unified day sheet summary.
-
-        Args:
-            sheet  : DailySalesSheet instance
-            branch : Branch instance
-
-        Returns:
-            dict with keys: meta, revenue, jobs, registration, pace,
-                            inventory, alerts
+        Cached in Redis: 90s for open sheets, 24h for closed sheets.
+        Pass force_refresh=True to bypass cache (e.g. after job mutations).
         """
+        from django.core.cache import cache
         from apps.finance.models import DailySalesSheet
 
-        is_open = sheet.status == DailySalesSheet.Status.OPEN
+        is_open  = sheet.status == DailySalesSheet.Status.OPEN
+        ttl      = 90 if is_open else 86400
+        cache_key = f'summary:sheet:{sheet.pk}'
 
-        meta        = SheetSummaryService._build_meta(sheet, branch)
-        revenue     = SheetSummaryService._build_revenue(sheet, branch, is_open)
-        jobs        = SheetSummaryService._build_jobs(sheet, branch)
+        if not force_refresh:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        meta         = SheetSummaryService._build_meta(sheet, branch)
+        revenue      = SheetSummaryService._build_revenue(sheet, branch, is_open)
+        jobs         = SheetSummaryService._build_jobs(sheet, branch)
         registration = SheetSummaryService._build_registration(jobs)
-        pace        = SheetSummaryService._build_pace(sheet, jobs, is_open)
-        inventory   = SheetSummaryService._build_inventory(branch, sheet)
-        alerts      = SheetSummaryService._build_alerts(jobs, inventory, sheet, is_open)
+        pace         = SheetSummaryService._build_pace(sheet, jobs, is_open)
+        inventory    = SheetSummaryService._build_inventory(branch, sheet)
+        alerts       = SheetSummaryService._build_alerts(jobs, inventory, sheet, is_open)
 
-        return {
+        result = {
             'meta'        : meta,
             'revenue'     : revenue,
             'jobs'        : jobs,
@@ -62,9 +64,14 @@ class SheetSummaryService:
             'inventory'   : inventory,
             'alerts'      : alerts,
         }
+        cache.set(cache_key, result, ttl)
+        return result
 
-    # ── Meta ──────────────────────────────────────────────────────────────────
-
+    @staticmethod
+    def invalidate(sheet_pk: int):
+        """Bust the summary cache for a sheet. Call after any mutation."""
+        from django.core.cache import cache
+        cache.delete(f'summary:sheet:{sheet_pk}')
     @staticmethod
     def _build_meta(sheet, branch) -> dict:
         return {
@@ -83,14 +90,14 @@ class SheetSummaryService:
             'notes'              : sheet.notes,
         }
 
-    # ── Revenue ───────────────────────────────────────────────────────────────
+    # â”€â”€ Revenue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_revenue(sheet, branch, is_open: bool) -> dict:
         """
         Live computation for open sheets.
         Frozen field reads for closed sheets.
-        Single source of truth — no duplication with DailySalesSheetTodayView.
+        Single source of truth â€” no duplication with DailySalesSheetTodayView.
         """
         if is_open:
             return SheetSummaryService._live_revenue(sheet)
@@ -100,7 +107,7 @@ class SheetSummaryService:
     def _live_revenue(sheet) -> dict:
         """
         Compute revenue live from completed jobs + payment legs.
-        Delegates SPLIT aggregation to revenue_selectors — no duplication.
+        Delegates SPLIT aggregation to revenue_selectors â€” no duplication.
         """
         from apps.jobs.models import Job
         from apps.jobs.selectors.revenue_selectors import get_method_total
@@ -146,7 +153,7 @@ class SheetSummaryService:
 
     @staticmethod
     def _frozen_revenue(sheet) -> dict:
-        """Read frozen totals from closed sheet — never recomputed."""
+        """Read frozen totals from closed sheet â€” never recomputed."""
         cash  = sheet.total_cash  or Decimal('0')
         momo  = sheet.total_momo  or Decimal('0')
         pos   = sheet.total_pos   or Decimal('0')
@@ -164,7 +171,7 @@ class SheetSummaryService:
             'is_live'         : False,
         }
 
-    # ── Jobs ──────────────────────────────────────────────────────────────────
+    # â”€â”€ Jobs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_jobs(sheet, branch) -> dict:
@@ -197,7 +204,7 @@ class SheetSummaryService:
             'walkin'     : walkin,
         }
 
-    # ── Registration ──────────────────────────────────────────────────────────
+    # â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_registration(jobs: dict) -> dict:
@@ -213,22 +220,22 @@ class SheetSummaryService:
             'label'     : f"{rate}% of jobs linked to a customer",
         }
 
-    # ── Pace ──────────────────────────────────────────────────────────────────
+    # â”€â”€ Pace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_pace(sheet, jobs: dict, is_open: bool) -> dict:
         """
         Jobs per hour since sheet opened, plus comparative analytics.
-        Only meaningful for open sheets — returns None for closed.
+        Only meaningful for open sheets â€” returns None for closed.
 
         Returns:
-            jobs_per_hour       : float — today's pace
-            hours_open          : float — hours since sheet opened
-            yesterday_per_hour  : float | None — yesterday's pace for comparison
-            pace_change_pct     : float | None — % change vs yesterday (positive = faster)
-            projected_eod       : int | None — estimated total jobs by close time
-            avg_job_value_today : float | None — revenue per completed job today
-            avg_job_value_7d    : float | None — revenue per completed job last 7 days
+            jobs_per_hour       : float â€” today's pace
+            hours_open          : float â€” hours since sheet opened
+            yesterday_per_hour  : float | None â€” yesterday's pace for comparison
+            pace_change_pct     : float | None â€” % change vs yesterday (positive = faster)
+            projected_eod       : int | None â€” estimated total jobs by close time
+            avg_job_value_today : float | None â€” revenue per completed job today
+            avg_job_value_7d    : float | None â€” revenue per completed job last 7 days
         """
         if not is_open or not sheet.opened_at:
             return {
@@ -249,7 +256,7 @@ class SheetSummaryService:
         hours_open  = max(delta.total_seconds() / 3600, 0.25)
         jobs_per_hr = round(jobs['total'] / hours_open, 1)
 
-        # ── Yesterday's pace ──────────────────────────────────
+        # â”€â”€ Yesterday's pace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         yesterday_per_hour = None
         pace_change_pct    = None
         try:
@@ -271,7 +278,7 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: yesterday pace failed for sheet %s', sheet.pk)
 
-        # ── Avg job value — today ─────────────────────────────
+        # â”€â”€ Avg job value â€” today â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         avg_job_value_today = None
         try:
             from apps.jobs.models import Job
@@ -287,7 +294,7 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: avg job value today failed for sheet %s', sheet.pk)
 
-        # ── Avg job value — last 7 closed sheets ─────────────
+        # â”€â”€ Avg job value â€” last 7 closed sheets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         avg_job_value_7d = None
         try:
             from apps.finance.models import DailySalesSheet, Receipt
@@ -312,7 +319,7 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: avg job value 7d failed for sheet %s', sheet.pk)
 
-        # ── Predicted EOD — curve-based prediction engine ─────────────
+        # â”€â”€ Predicted EOD â€” curve-based prediction engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         predicted_jobs_eod    = None
         predicted_revenue_eod = None
         confidence_pct        = None
@@ -344,14 +351,14 @@ class SheetSummaryService:
             'avg_job_value_7d'     : avg_job_value_7d,
         }
 
-    # ── Inventory ─────────────────────────────────────────────────────────────
+    # â”€â”€ Inventory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_inventory(branch, sheet) -> list:
         """
-        Single inventory call — replaces the two-API client-side join.
+        Single inventory call â€” replaces the two-API client-side join.
         Delegates entirely to InventoryEngine.
-        Returns [] on failure — never crashes the summary.
+        Returns [] on failure â€” never crashes the summary.
         """
         try:
             from apps.inventory.inventory_engine import InventoryEngine
@@ -364,7 +371,7 @@ class SheetSummaryService:
             )
             return []
 
-    # ── Alerts ────────────────────────────────────────────────────────────────
+    # â”€â”€ Alerts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _build_alerts(jobs: dict, inventory: list, sheet, is_open: bool) -> list:

@@ -16,6 +16,22 @@ def broadcast_invalidation(branch_id: int, events: list[str]):
         events:    List of React Query cache keys to invalidate.
                    e.g. ['paymentQueue', 'jobStats', 'todaySummary']
     """
+    # Bust summary cache for any sheet affected by this mutation
+    try:
+        from django.core.cache import cache
+        if 'todaySummary' in events or 'jobStats' in events:
+            from apps.finance.models import DailySalesSheet
+            from django.utils import timezone
+            sheet = DailySalesSheet.objects.filter(
+                branch_id=branch_id,
+                date=timezone.localdate(),
+            ).values_list('pk', flat=True).first()
+            if sheet:
+                cache.delete(f'summary:sheet:{sheet}')
+                cache.delete(f'jobstats:branch:{branch_id}')
+    except Exception:
+        pass
+
     try:
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(

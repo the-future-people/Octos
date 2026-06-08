@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
 
@@ -163,10 +163,21 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
 }
 
-# ── ASGI & WebSocket ───────────────────────────────────────────────────────────
+# â”€â”€ ASGI & WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ASGI_APPLICATION = 'config.asgi.application'
 
 _REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+CACHES = {
+    'default': {
+        'BACKEND'  : 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION' : _REDIS_URL,
+        'TIMEOUT'  : 300,
+        'KEY_PREFIX': 'octos',
+        'OPTIONS'  : {
+            'db': '1',
+        },
+    }
+}
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
