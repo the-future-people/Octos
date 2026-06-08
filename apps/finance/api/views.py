@@ -1448,8 +1448,17 @@ class BranchLockStatusView(APIView):
 
         status_data = SheetEngine(user.branch).get_branch_lock_status()
 
-        # Check for active float dispute - hard blocks BM portal
+        # Check cashier sign-off status
         today = timezone.localdate()
+        cashier_signed_off = not CashierFloat.objects.filter(
+            daily_sheet__branch=user.branch,
+            daily_sheet__date=today,
+            is_signed_off=False,
+            opening_float__isnull=False,
+        ).exists()
+        status_data['cashier_signed_off'] = cashier_signed_off
+
+        # Check for active float dispute - hard blocks BM portal
         float_dispute_active = CashierFloat.objects.filter(
             daily_sheet__branch=user.branch,
             daily_sheet__date=today,
