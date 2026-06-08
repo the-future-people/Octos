@@ -30,9 +30,9 @@ class ShiftEngine:
     # ── Safe fallback constants (used only if no BranchShift is configured) ──
     FALLBACK_START          = '07:30'
     FALLBACK_END            = '19:30'
-    FALLBACK_ATTENDANT_LOCK = 0
-    FALLBACK_CASHIER_LOCK   = 45
-    FALLBACK_BM_AUTOCLOSE   = 60
+    FALLBACK_ATTENDANT_LOCK = 50
+    FALLBACK_CASHIER_LOCK   = 40
+    FALLBACK_BM_AUTOCLOSE   = 150
 
     def __init__(self, branch) -> None:
         self.branch = branch
@@ -255,9 +255,9 @@ class ShiftEngine:
         from apps.hr.models import ShiftRoleConfig
 
         DEFAULTS = {
-            'ATTENDANT'     : {'job_lock_buffer': 0,  'signoff_buffer': 30, 'autoclose_buffer': None},
-            'CASHIER'       : {'job_lock_buffer': 45, 'signoff_buffer': 45, 'autoclose_buffer': None},
-            'BRANCH_MANAGER': {'job_lock_buffer': 60, 'signoff_buffer': 60, 'autoclose_buffer': 60},
+            'ATTENDANT'     : {'job_lock_buffer': 0, 'signoff_buffer': 50,  'autoclose_buffer': None},
+            'CASHIER'       : {'job_lock_buffer': 0, 'signoff_buffer': 40,  'autoclose_buffer': None},
+            'BRANCH_MANAGER': {'job_lock_buffer': 0, 'signoff_buffer': 150, 'autoclose_buffer': 150},
         }
 
         try:
