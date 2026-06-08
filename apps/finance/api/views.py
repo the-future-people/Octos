@@ -1636,210 +1636,269 @@ class InvoicePDFView(APIView):
 
 def _generate_invoice_pdf(invoice):
     """Generate a PDF for the invoice and save path to invoice.pdf_path."""
-    media_root = getattr(settings, 'MEDIA_ROOT', 'media')
+    import os, base64, io
+    from django.conf import settings
+
+    media_root   = getattr(settings, 'MEDIA_ROOT', 'media')
     invoices_dir = os.path.join(media_root, 'invoices')
     os.makedirs(invoices_dir, exist_ok=True)
+    output_path  = os.path.join(invoices_dir, f"{invoice.invoice_number}.pdf")
 
-    output_path = os.path.join(invoices_dir, f"{invoice.invoice_number}.pdf")
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle,
+        Paragraph, Spacer, HRFlowable, Image,
+    )
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-    # Build PDF using reportlab
+    FARHAT_RED  = colors.HexColor('#E31E24')
+    CHARCOAL    = colors.HexColor('#1A1A1A')
+    DARK_GREY   = colors.HexColor('#444444')
+    MID_GREY    = colors.HexColor('#777777')
+    LIGHT_GREY  = colors.HexColor('#F0F0F0')
+    WHITE       = colors.white
+
+    PAGE_W, PAGE_H = A4
+    LM = RM = 20 * mm
+    CONTENT_W = PAGE_W - LM - RM
+
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
-        rightMargin=20*mm, leftMargin=20*mm,
-        topMargin=20*mm, bottomMargin=20*mm,
+        rightMargin=RM, leftMargin=LM,
+        topMargin=0,    bottomMargin=20*mm,
     )
-    styles = getSampleStyleSheet()
-    W = A4[0] - 40*mm
-
-    # Custom styles
-    h1 = ParagraphStyle('h1', fontSize=20, fontName='Helvetica-Bold',
-                        textColor=colors.HexColor('#111111'))
-    sm = ParagraphStyle('sm', fontSize=9, fontName='Helvetica',
-                        textColor=colors.HexColor('#666666'))
-    sm_bold = ParagraphStyle('smb', fontSize=9, fontName='Helvetica-Bold',
-                             textColor=colors.HexColor('#111111'))
-    right = ParagraphStyle('right', fontSize=9, fontName='Helvetica',
-                           alignment=TA_RIGHT, textColor=colors.HexColor('#666666'))
-    right_bold = ParagraphStyle('rightb', fontSize=11, fontName='Helvetica-Bold',
-                                alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))
 
     def fmt(n):
         return f"GHS {float(n or 0):,.2f}"
 
+    def style(name, **kw):
+        return ParagraphStyle(name, **kw)
+
+    sm        = style('sm',  fontSize=9,  fontName='Helvetica',      textColor=DARK_GREY)
+    sm_bold   = style('smb', fontSize=9,  fontName='Helvetica-Bold', textColor=CHARCOAL)
+    lbl       = style('lbl', fontSize=8,  fontName='Helvetica-Bold', textColor=colors.HexColor('#999999'), leading=10)
+    right_sm  = style('rsm', fontSize=9,  fontName='Helvetica',      textColor=DARK_GREY,  alignment=TA_RIGHT)
+    right_b   = style('rb',  fontSize=13, fontName='Helvetica-Bold', textColor=FARHAT_RED, alignment=TA_RIGHT)
+    right_m   = style('rm',  fontSize=9,  fontName='Helvetica-Bold', textColor=CHARCOAL,   alignment=TA_RIGHT)
+    center_sm = style('csm', fontSize=9,  fontName='Helvetica',      textColor=DARK_GREY,  alignment=TA_CENTER)
+    total_lbl = style('tl',  fontSize=11, fontName='Helvetica-Bold', textColor=CHARCOAL)
+    total_amt = style('ta',  fontSize=11, fontName='Helvetica-Bold', textColor=FARHAT_RED, alignment=TA_RIGHT)
+    footer_sm = style('ft',  fontSize=8,  fontName='Helvetica',      textColor=MID_GREY,   alignment=TA_CENTER)
+
     story = []
 
-    # Header
-    header_data = [[
-        Paragraph('Farhat Printing Press', h1),
-        Paragraph(
-            f"<b>{invoice.invoice_type} INVOICE</b>",
-            ParagraphStyle('inv', fontSize=14, fontName='Helvetica-Bold',
-                           alignment=TA_RIGHT,
-                           textColor=colors.HexColor('#1a4fd6' if invoice.invoice_type == 'PROFORMA' else '#1a7a4a'))
-        ),
-    ]]
-    header_table = Table(header_data, colWidths=[W*0.6, W*0.4])
+    # -- Logo image from base64
+    LOGO_B64 = "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"
+    logo_bytes = base64.b64decode(LOGO_B64)
+    logo_img   = Image(io.BytesIO(logo_bytes), width=14*mm, height=14*mm)
+
+    # -- Header: red bar spanning full page width
+    company_cell = [
+        Paragraph('<font color="#FFFFFF"><b>Farhat Printing Press</b></font>',
+                  style('co', fontSize=16, fontName='Helvetica-Bold',
+                        textColor=WHITE, leading=20)),
+        Paragraph('<font color="#FFFFFF">Professional Printing Services</font>',
+                  style('cs', fontSize=8, fontName='Helvetica',
+                        textColor=colors.HexColor('#FFAAAA'), leading=11)),
+    ]
+    invoice_type_color = '#FFFFFF'
+    type_cell = Paragraph(
+        f'<font color="#FFFFFF"><b>{invoice.invoice_type} INVOICE</b></font>',
+        style('it', fontSize=11, fontName='Helvetica-Bold',
+              textColor=WHITE, alignment=TA_RIGHT, leading=14),
+    )
+
+    header_data = [[ logo_img, company_cell, type_cell ]]
+    header_table = Table(header_data, colWidths=[18*mm, CONTENT_W - 18*mm - 38*mm, 38*mm])
     header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('BACKGROUND',    (0,0), (-1,-1), FARHAT_RED),
+        ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+        ('LEFTPADDING',   (0,0), (0,0),   4),
+        ('LEFTPADDING',   (1,0), (1,0),   8),
+        ('RIGHTPADDING',  (2,0), (2,0),   8),
+        ('TOPPADDING',    (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
     ]))
     story.append(header_table)
 
-    # Branch info
+    # -- Branch info bar: centered pipe-separated text
     branch = invoice.branch
-    story.append(Paragraph(branch.name, sm))
+    branch_parts = [branch.name]
     if branch.phone or branch.whatsapp_number:
-        story.append(Paragraph(branch.phone or branch.whatsapp_number, sm))
+        branch_parts.append(branch.phone or branch.whatsapp_number)
     if branch.email:
-        story.append(Paragraph(branch.email, sm))
-    if branch.address:
-        story.append(Paragraph(branch.address, sm))
-    story.append(Spacer(1, 6*mm))
-    story.append(HRFlowable(width=W, thickness=1, color=colors.HexColor('#eeeeee')))
+        branch_parts.append(branch.email)
+    branch_line = '  |  '.join(branch_parts)
+
+    branch_bar_data = [[ Paragraph(branch_line,
+        style('bb', fontSize=8.5, fontName='Helvetica',
+              textColor=DARK_GREY, alignment=TA_CENTER)) ]]
+    branch_bar = Table(branch_bar_data, colWidths=[CONTENT_W])
+    branch_bar.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,-1), colors.HexColor('#FAFAFA')),
+        ('TOPPADDING',    (0,0), (-1,-1), 7),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 7),
+        ('LINEBELOW',     (0,0), (-1,-1), 0.5, LIGHT_GREY),
+    ]))
+    story.append(branch_bar)
     story.append(Spacer(1, 6*mm))
 
-    # Invoice meta + Bill To
-    issued = invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '--'
-    due = invoice.due_date.strftime('%d %b %Y') if invoice.due_date else '--'
+    # -- Bill To + Invoice meta two-column
+    issued = invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '-'
+    due    = invoice.due_date.strftime('%d %b %Y')   if invoice.due_date   else '-'
 
-    primary = invoice.bill_to_company or invoice.bill_to_name
+    primary   = invoice.bill_to_company or invoice.bill_to_name
     secondary = invoice.bill_to_name if invoice.bill_to_company else None
-    bill_lines = [primary]
+    bill_lines = [Paragraph('BILL TO', lbl)]
+    bill_lines.append(Paragraph(primary,
+        style('bp', fontSize=12, fontName='Helvetica-Bold', textColor=CHARCOAL)))
     if secondary:
-        bill_lines.append(secondary)
+        bill_lines.append(Paragraph(secondary, sm_bold))
     if invoice.bill_to_phone:
-        bill_lines.append(invoice.bill_to_phone)
+        bill_lines.append(Paragraph(invoice.bill_to_phone, sm))
     if invoice.bill_to_email:
-        bill_lines.append(invoice.bill_to_email)
+        bill_lines.append(Paragraph(invoice.bill_to_email, sm))
 
-    meta_data = [[
-        [
-            Paragraph('BILL TO', ParagraphStyle('lbl', fontSize=8,
-                       fontName='Helvetica-Bold', textColor=colors.HexColor('#aaaaaa'), spaceAfter=3)),
-            *[Paragraph(line, sm_bold if i == 0 else sm) for i, line in enumerate(bill_lines)],
-        ],
-        [
-            Paragraph('INVOICE NO', ParagraphStyle('lbl', fontSize=8,
-                       fontName='Helvetica-Bold', textColor=colors.HexColor('#aaaaaa'),
-                       alignment=TA_RIGHT, spaceAfter=3)),
-            Paragraph(invoice.invoice_number, right_bold),
-            Spacer(1, 4),
-            Paragraph('DATE ISSUED', ParagraphStyle('lbl2', fontSize=8,
-                       fontName='Helvetica-Bold', textColor=colors.HexColor('#aaaaaa'),
-                       alignment=TA_RIGHT, spaceAfter=3)),
-            Paragraph(issued, right),
-            Spacer(1, 4),
-            Paragraph('DUE DATE', ParagraphStyle('lbl3', fontSize=8,
-                       fontName='Helvetica-Bold', textColor=colors.HexColor('#aaaaaa'),
-                       alignment=TA_RIGHT, spaceAfter=3)),
-            Paragraph(due, right),
-        ],
-    ]]
+    meta_lines = [
+        Paragraph('INVOICE NO', lbl),
+        Paragraph(invoice.invoice_number,
+            style('inv', fontSize=13, fontName='Helvetica-Bold',
+                  textColor=FARHAT_RED, alignment=TA_RIGHT)),
+        Spacer(1, 4),
+        Paragraph('DATE ISSUED', lbl),
+        Paragraph(issued, right_m),
+        Spacer(1, 4),
+        Paragraph('DUE DATE', lbl),
+        Paragraph(due, right_m),
+    ]
 
-    meta_table = Table(meta_data, colWidths=[W*0.5, W*0.5])
-    meta_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    meta_table = Table([[bill_lines, meta_lines]], colWidths=[CONTENT_W*0.55, CONTENT_W*0.45])
+    meta_table.setStyle(TableStyle([
+        ('VALIGN',       (0,0), (-1,-1), 'TOP'),
+        ('LINEBEFORE',   (0,0), (0,-1),  2, FARHAT_RED),
+        ('LEFTPADDING',  (0,0), (0,-1),  10),
+        ('LEFTPADDING',  (1,0), (1,-1),  0),
+    ]))
     story.append(meta_table)
-    story.append(Spacer(1, 8*mm))
+    story.append(Spacer(1, 6*mm))
 
-    # Job ref if linked
+    # -- Job ref
     if invoice.job:
-        story.append(Paragraph(f"Job Reference: <b>{invoice.job.job_number}</b>", sm))
-        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph(
+            f"Job Reference: <b>{invoice.job.job_number}</b>", sm))
+        story.append(Spacer(1, 3*mm))
 
-    # Line items table
+    # -- Line items table
+    th = style('th', fontSize=9, fontName='Helvetica-Bold',
+               textColor=WHITE)
+    th_r = style('thr', fontSize=9, fontName='Helvetica-Bold',
+                 textColor=WHITE, alignment=TA_RIGHT)
+    th_c = style('thc', fontSize=9, fontName='Helvetica-Bold',
+                 textColor=WHITE, alignment=TA_CENTER)
+
     table_data = [[
-        Paragraph('SERVICE', ParagraphStyle('th', fontSize=8, fontName='Helvetica-Bold',
-                   textColor=colors.HexColor('#aaaaaa'))),
-        Paragraph('QTY', ParagraphStyle('th2', fontSize=8, fontName='Helvetica-Bold',
-                   textColor=colors.HexColor('#aaaaaa'), alignment=TA_CENTER)),
-        Paragraph('UNIT PRICE', ParagraphStyle('th3', fontSize=8, fontName='Helvetica-Bold',
-                   textColor=colors.HexColor('#aaaaaa'), alignment=TA_RIGHT)),
-        Paragraph('TOTAL', ParagraphStyle('th4', fontSize=8, fontName='Helvetica-Bold',
-                   textColor=colors.HexColor('#aaaaaa'), alignment=TA_RIGHT)),
+        Paragraph('SERVICE', th),
+        Paragraph('QTY', th_c),
+        Paragraph('UNIT PRICE', th_r),
+        Paragraph('TOTAL', th_r),
     ]]
 
     for li in invoice.line_items.all():
-        detail = f"{li.paper_size} · {'Colour' if li.is_color else 'B&W'}"
+        detail = f"{li.paper_size} &middot; {'Colour' if li.is_color else 'B&amp;W'}"
         if li.pages > 1:
-            detail += f" · {li.pages}pp × {li.sets} sets"
+            detail += f" &middot; {li.pages}pp &times; {li.sets} sets"
         table_data.append([
-            [
-                Paragraph(li.label, sm_bold),
-                Paragraph(detail, sm),
-            ],
-            Paragraph(str(li.quantity), ParagraphStyle('c', fontSize=9, fontName='Helvetica',
-                       alignment=TA_CENTER, textColor=colors.HexColor('#444444'))),
-            Paragraph(fmt(li.unit_price), ParagraphStyle('r', fontSize=9, fontName='Helvetica',
-                       alignment=TA_RIGHT, textColor=colors.HexColor('#444444'))),
-            Paragraph(fmt(li.line_total), ParagraphStyle('rb', fontSize=9, fontName='Helvetica-Bold',
-                       alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))),
+            [Paragraph(li.label, sm_bold), Paragraph(detail, sm)],
+            Paragraph(str(li.quantity),
+                style('qc', fontSize=9, fontName='Helvetica',
+                      textColor=CHARCOAL, alignment=TA_CENTER)),
+            Paragraph(fmt(li.unit_price),
+                style('up', fontSize=9, fontName='Helvetica',
+                      textColor=DARK_GREY, alignment=TA_RIGHT)),
+            Paragraph(fmt(li.line_total),
+                style('lt', fontSize=9, fontName='Helvetica-Bold',
+                      textColor=CHARCOAL, alignment=TA_RIGHT)),
         ])
 
-    col_w = [W*0.5, W*0.1, W*0.2, W*0.2]
+    col_w = [CONTENT_W*0.50, CONTENT_W*0.10, CONTENT_W*0.20, CONTENT_W*0.20]
     items_table = Table(table_data, colWidths=col_w, repeatRows=1)
     items_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f7f7f7')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fafafa')]),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#eeeeee')),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('BACKGROUND',    (0,0), (-1,0),  FARHAT_RED),
+        ('ROWBACKGROUNDS',(0,1), (-1,-1), [WHITE, colors.HexColor('#FAFAFA')]),
+        ('LINEBELOW',     (0,0), (-1,-1), 0.5, LIGHT_GREY),
+        ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING',    (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING',   (0,0), (-1,-1), 8),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 8),
     ]))
     story.append(items_table)
-    story.append(Spacer(1, 6*mm))
+    story.append(Spacer(1, 4*mm))
 
-    # Totals
-    totals_data = []
-    totals_data.append([
+    # -- Totals
+    totals_data = [[
         Paragraph('Subtotal', sm),
-        Paragraph(fmt(invoice.subtotal), right),
-    ])
+        Paragraph(fmt(invoice.subtotal), right_sm),
+    ]]
     if invoice.vat_rate:
         totals_data.append([
             Paragraph(f'VAT ({invoice.vat_rate}%)', sm),
-            Paragraph(fmt(invoice.vat_amount), right),
+            Paragraph(fmt(invoice.vat_amount), right_sm),
         ])
     totals_data.append([
-        Paragraph('<b>Total</b>', ParagraphStyle('tb', fontSize=11, fontName='Helvetica-Bold',
-                   textColor=colors.HexColor('#111111'))),
-        Paragraph(f'<b>{fmt(invoice.total)}</b>', ParagraphStyle('trb', fontSize=11,
-                   fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=colors.HexColor('#111111'))),
+        Paragraph('<b>Total</b>', total_lbl),
+        Paragraph(f'<b>{fmt(invoice.total)}</b>', total_amt),
     ])
 
-    totals_table = Table(totals_data, colWidths=[W*0.75, W*0.25])
+    totals_table = Table(totals_data, colWidths=[CONTENT_W*0.75, CONTENT_W*0.25])
     totals_table.setStyle(TableStyle([
-        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-        ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#eeeeee')),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN',         (1,0),  (1,-1),  'RIGHT'),
+        ('LINEABOVE',     (0,-1), (-1,-1), 1.5, FARHAT_RED),
+        ('LINEBELOW',     (0,0),  (-1,-2), 0.5, LIGHT_GREY),
+        ('TOPPADDING',    (0,0),  (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0),  (-1,-1), 5),
     ]))
     story.append(totals_table)
 
-    # BM note
+    # -- BM note
     if invoice.bm_note:
-        story.append(Spacer(1, 6*mm))
-        story.append(HRFlowable(width=W, thickness=0.5, color=colors.HexColor('#eeeeee')))
-        story.append(Spacer(1, 4*mm))
+        story.append(Spacer(1, 5*mm))
+        story.append(HRFlowable(width=CONTENT_W, thickness=0.5,
+                                color=LIGHT_GREY))
+        story.append(Spacer(1, 3*mm))
         story.append(Paragraph(invoice.bm_note, sm))
 
-    story.append(Spacer(1, 10*mm))
-    story.append(HRFlowable(width=W, thickness=0.5, color=colors.HexColor('#eeeeee')))
-    story.append(Spacer(1, 3*mm))
-    story.append(Paragraph(
-        'Thank you for your business - Farhat Printing Press',
-        ParagraphStyle('ft', fontSize=8, fontName='Helvetica',
-                       textColor=colors.HexColor('#aaaaaa'), alignment=TA_CENTER)
-    ))
+    # -- Footer
+    story.append(Spacer(1, 8*mm))
+    footer_data = [[
+        Paragraph(
+            'Thank you for choosing Farhat Printing Press',
+            style('fl', fontSize=8, fontName='Helvetica',
+                  textColor=WHITE, alignment=TA_LEFT)),
+        Paragraph(
+            'FARHAT &trade;',
+            style('fr', fontSize=9, fontName='Helvetica-Bold',
+                  textColor=FARHAT_RED, alignment=TA_RIGHT)),
+    ]]
+    footer_table = Table(footer_data, colWidths=[CONTENT_W*0.7, CONTENT_W*0.3])
+    footer_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,-1), CHARCOAL),
+        ('TOPPADDING',    (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('LEFTPADDING',   (0,0), (0,-1),  14),
+        ('RIGHTPADDING',  (-1,0),(-1,-1), 14),
+        ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    story.append(footer_table)
 
     doc.build(story)
 
-    # Save path
     invoice.pdf_path = output_path
     invoice.save(update_fields=['pdf_path', 'updated_at'])
-
 
 def _deliver_invoice(invoice):
     """Send invoice via its delivery channel. Marks status as SENT."""
