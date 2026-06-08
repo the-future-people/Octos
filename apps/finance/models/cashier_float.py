@@ -197,10 +197,11 @@ class CashierFloat(AuditModel):
         verbose_name        = 'Cashier Float'
         verbose_name_plural = 'Cashier Floats'
         indexes = [
-            models.Index(fields=['daily_sheet', 'cashier']),
-            models.Index(fields=['scheduled_date', 'cashier']),
-            models.Index(fields=['is_signed_off']),
-            models.Index(fields=['morning_acknowledged']),
+            models.Index(fields=['daily_sheet', 'cashier'],                         name='float_sheet_cashier_idx'),
+            models.Index(fields=['scheduled_date', 'cashier'],                      name='float_scheduled_cashier_idx'),
+            models.Index(fields=['is_signed_off'],                                  name='float_signed_off_idx'),
+            models.Index(fields=['morning_acknowledged'],                           name='float_morning_ack_idx'),
+            models.Index(fields=['physical_confirm_disputed', 'morning_acknowledged'], name='float_dispute_ack_idx'),
         ]
 
     def __str__(self) -> str:
