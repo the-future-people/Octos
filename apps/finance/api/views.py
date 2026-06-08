@@ -1734,13 +1734,7 @@ class InvoicePDFView(APIView):
                 {'detail': f'PDF generation failed: {e}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-            except Exception as e:
-                return Response(
-                    {'detail': f'PDF generation failed: {e}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-        from django.http import FileResponse
+            from django.http import FileResponse
         response = FileResponse(
             open(invoice.pdf_path, 'rb'),
             content_type='application/pdf',
@@ -1750,10 +1744,6 @@ class InvoicePDFView(APIView):
         )
         return response
 
-
-# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-# Invoice helpers
-# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def _generate_invoice_pdf(invoice):
     """Generate a PDF for the invoice and save path to invoice.pdf_path."""
@@ -1986,9 +1976,8 @@ def _generate_invoice_pdf(invoice):
     ]))
     story.append(totals_table)
 
-    ))
+    # ── BM note
 
-    # ΓöÇΓöÇ BM note ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if invoice.bm_note:
         story.append(Spacer(1, 6*mm))
         story.append(HRFlowable(width=W, thickness=0.5,
@@ -1996,7 +1985,6 @@ def _generate_invoice_pdf(invoice):
         story.append(Spacer(1, 4*mm))
         story.append(Paragraph(invoice.bm_note, sm))
 
-    # ΓöÇΓöÇ Footer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     story.append(Spacer(1, 10*mm))
     story.append(HRFlowable(width=W, thickness=0.5,
                              color=colors.HexColor('#eeeeee')))
