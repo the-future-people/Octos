@@ -396,6 +396,12 @@ class ServiceCreateView(APIView):
             raw_mappings_json = request.data.get('consumable_mappings'),
         )
 
+        # Bust the services list cache so new service is immediately visible
+        from django.core.cache import cache
+        cache.delete('services:list:__all__')
+        for cat in ('INSTANT', 'PRODUCTION', 'DESIGN'):
+            cache.delete(f'services:list:{cat}')
+
         return Response(ServiceSerializer(service).data, status=status.HTTP_201_CREATED)
     
 class PricingRuleListView(generics.ListAPIView):
