@@ -153,9 +153,15 @@ class Receipt(AuditModel):
     )
 
     class Meta:
-        ordering        = ['-created_at']
+        ordering            = ['-created_at']
         verbose_name        = 'Receipt'
         verbose_name_plural = 'Receipts'
+        indexes = [
+            models.Index(fields=['daily_sheet', 'is_void'],      name='receipt_sheet_void_idx'),
+            models.Index(fields=['cashier', 'daily_sheet'],      name='receipt_cashier_sheet_idx'),
+            models.Index(fields=['daily_sheet', 'payment_method'], name='receipt_sheet_method_idx'),
+            models.Index(fields=['created_at'],                  name='receipt_created_idx'),
+        ]
 
     def __str__(self) -> str:
         return f"{self.receipt_number} — GHS {self.amount_paid}"
