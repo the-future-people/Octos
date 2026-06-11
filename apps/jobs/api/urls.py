@@ -29,6 +29,7 @@ urlpatterns = [
     path('pricing/create/',   views.PricingRuleCreateView.as_view(), name='pricing-create'),
     path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
     path('pricing/<int:pk>/', views.PricingRuleDetailView.as_view(), name='pricing-detail'),
+    path('price/bulk/',       views.PriceBulkView.as_view(),       name='price-bulk'),
     path('price/calculate/',  views.PriceCalculateView.as_view(),  name='price-calculate'),
     # Drafts
     path('drafts/',              views.DraftListView.as_view(),   name='draft-list'),

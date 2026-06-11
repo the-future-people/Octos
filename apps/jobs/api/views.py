@@ -465,6 +465,71 @@ class PricingRuleCreateView(APIView):
 
         return Response(PricingRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
 
+class PriceBulkView(APIView):
+    """
+    GET /api/v1/jobs/price/bulk/?branch=<id>
+    Returns base pricing for all active services at a branch.
+    Used by the frontend to calculate prices locally without round trips.
+    Cached 5 minutes per branch.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.core.cache import cache
+        from apps.jobs.models import PricingRule
+
+        branch_id = request.query_params.get('branch')
+        if not branch_id:
+            return Response({'detail': 'branch is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cache_key = f'price_bulk:{branch_id}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        try:
+            branch = Branch.objects.get(pk=branch_id)
+        except Branch.DoesNotExist:
+            return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only allow access to own branch unless RM or above
+        user_branch = getattr(request.user, 'branch', None)
+        user_role   = getattr(getattr(request.user, 'role', None), 'name', '')
+        if user_role not in ('REGIONAL_MANAGER', 'BRANCH_MANAGER') and user_branch and user_branch.id != branch.id:
+            return Response({'detail': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Fetch branch-specific rules
+        branch_rules = {
+            r.service_id: r
+            for r in PricingRule.objects.filter(
+                branch=branch, is_active=True
+            ).select_related('service')
+        }
+        # Fetch company-wide fallback rules
+        default_rules = {
+            r.service_id: r
+            for r in PricingRule.objects.filter(
+                branch__isnull=True, is_active=True
+            ).select_related('service')
+        }
+
+        result = {}
+        all_service_ids = set(branch_rules) | set(default_rules)
+        for sid in all_service_ids:
+            rule = branch_rules.get(sid) or default_rules.get(sid)
+            if rule:
+                result[sid] = {
+                    'base_price':       str(rule.base_price),
+                    'color_multiplier': str(rule.color_multiplier),
+                    'unit':             rule.service.unit,
+                    'pricing_tiers':    rule.pricing_tiers,
+                    'source':           'branch' if sid in branch_rules else 'default',
+                }
+
+        cache.set(cache_key, result, 300)
+        return Response(result)
+
+
 class PriceCalculateView(APIView):
     """
     GET /api/v1/jobs/price/calculate/?service=&branch=&quantity=&pages=&is_color=
