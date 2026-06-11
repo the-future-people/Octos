@@ -586,13 +586,15 @@ class ServiceCreateSerializer(serializers.Serializer):
     code              = serializers.CharField(max_length=20)
     category          = serializers.ChoiceField(choices=['INSTANT', 'PRODUCTION', 'DESIGN'])
     unit              = serializers.ChoiceField(
-        choices=['PER_COPY', 'PER_PIECE', 'PER_SQFT', 'PER_SQCM', 'PER_JOB'],
+        choices=['PER_COPY', 'PER_PIECE', 'PER_SQFT', 'PER_SQCM', 'PER_JOB', 'PER_PAGE', 'PER_SHEET'],
         default='PER_PIECE',
     )
+    paper_size        = serializers.CharField(max_length=10, default='A4')
     description       = serializers.CharField(allow_blank=True, default='')
     base_price        = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    color_multiplier  = serializers.DecimalField(max_digits=6, decimal_places=2, min_value=1, default='1.00')
     image             = serializers.ImageField(required=False, allow_null=True)
-    sides = serializers.ChoiceField(
+    sides             = serializers.ChoiceField(
         choices=['SINGLE', 'DOUBLE', 'NA'],
         default='SINGLE',
     )
