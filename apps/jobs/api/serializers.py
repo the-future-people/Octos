@@ -319,9 +319,16 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 'Provide either line_items (multi-service) or service (single-service).'
             )
 
-        # ── Branch lock — no jobs past closing time ────────────
-        branch = attrs['branch']
-        lock   = SheetEngine(branch).get_branch_lock_status()
+        # ── Branch lock — role-aware ───────────────────────────
+        branch    = attrs['branch']
+        role_name = 'ATTENDANT'
+        if request and hasattr(request.user, 'role') and request.user.role:
+            role_name = {
+                'BRANCH_MANAGER': 'BRANCH_MANAGER',
+                'CASHIER':        'CASHIER',
+                'ATTENDANT':      'ATTENDANT',
+            }.get(getattr(request.user.role, 'name', ''), 'ATTENDANT')
+        lock = SheetEngine(branch).get_branch_lock_status(role_name=role_name)
         if not lock['can_create_jobs']:
             raise serializers.ValidationError(lock['lock_reason'])
 
