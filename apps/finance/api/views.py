@@ -1446,7 +1446,14 @@ class BranchLockStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        status_data = SheetEngine(user.branch).get_branch_lock_status()
+        role_map = {
+            'ATTENDANT'     : 'ATTENDANT',
+            'CASHIER'       : 'CASHIER',
+            'BRANCH_MANAGER': 'BRANCH_MANAGER',
+        }
+        user_role = getattr(getattr(user, 'role', None), 'name', 'ATTENDANT')
+        lock_role = role_map.get(user_role, 'ATTENDANT')
+        status_data = SheetEngine(user.branch).get_branch_lock_status(role_name=lock_role)
 
         # Check cashier sign-off status
         today = timezone.localdate()
