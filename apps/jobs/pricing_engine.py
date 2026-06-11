@@ -29,7 +29,14 @@ class PricingEngine:
         """
         Get the most specific pricing rule available.
         Branch-specific → Company-wide default.
+        Cached 5 minutes per service+branch pair.
         """
+        from django.core.cache import cache
+        cache_key = f'pricing_rule:{self.service.pk}:{self.branch.pk}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         rule = PricingRule.objects.filter(
             service  = self.service,
             branch   = self.branch,
@@ -38,11 +45,13 @@ class PricingEngine:
 
         if not rule:
             rule = PricingRule.objects.filter(
-                service      = self.service,
+                service        = self.service,
                 branch__isnull = True,
-                is_active    = True,
+                is_active      = True,
             ).first()
 
+        if rule is not None:
+            cache.set(cache_key, rule, 300)
         return rule
 
     def calculate(self, quantity: int = 1, is_color: bool = False, pages: int = 1,
