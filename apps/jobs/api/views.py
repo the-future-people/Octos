@@ -739,6 +739,23 @@ class JobStatsView(APIView):
 
         return Response({**branch_stats, 'personal': personal})
 
+class ActiveWorkloadView(APIView):
+    """
+    GET /api/v1/jobs/workload/
+    Returns active workload counts for the BM Overview.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.jobs.selectors.stats_selectors import get_active_workload
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+
+        return Response(get_active_workload(branch))
+    
+    
 class JobHistoryView(APIView):
     """
     GET /api/v1/jobs/history/

@@ -283,3 +283,60 @@ def get_personal_stats(user, branch, sheet_id=None) -> dict:
     if sheet_id:
         cache.set(_personal_key, _result, 90)
     return _result
+
+def get_active_workload(branch) -> dict:
+    """
+    Active workload counts for the BM Overview command centre.
+    Single aggregation query — cached 60s per branch.
+    """
+    from django.core.cache import cache
+    from apps.jobs.models import Job
+    from django.utils import timezone
+
+    cache_key = f'workload:branch:{branch.pk}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    now = timezone.now()
+
+    qs = Job.objects.filter(branch=branch)
+
+    agg = qs.aggregate(
+        pending_payment    = Count('id', filter=Q(status='PENDING_PAYMENT')),
+        in_production      = Count('id', filter=Q(
+            status__in=['CONFIRMED', 'IN_PROGRESS'],
+            job_type__in=['PRODUCTION', 'DESIGN'],
+        )),
+        ready_for_pickup   = Count('id', filter=Q(
+            status='READY',
+            job_type__in=['PRODUCTION', 'DESIGN'],
+        )),
+        awaiting_feedback  = Count('id', filter=Q(
+            status__in=['SAMPLE_SENT', 'REVISION_REQUESTED'],
+        )),
+        overdue            = Count('id', filter=Q(
+            deadline__lt=now,
+            status__in=['CONFIRMED', 'IN_PROGRESS', 'READY', 'SAMPLE_SENT', 'REVISION_REQUESTED'],
+        )),
+    )
+
+    # Oldest pending payment job age in minutes
+    oldest_pending = qs.filter(
+        status='PENDING_PAYMENT'
+    ).order_by('created_at').values_list('created_at', flat=True).first()
+
+    oldest_pending_mins = None
+    if oldest_pending:
+        oldest_pending_mins = int((now - oldest_pending).total_seconds() / 60)
+
+    result = {
+        'pending_payment'   : agg['pending_payment']   or 0,
+        'in_production'     : agg['in_production']     or 0,
+        'ready_for_pickup'  : agg['ready_for_pickup']  or 0,
+        'awaiting_feedback' : agg['awaiting_feedback'] or 0,
+        'overdue'           : agg['overdue']           or 0,
+        'oldest_pending_mins': oldest_pending_mins,
+    }
+    cache.set(cache_key, result, 60)
+    return result
