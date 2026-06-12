@@ -1465,6 +1465,19 @@ class BranchLockStatusView(APIView):
         ).exists()
         status_data['cashier_signed_off'] = cashier_signed_off
 
+        # Sheet info for topbar display
+        try:
+            from apps.finance.models import DailySalesSheet
+            sheet = DailySalesSheet.objects.filter(
+                branch=user.branch,
+                date=today,
+            ).values('sheet_number', 'status').first()
+            status_data['sheet_number'] = sheet['sheet_number'] if sheet else None
+            status_data['sheet_status'] = sheet['status'] if sheet else None
+        except Exception:
+            status_data['sheet_number'] = None
+            status_data['sheet_status'] = None
+
         # Check for active float dispute - hard blocks BM portal
         float_dispute_active = CashierFloat.objects.filter(
             daily_sheet__branch=user.branch,
