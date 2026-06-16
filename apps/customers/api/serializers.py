@@ -15,6 +15,9 @@ class CustomerSerializer(serializers.ModelSerializer):
     preferred_branch_name = serializers.CharField(
         source='preferred_branch.name', read_only=True
     )
+    affiliation_name = serializers.CharField(
+        source='affiliation.display_name', read_only=True
+    )
 
     class Meta:
         model  = CustomerProfile
@@ -27,6 +30,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             'company_name', 'address',
             'customer_type', 'institution_subtype',
             'affiliation', 'affiliation_active',
+            'affiliation_name',
             'visit_count', 'tier', 'confidence_score',
             'preferred_branch', 'preferred_branch_name',
             'is_priority', 'is_walkin', 'notes', 'created_at',
@@ -48,6 +52,9 @@ class CustomerListSerializer(serializers.ModelSerializer):
     preferred_branch_name = serializers.CharField(
         source='preferred_branch.name', read_only=True
     )
+    affiliation_name = serializers.CharField(
+        source='affiliation.display_name', read_only=True
+    )
 
     class Meta:
         model  = CustomerProfile
@@ -57,6 +64,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
             'gender', 'preferred_contact',
             'company_name', 'customer_type', 'institution_subtype',
             'affiliation', 'affiliation_active',
+            'affiliation_name',
             'tier', 'is_priority', 'confidence_score', 'visit_count',
             'preferred_branch', 'preferred_branch_name',
             'created_at',
@@ -75,6 +83,7 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
             'phone', 'secondary_phone', 'email', 'preferred_contact',
             'company_name', 'address',
             'customer_type', 'institution_subtype',
+            'affiliation', 'affiliation_active',
             'preferred_branch', 'notes',
         ]
         extra_kwargs = {
@@ -114,6 +123,22 @@ class CustomerCreateSerializer(serializers.ModelSerializer):
                 f'Customer type must be one of: {", ".join(allowed)}'
             )
         return value
+
+    def validate(self, attrs):
+        affiliation   = attrs.get('affiliation')
+        customer_type = attrs.get('customer_type', 'INDIVIDUAL')
+        if affiliation:
+            if customer_type != CustomerProfile.INDIVIDUAL:
+                raise serializers.ValidationError(
+                    {'affiliation': 'Only individual customers can have an affiliation.'}
+                )
+            if affiliation.customer_type not in (
+                CustomerProfile.BUSINESS, CustomerProfile.INSTITUTION
+            ):
+                raise serializers.ValidationError(
+                    {'affiliation': 'Affiliation must point to a business or institution.'}
+                )
+        return attrs
 
 
 # ── Credit Account serializers ────────────────────────────────────────────────
