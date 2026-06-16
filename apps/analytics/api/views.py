@@ -8,6 +8,7 @@ Session endpoints called by frontend JS:
   POST /api/v1/analytics/session/end/        — on logout/unload
 """
 
+from django.db.models import Count
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -133,6 +134,67 @@ class SessionEventView(APIView):
             )
 
         return Response({'ok': True})
+
+
+class EODPredictionView(APIView):
+    """
+    GET /api/v1/analytics/prediction/
+    Returns EOD job count and revenue prediction interval for today's sheet.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.models import DailySalesSheet
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+        from apps.analytics.engines.prediction_engine import PredictionEngine
+        from django.utils import timezone
+        from django.db.models import Sum
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = timezone.localdate()
+        try:
+            sheet = DailySalesSheet.objects.get(
+                branch = branch,
+                date   = today,
+            )
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'No sheet found for today.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Current actuals
+        from apps.jobs.models import Job
+        agg = Job.objects.filter(
+            daily_sheet = sheet,
+            status      = 'COMPLETE',
+        ).aggregate(
+            job_count = Count('id'),
+            revenue   = Sum('amount_paid'),
+        )
+        current_jobs    = agg['job_count'] or 0
+        current_revenue = float(agg['revenue'] or 0)
+
+        engine = PredictionEngine(branch)
+        result = engine.predict(
+            sheet           = sheet,
+            current_jobs    = current_jobs,
+            current_revenue = current_revenue,
+        )
+
+        return Response({
+            **result,
+            'current_jobs'   : current_jobs,
+            'current_revenue': current_revenue,
+            'sheet_id'       : sheet.pk,
+            'sheet_date'     : str(sheet.date),
+        })
 
 
 class SessionEndView(APIView):

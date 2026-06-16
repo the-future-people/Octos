@@ -4,6 +4,7 @@ from .views import (
     SessionHeartbeatView,
     SessionEventView,
     SessionEndView,
+    EODPredictionView,
 )
 
 urlpatterns = [
@@ -11,4 +12,5 @@ urlpatterns = [
     path('session/heartbeat/', SessionHeartbeatView.as_view(), name='session-heartbeat'),
     path('session/event/',     SessionEventView.as_view(),     name='session-event'),
     path('session/end/',       SessionEndView.as_view(),       name='session-end'),
+    path('prediction/',        EODPredictionView.as_view(),    name='eod-prediction'),
 ]
