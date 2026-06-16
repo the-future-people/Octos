@@ -4,6 +4,7 @@ from .audit_event import AuditEvent
 from .daily_risk import DailyRiskFlag, DailyRiskReport
 from .weekly_risk import WeeklyRiskFlag, WeeklyRiskScore
 from .monthly_summary import MonthlyCloseSummary
+from .hourly_snapshot import HourlySheetSnapshot
 
 __all__ = [
     'BranchSnapshot',
@@ -14,4 +15,5 @@ __all__ = [
     'WeeklyRiskFlag',
     'WeeklyRiskScore',
     'MonthlyCloseSummary',
+    'HourlySheetSnapshot',
 ]
