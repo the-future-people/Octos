@@ -1313,6 +1313,10 @@ class CreditSettlementView(APIView):
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Bust summary cache so BM portal reflects settlement immediately
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+        SheetSummaryService.invalidate(sheet.pk)
+
         return Response(
             CreditPaymentSerializer(payment).data,
             status=status.HTTP_201_CREATED,

@@ -133,11 +133,27 @@ class SheetSummaryService:
         from apps.finance.models import CreditPayment
         from django.db.models import Sum as DSum
 
-        petty_out      = sheet.total_petty_cash_out or Decimal('0')
-        credit_settled = CreditPayment.objects.filter(
-            daily_sheet=sheet,
+        # Credit settlements broken down by payment method
+        settlement_qs = CreditPayment.objects.filter(daily_sheet=sheet)
+        settle_cash = settlement_qs.filter(
+            payment_method='CASH'
         ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
-        net_cash       = cash + credit_settled - petty_out
+        settle_momo = settlement_qs.filter(
+            payment_method='MOMO'
+        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
+        settle_pos  = settlement_qs.filter(
+            payment_method='POS'
+        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
+        credit_settled = settle_cash + settle_momo + settle_pos
+
+        # Add settlements into the method breakdown
+        cash  = cash  + settle_cash
+        momo  = momo  + settle_momo
+        pos   = pos   + settle_pos
+        total = cash  + momo + pos
+
+        petty_out = sheet.total_petty_cash_out or Decimal('0')
+        net_cash  = cash - petty_out
 
         return {
             'cash'            : str(cash),
