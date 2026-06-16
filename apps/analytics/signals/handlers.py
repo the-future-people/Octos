@@ -179,8 +179,8 @@ def on_sheet_saved(sender, instance, created, **kwargs):
                         'total_pos'   : str(instance.total_pos),
                     },
                 )
-                # Trigger daily risk analysis via Celery
                 _trigger_daily_risk(instance)
+                _snapshot_hourly(instance)
 
             elif instance.status == 'AUTO_CLOSED':
                 _write_event(
@@ -195,6 +195,7 @@ def on_sheet_saved(sender, instance, created, **kwargs):
                     },
                 )
                 _trigger_daily_risk(instance)
+                _snapshot_hourly(instance)
 
     except Exception as e:
         logger.error('on_sheet_saved failed: %s', e, exc_info=True)
@@ -207,6 +208,138 @@ def _trigger_daily_risk(sheet):
         analyse_daily_risk.delay(sheet.pk)
     except Exception as e:
         logger.error('_trigger_daily_risk failed for sheet %s: %s', sheet.pk, e, exc_info=True)
+
+
+def _snapshot_hourly(sheet):
+    """
+    Builds HourlySheetSnapshot records for a just-closed sheet.
+    One record per hour slot (7–19) regardless of whether jobs occurred.
+    Fetches historical weather from Open-Meteo for accuracy.
+    Never raises — failure is logged silently.
+    """
+    try:
+        from django.db.models import Count, Sum
+        from django.db.models.functions import ExtractHour
+        from apps.jobs.models import Job
+        from apps.analytics.models import HourlySheetSnapshot
+
+        branch = sheet.branch
+
+        # Compute week of month (1–5)
+        day = sheet.date.day
+        week_of_month = (day - 1) // 7 + 1
+
+        # Hourly job counts and revenue from completed jobs on this sheet
+        hourly_qs = Job.objects.filter(
+            daily_sheet = sheet,
+            status      = 'COMPLETE',
+        ).annotate(
+            hour = ExtractHour('created_at'),
+        ).values('hour').annotate(
+            job_count = Count('id'),
+            revenue   = Sum('amount_paid'),
+        ).order_by('hour')
+
+        hourly_data = {
+            row['hour']: {
+                'job_count': row['job_count'],
+                'revenue':   float(row['revenue'] or 0),
+            }
+            for row in hourly_qs
+        }
+
+        # Fetch historical weather from Open-Meteo
+        weather_by_hour = _fetch_historical_weather(
+            lat  = float(branch.latitude)  if branch.latitude  else 5.6037,
+            lng  = float(branch.longitude) if branch.longitude else -0.1870,
+            date = sheet.date,
+        )
+
+        # Create one snapshot per hour slot 7–19
+        snapshots = []
+        for hour in range(7, 20):
+            data      = hourly_data.get(hour, {'job_count': 0, 'revenue': 0.0})
+            job_count = data['job_count']
+            revenue   = data['revenue']
+            avg_val   = round(revenue / job_count, 2) if job_count > 0 else 0.0
+            weather   = weather_by_hour.get(hour, {})
+
+            snapshots.append(HourlySheetSnapshot(
+                daily_sheet       = sheet,
+                branch            = branch,
+                date              = sheet.date,
+                weekday           = sheet.date.weekday(),
+                week_of_month     = week_of_month,
+                hour              = hour,
+                job_count         = job_count,
+                revenue           = revenue,
+                avg_job_value     = avg_val,
+                weather_condition = weather.get('condition', ''),
+                precipitation_mm  = weather.get('precipitation_mm', 0),
+            ))
+
+        HourlySheetSnapshot.objects.bulk_create(snapshots, ignore_conflicts=True)
+        logger.info(
+            '_snapshot_hourly: created %d hourly snapshots for sheet %s',
+            len(snapshots), sheet.pk,
+        )
+
+    except Exception as e:
+        logger.error(
+            '_snapshot_hourly failed for sheet %s: %s', sheet.pk, e, exc_info=True
+        )
+
+
+def _fetch_historical_weather(lat: float, lng: float, date) -> dict:
+    """
+    Fetches hourly precipitation data from Open-Meteo archive API.
+    Returns dict of {hour: {condition, precipitation_mm}}.
+    Falls back to empty dict on any failure — weather is optional signal.
+
+    Open-Meteo archive: free, no API key, covers Ghana.
+    """
+    try:
+        import urllib.request
+        import json
+
+        date_str = date.strftime('%Y-%m-%d')
+        url = (
+            f'https://archive-api.open-meteo.com/v1/archive'
+            f'?latitude={lat}&longitude={lng}'
+            f'&start_date={date_str}&end_date={date_str}'
+            f'&hourly=precipitation,weathercode'
+            f'&timezone=Africa%2FAccra'
+        )
+
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read())
+
+        hours        = data['hourly']['time']          # ['2026-06-16T00:00', ...]
+        precip       = data['hourly']['precipitation']  # [0.0, 0.2, ...]
+        weathercodes = data['hourly']['weathercode']    # [0, 2, 61, ...]
+
+        def _condition(code: int, precip_mm: float) -> str:
+            if precip_mm >= 5.0:  return 'heavy_rain'
+            if precip_mm >= 0.5:  return 'light_rain'
+            if code in range(51, 68): return 'light_rain'
+            if code in range(71, 78): return 'harmattan'
+            if code in range(1, 4):   return 'cloudy'
+            return 'clear'
+
+        result = {}
+        for i, time_str in enumerate(hours):
+            hour = int(time_str[11:13])  # extract HH from 'YYYY-MM-DDTHH:MM'
+            if 7 <= hour <= 19:
+                p = float(precip[i] or 0)
+                result[hour] = {
+                    'condition'       : _condition(weathercodes[i], p),
+                    'precipitation_mm': round(p, 2),
+                }
+        return result
+
+    except Exception as e:
+        logger.warning('_fetch_historical_weather failed: %s', e)
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
