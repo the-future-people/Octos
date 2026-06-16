@@ -1129,14 +1129,32 @@ class CashierReceiptListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
         user = self.request.user
         qs = Receipt.objects.filter(
             cashier=user,
             is_void=False,
         ).select_related('job', 'daily_sheet').order_by('-created_at')
 
+        period = self.request.query_params.get('period')
         date_param = self.request.query_params.get('date')
-        if date_param:
+
+        if period:
+            now = timezone.now()
+            if period == 'day':
+                qs = qs.filter(created_at__date=timezone.localdate())
+            elif period == 'week':
+                week_start = (now - timedelta(days=now.weekday())).replace(
+                    hour=0, minute=0, second=0, microsecond=0)
+                qs = qs.filter(created_at__gte=week_start)
+            elif period == 'month':
+                qs = qs.filter(
+                    created_at__year=now.year,
+                    created_at__month=now.month,
+                )
+        elif date_param:
             qs = qs.filter(created_at__date=date_param)
 
         return qs
