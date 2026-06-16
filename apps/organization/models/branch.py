@@ -46,6 +46,18 @@ class Branch(AuditModel):
         help_text='Branch closing time — default 19:30',
     )
 
+    # ── Location coordinates ──────────────────────────────────
+    latitude  = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True,
+        help_text='Branch latitude — used for weather forecasting',
+    )
+    longitude = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True,
+        help_text='Branch longitude — used for weather forecasting',
+    )
+
     # ── VAT (future-proofed — 0 until GRA registered) ─────────
     vat_registered  = models.BooleanField(
         default=False,
