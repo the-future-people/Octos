@@ -167,6 +167,8 @@ class Command(BaseCommand):
         Returns {hour: {condition, precipitation_mm}} or {} on failure.
         """
         try:
+            import urllib.request
+            import json
             date_str = date.strftime('%Y-%m-%d')
             url = (
                 f'https://archive-api.open-meteo.com/v1/archive'
