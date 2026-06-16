@@ -445,13 +445,19 @@ class PredictionEngine:
 
         remaining_hours = max(close_hour - current_hour, 0)
 
+        # ── Credit signal ─────────────────────────────────────────
+        credit = self._credit_signal(None, current_hour)
+        revenue_low   = revenue_low   + credit['contribution'] * 0.5
+        revenue_point = revenue_point + credit['contribution']
+        revenue_high  = revenue_high  + credit['contribution'] * 1.5
+
         return {
             'jobs_low'        : max(current_jobs, jobs_low),
             'jobs_high'       : jobs_high,
             'jobs_point'      : max(current_jobs, jobs_point),
-            'revenue_low'     : max(current_revenue, revenue_low),
-            'revenue_high'    : revenue_high,
-            'revenue_point'   : max(current_revenue, revenue_point),
+            'revenue_low'     : max(current_revenue, round(revenue_low, 2)),
+            'revenue_high'    : round(revenue_high, 2),
+            'revenue_point'   : max(current_revenue, round(revenue_point, 2)),
             'confidence_pct'  : confidence,
             'method'          : 'curve',
             'remaining_hours' : round(remaining_hours, 1),
@@ -460,7 +466,133 @@ class PredictionEngine:
             'weather_note'    : weather['note'],
             'deviation_factor': round(deviation_factor, 2),
             'data_weeks'      : data_weeks,
+            'credit_signal'   : credit,
         }
+
+    # ── Credit signal ─────────────────────────────────────────────────────────
+
+    def _credit_signal(self, sheet, current_hour: float) -> dict:
+        """
+        Estimates additional revenue likely from credit settlements today.
+        Adaptively weighted by payment history volume — low data = low weight.
+
+        Returns:
+            {
+                'contribution'  : float  — expected additional revenue
+                'weight'        : float  — 0.0–0.25 adaptive weight applied
+                'outstanding'   : float  — total outstanding balance
+                'accounts'      : int    — active accounts with balance
+                'data_points'   : int    — total settlement records available
+            }
+        """
+        try:
+            from apps.finance.models import CreditAccount, CreditPayment
+            from django.db.models import Sum, Count
+            from django.utils import timezone
+
+            today   = timezone.localdate()
+            weekday = today.weekday()  # 0=Mon, 6=Sun
+
+            # ── Outstanding balances ──────────────────────────────
+            accounts = CreditAccount.objects.filter(
+                branch  = self.branch,
+                status  = 'ACTIVE',
+            ).exclude(current_balance__lte=0)
+
+            outstanding = float(
+                accounts.aggregate(t=Sum('current_balance'))['t'] or 0
+            )
+            account_count = accounts.count()
+
+            if outstanding <= 0 or account_count == 0:
+                return {
+                    'contribution': 0.0, 'weight': 0.0,
+                    'outstanding': 0.0, 'accounts': 0, 'data_points': 0,
+                }
+
+            # ── Settlement history for this branch ────────────────
+            all_payments = CreditPayment.objects.filter(
+                credit_account__branch=self.branch,
+            )
+            total_payments = all_payments.count()
+
+            # Adaptive weight — needs 10+ records for full signal
+            weight = min(total_payments / 10.0, 1.0) * 0.25
+            if weight < 0.01:
+                return {
+                    'contribution': 0.0, 'weight': 0.0,
+                    'outstanding': outstanding,
+                    'accounts': account_count,
+                    'data_points': total_payments,
+                }
+
+            # ── P(settles today | weekday) ────────────────────────
+            # What fraction of historical settlements happened on this weekday?
+            weekday_payments = all_payments.filter(
+                created_at__week_day=(weekday + 2) % 7 or 7
+            ).count()
+
+            if total_payments > 0:
+                p_weekday = weekday_payments / total_payments
+            else:
+                p_weekday = 1 / 6  # uniform prior across 6 working days
+
+            # ── Already settled today — don't double count ─────────
+            settled_today = float(
+                all_payments.filter(
+                    created_at__date=today
+                ).aggregate(t=Sum('amount'))['t'] or 0
+            )
+
+            # ── Recency factor per account ────────────────────────
+            # Accounts approaching payment terms = higher probability
+            recency_boost = 1.0
+            try:
+                for account in accounts.select_related('customer')[:10]:
+                    last = CreditPayment.objects.filter(
+                        credit_account=account
+                    ).order_by('-created_at').first()
+
+                    if last:
+                        days_since = (today - last.created_at.date()).days
+                        terms = account.payment_terms or 30
+                        # Boost if approaching due date
+                        if days_since >= terms * 0.8:
+                            recency_boost = min(recency_boost * 1.2, 2.0)
+                        # Discount if settled very recently
+                        elif days_since <= 2:
+                            recency_boost = max(recency_boost * 0.5, 0.1)
+            except Exception:
+                recency_boost = 1.0
+
+            # ── Hours remaining factor ────────────────────────────
+            # Less likely to settle in last hour vs peak business hours
+            hours_remaining = max(DEFAULT_CLOSE_HOUR - current_hour, 0)
+            time_factor = min(hours_remaining / 8.0, 1.0)
+
+            # ── Final contribution ────────────────────────────────
+            remaining_outstanding = max(outstanding - settled_today, 0)
+            p_settle = p_weekday * recency_boost * time_factor
+            p_settle = max(0.0, min(p_settle, 0.8))  # cap at 80%
+
+            contribution = remaining_outstanding * p_settle * weight
+
+            return {
+                'contribution': round(contribution, 2),
+                'weight'      : round(weight, 3),
+                'outstanding' : round(outstanding, 2),
+                'accounts'    : account_count,
+                'data_points' : total_payments,
+                'p_settle'    : round(p_settle, 3),
+                'settled_today': round(settled_today, 2),
+            }
+
+        except Exception as e:
+            logger.warning('_credit_signal failed: %s', e)
+            return {
+                'contribution': 0.0, 'weight': 0.0,
+                'outstanding': 0.0, 'accounts': 0, 'data_points': 0,
+            }
 
     # ── Linear fallback ───────────────────────────────────────────────────────
 
@@ -492,13 +624,18 @@ class PredictionEngine:
         operating_hours = max(close_hour - DEFAULT_OPEN_HOUR, 1)
         confidence      = max(10, min(45, int(15 + (min(hours_elapsed / operating_hours, 1.0) * 30))))
 
+        credit = self._credit_signal(None, current_hour)
+        revenue_low   = revenue_low   + credit['contribution'] * 0.5
+        revenue_point = revenue_point + credit['contribution']
+        revenue_high  = revenue_high  + credit['contribution'] * 1.5
+
         return {
             'jobs_low'        : max(current_jobs, jobs_low),
             'jobs_high'       : jobs_high,
             'jobs_point'      : max(current_jobs, jobs_point),
-            'revenue_low'     : max(current_revenue, revenue_low),
-            'revenue_high'    : revenue_high,
-            'revenue_point'   : max(current_revenue, revenue_point),
+            'revenue_low'     : max(current_revenue, round(revenue_low, 2)),
+            'revenue_high'    : round(revenue_high, 2),
+            'revenue_point'   : max(current_revenue, round(revenue_point, 2)),
             'confidence_pct'  : confidence,
             'method'          : 'linear_fallback',
             'remaining_hours' : round(hours_remaining, 1),
@@ -507,4 +644,5 @@ class PredictionEngine:
             'weather_note'    : '',
             'deviation_factor': 1.0,
             'data_weeks'      : 0,
+            'credit_signal'   : credit,
         }
