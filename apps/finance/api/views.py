@@ -1125,8 +1125,9 @@ class CashierReceiptListView(generics.ListAPIView):
     GET /api/v1/finance/cashier/receipts/
     Returns receipts issued by the logged-in cashier.
     """
-    serializer_class = ReceiptSerializer
+    serializer_class   = ReceiptSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class   = None
 
     def get_queryset(self):
         from django.utils import timezone
