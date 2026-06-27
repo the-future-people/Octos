@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/v1/analytics/',     include('apps.analytics.api.urls')),
     path('api/v1/inventory/',     include('apps.inventory.api.urls')),
     path('api/v1/procurement/',   include('apps.procurement.api.urls')),
+    path('api/v1/personal-notes/', include('apps.personal_notes.api.urls')),
 
     # Portals
     path('',        home_view,    name='home'),
