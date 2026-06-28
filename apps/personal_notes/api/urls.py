@@ -7,6 +7,8 @@ from .views import (
     VerifyPinView,
     DueRemindersView,
     DismissReminderView,
+    AcknowledgeCheckpointView,
+    CompleteTaskView,
 )
 
 urlpatterns = [
@@ -17,4 +19,6 @@ urlpatterns = [
     path('pin/verify/',               VerifyPinView.as_view(),               name='note-pin-verify'),
     path('due-reminders/',            DueRemindersView.as_view(),            name='note-due-reminders'),
     path('<int:pk>/dismiss-reminder/', DismissReminderView.as_view(),         name='note-dismiss-reminder'),
+    path('<int:pk>/complete/',         CompleteTaskView.as_view(),            name='note-complete-task'),
+    path('checkpoints/<int:pk>/acknowledge/', AcknowledgeCheckpointView.as_view(), name='checkpoint-acknowledge'),
 ]

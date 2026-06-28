@@ -3,7 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from apps.personal_notes.models import PersonalNote, NotePin
+from apps.personal_notes.models import PersonalNote, NotePin, TaskCheckpoint
+from apps.personal_notes.services import generate_checkpoints, acknowledge_checkpoint, complete_task
 from .serializers import PersonalNoteSerializer, SetPinSerializer, VerifyPinSerializer
 
 
@@ -22,7 +23,9 @@ class PersonalNoteListCreateView(generics.ListCreateAPIView):
         return PersonalNote.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        note = serializer.save(owner=self.request.user)
+        if note.note_type == 'TASK' and note.due_date:
+            generate_checkpoints(note)
 
 
 class PersonalNoteDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -36,6 +39,18 @@ class PersonalNoteDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return PersonalNote.objects.filter(owner=self.request.user)
+
+    def perform_update(self, serializer):
+        old_due_date = serializer.instance.due_date
+        old_type     = serializer.instance.note_type
+        note = serializer.save()
+        # Regenerate checkpoints if this just became a task, or due_date changed
+        if note.note_type == 'TASK' and note.due_date:
+            if old_type != 'TASK' or old_due_date != note.due_date:
+                generate_checkpoints(note)
+        elif note.note_type == 'NOTE':
+            # Converted back to a plain note — clear any stale checkpoints
+            note.checkpoints.all().delete()
 
 
 # ── PIN management ────────────────────────────────────────────────────────────
@@ -104,27 +119,49 @@ class VerifyPinView(APIView):
 class DueRemindersView(APIView):
     """
     GET /api/v1/personal-notes/due-reminders/
-    Returns any notes with a reminder_at in the past that haven't
-    been dismissed yet.
+    Returns:
+      - plain notes with reminder_at in the past, not dismissed
+      - task checkpoints that are due, not yet acknowledged
+    Both surfaced together so the frontend can show whichever fires first.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from django.utils import timezone
+        from .serializers import TaskCheckpointSerializer
 
-        due = PersonalNote.objects.filter(
+        now = timezone.now()
+
+        due_notes = PersonalNote.objects.filter(
             owner               = request.user,
-            reminder_at__lte    = timezone.now(),
+            note_type           = 'NOTE',
+            reminder_at__lte    = now,
             reminder_dismissed  = False,
         ).order_by('reminder_at')
 
-        return Response(PersonalNoteSerializer(due, many=True).data)
+        due_checkpoints = TaskCheckpoint.objects.filter(
+            note__owner   = request.user,
+            note__status  = 'ACTIVE',
+            scheduled_at__lte = now,
+            acknowledged  = False,
+        ).select_related('note').order_by('scheduled_at')
+
+        checkpoint_data = []
+        for cp in due_checkpoints:
+            data = TaskCheckpointSerializer(cp).data
+            data['note'] = PersonalNoteSerializer(cp.note).data
+            checkpoint_data.append(data)
+
+        return Response({
+            'notes':       PersonalNoteSerializer(due_notes, many=True).data,
+            'checkpoints': checkpoint_data,
+        })
 
 
 class DismissReminderView(APIView):
     """
     POST /api/v1/personal-notes/<id>/dismiss-reminder/
-    Marks a reminder as seen so it stops firing the full-screen modal.
+    Marks a plain note's reminder as seen.
     """
     permission_classes = [IsAuthenticated]
 
@@ -137,3 +174,38 @@ class DismissReminderView(APIView):
         note.reminder_dismissed = True
         note.save(update_fields=['reminder_dismissed'])
         return Response({'detail': 'Dismissed.'})
+
+
+class AcknowledgeCheckpointView(APIView):
+    """
+    POST /api/v1/personal-notes/checkpoints/<id>/acknowledge/
+    'Still working on it' — acknowledges this checkpoint only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            checkpoint = TaskCheckpoint.objects.get(pk=pk, note__owner=request.user)
+        except TaskCheckpoint.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        acknowledge_checkpoint(checkpoint)
+        return Response({'detail': 'Acknowledged.'})
+
+
+class CompleteTaskView(APIView):
+    """
+    POST /api/v1/personal-notes/<id>/complete/
+    'Mark complete' — closes out the task regardless of which
+    checkpoint triggered it. Acknowledges all remaining checkpoints.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            note = PersonalNote.objects.get(pk=pk, owner=request.user)
+        except PersonalNote.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        complete_task(note)
+        return Response(PersonalNoteSerializer(note).data)

@@ -21,6 +21,16 @@ class PersonalNote(models.Model):
         ('slate',  'Slate'),
     ]
 
+    TYPE_CHOICES = [
+        ('NOTE', 'Note'),
+        ('TASK', 'Task'),
+    ]
+
+    STATUS_CHOICES = [
+        ('ACTIVE',   'Active'),
+        ('COMPLETE', 'Complete'),
+    ]
+
     owner = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.CASCADE,
@@ -29,6 +39,11 @@ class PersonalNote(models.Model):
     title = models.CharField(max_length=120, blank=True)
     body  = models.TextField(blank=True)
     color = models.CharField(max_length=10, choices=COLOR_CHOICES, default='amber')
+
+    note_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default='NOTE')
+    status    = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ACTIVE')
+    due_date  = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     reminder_at         = models.DateTimeField(null=True, blank=True)
     reminder_dismissed  = models.BooleanField(default=False)
