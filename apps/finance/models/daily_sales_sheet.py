@@ -76,6 +76,50 @@ class DailySalesSheet(AuditModel):
     # ── Notes (BM only, no number adjustments) ───────────────────────────
     notes                = models.TextField(blank=True)
 
+    # ── Disruption tracking ───────────────────────────────────────────────
+    class DisruptionReason(models.TextChoices):
+        POWER_OUTAGE       = 'POWER_OUTAGE',       'Power Outage'
+        FLOODING           = 'FLOODING',           'Flooding'
+        SECURITY_INCIDENT  = 'SECURITY_INCIDENT',  'Security Incident'
+        FORCE_MAJEURE      = 'FORCE_MAJEURE',       'Force Majeure'
+        OTHER              = 'OTHER',              'Other'
+
+    class DisruptionStatus(models.TextChoices):
+        PENDING_REVIEW = 'PENDING_REVIEW', 'Pending Review'
+        APPROVED       = 'APPROVED',       'Approved'
+        REJECTED       = 'REJECTED',       'Rejected'
+
+    disruption_reason      = models.CharField(
+        max_length=20,
+        choices=DisruptionReason.choices,
+        null=True, blank=True,
+    )
+    disruption_evidence    = models.TextField(
+        blank=True,
+        help_text='URL, ECG reference, news link, or other provable evidence',
+    )
+    disruption_notes       = models.TextField(blank=True)
+    disruption_status      = models.CharField(
+        max_length=15,
+        choices=DisruptionStatus.choices,
+        null=True, blank=True,
+    )
+    disruption_submitted_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='disruptions_submitted',
+        null=True, blank=True,
+    )
+    disruption_submitted_at = models.DateTimeField(null=True, blank=True)
+    disruption_reviewed_by  = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='disruptions_reviewed',
+        null=True, blank=True,
+    )
+    disruption_reviewed_at      = models.DateTimeField(null=True, blank=True)
+    disruption_rejection_reason = models.TextField(blank=True)
+
     class Meta:
         ordering             = ['-date']
         unique_together      = [['branch', 'date']]
@@ -104,3 +148,13 @@ class DailySalesSheet(AuditModel):
     def total_collected(self):
         """Total cash actually received — excludes credit issued."""
         return self.total_cash + self.total_momo + self.total_pos + self.total_credit_settled
+
+    @property
+    def is_disrupted(self):
+        """True if this day was a legitimate non-operating day."""
+        return bool(self.disruption_reason)
+
+    @property
+    def disruption_approved(self):
+        """True only if the disruption has been reviewed and approved by the owner."""
+        return self.disruption_status == self.DisruptionStatus.APPROVED

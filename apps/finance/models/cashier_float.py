@@ -179,6 +179,16 @@ class CashierFloat(AuditModel):
     overtime_reason = models.TextField(blank=True)
     overtime_until  = models.DateTimeField(null=True, blank=True)
 
+    # ── Recovery float ────────────────────────────────────────
+    is_recovery_float = models.BooleanField(
+        default   = False,
+        help_text = (
+            'True if this float was auto-created by the system recovery task '
+            'because no float existed by 4pm. Indicates a disrupted or delayed '
+            'start day — not a normal BM-staged float.'
+        ),
+    )
+
     # ── Cover shift ───────────────────────────────────────────
     is_cover     = models.BooleanField(default=False)
     covering_for = models.ForeignKey(
