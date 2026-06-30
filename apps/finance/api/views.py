@@ -3335,3 +3335,56 @@ class FloatReConfirmView(APIView):
                 )
         except Exception:
             logger.exception('FloatReConfirmView: failed to notify RM of resolution')
+
+class BranchStatementView(APIView):
+    """
+    GET /api/v1/finance/branch-statement/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+    Generates an investor/bank-presentable PDF statement for the
+    requesting user's branch over the given date range.
+
+    Access gated: only staff/superuser for now (i.e. Khofi as
+    CEO-acting-as-BM). Future: per-BM request/approval flow.
+    Deliberately NOT self-serve for regular BMs — see project notes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import datetime
+        from apps.finance.services.branch_statement_service import BranchStatementService
+        from apps.finance.pdf.branch_statement_pdf import build_branch_statement_pdf
+        from django.http import HttpResponse
+
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response(
+                {'detail': 'You do not have permission to generate branch statements.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        date_from_str = request.query_params.get('date_from')
+        date_to_str   = request.query_params.get('date_to')
+        if not date_from_str or not date_to_str:
+            return Response(
+                {'detail': 'date_from and date_to are required (YYYY-MM-DD).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+            date_to   = datetime.strptime(date_to_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if date_from > date_to:
+            return Response({'detail': 'date_from must be before date_to.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload  = BranchStatementService.generate(branch, date_from, date_to)
+        pdf_bytes = build_branch_statement_pdf(payload)
+
+        filename = f"{branch.code}-statement-{date_from}-to-{date_to}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response

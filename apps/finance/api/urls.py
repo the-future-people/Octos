@@ -28,6 +28,7 @@ from .views import (
     BranchTransferCreditListView,
     BranchTransferCreditReconcileView,
     DailySalesSheetPDFView,
+    BranchStatementView,
     InvoiceListView,
     InvoiceDetailView,
     InvoiceCreateView,
@@ -70,6 +71,7 @@ urlpatterns = [
     path('sheets/<int:pk>/summary/',             DailySalesSheetSummaryView.as_view(),        name='sheet-summary'),
     path('sheets/<int:pk>/eod-summary/',         EODSummaryView.as_view(),                    name='sheet-eod-summary'),
     path('sheets/<int:pk>/pdf/',                 DailySalesSheetPDFView.as_view(),            name='sheet-pdf'),
+    path('branch-statement/',                    BranchStatementView.as_view(),               name='branch-statement'),
 
     # ── Cashier Float ─────────────────────────────────────────────────────────
     path('sheets/<int:pk>/floats/set/',          CashierFloatSetView.as_view(),               name='float-set'),
