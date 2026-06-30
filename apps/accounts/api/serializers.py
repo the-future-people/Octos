@@ -72,10 +72,9 @@ class UserSerializer(serializers.ModelSerializer):
         """
         Deliberately separate from Django's is_staff/is_superuser —
         this is a specific business permission, not a generic admin flag.
-        For now: true only for staff/superuser (i.e. Khofi). Future:
-        per-BM request/approval flow replaces this hardcoded check.
+        Future: per-BM request/approval flow replaces this hardcoded check.
         """
-        return bool(obj.is_staff or obj.is_superuser)
+        return bool(obj.is_business_owner)
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

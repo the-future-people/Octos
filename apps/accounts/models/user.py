@@ -98,6 +98,16 @@ class CustomUser(AbstractBaseUser, AuditModel):
     approved_at    = models.DateTimeField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
 
+    # ── Business ownership ────────────────────────────────────
+    is_business_owner = models.BooleanField(
+        default=False,
+        help_text=(
+            'True only for the business owner/CEO. Gates sensitive features '
+            'like investor statement generation. Deliberately separate from '
+            'is_staff/is_superuser which are Django admin flags.'
+        ),
+    )
+
     # ── Download PIN ─────────────────────────────────────────
     # Stored as a hashed 4-digit PIN — never plain text
     download_pin     = models.CharField(max_length=128, blank=True, null=True)
