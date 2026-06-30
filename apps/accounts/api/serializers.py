@@ -48,6 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
     region_detail = RegionMinimalSerializer(source='region', read_only=True)
     full_name     = serializers.SerializerMethodField()
     role_name     = serializers.SerializerMethodField()
+    can_generate_branch_statement = serializers.SerializerMethodField()
 
     class Meta:
         model  = CustomUser
@@ -58,6 +59,7 @@ class UserSerializer(serializers.ModelSerializer):
             'region', 'region_detail',
             'phone', 'employee_id', 'is_active', 'created_at',
             'download_pin_set',
+            'can_generate_branch_statement',
         ]
 
     def get_role_name(self, obj):
@@ -65,6 +67,15 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.full_name or obj.email
+
+    def get_can_generate_branch_statement(self, obj):
+        """
+        Deliberately separate from Django's is_staff/is_superuser —
+        this is a specific business permission, not a generic admin flag.
+        For now: true only for staff/superuser (i.e. Khofi). Future:
+        per-BM request/approval flow replaces this hardcoded check.
+        """
+        return bool(obj.is_staff or obj.is_superuser)
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
