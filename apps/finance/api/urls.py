@@ -59,6 +59,7 @@ from .views import (
     MonthlyCloseMyBranchesView,
     TodaySummaryView,
     MarkDisruptedView,
+    ReportMissingDayDisruptionView,
     ApproveDisruptionView,
     RejectDisruptionView,
 )
@@ -76,6 +77,7 @@ urlpatterns = [
     path('sheets/<int:pk>/pdf/',                 DailySalesSheetPDFView.as_view(),            name='sheet-pdf'),
     path('branch-statement/',                    BranchStatementView.as_view(),               name='branch-statement'),
     path('sheets/<int:pk>/mark-disrupted/',      MarkDisruptedView.as_view(),                 name='sheet-mark-disrupted'),
+    path('sheets/report-disruption/',            ReportMissingDayDisruptionView.as_view(),    name='sheet-report-disruption'),
     path('sheets/<int:pk>/approve-disruption/',  ApproveDisruptionView.as_view(),             name='sheet-approve-disruption'),
     path('sheets/<int:pk>/reject-disruption/',   RejectDisruptionView.as_view(),              name='sheet-reject-disruption'),
 

@@ -3395,6 +3395,76 @@ class MarkDisruptedView(APIView):
         })
 
 
+class ReportMissingDayDisruptionView(APIView):
+    """
+    POST /api/v1/finance/sheets/report-disruption/
+    Body: { date, reason, evidence, notes }
+
+    Used when NO sheet exists at all for a given date (e.g. power was
+    out before the 5am auto-open task could fire). Creates the sheet
+    retroactively in CLOSED status with disruption fields set to
+    PENDING_REVIEW, same as MarkDisruptedView but for a sheet that
+    was never created.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.utils import timezone
+        from datetime import datetime
+
+        branch = request.user.branch
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        date_str = request.data.get('date', '').strip()
+        reason   = request.data.get('reason', '').strip()
+        evidence = request.data.get('evidence', '').strip()
+        notes    = request.data.get('notes', '').strip()
+
+        if not date_str:
+            return Response({'detail': 'date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not reason or reason not in [r[0] for r in DailySalesSheet.DisruptionReason.choices]:
+            return Response({'detail': 'Valid reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not evidence:
+            return Response(
+                {'detail': 'evidence is required — provide a URL, reference number, or provable source.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # If a sheet already exists for this date, don't duplicate — redirect logic
+        existing = DailySalesSheet.objects.filter(branch=branch, date=target_date).first()
+        if existing:
+            return Response(
+                {'detail': 'A sheet already exists for this date.', 'sheet_id': existing.pk},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sheet = DailySalesSheet.objects.create(
+            branch                   = branch,
+            date                     = target_date,
+            status                   = DailySalesSheet.Status.CLOSED,
+            closed_at                = timezone.now(),
+            closed_by                = request.user,
+            disruption_reason        = reason,
+            disruption_evidence      = evidence,
+            disruption_notes         = notes,
+            disruption_status        = 'PENDING_REVIEW',
+            disruption_submitted_by  = request.user,
+            disruption_submitted_at  = timezone.now(),
+        )
+
+        return Response({
+            'detail': 'Disruption reported for missing day. Sheet created and pending owner review.',
+            'sheet_id': sheet.pk,
+        }, status=status.HTTP_201_CREATED)
+
+
+        
 class ApproveDisruptionView(APIView):
     """
     POST /api/v1/finance/sheets/<pk>/approve-disruption/
