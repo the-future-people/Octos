@@ -3464,7 +3464,7 @@ class ReportMissingDayDisruptionView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-        
+
 class ApproveDisruptionView(APIView):
     """
     POST /api/v1/finance/sheets/<pk>/approve-disruption/
@@ -3498,6 +3498,24 @@ class ApproveDisruptionView(APIView):
         sheet.save(update_fields=[
             'disruption_status', 'disruption_reviewed_by', 'disruption_reviewed_at'
         ])
+
+        # Remove any snapshots already created for this sheet before
+        # approval — they'd otherwise corrupt the prediction engine's
+        # historical curve with a non-representative disrupted day.
+        try:
+            from apps.analytics.models import HourlySheetSnapshot
+            deleted, _ = HourlySheetSnapshot.objects.filter(daily_sheet=sheet).delete()
+            if deleted:
+                import logging
+                logging.getLogger(__name__).info(
+                    'ApproveDisruptionView: removed %d snapshot(s) for sheet %s after approval',
+                    deleted, sheet.pk,
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                'ApproveDisruptionView: snapshot cleanup failed for sheet %s', sheet.pk
+            )
 
         return Response({'detail': 'Disruption approved.', 'sheet_id': sheet.pk})
 

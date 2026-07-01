@@ -216,8 +216,21 @@ def _snapshot_hourly(sheet):
     One record per hour slot (7–19) regardless of whether jobs occurred.
     Fetches historical weather from Open-Meteo for accuracy.
     Never raises — failure is logged silently.
+
+    Skips entirely for approved disruptions — a flood/power-outage day
+    would otherwise get averaged into the prediction engine's historical
+    curve as if it were a normal (very slow) day, quietly corrupting
+    future predictions. Pending/rejected disruptions still snapshot
+    normally, since a rejected claim means the day was operationally real.
     """
     try:
+        if getattr(sheet, 'disruption_status', None) == 'APPROVED':
+            logger.info(
+                '_snapshot_hourly: skipping sheet %s — approved disruption (%s)',
+                sheet.pk, sheet.disruption_reason,
+            )
+            return
+
         from django.db.models import Count, Sum
         from django.db.models.functions import ExtractHour
         from apps.jobs.models import Job
