@@ -216,6 +216,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.check_credit_due',
         'schedule': crontab(hour=7, minute=30),
     },
+    'recovery-float-check-daily': {
+        'task': 'apps.finance.tasks.recovery_float_check',
+        'schedule': crontab(hour=16, minute=0),
+    },
     'process-staff-activations-daily': {
         'task': 'apps.accounts.tasks.process_staff_activations',
         'schedule': crontab(hour=0, minute=1),  # 00:01 WAT daily

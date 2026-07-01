@@ -58,6 +58,9 @@ from .views import (
     MonthlyCloseRequestClarificationView,
     MonthlyCloseMyBranchesView,
     TodaySummaryView,
+    MarkDisruptedView,
+    ApproveDisruptionView,
+    RejectDisruptionView,
 )
 
 
@@ -72,6 +75,9 @@ urlpatterns = [
     path('sheets/<int:pk>/eod-summary/',         EODSummaryView.as_view(),                    name='sheet-eod-summary'),
     path('sheets/<int:pk>/pdf/',                 DailySalesSheetPDFView.as_view(),            name='sheet-pdf'),
     path('branch-statement/',                    BranchStatementView.as_view(),               name='branch-statement'),
+    path('sheets/<int:pk>/mark-disrupted/',      MarkDisruptedView.as_view(),                 name='sheet-mark-disrupted'),
+    path('sheets/<int:pk>/approve-disruption/',  ApproveDisruptionView.as_view(),             name='sheet-approve-disruption'),
+    path('sheets/<int:pk>/reject-disruption/',   RejectDisruptionView.as_view(),              name='sheet-reject-disruption'),
 
     # ── Cashier Float ─────────────────────────────────────────────────────────
     path('sheets/<int:pk>/floats/set/',          CashierFloatSetView.as_view(),               name='float-set'),

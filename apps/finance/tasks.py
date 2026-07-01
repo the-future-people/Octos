@@ -26,6 +26,11 @@ def check_credit_due():
     call_command('check_credit_due')
 
 @shared_task
-def check_credit_due():
+def recovery_float_check():
+    """
+    Runs at 4pm daily. Creates a recovery float for any open sheet
+    that has no float record yet — handles disrupted/delayed-start days
+    so the cashier can always sign off normally.
+    """
     from django.core.management import call_command
-    call_command('check_credit_due')
+    call_command('recovery_float_check')

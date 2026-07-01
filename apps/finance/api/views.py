@@ -3336,6 +3336,149 @@ class FloatReConfirmView(APIView):
         except Exception:
             logger.exception('FloatReConfirmView: failed to notify RM of resolution')
 
+class MarkDisruptedView(APIView):
+    """
+    POST /api/v1/finance/sheets/<pk>/mark-disrupted/
+    BM submits a disruption claim with evidence.
+    Sheet must be closed or auto-closed — not still open.
+    Sets disruption_status to PENDING_REVIEW.
+    Owner must approve before it takes effect.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        try:
+            sheet = DailySalesSheet.objects.get(pk=pk, branch=request.user.branch)
+        except DailySalesSheet.DoesNotExist:
+            return Response({'detail': 'Sheet not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sheet.disruption_status in ('PENDING_REVIEW', 'APPROVED'):
+            return Response(
+                {'detail': 'Disruption already submitted or approved.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason   = request.data.get('reason', '').strip()
+        evidence = request.data.get('evidence', '').strip()
+        notes    = request.data.get('notes', '').strip()
+
+        if not reason:
+            return Response({'detail': 'reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if reason not in [r[0] for r in DailySalesSheet.DisruptionReason.choices]:
+            return Response({'detail': f'Invalid reason.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not evidence:
+            return Response(
+                {'detail': 'evidence is required — provide a URL, reference number, or provable source.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Close the sheet if still open
+        if sheet.status == DailySalesSheet.Status.OPEN:
+            sheet.status    = DailySalesSheet.Status.CLOSED
+            sheet.closed_at = timezone.now()
+            sheet.closed_by = request.user
+
+        sheet.disruption_reason       = reason
+        sheet.disruption_evidence     = evidence
+        sheet.disruption_notes        = notes
+        sheet.disruption_status       = 'PENDING_REVIEW'
+        sheet.disruption_submitted_by = request.user
+        sheet.disruption_submitted_at = timezone.now()
+        sheet.save()
+
+        return Response({
+            'detail': 'Disruption submitted for owner review.',
+            'sheet_id': sheet.pk,
+            'disruption_status': sheet.disruption_status,
+        })
+
+
+class ApproveDisruptionView(APIView):
+    """
+    POST /api/v1/finance/sheets/<pk>/approve-disruption/
+    Owner only. Approves a pending disruption claim.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        if not request.user.is_business_owner:
+            return Response(
+                {'detail': 'Only the business owner can approve disruptions.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            sheet = DailySalesSheet.objects.get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response({'detail': 'Sheet not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sheet.disruption_status != 'PENDING_REVIEW':
+            return Response(
+                {'detail': 'No pending disruption to approve.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sheet.disruption_status     = 'APPROVED'
+        sheet.disruption_reviewed_by  = request.user
+        sheet.disruption_reviewed_at  = timezone.now()
+        sheet.save(update_fields=[
+            'disruption_status', 'disruption_reviewed_by', 'disruption_reviewed_at'
+        ])
+
+        return Response({'detail': 'Disruption approved.', 'sheet_id': sheet.pk})
+
+
+class RejectDisruptionView(APIView):
+    """
+    POST /api/v1/finance/sheets/<pk>/reject-disruption/
+    Owner only. Rejects a pending disruption claim.
+    Body: { rejection_reason }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        if not request.user.is_business_owner:
+            return Response(
+                {'detail': 'Only the business owner can reject disruptions.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            sheet = DailySalesSheet.objects.get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response({'detail': 'Sheet not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sheet.disruption_status != 'PENDING_REVIEW':
+            return Response(
+                {'detail': 'No pending disruption to reject.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rejection_reason = request.data.get('rejection_reason', '').strip()
+        if not rejection_reason:
+            return Response(
+                {'detail': 'rejection_reason is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sheet.disruption_status           = 'REJECTED'
+        sheet.disruption_reviewed_by      = request.user
+        sheet.disruption_reviewed_at      = timezone.now()
+        sheet.disruption_rejection_reason = rejection_reason
+        sheet.save(update_fields=[
+            'disruption_status', 'disruption_reviewed_by',
+            'disruption_reviewed_at', 'disruption_rejection_reason',
+        ])
+
+        return Response({'detail': 'Disruption rejected.', 'sheet_id': sheet.pk})
+
+
 class BranchStatementView(APIView):
     """
     GET /api/v1/finance/branch-statement/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
