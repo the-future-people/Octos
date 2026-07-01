@@ -31,14 +31,20 @@ def get_hourly_distribution(qs):
     ]
 
 
-def get_service_breakdown(branch, since):
+def get_service_breakdown(branch, since, until=None):
     from apps.jobs.models import JobLineItem
+
+    filters = {
+        'job__branch': branch,
+        'job__created_at__gte': since,
+        'job__status': 'COMPLETE',
+    }
+    if until:
+        filters['job__created_at__lte'] = until
+
     services_raw = list(
-        JobLineItem.objects.filter(
-            job__branch=branch,
-            job__created_at__gte=since,
-            job__status='COMPLETE',
-        ).values('service__name')
+        JobLineItem.objects.filter(**filters)
+        .values('service__name')
         .annotate(count=Count('id'), revenue=Sum('line_total'))
         .order_by('-revenue')[:10]
     )

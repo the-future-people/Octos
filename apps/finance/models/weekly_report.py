@@ -64,6 +64,8 @@ class WeeklyReport(AuditModel):
         default=0,
         help_text='Jobs still pending payment at week end',
     )
+    total_jobs_registered = models.PositiveIntegerField(default=0)
+    total_jobs_walkin     = models.PositiveIntegerField(default=0)
 
     # ── Inventory hook (populated by inventory app later) ─────────────────
     inventory_snapshot = models.JSONField(

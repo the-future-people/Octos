@@ -28,6 +28,8 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
     closing_time   = serializers.SerializerMethodField()
     opened_by_name = serializers.SerializerMethodField()
     closed_by_name = serializers.SerializerMethodField()
+    is_disrupted        = serializers.BooleanField(read_only=True)
+    disruption_approved = serializers.BooleanField(read_only=True)
 
     class Meta:
         model  = DailySalesSheet
@@ -45,6 +47,9 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
             'total_damages', 'total_petty_cash_out',
             'net_cash_in_till', 'vat_collected',
             'notes', 'created_at',
+            'disruption_reason', 'disruption_evidence', 'disruption_notes',
+            'disruption_status', 'disruption_submitted_at', 'disruption_reviewed_at',
+            'disruption_rejection_reason', 'is_disrupted', 'disruption_approved',
         ]
     
     def get_closing_time(self, obj) -> str:
@@ -532,6 +537,7 @@ class WeeklyReportListSerializer(serializers.ModelSerializer):
             'total_collected', 'total_petty_cash_out',
             'total_jobs_created', 'total_jobs_complete',
             'total_jobs_cancelled', 'carry_forward_count',
+            'total_jobs_registered', 'total_jobs_walkin',
             'sheets_count', 'all_sheets_closed',
             'submitted_by_name', 'submitted_at',
             'bm_notes', 'pdf_path', 'created_at',
@@ -544,18 +550,32 @@ class WeeklyReportListSerializer(serializers.ModelSerializer):
 
 
 class WeeklyReportDetailSerializer(WeeklyReportListSerializer):
-    daily_sheets     = serializers.SerializerMethodField()
+    daily_sheets       = serializers.SerializerMethodField()
     inventory_snapshot = serializers.JSONField(read_only=True)
+    top_services       = serializers.SerializerMethodField()
 
     class Meta(WeeklyReportListSerializer.Meta):
         fields = WeeklyReportListSerializer.Meta.fields + [
             'daily_sheets',
             'inventory_snapshot',
+            'top_services',
         ]
 
     def get_daily_sheets(self, obj) -> list:
         sheets = obj.daily_sheets.all().order_by('date')
         return DailySalesSheetListSerializer(sheets, many=True).data
+
+    def get_top_services(self, obj) -> list:
+        try:
+            from apps.jobs.selectors.performance_selectors import get_service_breakdown
+            from django.utils import timezone
+            from datetime import datetime, time
+
+            since = timezone.make_aware(datetime.combine(obj.date_from, time.min))
+            until = timezone.make_aware(datetime.combine(obj.date_to, time.max))
+            return get_service_breakdown(obj.branch, since, until=until)[:3]
+        except Exception:
+            return []
 
 
 class WeeklyReportNotesSerializer(serializers.Serializer):

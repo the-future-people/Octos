@@ -63,9 +63,11 @@ class WeeklyReportService:
             branch                  = report.branch,
             created_at__date__range = [report.date_from, report.date_to],
         )
-        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
-        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
-        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
+        report.total_jobs_complete   = week_jobs.filter(status='COMPLETE').count()
+        report.total_jobs_cancelled  = week_jobs.filter(status='CANCELLED').count()
+        report.carry_forward_count   = week_jobs.filter(status='PENDING_PAYMENT').count()
+        report.total_jobs_registered = week_jobs.exclude(customer__isnull=True).count()
+        report.total_jobs_walkin     = week_jobs.filter(customer__isnull=True).count()
 
         # ── Refresh inventory snapshot ─────────────────────────────────
         try:
@@ -152,9 +154,11 @@ class WeeklyReportService:
             branch                  = branch,
             created_at__date__range = [monday, saturday],
         )
-        report.total_jobs_complete  = week_jobs.filter(status='COMPLETE').count()
-        report.total_jobs_cancelled = week_jobs.filter(status='CANCELLED').count()
-        report.carry_forward_count  = week_jobs.filter(status='PENDING_PAYMENT').count()
+        report.total_jobs_complete   = week_jobs.filter(status='COMPLETE').count()
+        report.total_jobs_cancelled  = week_jobs.filter(status='CANCELLED').count()
+        report.carry_forward_count   = week_jobs.filter(status='PENDING_PAYMENT').count()
+        report.total_jobs_registered = week_jobs.exclude(customer__isnull=True).count()
+        report.total_jobs_walkin     = week_jobs.filter(customer__isnull=True).count()
 
         try:
             from apps.inventory.inventory_engine import InventoryEngine

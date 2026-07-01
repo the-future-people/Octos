@@ -3585,7 +3585,7 @@ class BranchStatementView(APIView):
         from apps.finance.pdf.branch_statement_pdf import build_branch_statement_pdf
         from django.http import HttpResponse
 
-        if not (request.user.is_staff or request.user.is_superuser):
+        if not request.user.is_business_owner:
             return Response(
                 {'detail': 'You do not have permission to generate branch statements.'},
                 status=status.HTTP_403_FORBIDDEN,
