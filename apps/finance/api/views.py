@@ -1173,7 +1173,14 @@ class CreditAccountListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return CreditAccount.objects.select_related('customer', 'nominated_by', 'approved_by')
+        from apps.core.finance_scope import get_branch_scope
+        from apps.organization.models import Branch
+
+        qs = CreditAccount.objects.select_related('customer', 'nominated_by', 'approved_by')
+
+        scope = get_branch_scope(self.request.user)
+        allowed_branch_ids = Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+        return qs.filter(branch_id__in=allowed_branch_ids)
 
 
 class CreditAccountDetailView(generics.RetrieveAPIView):
@@ -1182,9 +1189,17 @@ class CreditAccountDetailView(generics.RetrieveAPIView):
     """
     serializer_class = CreditAccountSerializer
     permission_classes = [IsAuthenticated]
-    queryset = CreditAccount.objects.select_related(
-        'customer', 'recommended_by', 'approved_by'
-    )
+
+    def get_queryset(self):
+        from apps.core.finance_scope import get_branch_scope
+        from apps.organization.models import Branch
+
+        qs = CreditAccount.objects.select_related(
+            'customer', 'recommended_by', 'approved_by'
+        )
+        scope = get_branch_scope(self.request.user)
+        allowed_branch_ids = Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+        return qs.filter(branch_id__in=allowed_branch_ids)
 
 
 class CreditAccountCreateView(APIView):
