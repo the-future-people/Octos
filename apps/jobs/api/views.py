@@ -475,15 +475,45 @@ class PricingRuleCreateView(APIView):
     """
     POST /api/v1/jobs/pricing/
     Create a pricing rule for a service at a branch.
+    Restricted to Branch Managers and above, scoped to their branch.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         from decimal import Decimal
+        from apps.core.finance_scope import get_branch_scope
+
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'You do not have permission to create pricing rules.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        target_branch_id = request.data.get('branch')
+
+        # Company-wide default rules (branch=None) are Super Admin only
+        if target_branch_id in (None, '', 'null') and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'Only a Super Admin can create company-wide default pricing.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if target_branch_id not in (None, '', 'null'):
+            scope = get_branch_scope(request.user)
+            allowed_branch_ids = set(
+                Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+            )
+            if int(target_branch_id) not in allowed_branch_ids:
+                return Response(
+                    {'detail': 'You do not have permission to set pricing for this branch.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         try:
             rule = PricingRule.objects.create(
                 service          = Service.objects.get(pk=request.data['service']),
-                branch           = Branch.objects.get(pk=request.data['branch']),
+                branch           = Branch.objects.get(pk=target_branch_id) if target_branch_id not in (None, '', 'null') else None,
                 base_price       = Decimal(str(request.data['base_price'])),
                 color_multiplier = Decimal(str(request.data.get('color_multiplier', '1.00'))),
                 is_active        = True,
