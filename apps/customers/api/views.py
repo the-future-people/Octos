@@ -173,7 +173,7 @@ class CreditAccountDetailView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        return get_credit_account_by_id(pk=self.kwargs['pk'])
+        return get_credit_account_by_id(pk=self.kwargs['pk'], user=self.request.user)
 
 
 class CreditAccountNominateView(APIView):
@@ -216,7 +216,7 @@ class CreditAccountApproveView(APIView):
 
     def post(self, request, pk):
         try:
-            account = get_credit_account_by_id(pk=pk, status=CreditAccount.Status.PENDING)
+            account = get_credit_account_by_id(pk=pk, status=CreditAccount.Status.PENDING, user=request.user)
         except CreditAccount.DoesNotExist:
             return Response(
                 {'detail': 'Pending credit account not found.'},
@@ -255,7 +255,7 @@ class CreditAccountSuspendView(APIView):
 
     def post(self, request, pk):
         try:
-            account = get_credit_account_by_id(pk=pk, status=CreditAccount.Status.ACTIVE)
+            account = get_credit_account_by_id(pk=pk, status=CreditAccount.Status.ACTIVE, user=request.user)
         except CreditAccount.DoesNotExist:
             return Response(
                 {'detail': 'Active credit account not found.'},
