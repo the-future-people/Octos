@@ -428,14 +428,40 @@ class PricingRuleDetailView(APIView):
     """
     PATCH /api/v1/jobs/pricing/<id>/
     Update base_price and color_multiplier for a pricing rule.
+    Restricted to Branch Managers and above, scoped to their branch.
     """
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
+        from apps.core.finance_scope import get_branch_scope
+
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'):
+            return Response(
+                {'detail': 'You do not have permission to modify pricing.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             rule = PricingRule.objects.get(pk=pk)
         except PricingRule.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Company-wide default rules (branch=None) are Super Admin only
+        if rule.branch_id is None and role != 'SUPER_ADMIN':
+            return Response(
+                {'detail': 'Only a Super Admin can modify company-wide default pricing.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if rule.branch_id is not None:
+            from apps.organization.models import Branch
+            scope = get_branch_scope(request.user)
+            allowed_branch_ids = set(
+                Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+            )
+            if rule.branch_id not in allowed_branch_ids:
+                return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         if 'base_price' in request.data:
             rule.base_price = request.data['base_price']
