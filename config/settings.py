@@ -11,6 +11,8 @@ class EnvConfig:
     def __call__(self, key, default=None, cast=None):
         val = os.environ.get(key)
         if val is not None:
+            if cast is bool:
+                return val.strip().lower() in ('true', '1', 'yes', 'on')
             if cast:
                 return cast(val)
             return val
@@ -26,8 +28,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security
 SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG', cast=bool, default=True)
+DEBUG = config('DEBUG', cast=bool, default=False)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost').split(',')
+
+# Trust Railway's TLS termination — requests arrive as plain HTTP
+# internally with this header set, so Django must be told to trust it
+# in order for request.is_secure() and secure-cookie logic to work.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Applications
 DJANGO_APPS = [
