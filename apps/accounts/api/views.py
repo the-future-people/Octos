@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from apps.accounts.models import CustomUser, Role, Permission
+from apps.core.throttling import PinVerifyRateThrottle
 from .serializers import (
     UserSerializer, UserCreateSerializer, ChangePasswordSerializer,
     RoleSerializer, RoleListSerializer, PermissionSerializer
@@ -120,6 +121,7 @@ class VerifyDownloadPinView(APIView):
     Returns: { "valid": true, "token": "<one-time-token>" }
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes   = [PinVerifyRateThrottle]
 
     def post(self, request):
         from apps.finance.models import DailySalesSheet, SheetDownloadLog
@@ -174,12 +176,15 @@ class VerifyDownloadPinView(APIView):
 
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
+from apps.core.throttling import LoginRateThrottle
 
 class AuditedTokenObtainPairView(TokenObtainPairView):
     """
     Extends SimpleJWT token view to write AuditEvent on login.
     Replaces TokenObtainPairView in config/urls.py.
     """
+    throttle_classes = [LoginRateThrottle]
+
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
 

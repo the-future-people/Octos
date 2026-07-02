@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.personal_notes.models import PersonalNote, NotePin, TaskCheckpoint
 from apps.personal_notes.services import generate_checkpoints, acknowledge_checkpoint, complete_task
+from apps.core.throttling import PinVerifyRateThrottle
 from .serializers import PersonalNoteSerializer, SetPinSerializer, VerifyPinSerializer
 
 
@@ -100,6 +101,7 @@ class VerifyPinView(APIView):
     Returns { "valid": true|false }.
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes   = [PinVerifyRateThrottle]
 
     def post(self, request):
         serializer = VerifyPinSerializer(data=request.data)
