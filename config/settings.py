@@ -162,6 +162,16 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '20/min',
+        'user': '120/min',
+        'login': '5/min',
+        'pin_verify': '5/min',
+    },
 }
 
 # JWT Settings
@@ -228,6 +238,10 @@ CELERY_BEAT_SCHEDULE = {
     'recovery-float-check-daily': {
         'task': 'apps.finance.tasks.recovery_float_check',
         'schedule': crontab(hour=16, minute=0),
+    },
+    'refresh-weather-cache': {
+        'task': 'apps.analytics.tasks.weather.refresh_weather_cache',
+        'schedule': crontab(minute='*/15'),
     },
     'process-staff-activations-daily': {
         'task': 'apps.accounts.tasks.process_staff_activations',
