@@ -285,45 +285,42 @@ class PredictionEngine:
 
     def _get_weather_factor(self, date, current_hour: float) -> dict:
         """
-        Fetches today's forecast from Open-Meteo and returns a discount
-        factor for remaining hours. Clear=1.0, heavy rain=0.65.
+        Reads today's forecast from Redis cache — populated in the
+        background every 15 minutes by refresh_weather_cache (see
+        apps/analytics/management/commands/refresh_weather_cache.py).
+
+        NEVER makes a live network call. If the cache is empty (e.g.
+        first run after deploy, before the beat schedule has fired
+        once), falls back to no weather impact rather than blocking
+        the request — a missed weather signal is far better than a
+        45-second hang on every Day Sheet load.
         """
         try:
-            import urllib.request
-            import json
-            from django.utils import timezone
+            from django.core.cache import cache
 
-            lat = float(self.branch.latitude)  if self.branch.latitude  else ACCRA_LAT
-            lng = float(self.branch.longitude) if self.branch.longitude else ACCRA_LNG
+            cache_key = f'weather_forecast:{self.branch.pk}'
+            data = cache.get(cache_key)
+
+            if not data:
+                return {'factor': 1.0, 'note': ''}
+
+            hours    = data['hourly']['time']
+            precip_p = data['hourly']['precipitation_probability']
+            precip   = data['hourly']['precipitation']
+            wcodes   = data['hourly']['weathercode']
 
             date_str = date.strftime('%Y-%m-%d')
-            url = (
-                f'https://api.open-meteo.com/v1/forecast'
-                f'?latitude={lat}&longitude={lng}'
-                f'&hourly=precipitation_probability,weathercode,precipitation'
-                f'&start_date={date_str}&end_date={date_str}'
-                f'&timezone=Africa%2FAccra'
-            )
 
-            with urllib.request.urlopen(url, timeout=4) as resp:
-                data = json.loads(resp.read())
-
-            hours     = data['hourly']['time']
-            precip_p  = data['hourly']['precipitation_probability']
-            precip    = data['hourly']['precipitation']
-            wcodes    = data['hourly']['weathercode']
-
-            # Only look at remaining hours
+            # Only look at remaining hours of the requested date
             remaining_hours = [
                 (int(t[11:13]), precip_p[i], precip[i], wcodes[i])
                 for i, t in enumerate(hours)
-                if int(t[11:13]) > int(current_hour)
+                if t.startswith(date_str) and int(t[11:13]) > int(current_hour)
             ]
 
             if not remaining_hours:
                 return {'factor': 1.0, 'note': ''}
 
-            # Weighted average precipitation probability for remaining hours
             avg_precip_p = sum(h[1] or 0 for h in remaining_hours) / len(remaining_hours)
             max_precip   = max(h[2] or 0 for h in remaining_hours)
 
