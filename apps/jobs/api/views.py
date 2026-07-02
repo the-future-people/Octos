@@ -120,8 +120,14 @@ class JobTransitionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        from apps.core.finance_scope import get_branch_scope
+        from apps.organization.models import Branch
+
+        scope = get_branch_scope(request.user)
+        allowed_branch_ids = Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+
         try:
-            job = Job.objects.get(pk=pk)
+            job = Job.objects.get(pk=pk, branch_id__in=allowed_branch_ids)
         except Job.DoesNotExist:
             return Response(
                 {'detail': 'Job not found.'},
