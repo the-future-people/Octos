@@ -109,21 +109,35 @@ def get_customer_edit_log(*, pk: int) -> QuerySet:
 
 
 def get_credit_accounts(*, user, status: str = None) -> QuerySet:
-    branch = getattr(user, 'branch', None)
+    from apps.core.finance_scope import get_branch_scope
+    from apps.organization.models import Branch
+
     qs = CreditAccount.objects.select_related(
         'customer', 'branch', 'nominated_by', 'approved_by'
     )
-    if branch:
-        qs = qs.filter(branch=branch)
+
+    scope = get_branch_scope(user)
+    allowed_branch_ids = Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+    qs = qs.filter(branch_id__in=allowed_branch_ids)
+
     if status:
         qs = qs.filter(status=status)
     return qs
 
 
-def get_credit_account_by_id(*, pk: int, status: str = None) -> CreditAccount:
+def get_credit_account_by_id(*, pk: int, status: str = None, user=None) -> CreditAccount:
+    from apps.core.finance_scope import get_branch_scope
+    from apps.organization.models import Branch
+
     qs = CreditAccount.objects.select_related(
         'customer', 'branch', 'nominated_by', 'approved_by'
     )
     if status:
         qs = qs.filter(status=status)
+
+    if user is not None:
+        scope = get_branch_scope(user)
+        allowed_branch_ids = Branch.objects.filter(scope['branch_filter']).values_list('pk', flat=True)
+        qs = qs.filter(branch_id__in=allowed_branch_ids)
+
     return qs.get(pk=pk)
