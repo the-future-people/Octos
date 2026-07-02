@@ -335,20 +335,30 @@ class SheetSummaryService:
         except Exception:
             logger.exception('SheetSummaryService: avg job value 7d failed for sheet %s', sheet.pk)
 
-        # â”€â”€ Predicted EOD â€” curve-based prediction engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # curve-based prediction engine 
         predicted_jobs_eod    = None
         predicted_revenue_eod = None
         confidence_pct        = None
         projected_eod         = None  # kept for backward compat
         try:
             from apps.analytics.engines.prediction_engine import PredictionEngine
-            prediction = PredictionEngine(sheet.branch).predict(
-                sheet         = sheet,
-                current_jobs  = jobs['total'],
-                avg_job_value = avg_job_value_today or 0,
+            from apps.jobs.models import Job
+            from apps.jobs.selectors.revenue_selectors import get_method_total
+
+            completed_today = Job.objects.filter(daily_sheet=sheet, status=Job.COMPLETE)
+            current_revenue = float(
+                get_method_total(completed_today, 'CASH') +
+                get_method_total(completed_today, 'MOMO') +
+                get_method_total(completed_today, 'POS')
             )
-            predicted_jobs_eod    = prediction['predicted_jobs_eod']
-            predicted_revenue_eod = prediction['predicted_revenue_eod']
+
+            prediction = PredictionEngine(sheet.branch).predict(
+                sheet           = sheet,
+                current_jobs    = jobs['total'],
+                current_revenue = current_revenue,
+            )
+            predicted_jobs_eod    = prediction['jobs_point']
+            predicted_revenue_eod = prediction['revenue_point']
             confidence_pct        = prediction['confidence_pct']
             projected_eod         = predicted_jobs_eod  # backward compat
         except Exception:
