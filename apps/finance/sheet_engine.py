@@ -325,6 +325,7 @@ class SheetEngine:
 
         attendant_lock_at = datetime.fromisoformat(att_schedule['job_lock_at'])
         cashier_lock_at = datetime.fromisoformat(cash_schedule['job_lock_at'])
+        bm_lock_at = datetime.fromisoformat(bm_schedule['job_lock_at'])
         bm_autoclose_at = (
             datetime.fromisoformat(bm_schedule['autoclose_at'])
             if bm_schedule.get('autoclose_at')
@@ -333,11 +334,13 @@ class SheetEngine:
         shift_end = datetime.fromisoformat(bm_schedule['shift_end'])
         warning_at = shift_end - timedelta(minutes=self.WARNING_BEFORE_CLOSE)
 
-        # Role-specific lock time
+        # Role-specific lock time — BM's late-job channel opens at their
+        # own job_lock_at (post-closing window start), NOT at bm_autoclose_at
+        # (which is the separate system safety-net for forced sheet closure).
         role_lock_at = {
             'ATTENDANT': attendant_lock_at,
             'CASHIER': cashier_lock_at,
-            'BRANCH_MANAGER': bm_autoclose_at or shift_end,
+            'BRANCH_MANAGER': bm_lock_at,
         }.get(role_name, attendant_lock_at)
 
         can_create = now < role_lock_at
