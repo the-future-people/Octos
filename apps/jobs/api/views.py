@@ -759,6 +759,8 @@ class DiscardDraftView(APIView):
     """
     POST /api/v1/jobs/drafts/<pk>/discard/
     Marks a draft as ABANDONED — kept for analytics, not resumable.
+    Status change now goes through JobStatusEngine for a consistent
+    audit trail with every other transition in the system.
     """
     permission_classes = [IsAuthenticated]
 
@@ -780,9 +782,18 @@ class DiscardDraftView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        job.status       = Job.CANCELLED
+        try:
+            JobStatusEngine.advance(
+                job       = job,
+                to_status = Job.CANCELLED,
+                actor     = request.user,
+                notes     = 'Draft discarded by attendant.',
+            )
+        except (ValueError, PermissionError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         job.abandoned_at = timezone.now()
-        job.save(update_fields=['status', 'abandoned_at'])
+        job.save(update_fields=['abandoned_at', 'updated_at'])
 
         return Response({'detail': 'Draft discarded.'})
 
@@ -995,11 +1006,13 @@ class ResolveHandoverView(APIView):
     """
     POST /api/v1/jobs/<id>/resolve-handover/
     Cashier confirms receipt of cash for an INTAKE_HELD job.
-    Links the job to today's sheet and moves it to PENDING_PAYMENT.
+    Links the job to today's sheet and moves it to PENDING_PAYMENT
+    via JobStatusEngine — this is now logged like any other transition.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        from django.utils import timezone
         from apps.finance.sheet_engine import SheetEngine
 
         branch = getattr(request.user, 'branch', None)
@@ -1030,10 +1043,25 @@ class ResolveHandoverView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Link to today's sheet and move to cashier queue
-        job.daily_sheet = sheet
-        job.status      = Job.PENDING_PAYMENT
-        job.save(update_fields=['daily_sheet', 'status', 'updated_at'])
+        # Advance through the engine — logged in JobStatusLog like any
+        # other transition, closing the audit-trail gap this used to have.
+        try:
+            JobStatusEngine.advance(
+                job       = job,
+                to_status = Job.PENDING_PAYMENT,
+                actor     = request.user,
+                notes     = 'Morning handover affirmed by cashier.',
+            )
+        except (ValueError, PermissionError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Link to today's sheet and record who resolved the handover
+        job.daily_sheet          = sheet
+        job.handover_resolved_at = timezone.now()
+        job.handover_resolved_by = request.user
+        job.save(update_fields=[
+            'daily_sheet', 'handover_resolved_at', 'handover_resolved_by', 'updated_at',
+        ])
 
         return Response({
             'id'        : job.id,
@@ -1042,6 +1070,99 @@ class ResolveHandoverView(APIView):
             'sheet_id'  : sheet.pk,
             'detail'    : f'{job.job_number} handed over and added to payment queue.',
         })
+
+
+class DisputeHandoverView(APIView):
+    """
+    POST /api/v1/jobs/<id>/dispute-handover/
+    Cashier reports NOT having received cash from the BM for an
+    INTAKE_HELD job this morning. Job stays INTAKE_HELD — this is a
+    flag, not a status transition (mirrors CashierFloat's
+    physical_confirm_disputed pattern). Escalates instantly to the
+    Regional Manager and sits on this cashier's audit trail.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job = Job.objects.select_related('intake_by').get(
+                pk          = pk,
+                branch      = branch,
+                status      = Job.INTAKE_HELD,
+                daily_sheet = None,
+            )
+        except Job.DoesNotExist:
+            return Response(
+                {'detail': 'Job not found or not in INTAKE_HELD state.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if job.handover_disputed:
+            return Response(
+                {'detail': 'This job is already flagged as disputed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        job.handover_disputed    = True
+        job.handover_disputed_at = timezone.now()
+        job.handover_disputed_by = request.user
+        job.save(update_fields=[
+            'handover_disputed', 'handover_disputed_at',
+            'handover_disputed_by', 'updated_at',
+        ])
+
+        self._notify_rm(job, branch, request.user)
+
+        return Response({
+            'id'        : job.id,
+            'job_number': job.job_number,
+            'status'    : job.status,
+            'disputed'  : True,
+            'detail'    : (
+                f'Dispute recorded for {job.job_number}. '
+                f'Regional Manager has been notified.'
+            ),
+        })
+
+    def _notify_rm(self, job, branch, cashier):
+        try:
+            from apps.notifications.services import notify
+            from apps.accounts.models import CustomUser
+
+            region = getattr(branch, 'region', None)
+            if not region:
+                return
+
+            rm_users = CustomUser.objects.filter(
+                region=region,
+                role__name='REGIONAL_MANAGER',
+                is_active=True,
+            )
+            for rm in rm_users:
+                notify(
+                    recipient=rm,
+                    verb='HANDOVER_DISPUTE',
+                    message=(
+                        f"{cashier.full_name} at {branch.name} reported not "
+                        f"receiving cash from the BM for late job {job.job_number} "
+                        f"(GHS {job.estimated_cost or 0}). Immediate follow-up required."
+                    ),
+                    link='/portal/regional-manager/',
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                'DisputeHandoverView: failed to notify RM for job %s', job.pk
+            )
 
 
 class BranchPerformanceView(APIView):
