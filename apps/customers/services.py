@@ -87,10 +87,6 @@ def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
     changes  = []
 
     for field, new_value in data.items():
-        if field not in allowed:
-            errors[field] = f'Field "{field}" is not editable.'
-            continue
-
         # Normalise phone before any comparison or save
         if field == 'phone' and new_value:
             new_value = normalise_phone(str(new_value).strip())
@@ -98,7 +94,17 @@ def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
         old_value = str(getattr(customer, field, '') or '')
         new_value = str(new_value or '').strip()
 
+        # A field present in the payload but identical to its current
+        # value is a no-op, not an edit attempt — skip it before the
+        # editability check. This is what lets a form legitimately send
+        # its full state (including blank fields that don't apply to
+        # this customer_type) without being rejected for fields nobody
+        # actually tried to change.
         if old_value == new_value:
+            continue
+
+        if field not in allowed:
+            errors[field] = f'Field "{field}" is not editable.'
             continue
 
         if field == 'phone':

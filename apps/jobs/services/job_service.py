@@ -149,7 +149,7 @@ def _price_line_items(
 
     for i, item in enumerate(line_items_data):
         try:
-            svc = Service.objects.select_related('category').get(
+            svc = Service.objects.get(
                 pk=item['service'],
                 is_active=True,
             )
