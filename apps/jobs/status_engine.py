@@ -10,6 +10,7 @@ from django.db import transaction
 INSTANT_TRANSITIONS = {
     'DRAFT'           : ['PENDING_PAYMENT', 'CANCELLED'],
     'PENDING_PAYMENT' : ['COMPLETE', 'CANCELLED'],
+    'INTAKE_HELD'     : ['PENDING_PAYMENT'],  # morning handover affirmed by cashier
     'COMPLETE'        : [],
     'CANCELLED'       : [],
 }
@@ -17,6 +18,7 @@ INSTANT_TRANSITIONS = {
 PRODUCTION_TRANSITIONS = {
     'DRAFT'           : ['PENDING_PAYMENT', 'CANCELLED'],
     'PENDING_PAYMENT' : ['PAID', 'CANCELLED'],
+    'INTAKE_HELD'     : ['PENDING_PAYMENT'],  # morning handover affirmed by cashier
     'PAID'            : ['CONFIRMED'],
     'CONFIRMED'       : ['IN_PROGRESS'],
     'IN_PROGRESS'     : ['READY', 'HALTED'],
@@ -30,6 +32,7 @@ PRODUCTION_TRANSITIONS = {
 DESIGN_TRANSITIONS = {
     'DRAFT'              : ['PENDING_PAYMENT', 'CANCELLED'],
     'PENDING_PAYMENT'    : ['PAID', 'CANCELLED'],
+    'INTAKE_HELD'        : ['PENDING_PAYMENT'],  # morning handover affirmed by cashier
     'PAID'               : ['IN_PROGRESS'],
     'IN_PROGRESS'        : ['SAMPLE_SENT', 'HALTED'],
     'SAMPLE_SENT'        : ['REVISION_REQUESTED', 'DESIGN_APPROVED'],

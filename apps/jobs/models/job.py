@@ -313,6 +313,40 @@ class Job(AuditModel):
         help_text    = 'BM who approved this post-closing job.',
     )
 
+    # ── Handover dispute (INTAKE_HELD jobs only) ────────────────────
+    # Mirrors CashierFloat.physical_confirm_disputed — same pattern,
+    # same escalation path to Regional Manager.
+    handover_disputed = models.BooleanField(
+        default   = False,
+        help_text = 'True if the cashier reported not receiving cash from the BM for this job.',
+    )
+    handover_disputed_at = models.DateTimeField(null=True, blank=True)
+    handover_disputed_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'handover_disputes_raised',
+        null         = True,
+        blank        = True,
+        help_text    = 'Cashier who raised the dispute.',
+    )
+    handover_resolved_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set when the cashier affirms receipt (with or without a prior dispute).',
+    )
+    handover_resolved_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'handover_resolutions',
+        null         = True,
+        blank        = True,
+        help_text    = 'Cashier who confirmed the handover.',
+    )
+
+    # ── Voided (DEPRECATED — never wired into JobStatusEngine, business
+    # rules for this were never finalized; CANCELLED covers the standard
+    # case. Do not build against this field without a fresh design
+    # discussion — see void_reason/voided_by/voided_at below.) ────────
+
    # ── Credit ────────────────────────────────────────────────
     credit_account = models.ForeignKey(
         'finance.CreditAccount',
