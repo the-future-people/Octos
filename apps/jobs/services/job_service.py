@@ -333,7 +333,6 @@ def save_draft(user, branch, data: dict) -> Dict[str, Any]:
         try:
             customer = CustomerProfile.objects.select_related('branch').get(
                 pk=customer_id,
-                is_active=True,
             )
             # Validate customer belongs to this branch or is global
             if customer.branch and customer.branch != branch:
@@ -468,10 +467,7 @@ def create_late_job(user, branch, data: dict) -> Any:
     customer_id = data.get('customer')
     if customer_id:
         try:
-            customer = CustomerProfile.objects.get(
-                pk=customer_id,
-                is_active=True,
-            )
+            customer = CustomerProfile.objects.get(pk=customer_id)
         except CustomerProfile.DoesNotExist:
             logger.warning(f'Customer {customer_id} not found for late job')
 
