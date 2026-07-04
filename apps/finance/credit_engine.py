@@ -401,6 +401,86 @@ class CreditEngine:
                 account.pk,
             )
 
+    # ── Customer confidence scoring ────────────────────────────────
+    # Restored here (canonical location) — previously only existed on
+    # a duplicate apps/customers/credit_engine.py, now removed.
+
+    CONFIDENCE_RECOMMEND_THRESHOLD = 50
+    CONFIDENCE_MAX                 = 100
+
+    @staticmethod
+    def compute_confidence_score(customer) -> int:
+        """
+        Computes a 0–100 confidence score for a customer based on:
+        - Job volume (how much business they've brought)
+        - Payment consistency (did they always pay promptly)
+        - Profile completeness (company name, address on file)
+        - Tenure (how long they've been a customer)
+
+        Updates customer.confidence_score and saves.
+        Returns the new score.
+        """
+        from apps.jobs.models import Job
+
+        jobs = Job.objects.filter(customer=customer)
+        total_jobs = jobs.count()
+
+        if total_jobs == 0:
+            customer.confidence_score = 0
+            customer.save(update_fields=['confidence_score', 'updated_at'])
+            return 0
+
+        completed = jobs.filter(status='COMPLETE').count()
+        volume_score = min(completed / 50, 1.0) * 40
+
+        non_cancelled = jobs.exclude(status='CANCELLED').count()
+        paid = jobs.filter(
+            status='COMPLETE',
+            amount_paid__isnull=False,
+            amount_paid__gt=0,
+        ).count()
+        consistency_score = (paid / non_cancelled * 30) if non_cancelled else 0
+
+        completeness = 0
+        if customer.first_name and customer.last_name: completeness += 5
+        if customer.phone:                             completeness += 5
+        if customer.company_name:                      completeness += 5
+        if customer.address:                            completeness += 5
+        completeness_score = completeness
+
+        if customer.created_at:
+            months = (timezone.now() - customer.created_at).days / 30
+            tenure_score = min(months / 12, 1.0) * 10
+        else:
+            tenure_score = 0
+
+        total = int(volume_score + consistency_score + completeness_score + tenure_score)
+        total = min(total, CreditEngine.CONFIDENCE_MAX)
+
+        customer.confidence_score = total
+        customer.save(update_fields=['confidence_score', 'updated_at'])
+
+        return total
+
+    @staticmethod
+    def should_recommend(customer) -> bool:
+        """
+        Returns True if the customer's confidence score meets or exceeds
+        the recommendation threshold and they don't already have an
+        active/pending credit account.
+        """
+        from apps.finance.models import CreditAccount
+
+        if customer.confidence_score < CreditEngine.CONFIDENCE_RECOMMEND_THRESHOLD:
+            return False
+
+        already_has_account = CreditAccount.objects.filter(
+            customer=customer,
+            status__in=['PENDING', 'ACTIVE'],
+        ).exists()
+
+        return not already_has_account
+
     # ── Class-level convenience ───────────────────────────────────
 
     @classmethod

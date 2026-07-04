@@ -244,7 +244,7 @@ def _handle_partial_credit(job, validated_data, result):
 
     try:
         from apps.finance.models import CreditAccount, DailySalesSheet
-        from apps.customers.credit_engine import CreditEngine
+        from apps.finance.credit_engine import CreditEngine
         from django.db.models import F
 
         credit_account = CreditAccount.objects.get(pk=partial_credit_account_id)
@@ -256,7 +256,8 @@ def _handle_partial_credit(job, validated_data, result):
             return
 
         credit_amount = Decimal(str(partial_credit_amount))
-        CreditEngine.check_eligibility(credit_account, credit_amount)
+        engine = CreditEngine(credit_account)
+        engine.check_or_raise(credit_amount)
 
         credit_account.current_balance += credit_amount
         credit_account.save(update_fields=['current_balance', 'updated_at'])

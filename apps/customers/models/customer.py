@@ -303,7 +303,7 @@ def update_customer_confidence(sender, instance, **kwargs):
         return
 
     try:
-        from apps.customers.credit_engine import CreditEngine
+        from apps.finance.credit_engine import CreditEngine
         from apps.notifications.services import notify
         from django.db.models import F
         from decimal import Decimal

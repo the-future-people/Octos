@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.customers.models import CustomerProfile
 from apps.finance.models import CreditAccount, CreditPayment, DailySalesSheet
-from apps.customers.credit_engine import CreditEngine, CreditLimitExceeded, CreditAccountNotActive
+from apps.finance.credit_engine import CreditEngine
 
 from apps.customers.selectors import (
     get_customer_list,
@@ -318,16 +318,17 @@ class CreditSettleView(APIView):
             )
 
         try:
-            payment = CreditEngine.settle(
-                credit_account=account,
-                amount        =data['amount'],
-                method        =data['method'],
-                sheet         =sheet,
-                cashier       =request.user,
-                reference     =data.get('reference', ''),
-                notes         =data.get('notes', ''),
+            engine = CreditEngine(account)
+            payment = engine.settle(
+                amount            = data['amount'],
+                payment_method    = data['method'],
+                actor             = request.user,
+                daily_sheet       = sheet,
+                momo_reference    = data.get('reference', '') if data['method'] == 'MOMO' else '',
+                pos_approval_code = data.get('reference', '') if data['method'] == 'POS' else '',
+                notes             = data.get('notes', ''),
             )
-        except (CreditAccountNotActive, ValueError) as e:
+        except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
