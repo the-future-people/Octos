@@ -1621,6 +1621,7 @@ class HolidayListView(generics.ListAPIView):
     Used by portals to check upcoming closures for lock-screen messaging.
     """
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
     def get_serializer_class(self):
         from rest_framework import serializers
