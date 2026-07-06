@@ -1532,7 +1532,119 @@ class BranchLockStatusView(APIView):
         else:
             status_data['float_dispute_active'] = False
 
+        # ── Closure awareness — shared by Cashier and Attendant lock overlays ──
+        from datetime import timedelta
+        from apps.finance.models import PublicHoliday
+
+        tomorrow = today + timedelta(days=1)
+        today_holiday    = PublicHoliday.objects.filter(branch=user.branch, date=today).first()
+        tomorrow_holiday = PublicHoliday.objects.filter(branch=user.branch, date=tomorrow).first()
+
+        status_data['is_today_sunday']      = today.weekday() == 6
+        status_data['is_today_holiday']     = bool(today_holiday)
+        status_data['today_holiday_name']   = today_holiday.name if today_holiday else None
+        status_data['tomorrow_is_sunday']   = tomorrow.weekday() == 6
+        status_data['tomorrow_holiday_name'] = tomorrow_holiday.name if tomorrow_holiday else None
+
         return Response(status_data)
+
+
+class DeclareHolidayView(APIView):
+    """
+    POST /api/v1/finance/holidays/declare/
+    Body: { date, name }
+
+    BM declares a specific date as a public holiday for their branch.
+    Ghana sometimes observes midweek holidays on the following Friday —
+    there's no reliable way to compute this, so the BM declares the
+    actual observed closure date directly. The 5am sheet-opening task
+    reads this to auto-set is_public_holiday/public_holiday_name.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from datetime import datetime
+        from apps.finance.models import PublicHoliday
+        from django.db import IntegrityError
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        date_str = request.data.get('date', '').strip()
+        name     = request.data.get('name', '').strip()
+
+        if not date_str:
+            return Response({'detail': 'date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not name:
+            return Response({'detail': 'name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if target_date.weekday() == 6:
+            return Response(
+                {'detail': 'Sunday is already closed — no need to declare it as a holiday.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            holiday = PublicHoliday.objects.create(
+                branch=branch,
+                date=target_date,
+                name=name,
+                declared_by=request.user,
+            )
+        except IntegrityError:
+            return Response(
+                {'detail': f'A holiday is already declared for {target_date} at this branch.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'id': holiday.pk,
+            'date': str(holiday.date),
+            'name': holiday.name,
+            'detail': f'{name} declared as a holiday for {target_date}.',
+        }, status=status.HTTP_201_CREATED)
+
+
+class HolidayListView(generics.ListAPIView):
+    """
+    GET /api/v1/finance/holidays/?upcoming=true
+    Returns declared holidays for the requesting user's branch.
+    Used by portals to check upcoming closures for lock-screen messaging.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        from rest_framework import serializers
+        from apps.finance.models import PublicHoliday
+
+        class _Serializer(serializers.ModelSerializer):
+            class Meta:
+                model = PublicHoliday
+                fields = ['id', 'date', 'name', 'branch']
+        return _Serializer
+
+    def get_queryset(self):
+        from apps.finance.models import PublicHoliday
+        branch = getattr(self.request.user, 'branch', None)
+        if not branch:
+            return PublicHoliday.objects.none()
+
+        qs = PublicHoliday.objects.filter(branch=branch)
+
+        if self.request.query_params.get('upcoming') == 'true':
+            from django.utils import timezone
+            qs = qs.filter(date__gte=timezone.localdate())
+
+        return qs.order_by('date')
 
 
 class EODSummaryView(APIView):

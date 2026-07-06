@@ -1,6 +1,8 @@
 from django.urls import path
 from .views import (
     BranchLockStatusView,
+    DeclareHolidayView,
+    HolidayListView,
     DailySalesSheetListView,
     DailySalesSheetDetailView,
     DailySalesSheetTodayView,
@@ -118,6 +120,10 @@ urlpatterns = [
 
     # ── Lock status ───────────────────────────────────────────────────────────
     path('lock-status/',                         BranchLockStatusView.as_view(),              name='branch-lock-status'),
+
+    # ── Public Holidays ───────────────────────────────────────────────────────
+    path('holidays/',                            HolidayListView.as_view(),                   name='holiday-list'),
+    path('holidays/declare/',                    DeclareHolidayView.as_view(),                 name='holiday-declare'),
 
     # ── Invoices ──────────────────────────────────────────────────────────────
     path('invoices/',                            InvoiceListView.as_view(),                   name='invoice-list'),

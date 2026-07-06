@@ -11,6 +11,7 @@ from .sheet_download_log import SheetDownloadLog
 from .weekly_report import WeeklyReport
 from .payment_leg import PaymentLeg
 from .monthly_close import MonthlyClose
+from .public_holiday import PublicHoliday
 
 __all__ = [
     'DailySalesSheet',
@@ -27,4 +28,5 @@ __all__ = [
     'WeeklyReport',
     'PaymentLeg',
     'MonthlyClose',
+    'PublicHoliday',
 ]

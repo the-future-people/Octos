@@ -52,9 +52,13 @@ class Command(BaseCommand):
         Open a daily sheet for every active branch.
         Skips Sundays automatically inside SheetEngine.
         Skips branches that already have an open sheet today.
+        If a PublicHoliday has been declared for a branch on this date,
+        the sheet is opened with is_public_holiday/public_holiday_name
+        set automatically — no separate manual step required.
         """
         from apps.organization.models import Branch
         from apps.finance.sheet_engine import SheetEngine
+        from apps.finance.models import PublicHoliday
 
         today    = timezone.localdate()
         branches = Branch.objects.filter(is_active=True)
@@ -63,9 +67,14 @@ class Command(BaseCommand):
 
         for branch in branches:
             try:
+                holiday = PublicHoliday.objects.filter(
+                    branch=branch, date=today,
+                ).first()
+
                 sheet, created = SheetEngine(branch).open_sheet(
                     target_date=today,
                     opened_by=None,   # system open
+                    holiday_name=holiday.name if holiday else '',
                 )
                 if created:
                     opened += 1
