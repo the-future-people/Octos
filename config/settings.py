@@ -255,6 +255,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.notifications.tasks.generate_checkpoint_reminders',
         'schedule': crontab(minute='*'),
     },
+    'expire-wallet-credits-daily': {
+        'task': 'apps.finance.tasks.expire_wallet_credits',
+        'schedule': crontab(hour=1, minute=0),  # 01:00 WAT daily
+    },
 }
 
 # CORS

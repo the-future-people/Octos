@@ -194,6 +194,24 @@ class CustomerProfile(AuditModel):
         ),
     )
 
+    # ── Wallet (job-redeemable store credit — money the branch owes
+    # this customer, NOT to be confused with CreditAccount, which is
+    # the opposite direction. See apps.finance.models.CustomerWalletTransaction
+    # for the full ledger; these two fields are a reconciled cache. ──
+    wallet_balance = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0,
+        help_text='Job-redeemable credit balance, capped at GHS 200. '
+                   'Reconciled from CustomerWalletTransaction — never '
+                   'edited directly.',
+    )
+    wallet_last_activity_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Timestamp of the last wallet add or redemption. '
+                   'Drives 6-month expiry; resets on any activity.',
+    )
+
     # ── Branch ────────────────────────────────────────────────
     preferred_branch = models.ForeignKey(
         'organization.Branch',

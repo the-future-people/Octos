@@ -132,6 +132,7 @@ class JobListSerializer(serializers.ModelSerializer):
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
     customer_credit  = serializers.SerializerMethodField()
+    customer_wallet_balance = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
     deposit_due      = serializers.SerializerMethodField()
     line_items       = JobLineItemSerializer(many=True, read_only=True)
@@ -145,7 +146,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
-            'customer', 'customer_credit',
+            'customer', 'customer_credit', 'customer_wallet_balance',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
         ]
@@ -175,6 +176,11 @@ class JobListSerializer(serializers.ModelSerializer):
             }
         except CreditAccount.DoesNotExist:
             return None
+
+    def get_customer_wallet_balance(self, obj):
+        if not obj.customer:
+            return None
+        return str(obj.customer.wallet_balance)
 
     def get_deposit_due(self, obj):
         if obj.estimated_cost is None:
@@ -476,7 +482,7 @@ class JobRouteSerializer(serializers.Serializer):
 class CashierPaymentSerializer(serializers.Serializer):
     deposit_percentage = serializers.ChoiceField(choices=[70, 100])
     payment_method     = serializers.ChoiceField(
-        choices=['CASH', 'MOMO', 'POS', 'SPLIT', 'CREDIT'],
+        choices=['CASH', 'MOMO', 'POS', 'SPLIT', 'CREDIT', 'WALLET'],
         default='CASH',
     )
     momo_reference    = serializers.CharField(required=False, allow_blank=True)
@@ -511,6 +517,12 @@ class CashierPaymentSerializer(serializers.Serializer):
     partial_credit_account = serializers.IntegerField(
         required=False, allow_null=True
     )
+
+    # Wallet — saving overpayment as credit (add) instead of cash change
+    wallet_credit_amount = serializers.DecimalField(
+        max_digits=8, decimal_places=2, required=False, allow_null=True
+    )
+    wallet_consent = serializers.BooleanField(required=False, default=False)
 
     def validate_momo_reference(self, value):
         if value and not value.isdigit():

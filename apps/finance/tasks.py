@@ -34,3 +34,14 @@ def recovery_float_check():
     """
     from django.core.management import call_command
     call_command('recovery_float_check')
+
+
+@shared_task
+def expire_wallet_credits():
+    """
+    Runs once daily. Zeroes out wallet balances inactive for 6+ months,
+    writing an EXPIRED CustomerWalletTransaction entry for each — never
+    a silent deletion.
+    """
+    from django.core.management import call_command
+    call_command('expire_wallet_credits')

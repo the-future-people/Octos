@@ -111,12 +111,14 @@ class Job(AuditModel):
     MOMO   = 'MOMO'
     POS    = 'POS'
     CREDIT = 'CREDIT'
+    WALLET = 'WALLET'
 
     PAYMENT_METHOD_CHOICES = [
         (CASH,   'Cash'),
         (MOMO,   'Mobile Money'),
         (POS,    'POS'),
         (CREDIT, 'Credit Account'),
+        (WALLET, 'Wallet Credit'),
     ]
 
     # ── Core fields ──────────────────────────────────────────────

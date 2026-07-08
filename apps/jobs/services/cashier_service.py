@@ -49,6 +49,32 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
                 f'amount due (GHS {float(amount_paid):.2f}).'
             )
 
+    # ── Wallet credit (cashier + customer chose to save overpayment
+    # instead of taking cash change) — must run before change_given is
+    # persisted, since a GHS 200 cap can force part of the request back
+    # to cash. Never silently short-changes the customer. ─────────────
+    wallet_extra    = {}
+    change_given_val = validated_data.get('change_given')
+    wallet_credit_amount = validated_data.get('wallet_credit_amount')
+
+    if wallet_credit_amount:
+        wallet_extra = _apply_wallet_credit(
+            job              = job,
+            requested_amount = wallet_credit_amount,
+            wallet_consent   = validated_data.get('wallet_consent'),
+            actor            = actor,
+        )
+        overflow = wallet_extra.pop('_overflow', Decimal('0'))
+        if overflow > 0 and change_given_val is not None:
+            change_given_val = Decimal(str(change_given_val)) + overflow
+
+    # ── Wallet redemption (payment_method=WALLET — customer is paying
+    # for THIS job using existing wallet balance instead of cash) ─────
+    if payment_method == 'WALLET':
+        wallet_extra.update(
+            _redeem_wallet_credit(job=job, actor=actor)
+        )
+
     # ── Persist payment fields on job ─────────────────────────────────
     job.deposit_percentage = deposit_pct
     job.amount_paid        = amount_paid
@@ -56,7 +82,7 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     job.momo_reference     = validated_data.get('momo_reference', '')
     job.pos_approval_code  = validated_data.get('pos_approval_code', '')
     job.cash_tendered      = validated_data.get('cash_tendered')
-    job.change_given       = validated_data.get('change_given')
+    job.change_given       = change_given_val
     job.save(update_fields=[
         'deposit_percentage', 'amount_paid',
         'payment_method', 'momo_reference',
@@ -82,6 +108,9 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
 
     # ── Partial credit ────────────────────────────────────────────────────────
     _handle_partial_credit(job, validated_data, result)
+
+    if wallet_extra:
+        result.update(wallet_extra)
 
     broadcast_invalidation(job.branch.id, [
         'paymentQueue', 'cashierSummary', 'shiftStatus',
@@ -277,3 +306,170 @@ def _handle_partial_credit(job, validated_data, result):
 
     except Exception as e:
         logger.error(f"Partial credit failed: {e}", exc_info=True)
+
+
+def _apply_wallet_credit(job, requested_amount, wallet_consent, actor):
+    """
+    Applies job-redeemable wallet credit from an overpayment. Unlike
+    _handle_partial_credit, this deliberately RAISES on real problems
+    (missing customer, missing consent) rather than silently swallowing
+    them — consent and eligibility are the fraud-resistance mechanisms
+    this feature exists to enforce, so a failure here must surface to
+    the cashier, not vanish into a log line.
+
+    Caps the customer's wallet_balance at GHS 200. Any amount beyond
+    the cap is reported back via '_overflow' so the caller can route
+    it back into cash change instead of losing it.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+    from apps.customers.models import CustomerProfile
+    from apps.finance.models import CustomerWalletTransaction
+    from apps.accounts.models import CustomUser
+    from apps.notifications.services import notify
+
+    if not job.customer_id:
+        raise ValueError(
+            'Wallet credit requires a registered customer — walk-ins are not eligible.'
+        )
+    if not wallet_consent:
+        raise ValueError('Customer consent is required before adding wallet credit.')
+
+    requested = Decimal(str(requested_amount))
+    if requested <= 0:
+        return {}
+
+    WALLET_CAP = Decimal('200.00')
+
+    with transaction.atomic():
+        customer = CustomerProfile.objects.select_for_update().get(pk=job.customer_id)
+
+        headroom = WALLET_CAP - customer.wallet_balance
+        if headroom <= 0:
+            raise ValueError(
+                f'{customer.display_name} has already reached the GHS 200 wallet limit.'
+            )
+
+        actual_credit = min(requested, headroom)
+        overflow      = requested - actual_credit
+
+        balance_before = customer.wallet_balance
+        balance_after  = balance_before + actual_credit
+        now = timezone.now()
+
+        CustomerWalletTransaction.objects.create(
+            customer             = customer,
+            branch               = job.branch,
+            job                  = job,
+            transaction_type     = CustomerWalletTransaction.TransactionType.CREDIT_ADDED,
+            amount               = actual_credit,
+            balance_before       = balance_before,
+            balance_after        = balance_after,
+            recorded_by          = actor,
+            consent_confirmed_at = now,
+        )
+
+        CustomerProfile.objects.filter(pk=customer.pk).update(
+            wallet_balance           = balance_after,
+            wallet_last_activity_at  = now,
+        )
+
+    result = {
+        'wallet_credit_added': str(actual_credit),
+        'wallet_balance':      str(balance_after),
+        '_overflow':           overflow,
+    }
+    if overflow > 0:
+        result['wallet_credit_capped_overflow'] = str(overflow)
+
+    try:
+        bm = CustomUser.objects.filter(
+            branch=job.branch, role__name='BRANCH_MANAGER',
+        ).exclude(pk=actor.pk).first()
+        if bm:
+            notify(
+                recipient = bm,
+                verb      = 'system',
+                message   = (
+                    f"{actor.full_name} added GHS {actual_credit} wallet credit "
+                    f"for {customer.display_name} (job {job.job_number})."
+                ),
+                link      = f'/customers/{customer.id}/',
+            )
+    except Exception:
+        logger.error('Failed to notify BM of wallet credit', exc_info=True)
+
+    return result
+
+def _redeem_wallet_credit(job, actor):
+    """
+    Redeems wallet balance against THIS job's cost. Job-only redemption
+    is the entire point of this feature — there is deliberately no
+    cash-redemption path anywhere in this system.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+    from apps.customers.models import CustomerProfile
+    from apps.finance.models import CustomerWalletTransaction
+    from apps.accounts.models import CustomUser
+    from apps.notifications.services import notify
+
+    if not job.customer_id:
+        raise ValueError('Wallet redemption requires a registered customer.')
+
+    job_cost = job.estimated_cost or Decimal('0')
+    if job_cost <= 0:
+        raise ValueError('Job has no cost — nothing to redeem against.')
+
+    with transaction.atomic():
+        customer = CustomerProfile.objects.select_for_update().get(pk=job.customer_id)
+
+        if customer.wallet_balance < job_cost:
+            raise ValueError(
+                f'{customer.display_name} has GHS {customer.wallet_balance} in wallet '
+                f'credit — not enough to cover GHS {job_cost}.'
+            )
+
+        balance_before = customer.wallet_balance
+        balance_after  = balance_before - job_cost
+        now = timezone.now()
+
+        CustomerWalletTransaction.objects.create(
+            customer         = customer,
+            branch           = job.branch,
+            job              = job,
+            transaction_type = CustomerWalletTransaction.TransactionType.REDEEMED_JOB,
+            amount           = job_cost,
+            balance_before   = balance_before,
+            balance_after    = balance_after,
+            recorded_by      = actor,
+        )
+
+        CustomerProfile.objects.filter(pk=customer.pk).update(
+            wallet_balance          = balance_after,
+            wallet_last_activity_at = now,
+        )
+
+    result = {
+        'wallet_redeemed':      str(job_cost),
+        'wallet_balance_after': str(balance_after),
+    }
+
+    try:
+        bm = CustomUser.objects.filter(
+            branch=job.branch, role__name='BRANCH_MANAGER',
+        ).exclude(pk=actor.pk).first()
+        if bm:
+            notify(
+                recipient = bm,
+                verb      = 'system',
+                message   = (
+                    f"{actor.full_name} redeemed GHS {job_cost} wallet credit "
+                    f"for {customer.display_name} (job {job.job_number})."
+                ),
+                link      = f'/customers/{customer.id}/',
+            )
+    except Exception:
+        logger.error('Failed to notify BM of wallet redemption', exc_info=True)
+
+    return result
