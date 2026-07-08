@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Notification
+from apps.notifications.models import Notification
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -13,6 +13,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             'id', 'verb', 'message', 'link',
             'is_read', 'created_at',
             'actor_name', 'time_ago',
+            'category', 'display_mode', 'requires_pin',
+            'object_id',
         ]
         read_only_fields = fields
 

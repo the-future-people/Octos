@@ -36,7 +36,7 @@ urlpatterns = [
     path('api/v1/careers/',       include('apps.hr.api.careers_urls')),
     path('api/v1/communications/',include('apps.communications.api.urls')),
     path('api/v1/finance/',       include('apps.finance.api.urls')),
-    path('api/v1/notifications/', include('apps.notifications.urls')),
+    path('api/v1/notifications/', include('apps.notifications.api.urls')),
     path('api/v1/analytics/',     include('apps.analytics.api.urls')),
     path('api/v1/inventory/',     include('apps.inventory.api.urls')),
     path('api/v1/procurement/',   include('apps.procurement.api.urls')),

@@ -247,6 +247,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.accounts.tasks.process_staff_activations',
         'schedule': crontab(hour=0, minute=1),  # 00:01 WAT daily
     },
+    'generate-shift-reminders-every-minute': {
+        'task': 'apps.notifications.tasks.generate_shift_reminders',
+        'schedule': crontab(minute='*'),
+    },
+    'generate-checkpoint-reminders-every-minute': {
+        'task': 'apps.notifications.tasks.generate_checkpoint_reminders',
+        'schedule': crontab(minute='*'),
+    },
 }
 
 # CORS

@@ -4,15 +4,20 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.notifications.models import Notification
-from apps.notifications.serializers import NotificationSerializer
+from apps.notifications.api.serializers import NotificationSerializer
 from apps.notifications.services import get_unread_count, mark_all_read
 
 
 class NotificationListView(APIView):
     """
     GET /api/v1/notifications/
-    Returns the latest 20 notifications for the authenticated user.
-    Accepts ?unread=true to filter unread only.
+    Returns notifications for the authenticated user.
+    Accepts:
+      ?unread=true           — filter unread only
+      ?display_mode=X        — filter by PASSIVE / INTERRUPTIVE
+    Passive/default calls (bell dropdown) are capped at the latest 20.
+    Interruptive-mode calls return all matches uncapped, since a
+    reminder must never be silently pushed out by a slice limit.
     """
     permission_classes = [IsAuthenticated]
 
@@ -22,7 +27,14 @@ class NotificationListView(APIView):
         if request.query_params.get('unread') == 'true':
             qs = qs.filter(is_read=False)
 
-        qs = qs.select_related('actor')[:20]
+        display_mode = request.query_params.get('display_mode')
+        if display_mode:
+            qs = qs.filter(display_mode=display_mode)
+
+        qs = qs.select_related('actor')
+        if display_mode != 'INTERRUPTIVE':
+            qs = qs[:20]
+
         serializer = NotificationSerializer(qs, many=True)
         return Response(serializer.data)
 
