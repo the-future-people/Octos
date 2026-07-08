@@ -952,12 +952,21 @@ class JobHistoryView(APIView):
 class IntakeHeldQueueView(APIView):
     """
     GET /api/v1/jobs/intake-held/
-    Returns all INTAKE_HELD jobs for the cashier's branch.
-    Called by the cashier portal on shift start to detect pending handovers.
+    Returns INTAKE_HELD jobs for the cashier's branch that genuinely
+    predate this cashier's current shift — i.e. real overnight backlog
+    from before this morning's float acknowledgment, not anything
+    recorded during the live session itself.
+
+    Without this cutoff, any INTAKE_HELD job created later the same
+    day (e.g. a BM late job entered mid-afternoon) would surface
+    immediately on the next portal refresh, rather than waiting for
+    tomorrow's morning handover — which is the intended design.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from apps.finance.models import CashierFloat
+
         branch = getattr(request.user, 'branch', None)
         if not branch:
             return Response(
@@ -965,10 +974,22 @@ class IntakeHeldQueueView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        active_float = CashierFloat.objects.filter(
+            cashier=request.user,
+            is_signed_off=False,
+        ).order_by('-created_at').first()
+
+        if not active_float or not active_float.morning_acknowledged_at:
+            # No active shift, or float not yet acknowledged this morning —
+            # FloatAcknowledgeModal blocks first anyway, but stay empty
+            # here rather than guessing a cutoff.
+            return Response([])
+
         jobs = Job.objects.filter(
             branch      = branch,
             status      = Job.INTAKE_HELD,
             daily_sheet = None,
+            created_at__lt = active_float.morning_acknowledged_at,
         ).select_related(
             'intake_by', 'customer'
         ).prefetch_related(
