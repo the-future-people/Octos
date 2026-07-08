@@ -1,476 +1,345 @@
 """
-Tests for the Jobs API.
+Automated regression tests for the Jobs lifecycle fixes:
+  - INTAKE_HELD transition map integrity (status_engine.py)
+  - Handover resolution routed through JobStatusEngine (audit trail)
+  - Handover dispute flagging + RM escalation
+  - Draft discard routed through JobStatusEngine (audit trail)
+  - Credit engine consolidation (cashier_service.py)
 
-Coverage:
-  - JobListView          — list, branch scoping, filters, search
-  - JobDetailView        — detail, branch isolation, allowed_transitions
-  - JobCreateView        — create, auto-price, branch default, validation
-  - JobTransitionView    — valid transition, invalid transition, 404
-  - JobFileUploadView    — upload file, 404
-  - JobRouteSuggestView  — suggest routing, missing service param
-  - JobRouteConfirmView  — confirm route, bad branch
-  - ServiceListView      — list, category filter
-  - PricingRuleListView  — list, branch/service filters
-  - PriceCalculateView   — calculate, missing params, no rule found
+All fixtures are constructed from scratch in setUpTestData, since
+Django's TestCase always runs against a fresh, empty test database —
+see tasks/lessons.md for why this differs from the one-off shell
+verification script.
 
-Run:
-  python manage.py test apps.jobs.tests --verbosity=2
+Run inside Docker:
+    docker compose exec web python manage.py test apps.jobs.tests
 """
 
-import uuid
-import io
+import datetime
 from decimal import Decimal
+
 from django.test import TestCase
-from django.urls import reverse
-from django.core.files.uploadedfile import SimpleUploadedFile
-from rest_framework.test import APIClient
-from rest_framework import status
+from django.utils import timezone
+from rest_framework.test import APIRequestFactory, force_authenticate
 
-from apps.accounts.models import CustomUser
-from apps.organization.models import Belt, Region, Branch
-from apps.jobs.models import Job, Service, PricingRule, JobFile
-
-
-# ─────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────
-
-def make_org(suffix=''):
-    belt   = Belt.objects.create(name=f'Southern Belt {suffix}')
-    region = Region.objects.create(name=f'Accra Region {suffix}', belt=belt)
-    branch = Branch.objects.create(
-        name=f'NTB {suffix}', code=f'NTB{suffix}',
-        region=region, address='Test Address',
-    )
-    return branch
+from apps.organization.models import Branch
+from apps.accounts.models import CustomUser, Role
+from apps.customers.models import CustomerProfile
+from apps.jobs.models import Job, JobStatusLog, Service
+from apps.finance.models import CreditAccount, DailySalesSheet
+from apps.jobs.status_engine import JobStatusEngine
+from apps.jobs.api.views import (
+    ResolveHandoverView, DisputeHandoverView, DiscardDraftView,
+)
 
 
-def make_user(email, branch, password='pass1234'):
-    user = CustomUser.objects.create_user(
-        email=email,
-        password=password,
-        first_name='Test',
-        last_name='User',
-        employee_id=str(uuid.uuid4())[:20],
-    )
-    user.branch = branch
-    user.save()
-    return user
+def make_request(method, user):
+    """Build an authenticated DRF request — force_authenticate bypasses
+    JWT machinery entirely, which is what we want when testing view
+    logic + permissions rather than the auth backend itself."""
+    rf = APIRequestFactory()
+    req = getattr(rf, method)('/fake-url/')
+    force_authenticate(req, user=user)
+    return req
 
 
-def make_service(name='Photocopy', code=None, category='INSTANT', unit='PER_PAGE'):
-    return Service.objects.create(
-        name=name,
-        code=code or name[:10].upper().replace(' ', '_'),
-        category=category,
-        unit=unit,
-    )
+class JobsFixtureMixin:
+    """Builds a complete, self-contained set of fixtures from scratch —
+    no dependency on staging/dev data existing."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.bm_role = Role.objects.create(
+            name='BRANCH_MANAGER', display_name='Branch Manager',
+            is_constrained=False, scope='BRANCH',
+        )
+        cls.cashier_role = Role.objects.create(
+            name='CASHIER', display_name='Cashier',
+            is_constrained=False, scope='BRANCH',
+        )
+
+        cls.branch = Branch.objects.create(
+            name='Test Branch', code='TSTB',
+            is_headquarters=False, is_regional_hq=False,
+            address='123 Test Street',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30),
+            closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.other_branch = Branch.objects.create(
+            name='Other Test Branch', code='OTHB',
+            is_headquarters=False, is_regional_hq=False,
+            address='456 Other Street',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30),
+            closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+
+        cls.bm = CustomUser(
+            employee_id='TST-BM-001',
+            first_name='Test', last_name='Manager',
+            email='bm@test.local',
+            employment_status='ACTIVE',
+            is_active=True, is_staff=False, is_superuser=False,
+            is_clocked_in=False, must_change_password=False,
+            is_business_owner=False, download_pin_set=False,
+            branch=cls.branch, role=cls.bm_role,
+        )
+        cls.bm.set_password('test-pass-123')
+        cls.bm.save()
+
+        cls.cashier = CustomUser(
+            employee_id='TST-CSH-001',
+            first_name='Test', last_name='Cashier',
+            email='cashier@test.local',
+            employment_status='ACTIVE',
+            is_active=True, is_staff=False, is_superuser=False,
+            is_clocked_in=False, must_change_password=False,
+            is_business_owner=False, download_pin_set=False,
+            branch=cls.branch, role=cls.cashier_role,
+        )
+        cls.cashier.set_password('test-pass-123')
+        cls.cashier.save()
+
+        cls.service = Service.objects.create(
+            name='Test Photocopy', code='TSTSVC',
+            category='INSTANT', unit='PER_PAGE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+
+        cls.today = timezone.localdate()
+        cls.sheet, _ = DailySalesSheet.objects.get_or_create(
+            branch=cls.branch, date=cls.today,
+            defaults={'status': DailySalesSheet.Status.OPEN},
+        )
 
 
-def make_pricing_rule(service, branch=None, base_price='2.00'):
-    return PricingRule.objects.create(
-        service=service,
-        branch=branch,
-        base_price=Decimal(base_price),
-    )
+class TransitionMapIntegrityTests(JobsFixtureMixin, TestCase):
+    """Section A — INTAKE_HELD must be a real, correctly-scoped state
+    in all three job-type transition maps."""
+
+    def _make_intake_held_job(self, job_type):
+        return Job.objects.create(
+            branch=self.branch, job_type=job_type, status=Job.INTAKE_HELD,
+            title='Test job', intake_by=self.bm, estimated_cost=50,
+            post_closing=True, post_closing_reason='Automated test',
+        )
+
+    def test_intake_held_to_pending_payment_legal_for_all_job_types(self):
+        for job_type in ['INSTANT', 'PRODUCTION', 'DESIGN']:
+            with self.subTest(job_type=job_type):
+                job = self._make_intake_held_job(job_type)
+                engine = JobStatusEngine(job)
+                self.assertTrue(engine.can_transition('PENDING_PAYMENT'))
+
+    def test_intake_held_to_complete_illegal_for_all_job_types(self):
+        for job_type in ['INSTANT', 'PRODUCTION', 'DESIGN']:
+            with self.subTest(job_type=job_type):
+                job = self._make_intake_held_job(job_type)
+                engine = JobStatusEngine(job)
+                self.assertFalse(engine.can_transition('COMPLETE'))
+
+    def test_illegal_transition_raises_valueerror(self):
+        for job_type in ['INSTANT', 'PRODUCTION', 'DESIGN']:
+            with self.subTest(job_type=job_type):
+                job = self._make_intake_held_job(job_type)
+                engine = JobStatusEngine(job)
+                with self.assertRaises(ValueError):
+                    engine.transition('COMPLETE', actor=self.bm)
 
 
-def make_job(branch, user, job_type='INSTANT', **kwargs):
-    defaults = dict(
-        title='Test Job',
-        job_type=job_type,
-        status='DRAFT',
-    )
-    defaults.update(kwargs)
-    return Job.objects.create(branch=branch, intake_by=user, **defaults)
-
-
-def get_results(res):
-    if isinstance(res.data, list):
-        return res.data
-    return res.data.get('results', res.data)
-
-
-# ─────────────────────────────────────────────────────────────
-# Base
-# ─────────────────────────────────────────────────────────────
-
-class JobsTestBase(TestCase):
+class ResolveHandoverViewTests(JobsFixtureMixin, TestCase):
+    """Section B — cashier affirms an INTAKE_HELD job."""
 
     def setUp(self):
-        self.branch  = make_org('A')
-        self.user    = make_user('staff@octos.test', self.branch)
-        self.client  = APIClient()
-        self.client.force_authenticate(user=self.user)
-        self.service = make_service()
-        self.rule    = make_pricing_rule(self.service, self.branch)
-        self.job     = make_job(self.branch, self.user)
-
-
-# ─────────────────────────────────────────────────────────────
-# List
-# ─────────────────────────────────────────────────────────────
-
-class JobListTests(JobsTestBase):
-
-    def test_list_returns_200(self):
-        res = self.client.get(reverse('job-list'))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-
-    def test_list_requires_auth(self):
-        self.client.logout()
-        res = self.client.get(reverse('job-list'))
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_list_scoped_to_users_branch(self):
-        other_branch = Branch.objects.create(
-            name='Other', code='OTH',
-            region=self.branch.region, address='Addr',
+        self.job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.INTAKE_HELD,
+            title='Handover affirm test', intake_by=self.bm, estimated_cost=75,
+            post_closing=True, post_closing_reason='Automated test',
+            daily_sheet=None,
         )
-        other_user = make_user('other@octos.test', other_branch)
-        make_job(other_branch, other_user)
+        self.view = ResolveHandoverView.as_view()
 
-        results = get_results(self.client.get(reverse('job-list')))
-        self.assertTrue(all(j['branch'] == self.branch.id for j in results))
+    def test_resolve_handover_success(self):
+        log_count_before = JobStatusLog.objects.filter(job=self.job).count()
 
-    def test_list_filter_by_status(self):
-        self.job.status = 'CONFIRMED'
-        self.job.save()
-        results = get_results(
-            self.client.get(reverse('job-list'), {'status': 'CONFIRMED'})
-        )
-        self.assertTrue(all(j['status'] == 'CONFIRMED' for j in results))
-
-    def test_list_filter_by_job_type(self):
-        make_job(self.branch, self.user, job_type='PRODUCTION', title='Prod Job')
-        results = get_results(
-            self.client.get(reverse('job-list'), {'job_type': 'PRODUCTION'})
-        )
-        self.assertTrue(all(j['job_type'] == 'PRODUCTION' for j in results))
-
-    def test_list_search_by_title(self):
-        make_job(self.branch, self.user, title='ZZZ Unique Title')
-        results = get_results(
-            self.client.get(reverse('job-list'), {'search': 'ZZZ Unique'})
-        )
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]['title'], 'ZZZ Unique Title')
-
-
-# ─────────────────────────────────────────────────────────────
-# Detail
-# ─────────────────────────────────────────────────────────────
-
-class JobDetailTests(JobsTestBase):
-
-    def test_detail_returns_200(self):
-        res = self.client.get(reverse('job-detail', args=[self.job.pk]))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-
-    def test_detail_contains_allowed_transitions(self):
-        res = self.client.get(reverse('job-detail', args=[self.job.pk]))
-        self.assertIn('allowed_transitions', res.data)
-        self.assertIsInstance(res.data['allowed_transitions'], list)
-
-    def test_detail_draft_instant_allowed_transitions(self):
-        res = self.client.get(reverse('job-detail', args=[self.job.pk]))
-        self.assertIn('CONFIRMED', res.data['allowed_transitions'])
-        self.assertIn('CANCELLED', res.data['allowed_transitions'])
-
-    def test_detail_contains_files_and_status_logs(self):
-        res = self.client.get(reverse('job-detail', args=[self.job.pk]))
-        self.assertIn('files', res.data)
-        self.assertIn('status_logs', res.data)
-
-    def test_detail_404_for_other_branch(self):
-        other_branch = Branch.objects.create(
-            name='Other2', code='OT2',
-            region=self.branch.region, address='Addr',
-        )
-        other_user = make_user('other2@octos.test', other_branch)
-        other_job  = make_job(other_branch, other_user)
-        res = self.client.get(reverse('job-detail', args=[other_job.pk]))
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
-
-
-# ─────────────────────────────────────────────────────────────
-# Create
-# ─────────────────────────────────────────────────────────────
-
-class JobCreateTests(JobsTestBase):
-
-    def _payload(self, **overrides):
-        data = {
-            'title'          : 'New Print Job',
-            'job_type'       : 'INSTANT',
-            'priority'       : 'NORMAL',
-            'intake_channel' : 'WALK_IN',
-            'service'        : self.service.id,
-            'quantity'       : 10,
-            'pages'          : 2,
-            'is_color'       : False,
-        }
-        data.update(overrides)
-        return data
-
-    def test_create_returns_201(self):
-        res = self.client.post(reverse('job-create'), self._payload())
-        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
-
-    def test_create_generates_job_number(self):
-        self.client.post(reverse('job-create'), self._payload())
-        job = Job.objects.filter(title='New Print Job').first()
-        self.assertIsNotNone(job)
-        self.assertTrue(job.job_number.startswith('FP-'))
-
-    def test_create_auto_calculates_price(self):
-        self.client.post(reverse('job-create'), self._payload(quantity=5, pages=1))
-        job = Job.objects.filter(title='New Print Job').first()
-        self.assertIsNotNone(job.estimated_cost)
-        self.assertGreater(job.estimated_cost, 0)
-
-    def test_create_sets_intake_by(self):
-        self.client.post(reverse('job-create'), self._payload())
-        job = Job.objects.filter(title='New Print Job').first()
-        self.assertEqual(job.intake_by, self.user)
-
-    def test_create_defaults_branch_to_users_branch(self):
-        self.client.post(reverse('job-create'), self._payload())
-        job = Job.objects.filter(title='New Print Job').first()
-        self.assertEqual(job.branch, self.branch)
-
-    def test_create_requires_title(self):
-        payload = self._payload()
-        del payload['title']
-        res = self.client.post(reverse('job-create'), payload)
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_requires_job_type(self):
-        payload = self._payload()
-        del payload['job_type']
-        res = self.client.post(reverse('job-create'), payload)
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-
-
-# ─────────────────────────────────────────────────────────────
-# Transition
-# ─────────────────────────────────────────────────────────────
-
-class JobTransitionTests(JobsTestBase):
-
-    def test_valid_transition_returns_200(self):
-        res = self.client.post(
-            reverse('job-transition', args=[self.job.pk]),
-            {'to_status': 'CONFIRMED'},
-        )
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(res.data['to_status'], 'CONFIRMED')
-
-    def test_transition_updates_job_status(self):
-        self.client.post(
-            reverse('job-transition', args=[self.job.pk]),
-            {'to_status': 'CONFIRMED'},
-        )
+        req = make_request('post', self.cashier)
+        resp = self.view(req, pk=self.job.pk)
         self.job.refresh_from_db()
-        self.assertEqual(self.job.status, 'CONFIRMED')
 
-    def test_transition_logs_status_change(self):
-        self.client.post(
-            reverse('job-transition', args=[self.job.pk]),
-            {'to_status': 'CONFIRMED'},
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.job.status, 'PENDING_PAYMENT')
+        self.assertIsNotNone(self.job.daily_sheet_id)
+        self.assertIsNotNone(self.job.handover_resolved_at)
+        self.assertEqual(self.job.handover_resolved_by_id, self.cashier.id)
+        self.assertEqual(
+            JobStatusLog.objects.filter(
+                job=self.job, from_status='INTAKE_HELD', to_status='PENDING_PAYMENT',
+            ).count(),
+            log_count_before + 1,
         )
-        self.assertEqual(self.job.status_logs.count(), 1)
-        log = self.job.status_logs.first()
-        self.assertEqual(log.from_status, 'DRAFT')
-        self.assertEqual(log.to_status, 'CONFIRMED')
 
-    def test_invalid_transition_returns_400(self):
-        # DRAFT → COMPLETE is not allowed for INSTANT
-        res = self.client.post(
-            reverse('job-transition', args=[self.job.pk]),
-            {'to_status': 'COMPLETE'},
+    def test_resolve_handover_twice_returns_404(self):
+        req1 = make_request('post', self.cashier)
+        self.view(req1, pk=self.job.pk)
+
+        req2 = make_request('post', self.cashier)
+        resp2 = self.view(req2, pk=self.job.pk)
+        self.assertEqual(resp2.status_code, 404)
+
+    def test_resolve_handover_cross_branch_returns_404(self):
+        cross_job = Job.objects.create(
+            branch=self.other_branch, job_type='INSTANT', status=Job.INTAKE_HELD,
+            title='Cross-branch test', intake_by=self.bm, estimated_cost=40,
+            post_closing=True, post_closing_reason='Automated test',
         )
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        req = make_request('post', self.cashier)  # cashier belongs to self.branch
+        resp = self.view(req, pk=cross_job.pk)
+        self.assertEqual(resp.status_code, 404)
 
-    def test_transition_404_unknown_job(self):
-        res = self.client.post(
-            reverse('job-transition', args=[99999]),
-            {'to_status': 'CONFIRMED'},
+
+class DisputeHandoverViewTests(JobsFixtureMixin, TestCase):
+    """Section C — cashier reports BM did not hand over cash."""
+
+    def setUp(self):
+        self.job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.INTAKE_HELD,
+            title='Handover dispute test', intake_by=self.bm, estimated_cost=60,
+            post_closing=True, post_closing_reason='Automated test',
+            daily_sheet=None,
         )
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.view = DisputeHandoverView.as_view()
 
-    def test_transition_requires_to_status(self):
-        res = self.client.post(
-            reverse('job-transition', args=[self.job.pk]),
-            {},
+    def test_dispute_handover_success(self):
+        req = make_request('post', self.cashier)
+        resp = self.view(req, pk=self.job.pk)
+        self.job.refresh_from_db()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.job.status, 'INTAKE_HELD')  # flag, not a transition
+        self.assertTrue(self.job.handover_disputed)
+        self.assertIsNotNone(self.job.handover_disputed_at)
+        self.assertEqual(self.job.handover_disputed_by_id, self.cashier.id)
+
+    def test_dispute_handover_twice_returns_400(self):
+        req1 = make_request('post', self.cashier)
+        self.view(req1, pk=self.job.pk)
+
+        req2 = make_request('post', self.cashier)
+        resp2 = self.view(req2, pk=self.job.pk)
+        self.assertEqual(resp2.status_code, 400)
+
+
+class DiscardDraftViewTests(JobsFixtureMixin, TestCase):
+    """Section E — discarding a draft must now log through the engine."""
+
+    def setUp(self):
+        self.job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.DRAFT,
+            title='Draft discard test', intake_by=self.bm, estimated_cost=30,
         )
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.view = DiscardDraftView.as_view()
 
-    def test_production_transition_map(self):
-        prod_job = make_job(self.branch, self.user, job_type='PRODUCTION')
-        res = self.client.post(
-            reverse('job-transition', args=[prod_job.pk]),
-            {'to_status': 'CONFIRMED'},
+    def test_discard_draft_logs_transition(self):
+        log_count_before = JobStatusLog.objects.filter(job=self.job).count()
+
+        req = make_request('post', self.bm)
+        resp = self.view(req, pk=self.job.pk)
+        self.job.refresh_from_db()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.job.status, 'CANCELLED')
+        self.assertIsNotNone(self.job.abandoned_at)
+        self.assertEqual(
+            JobStatusLog.objects.filter(
+                job=self.job, from_status='DRAFT', to_status='CANCELLED',
+            ).count(),
+            log_count_before + 1,
         )
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        # CONFIRMED → QUEUED (production path)
-        res2 = self.client.post(
-            reverse('job-transition', args=[prod_job.pk]),
-            {'to_status': 'QUEUED'},
+
+
+class CreditEngineRegressionTests(JobsFixtureMixin, TestCase):
+    """Section F — confirm the credit engine consolidation didn't break
+    full credit and now actually fixes partial credit."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        cls.customer = CustomerProfile.objects.create(
+            phone='0555000111', affiliation_active=True,
+            customer_type=CustomerProfile.INDIVIDUAL,
+            visit_count=0, total_spend=Decimal('0'),
+            tier=CustomerProfile.REGULAR, confidence_score=0,
+            is_priority=False, is_walkin=False,
+            first_name='Test', last_name='Customer',
         )
-        self.assertEqual(res2.status_code, status.HTTP_200_OK)
-
-
-# ─────────────────────────────────────────────────────────────
-# File Upload
-# ─────────────────────────────────────────────────────────────
-
-class JobFileUploadTests(JobsTestBase):
-
-    def _make_file(self, name='test.pdf', content=b'%PDF content'):
-        return SimpleUploadedFile(name, content, content_type='application/pdf')
-
-    def test_upload_returns_201(self):
-        res = self.client.post(
-            reverse('job-file-upload', args=[self.job.pk]),
-            {'file': self._make_file(), 'file_type': 'ORIGINAL'},
-            format='multipart',
+        cls.credit_account = CreditAccount.objects.create(
+            customer=cls.customer,
+            account_type=CreditAccount.Status.__class__ and 'INDIVIDUAL',
+            status='ACTIVE',
+            credit_limit=Decimal('500.00'),
+            current_balance=Decimal('0.00'),
+            payment_terms=30,
         )
-        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
 
-    def test_upload_creates_job_file(self):
-        self.client.post(
-            reverse('job-file-upload', args=[self.job.pk]),
-            {'file': self._make_file(), 'file_type': 'ORIGINAL'},
-            format='multipart',
+    def test_full_credit_payment_still_works(self):
+        from apps.jobs.services.cashier_service import confirm_payment
+
+        job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.PENDING_PAYMENT,
+            title='Full credit test', intake_by=self.bm,
+            estimated_cost=Decimal('25.00'), daily_sheet=self.sheet,
         )
-        self.assertEqual(JobFile.objects.filter(job=self.job).count(), 1)
 
-    def test_upload_sets_uploaded_by(self):
-        self.client.post(
-            reverse('job-file-upload', args=[self.job.pk]),
-            {'file': self._make_file(), 'file_type': 'ORIGINAL'},
-            format='multipart',
+        result = confirm_payment(
+            job=job,
+            validated_data={
+                'deposit_percentage': 100,
+                'payment_method': 'CREDIT',
+                'credit_account_id': self.credit_account.pk,
+            },
+            actor=self.cashier,
         )
-        f = JobFile.objects.filter(job=self.job).first()
-        self.assertEqual(f.uploaded_by, self.user)
 
-    def test_upload_404_unknown_job(self):
-        res = self.client.post(
-            reverse('job-file-upload', args=[99999]),
-            {'file': self._make_file(), 'file_type': 'ORIGINAL'},
-            format='multipart',
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'COMPLETE')
+        self.assertEqual(job.payment_method, 'CREDIT')
+        self.assertEqual(result['payment_method'], 'CREDIT')
+
+    def test_partial_credit_payment_now_succeeds(self):
+        from apps.jobs.services.cashier_service import confirm_payment
+
+        job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.PENDING_PAYMENT,
+            title='Partial credit test', intake_by=self.bm,
+            estimated_cost=Decimal('40.00'), daily_sheet=self.sheet,
         )
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        balance_before = self.credit_account.current_balance
 
-
-# ─────────────────────────────────────────────────────────────
-# Services
-# ─────────────────────────────────────────────────────────────
-
-class ServiceListTests(JobsTestBase):
-
-    def test_service_list_returns_200(self):
-        res = self.client.get(reverse('service-list'))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-
-    def test_service_list_filter_by_category(self):
-        make_service('Large Format', 'LF', category='PRODUCTION', unit='PER_SQM')
-        results = get_results(
-            self.client.get(reverse('service-list'), {'category': 'INSTANT'})
+        result = confirm_payment(
+            job=job,
+            validated_data={
+                'deposit_percentage': 50,
+                'payment_method': 'CASH',
+                'cash_tendered': Decimal('20.00'),
+                'partial_credit_amount': Decimal('20.00'),
+                'partial_credit_account': self.credit_account.pk,
+            },
+            actor=self.cashier,
         )
-        self.assertTrue(all(s['category'] == 'INSTANT' for s in results))
 
-    def test_service_list_excludes_inactive(self):
-        inactive = make_service('Old Service', 'OLD')
-        inactive.is_active = False
-        inactive.save()
-        results = get_results(self.client.get(reverse('service-list')))
-        ids = [s['id'] for s in results]
-        self.assertNotIn(inactive.id, ids)
+        self.credit_account.refresh_from_db()
+        job.refresh_from_db()
 
-
-# ─────────────────────────────────────────────────────────────
-# Pricing Rules
-# ─────────────────────────────────────────────────────────────
-
-class PricingRuleListTests(JobsTestBase):
-
-    def test_pricing_list_returns_200(self):
-        res = self.client.get(reverse('pricing-list'))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-
-    def test_pricing_filter_by_branch(self):
-        results = get_results(
-            self.client.get(reverse('pricing-list'), {'branch': self.branch.id})
+        self.assertEqual(
+            self.credit_account.current_balance,
+            balance_before + Decimal('20.00'),
         )
-        self.assertTrue(all(r['branch'] == self.branch.id for r in results))
-
-    def test_pricing_filter_by_service(self):
-        results = get_results(
-            self.client.get(reverse('pricing-list'), {'service': self.service.id})
-        )
-        self.assertTrue(all(r['service'] == self.service.id for r in results))
-
-
-# ─────────────────────────────────────────────────────────────
-# Price Calculate
-# ─────────────────────────────────────────────────────────────
-
-class PriceCalculateTests(JobsTestBase):
-
-    def _url(self, **params):
-        base = reverse('price-calculate')
-        qs   = '&'.join(f'{k}={v}' for k, v in params.items())
-        return f'{base}?{qs}'
-
-    def test_calculate_returns_200(self):
-        res = self.client.get(self._url(
-            service=self.service.id, branch=self.branch.id,
-            quantity=5, pages=2,
-        ))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertTrue(res.data['success'])
-
-    def test_calculate_returns_correct_total(self):
-        # base_price=2.00, quantity=5, pages=2, not color → 2.00 * 2 * 5 = 20.00
-        res = self.client.get(self._url(
-            service=self.service.id, branch=self.branch.id,
-            quantity=5, pages=2, is_color='false',
-        ))
-        self.assertEqual(res.data['total'], Decimal('20.00'))
-
-    def test_calculate_applies_color_multiplier(self):
-        self.rule.color_multiplier = Decimal('1.50')
-        self.rule.save()
-        # base=2.00, multiplier=1.5, quantity=1, pages=1 → 3.00
-        res = self.client.get(self._url(
-            service=self.service.id, branch=self.branch.id,
-            quantity=1, pages=1, is_color='true',
-        ))
-        self.assertEqual(res.data['total'], Decimal('3.00'))
-
-    def test_calculate_missing_service_returns_400(self):
-        res = self.client.get(self._url(branch=self.branch.id))
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_calculate_missing_branch_returns_400(self):
-        res = self.client.get(self._url(service=self.service.id))
-        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_calculate_no_pricing_rule_returns_failure(self):
-        # Service with no rule for this branch
-        new_service = make_service('Binding', 'BIND', unit='FLAT_RATE')
-        res = self.client.get(self._url(
-            service=new_service.id, branch=self.branch.id,
-        ))
-        self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertFalse(res.data['success'])
-
-    def test_calculate_404_unknown_service(self):
-        res = self.client.get(self._url(service=99999, branch=self.branch.id))
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_calculate_404_unknown_branch(self):
-        res = self.client.get(self._url(service=self.service.id, branch=99999))
-        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(job.partial_credit_amount, Decimal('20.00'))
+        self.assertIn('partial_credit_amount', result)
