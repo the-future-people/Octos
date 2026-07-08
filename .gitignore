@@ -56,3 +56,6 @@ celerybeat-schedule
 celerybeat-schedule.db
 celerybeat-schedule-shm
 celerybeat-schedule-wal
+
+__pycache__/
+tasks/
