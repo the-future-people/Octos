@@ -693,10 +693,13 @@ class SheetEngine:
                         cashier=cashier,
                     ).first()
 
+                    # Always stage the standard float. Carrying closing cash
+                    # forward would inflate the next day's opening_float, which
+                    # feeds expected_cash in compute_variance() and would show
+                    # the cashier as short by the difference — money she never
+                    # received. The BM physically collects the day's takings and
+                    # hands back a fixed float each morning.
                     opening = self.DEFAULT_FLOAT_AMOUNT
-                    if float_record and float_record.closing_cash:
-                        if float_record.closing_cash > Decimal('0.00'):
-                            opening = float_record.closing_cash
 
                     FloatEngine.stage_float(
                         cashier=cashier,
