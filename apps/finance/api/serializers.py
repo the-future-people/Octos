@@ -402,6 +402,65 @@ class CashierSignOffSerializer(serializers.Serializer):
         return data
 
 
+class StrandedSheetSerializer(serializers.Serializer):
+    """
+    A stranded sheet plus everything the recovery form needs to show
+    before the manager enters anything. Read-only; built by
+    RecoveryService.get_recovery_context().
+    """
+    sheet_id          = serializers.IntegerField()
+    date              = serializers.DateField()
+    cashier_id        = serializers.IntegerField(allow_null=True)
+    cashier_name      = serializers.CharField(allow_null=True)
+    has_float         = serializers.BooleanField()
+    float_id          = serializers.IntegerField(allow_null=True)
+    suggested_opening = serializers.DecimalField(max_digits=10, decimal_places=2)
+    cash_collected    = serializers.DecimalField(max_digits=10, decimal_places=2)
+    petty_cash_out    = serializers.DecimalField(max_digits=10, decimal_places=2)
+    expected_cash     = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_revenue     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    job_count         = serializers.IntegerField()
+
+
+class SheetRecoverySerializer(serializers.Serializer):
+    """
+    A backdated reconciliation for a sheet that was never closed on its
+    own day. Figures come from a physical count agreed with the cashier,
+    not from the system's own totals.
+    """
+    opening_float   = serializers.DecimalField(max_digits=10, decimal_places=2)
+    closing_cash    = serializers.DecimalField(max_digits=10, decimal_places=2)
+    reason          = serializers.CharField()
+    notes           = serializers.CharField()
+    reconciled_with = serializers.IntegerField(
+        help_text='ID of the cashier who physically counted the cash',
+    )
+    variance_notes  = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_opening_float(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Opening float cannot be negative.')
+        return value
+
+    def validate_closing_cash(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Closing cash cannot be negative.')
+        return value
+
+    def validate_notes(self, value):
+        if not value.strip():
+            raise serializers.ValidationError(
+                'An explanation is required for a backdated close.'
+            )
+        return value
+
+    def validate_reason(self, value):
+        from apps.finance.models import DailySalesSheet
+        if value not in DailySalesSheet.RecoveryReason.values:
+            raise serializers.ValidationError('Invalid recovery reason.')
+        return value
+
+
 class ShiftStatusSerializer(serializers.Serializer):
     """Read-only — returned by GET /api/v1/finance/cashier/shift-status/"""
     has_shift         = serializers.BooleanField()

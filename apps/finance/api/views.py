@@ -3747,3 +3747,126 @@ class BranchStatementView(APIView):
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+class StrandedSheetsView(APIView):
+    """
+    GET /api/v1/finance/sheets/stranded/
+
+    Sheets that were never closed on their own day, with everything the
+    recovery form needs. Also reports whether the manager may proceed
+    unaided or whether the backlog has grown past the point where a
+    regional manager must intervene.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.services.recovery_service import RecoveryService
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        gate = RecoveryService.can_recover(branch)
+        sheets = RecoveryService.get_stranded_sheets(branch)
+
+        return Response({
+            'stranded_count' : gate['stranded_count'],
+            'can_recover'    : gate['allowed'],
+            'requires_rm'    : gate['requires_rm'],
+            'max_bm_days'    : RecoveryService.MAX_BM_RECOVERY_DAYS,
+            'sheets'         : [
+                RecoveryService.get_recovery_context(s) for s in sheets
+            ],
+        })
+
+
+class RecoverSheetView(APIView):
+    """
+    POST /api/v1/finance/sheets/<id>/recover/
+
+    Records a backdated reconciliation for a sheet that was never closed
+    on its own day, then closes it — which stages the following day's
+    float and unblocks the next stranded day.
+
+    Restricted to branch managers and above: this writes a financial
+    record for a day that has already passed.
+    """
+    permission_classes = [IsAuthenticated]
+
+    ALLOWED_ROLES = ('BRANCH_MANAGER', 'REGIONAL_MANAGER', 'SUPER_ADMIN')
+
+    def post(self, request, pk):
+        from apps.finance.services.recovery_service import RecoveryService
+        from apps.accounts.models import CustomUser
+        from .serializers import SheetRecoverySerializer
+
+        role = getattr(getattr(request.user, 'role', None), 'name', 'ATTENDANT')
+        if role not in self.ALLOWED_ROLES:
+            return Response(
+                {'detail': 'You do not have permission to recover a sheet.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            sheet = DailySalesSheet.objects.select_related('branch').get(
+                pk=pk, branch=branch,
+            )
+        except DailySalesSheet.DoesNotExist:
+            return Response(
+                {'detail': 'Sheet not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = SheetRecoverySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        try:
+            cashier = CustomUser.objects.get(
+                pk=data['reconciled_with'], branch=branch,
+            )
+        except CustomUser.DoesNotExist:
+            return Response(
+                {'detail': 'Cashier not found at this branch.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        result = RecoveryService.recover_sheet(
+            sheet           = sheet,
+            opening_float   = data['opening_float'],
+            closing_cash    = data['closing_cash'],
+            reason          = data['reason'],
+            notes           = data['notes'],
+            recovered_by    = request.user,
+            reconciled_with = cashier,
+            variance_notes  = data.get('variance_notes', ''),
+        )
+
+        if not result['ok']:
+            return Response(
+                {'detail': result['error']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'sheet_id' : result['sheet'].pk,
+            'date'     : result['sheet'].date,
+            'status'   : result['sheet'].status,
+            'variance' : str(result['variance']),
+            'detail'   : (
+                f"{result['sheet'].date:%d %b} recovered and closed. "
+                f"The following day's float has been staged."
+            ),
+        })

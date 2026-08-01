@@ -9,6 +9,8 @@ from .views import (
     DailySalesSheetNotesView,
     DailySalesSheetCloseView,
     DailySalesSheetSummaryView,
+    StrandedSheetsView,
+    RecoverSheetView,
     CashierFloatSetView,
     CashierFloatCloseView,
     CashierSignOffView,
@@ -82,6 +84,8 @@ urlpatterns = [
     path('sheets/report-disruption/',            ReportMissingDayDisruptionView.as_view(),    name='sheet-report-disruption'),
     path('sheets/<int:pk>/approve-disruption/',  ApproveDisruptionView.as_view(),             name='sheet-approve-disruption'),
     path('sheets/<int:pk>/reject-disruption/',   RejectDisruptionView.as_view(),              name='sheet-reject-disruption'),
+    path('sheets/stranded/',                     StrandedSheetsView.as_view(),                name='sheets-stranded'),
+    path('sheets/<int:pk>/recover/',             RecoverSheetView.as_view(),                  name='sheet-recover'),
 
     # ── Cashier Float ─────────────────────────────────────────────────────────
     path('sheets/<int:pk>/floats/set/',          CashierFloatSetView.as_view(),               name='float-set'),
