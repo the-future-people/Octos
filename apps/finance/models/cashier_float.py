@@ -189,6 +189,31 @@ class CashierFloat(AuditModel):
         ),
     )
 
+    # ── Backdated recovery sign-off ───────────────────────────
+    # Distinct from is_recovery_float above: that flags a float the system
+    # created mid-day because none was staged. These flag a sign-off that
+    # was keyed retrospectively, after the day had already passed, because
+    # the cashier was never presented with the sign-off flow.
+    is_recovery_entry = models.BooleanField(
+        default   = False,
+        help_text = (
+            'True if this sign-off was recorded retrospectively during a '
+            'stranded sheet recovery, rather than by the cashier at end of shift.'
+        ),
+    )
+    reconciled_with = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        null         = True,
+        blank        = True,
+        related_name = 'floats_reconciled',
+        help_text    = (
+            'The cashier who physically counted and confirmed the cash. '
+            'Recorded separately from signed_off_by so a recovery entry can '
+            'never read as a manager unilaterally deciding the till figure.'
+        ),
+    )
+
     # ── Cover shift ───────────────────────────────────────────
     is_cover     = models.BooleanField(default=False)
     covering_for = models.ForeignKey(

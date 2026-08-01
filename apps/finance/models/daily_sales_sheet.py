@@ -48,6 +48,38 @@ class DailySalesSheet(AuditModel):
     )
     closed_at   = models.DateTimeField(null=True, blank=True)
 
+    # ── Stranded sheet recovery ───────────────────────────────
+    # A sheet that could not be closed on its own day (outage, system
+    # failure, oversight) strands every subsequent day, because the next
+    # day's float is only staged during close. These fields record the
+    # backdated reconciliation that unwinds that.
+    class RecoveryReason(models.TextChoices):
+        POWER_OUTAGE    = 'POWER_OUTAGE',    'Power outage'
+        SYSTEM_DOWN     = 'SYSTEM_DOWN',     'System unavailable'
+        NETWORK_FAILURE = 'NETWORK_FAILURE', 'Network failure'
+        NOT_CLOSED      = 'NOT_CLOSED',      'Not closed at end of day'
+        OTHER           = 'OTHER',           'Other'
+
+    recovery_reason = models.CharField(
+        max_length = 20,
+        choices    = RecoveryReason.choices,
+        blank      = True,
+        help_text  = 'Why this sheet could not be closed on its own day',
+    )
+    recovered_at = models.DateTimeField(null=True, blank=True)
+    recovered_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        null         = True,
+        blank        = True,
+        related_name = 'sheets_recovered',
+        help_text    = 'Who keyed the recovery entry — not necessarily who counted the cash',
+    )
+    recovery_notes = models.TextField(
+        blank     = True,
+        help_text = 'Mandatory explanation recorded at recovery',
+    )
+
     # ── Public holiday marker ─────────────────────────────────
     is_public_holiday    = models.BooleanField(default=False)
     public_holiday_name  = models.CharField(max_length=100, blank=True)
