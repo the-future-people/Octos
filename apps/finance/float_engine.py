@@ -103,7 +103,8 @@ class FloatEngine:
 
         logger.info(
             'FloatEngine: staged GHS %s float for %s on %s (set by %s)',
-            amount, cashier.full_name, target_date, set_by.full_name,
+            amount, cashier.full_name, target_date,
+            set_by.full_name if set_by else 'system (auto-close)',
         )
 
         return {'ok': True, 'float': float_record}
