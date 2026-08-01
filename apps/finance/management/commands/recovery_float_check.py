@@ -63,12 +63,25 @@ class Command(BaseCommand):
                 )
                 continue
 
-            # Create recovery float
+            # Create recovery float.
+            #
+            # opening_float uses the branch standard rather than 0: the
+            # cashier physically holds a float regardless of whether the
+            # system recorded one, and expected_cash is computed as
+            # opening_float + cash_collected - petty_cash_out. Recording 0
+            # here would understate expected cash and show the cashier as
+            # holding a surplus she never received.
+            #
+            # float_set_by stays None — no human staged this float, and
+            # attributing it to the cashier would contradict the rule that
+            # a cashier never sets their own float.
+            from apps.finance.sheet_engine import SheetEngine
+
             CashierFloat.objects.create(
                 daily_sheet             = sheet,
                 cashier                 = cashier_user,
-                float_set_by            = cashier_user,
-                opening_float           = 0,
+                float_set_by            = None,
+                opening_float           = SheetEngine.DEFAULT_FLOAT_AMOUNT,
                 scheduled_date          = today,
                 morning_acknowledged    = True,
                 morning_acknowledged_at = now,
@@ -76,6 +89,8 @@ class Command(BaseCommand):
                 shift_notes             = (
                     f'Recovery float auto-created at {now.strftime("%H:%M")} '
                     f'by system — no float was staged for this shift. '
+                    f'Opening float assumed to be the branch standard; '
+                    f'BM should verify against the physical count. '
                     f'Branch may have experienced a delayed start or disruption.'
                 ),
             )
