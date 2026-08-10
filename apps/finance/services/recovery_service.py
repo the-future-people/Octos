@@ -52,17 +52,31 @@ class RecoveryService:
 
         return [s for s in sheets if s.date.weekday() != 6]
 
+    # Roles the day-ceiling does not apply to. The ceiling exists to stop a
+    # branch quietly accumulating backdated entries; it is not meant to bind
+    # the people the escalation summons. Without this, a backlog past the
+    # ceiling could not be cleared by anyone at all.
+    UNRESTRICTED_ROLES = ('REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN')
+
     @classmethod
-    def can_recover(cls, branch) -> dict:
+    def can_recover(cls, branch, actor=None) -> dict:
         """
-        Whether the branch manager may recover unaided.
+        Whether the given actor may recover unaided.
+
+        A branch manager is capped at MAX_BM_RECOVERY_DAYS. Regional
+        managers and above are not — they are who the cap escalates to.
 
         Returns:
             {'allowed': bool, 'stranded_count': int, 'requires_rm': bool}
         """
         stranded = cls.get_stranded_sheets(branch)
         count = len(stranded)
-        requires_rm = count > cls.MAX_BM_RECOVERY_DAYS
+
+        role = getattr(getattr(actor, 'role', None), 'name', None)
+        unrestricted = role in cls.UNRESTRICTED_ROLES
+
+        over_ceiling = count > cls.MAX_BM_RECOVERY_DAYS
+        requires_rm  = over_ceiling and not unrestricted
 
         return {
             'allowed'        : count > 0 and not requires_rm,
@@ -194,7 +208,7 @@ class RecoveryService:
         if reason not in DailySalesSheet.RecoveryReason.values:
             return {'ok': False, 'error': 'Invalid recovery reason.'}
 
-        gate = cls.can_recover(sheet.branch)
+        gate = cls.can_recover(sheet.branch, actor=recovered_by)
         if gate['requires_rm']:
             return {
                 'ok': False,

@@ -3769,7 +3769,7 @@ class StrandedSheetsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        gate = RecoveryService.can_recover(branch)
+        gate = RecoveryService.can_recover(branch, actor=request.user)
         sheets = RecoveryService.get_stranded_sheets(branch)
 
         return Response({

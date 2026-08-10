@@ -147,6 +147,44 @@ class StrandedSheetDetectionTests(RecoveryFixtureMixin, TestCase):
         self.assertTrue(gate['requires_rm'])
         self.assertEqual(gate['stranded_count'], 3)
 
+    def test_regional_manager_is_not_bound_by_the_ceiling(self):
+        """
+        The ceiling escalates to an RM, so it cannot also bind them —
+        otherwise a backlog past the limit could not be cleared by anyone.
+        """
+        rm_role = Role.objects.create(
+            name='REGIONAL_MANAGER', display_name='Regional Manager',
+            is_constrained=False, scope='REGION',
+        )
+        rm = CustomUser(
+            employee_id='RTB-RM-001',
+            first_name='Test', last_name='Regional',
+            email='rm@recovery.test',
+            employment_status='ACTIVE', is_active=True,
+            branch=self.branch, role=rm_role,
+        )
+        rm.set_password('test-pass-123')
+        rm.save()
+
+        self.make_sheet(days_ago=2)
+        self.make_sheet(days_ago=3)
+        self.make_sheet(days_ago=4)
+
+        bm_gate = RecoveryService.can_recover(self.branch, actor=self.bm)
+        rm_gate = RecoveryService.can_recover(self.branch, actor=rm)
+
+        self.assertTrue(bm_gate['requires_rm'])
+        self.assertFalse(bm_gate['allowed'])
+        self.assertFalse(rm_gate['requires_rm'])
+        self.assertTrue(rm_gate['allowed'])
+
+    def test_manager_may_recover_within_ceiling_when_actor_given(self):
+        self.make_sheet(days_ago=2)
+        self.make_sheet(days_ago=3)
+        gate = RecoveryService.can_recover(self.branch, actor=self.bm)
+        self.assertTrue(gate['allowed'])
+        self.assertFalse(gate['requires_rm'])
+
     def test_nothing_stranded_means_nothing_to_allow(self):
         gate = RecoveryService.can_recover(self.branch)
         self.assertFalse(gate['allowed'])
