@@ -1,5 +1,6 @@
 # apps/customers/selectors.py
-from django.db.models import QuerySet, Q
+from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
+from django.db.models.functions import Greatest
 from django.contrib.postgres.search import TrigramSimilarity
 
 from apps.customers.models import CustomerProfile, CustomerEditLog
@@ -76,7 +77,18 @@ def search_customers(*, query: str, limit: int = 10) -> QuerySet:
         if phone_qs.exists():
             return phone_qs
 
-    # Name path — trigram similarity across all name fields
+    # Name path — trigram similarity across all name fields.
+    #
+    # Ranking is by the best score of the three, not first name then the
+    # others in turn. Ordering by '-sim_first', '-sim_last', '-sim_company'
+    # sorts almost entirely on first name, since the later fields only ever
+    # break ties on the earlier one: searching a company name put records
+    # scoring 0.1 on first name above an exact 1.0 company match, which then
+    # fell outside the result limit and appeared to be missing entirely.
+    #
+    # A substring match is also promoted above any fuzzy score. Someone who
+    # types a name they know exists is telling us more than a trigram
+    # coefficient can, and should not be ranked beneath approximations of it.
     qs = (
         CustomerProfile.objects
         .select_related('preferred_branch')
@@ -85,15 +97,23 @@ def search_customers(*, query: str, limit: int = 10) -> QuerySet:
             sim_last    = TrigramSimilarity('last_name',    query),
             sim_company = TrigramSimilarity('company_name', query),
         )
-        .filter(
-            Q(sim_first__gt=0.1) |
-            Q(sim_last__gt=0.1)  |
-            Q(sim_company__gt=0.1) |
-            Q(first_name__icontains=query) |
-            Q(last_name__icontains=query)  |
-            Q(company_name__icontains=query)
+        .annotate(
+            relevance = Greatest('sim_first', 'sim_last', 'sim_company'),
+            exact_match = Case(
+                When(
+                    Q(first_name__icontains=query) |
+                    Q(last_name__icontains=query)  |
+                    Q(company_name__icontains=query),
+                    then=Value(1),
+                ),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
         )
-        .order_by('-sim_first', '-sim_last', '-sim_company')
+        .filter(
+            Q(relevance__gt=0.1) | Q(exact_match=1)
+        )
+        .order_by('-exact_match', '-relevance')
     )
 
     return qs[:limit]
