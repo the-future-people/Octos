@@ -161,6 +161,16 @@ def _price_line_items(
         sets = int(item.get('sets', 1))
         is_color = bool(item.get('is_color', False))
 
+        # Conditional services price entirely from their tiers — a passport
+        # photo without output_mode, or a binding without ring_size, matches
+        # no tier and returns success=False with a total of 0.00. These were
+        # being dropped here, so every such late job was recorded as free.
+        condition_params = {}
+        if item.get('output_mode'):
+            condition_params['output_mode'] = item['output_mode']
+        if item.get('ring_size'):
+            condition_params['ring_size'] = int(item['ring_size'])
+
         try:
             pricing = PricingEngine.get_price(
                 service=svc,
@@ -168,12 +178,21 @@ def _price_line_items(
                 quantity=sets,
                 is_color=is_color,
                 pages=pg,
+                condition_params=condition_params or None,
             )
-            
+
             if not pricing or 'total' not in pricing:
                 errors.append(f'Failed to calculate price for {svc.name}.')
                 continue
-                
+
+            # The engine reports why it could not price something. Taking the
+            # total regardless turned that report into a job worth nothing.
+            if not pricing.get('success'):
+                errors.append(
+                    pricing.get('error') or f'Could not price {svc.name}.'
+                )
+                continue
+
             line_total = Decimal(str(pricing.get('total', 0)))
             unit_price = Decimal(str(pricing.get('base_price', 0)))
             

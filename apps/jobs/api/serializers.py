@@ -373,8 +373,19 @@ class JobCreateSerializer(serializers.ModelSerializer):
                     pages            = pg,
                     condition_params = condition_params or None,
                 )
-                unit_price = float(pricing.get('base_price', pricing.get('total', 0))) if pricing['success'] else 0
-                line_total = float(pricing['total']) if pricing['success'] else 0
+                # A pricing failure must not become a zero-priced job. The
+                # engine already reports what went wrong — usually a missing
+                # condition, such as a passport photo arriving without its
+                # output_mode — and defaulting to 0 turned that into real work
+                # recorded as free.
+                if not pricing['success']:
+                    raise serializers.ValidationError(
+                        pricing.get('error')
+                        or f"Could not price {svc.name}. Check the service's pricing rules."
+                    )
+
+                unit_price = float(pricing.get('base_price', pricing.get('total', 0)))
+                line_total = float(pricing['total'])
                 total     += line_total
 
                 priced_items.append({
@@ -405,8 +416,12 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 is_color = is_color,
                 pages    = pages,
             )
-            if pricing['success']:
-                validated_data['estimated_cost'] = pricing['total']
+            if not pricing['success']:
+                raise serializers.ValidationError(
+                    pricing.get('error')
+                    or f"Could not price {service.name}. Check the service's pricing rules."
+                )
+            validated_data['estimated_cost'] = pricing['total']
             priced_items = None
 
         # ── Status ────────────────────────────────────────────
@@ -453,8 +468,8 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 quantity   = quantity,
                 pages      = pages,
                 is_color   = is_color,
-                unit_price = pricing['base_price'] if pricing['success'] else 0,
-                line_total = pricing['total']      if pricing['success'] else 0,
+                unit_price = pricing['base_price'],
+                line_total = pricing['total'],
                 position   = 0,
             )
 
