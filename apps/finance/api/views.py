@@ -3878,3 +3878,40 @@ class RecoverSheetView(APIView):
                 f"The following day's float has been staged."
             ),
         })
+
+class WalletBalanceListView(APIView):
+    """
+    GET /api/v1/finance/wallets/
+
+    Customers currently holding wallet credit at this branch. Read-only:
+    wallet credit is redeemable against a job at the counter and never
+    paid out, so there is nothing for a cashier to action here — it exists
+    so she can see, for the customer in front of her, that money is waiting.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.customers.models import CustomerProfile
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response(
+                {'detail': 'No branch assigned.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        holders = CustomerProfile.objects.filter(
+            wallet_balance__gt=0,
+        ).order_by('-wallet_balance')
+
+        return Response([
+            {
+                'customer_id'  : c.pk,
+                'name'         : c.full_name,
+                'phone'        : c.phone,
+                'company_name' : c.company_name,
+                'balance'      : str(c.wallet_balance),
+                'last_activity': c.wallet_last_activity_at,
+            }
+            for c in holders
+        ])

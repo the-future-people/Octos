@@ -39,6 +39,7 @@ from .views import (
     InvoiceSendView,
     InvoicePDFView,
     CashierReceiptListView,
+    WalletBalanceListView,
     WeeklyReportListView,
     WeeklyReportDetailView,
     WeeklyReportPrepareView,
@@ -100,6 +101,7 @@ urlpatterns = [
     path('cashier/shift-status/',                CashierShiftStatusView.as_view(),            name='cashier-shift-status'),
     path('cashier/history/',                     CashierHistoryView.as_view(),                name='cashier-history'),
     path('cashier/receipts/',                    CashierReceiptListView.as_view(),            name='cashier-receipts'),
+    path('wallets/',                             WalletBalanceListView.as_view(),             name='wallet-list'),
 
     # ── POS Transactions ──────────────────────────────────────────────────────
     path('pos/',                                 POSTransactionListView.as_view(),            name='pos-list'),
