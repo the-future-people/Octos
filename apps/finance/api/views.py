@@ -1134,10 +1134,18 @@ class CashierReceiptListView(generics.ListAPIView):
         from datetime import timedelta
 
         user = self.request.user
+        # line_items is a reverse relation and intake_by is a second hop
+        # through job — neither is covered by select_related('job'), so each
+        # receipt was firing two extra queries. A month view meant well over
+        # a thousand round trips to render ten rows.
         qs = Receipt.objects.filter(
             cashier=user,
             is_void=False,
-        ).select_related('job', 'daily_sheet').order_by('-created_at')
+        ).select_related(
+            'job', 'job__intake_by', 'cashier', 'daily_sheet',
+        ).prefetch_related(
+            'job__line_items__service',
+        ).order_by('-created_at')
 
         period = self.request.query_params.get('period')
         date_param = self.request.query_params.get('date')
