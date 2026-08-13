@@ -39,6 +39,9 @@ PERMISSIONS = [
     # Design
     ('can_manage_design_jobs', 'Access and manage design jobs'),
 
+    # Production floor
+    ('can_manage_production', 'Move jobs through production stages and halt work'),
+
     # Notifications
     ('can_view_notifications', 'View system notifications'),
 
@@ -169,6 +172,17 @@ ROLES = [
         'permissions': [
             'can_confirm_payment',
             'can_update_job_status',
+            'can_view_notifications',
+        ],
+    },
+    {
+        'name': 'FLOW_COORDINATOR',
+        'display_name': 'Flow Coordinator',
+        'permissions': [
+            'can_manage_production',
+            'can_update_job_status',
+            'can_view_all_jobs',
+            'can_manage_inventory',
             'can_view_notifications',
         ],
     },
