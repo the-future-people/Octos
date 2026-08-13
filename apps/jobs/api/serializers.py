@@ -64,7 +64,7 @@ class JobStatusLogSerializer(serializers.ModelSerializer):
     class Meta:
         model  = JobStatusLog
         fields = [
-            'id', 'from_status', 'to_status',
+            'id', 'axis', 'from_status', 'to_status',
             'actor', 'actor_name', 'notes', 'transitioned_at',
         ]
 
@@ -149,6 +149,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'customer', 'customer_credit', 'customer_wallet_balance',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
+            'payment_state', 'work_state', 'handover_state',
         ]
 
     def get_customer_name(self, obj):
@@ -203,6 +204,8 @@ class JobDetailSerializer(serializers.ModelSerializer):
     deposit_due         = serializers.SerializerMethodField()
     line_items          = JobLineItemSerializer(many=True, read_only=True)
     computed_total      = serializers.SerializerMethodField()
+    active_halt         = serializers.SerializerMethodField()
+    allowed_axis_moves  = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
@@ -216,6 +219,8 @@ class JobDetailSerializer(serializers.ModelSerializer):
             'deadline', 'is_routed', 'routing_reason', 'notes',
             'files', 'status_logs', 'allowed_transitions',
             'line_items', 'computed_total',
+            'payment_state', 'work_state', 'handover_state',
+            'handed_over_at', 'active_halt', 'allowed_axis_moves',
             'created_at', 'updated_at',
         ]
 
@@ -242,6 +247,36 @@ class JobDetailSerializer(serializers.ModelSerializer):
 
     def get_computed_total(self, obj):
         return str(obj.computed_total)
+
+    def get_active_halt(self, obj):
+        halt = obj.halts.filter(resumed_at__isnull=True).first()
+        if not halt:
+            return None
+        return {
+            'id'                 : halt.id,
+            'reason'             : halt.reason,
+            'reason_display'     : halt.get_reason_display(),
+            'note'               : halt.note,
+            'work_state_at_halt' : halt.work_state_at_halt,
+            'halted_at'          : halt.halted_at.isoformat(),
+            'halted_by'          : halt.halted_by.full_name if halt.halted_by else None,
+        }
+
+    def get_allowed_axis_moves(self, obj):
+        """
+        What this actor may do next on each axis. Drives which buttons the
+        coordinator, cashier and attendant portals render — an empty list
+        means the actor does not own that axis, or nothing is legal yet.
+        """
+        from apps.jobs.status_engine import JobStatusEngine
+        request = self.context.get('request')
+        actor   = request.user if request else None
+        engine  = JobStatusEngine(obj)
+        return {
+            'payment'  : engine.get_allowed_axis_moves('PAYMENT', actor=actor),
+            'work'     : engine.get_allowed_axis_moves('WORK', actor=actor),
+            'handover' : engine.get_allowed_axis_moves('HANDOVER', actor=actor),
+        }
 
 
 # ─────────────────────────────────────────────────────────────
