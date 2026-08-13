@@ -1,4 +1,5 @@
 from .job import Job
+from .job_halt import JobHalt
 from .job_file import JobFile
 from .job_line_item import JobLineItem
 from .service import Service
@@ -8,6 +9,7 @@ from .proforma_invoice import ProformaInvoice
 
 __all__ = [
     'Job',
+    'JobHalt',
     'JobFile',
     'JobLineItem',
     'Service',

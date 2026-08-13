@@ -49,6 +49,31 @@ class Job(AuditModel):
     QUEUED             = 'QUEUED'
     READY_FOR_PAYMENT  = 'READY_FOR_PAYMENT'
 
+    # ── Lifecycle axes ────────────────────────────────────────
+    # Three independent facts that the single `status` field cannot express
+    # together: where the money is, where the physical work is, and whether
+    # the customer has it. A job can be part-paid, still in production and
+    # awaiting collection — one value cannot say that.
+    #
+    # `status` is retained and kept in sync while readers are migrated across.
+
+    class Payment(models.TextChoices):
+        UNPAID       = 'UNPAID',       'Unpaid'
+        DEPOSIT_PAID = 'DEPOSIT_PAID', 'Deposit paid'
+        SETTLED      = 'SETTLED',      'Settled'
+
+    class Work(models.TextChoices):
+        RECEIVED      = 'RECEIVED',      'Received'
+        IN_PRODUCTION = 'IN_PRODUCTION', 'In production'
+        FINISHING     = 'FINISHING',     'Finishing'
+        QUALITY_CHECK = 'QUALITY_CHECK', 'Quality check'
+        DONE          = 'DONE',          'Done'
+
+    class Handover(models.TextChoices):
+        AWAITING_COLLECTION = 'AWAITING_COLLECTION', 'Awaiting collection'
+        OUT_FOR_DELIVERY    = 'OUT_FOR_DELIVERY',    'Out for delivery'
+        HANDED_OVER         = 'HANDED_OVER',         'Handed over'
+
     STATUS_CHOICES = [
         # Active statuses
         (DRAFT,              'Draft'),
@@ -125,6 +150,39 @@ class Job(AuditModel):
     job_number = models.CharField(max_length=30, unique=True, blank=True)
     job_type   = models.CharField(max_length=20, choices=JOB_TYPE_CHOICES)
     status     = models.CharField(max_length=30, choices=STATUS_CHOICES, default=DRAFT)
+
+    # Owned by the cashier — the only point at which money enters.
+    payment_state = models.CharField(
+        max_length = 20,
+        choices    = Payment.choices,
+        default    = Payment.UNPAID,
+        db_index   = True,
+    )
+    # Owned by the flow coordinator, who never meets a customer.
+    # Instant jobs use only RECEIVED and DONE.
+    work_state = models.CharField(
+        max_length = 20,
+        choices    = Work.choices,
+        default    = Work.RECEIVED,
+        db_index   = True,
+    )
+    # Owned by the attendant, the only customer-facing surface.
+    # An attendant can never release a job that is not SETTLED, unless the
+    # balance has been placed on a credit account by the cashier.
+    handover_state = models.CharField(
+        max_length = 20,
+        choices    = Handover.choices,
+        default    = Handover.AWAITING_COLLECTION,
+        db_index   = True,
+    )
+    handed_over_at = models.DateTimeField(null=True, blank=True)
+    handed_over_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.SET_NULL,
+        null         = True,
+        blank        = True,
+        related_name = 'jobs_handed_over',
+    )
     priority   = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default=NORMAL)
 
     # ── Branches ─────────────────────────────────────────────────
