@@ -15,6 +15,7 @@ from .serializers import (
     JobListSerializer, JobDetailSerializer, JobCreateSerializer,
     JobTransitionSerializer, JobRouteSerializer, JobFileUploadSerializer,
     ServiceSerializer, PricingRuleSerializer, CashierPaymentSerializer,
+    JobAxisMoveSerializer, JobHaltSerializer,
 )
 
 
@@ -87,7 +88,7 @@ class JobDetailView(generics.RetrieveAPIView):
         user = self.request.user
         qs   = Job.objects.select_related(
             'branch', 'assigned_to', 'customer', 'intake_by'
-        ).prefetch_related('files', 'status_logs')
+        ).prefetch_related('files', 'status_logs', 'halts')
 
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)
@@ -155,6 +156,158 @@ class JobTransitionView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class JobAxisMoveView(APIView):
+    """
+    POST /api/v1/jobs/<id>/move/
+    Body: { axis: PAYMENT|WORK|HANDOVER, to_state, notes? }
+
+    Moves one lifecycle axis. Ownership and cross-axis rules are enforced
+    inside the engine: the cashier owns payment, the coordinator owns work,
+    the attendant owns handover, and an attendant can never release an
+    unpaid job.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.core.finance_scope import get_branch_scope
+        from apps.core.broadcast import broadcast_invalidation
+
+        scope = get_branch_scope(request.user)
+        allowed_branch_ids = Branch.objects.filter(
+            scope['branch_filter']
+        ).values_list('pk', flat=True)
+
+        try:
+            job = Job.objects.get(pk=pk, branch_id__in=allowed_branch_ids)
+        except Job.DoesNotExist:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        serializer = JobAxisMoveSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        axis   = serializer.validated_data['axis']
+        engine = JobStatusEngine(job)
+        method = {
+            'PAYMENT'  : engine.move_payment,
+            'WORK'     : engine.move_work,
+            'HANDOVER' : engine.move_handover,
+        }[axis]
+
+        try:
+            result = method(
+                serializer.validated_data['to_state'],
+                request.user,
+                serializer.validated_data.get('notes', ''),
+            )
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(job.branch.id, [
+            'jobs', 'job-detail', 'jobStats', 'recentJobs',
+            'paymentQueue', 'productionQueue', 'collectionQueue',
+            'attendant-my-jobs', 'attendant-my-jobs-recent',
+        ])
+        return Response(result)
+
+
+class JobHaltView(APIView):
+    """
+    POST /api/v1/jobs/<id>/halt/
+    Body: { reason, note? }
+
+    Stops work without losing the stage the job was in.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.core.finance_scope import get_branch_scope
+        from apps.core.broadcast import broadcast_invalidation
+
+        scope = get_branch_scope(request.user)
+        allowed_branch_ids = Branch.objects.filter(
+            scope['branch_filter']
+        ).values_list('pk', flat=True)
+
+        try:
+            job = Job.objects.get(pk=pk, branch_id__in=allowed_branch_ids)
+        except Job.DoesNotExist:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        serializer = JobHaltSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            halt = JobStatusEngine(job).halt(
+                reason = serializer.validated_data['reason'],
+                actor  = request.user,
+                note   = serializer.validated_data.get('note', ''),
+            )
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(job.branch.id, [
+            'jobs', 'job-detail', 'jobStats', 'productionQueue',
+        ])
+        return Response({
+            'success'            : True,
+            'halt_id'            : halt.id,
+            'job_number'         : job.job_number,
+            'reason'             : halt.reason,
+            'work_state_at_halt' : halt.work_state_at_halt,
+            'halted_at'          : halt.halted_at.isoformat(),
+        }, status=status.HTTP_201_CREATED)
+
+
+class JobResumeView(APIView):
+    """
+    POST /api/v1/jobs/<id>/resume/
+    Closes the active halt. The work state was never overwritten, so the
+    job picks up exactly where it stopped.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.core.finance_scope import get_branch_scope
+        from apps.core.broadcast import broadcast_invalidation
+
+        scope = get_branch_scope(request.user)
+        allowed_branch_ids = Branch.objects.filter(
+            scope['branch_filter']
+        ).values_list('pk', flat=True)
+
+        try:
+            job = Job.objects.get(pk=pk, branch_id__in=allowed_branch_ids)
+        except Job.DoesNotExist:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            halt = JobStatusEngine(job).resume(actor=request.user)
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(job.branch.id, [
+            'jobs', 'job-detail', 'jobStats', 'productionQueue',
+        ])
+        return Response({
+            'success'    : True,
+            'halt_id'    : halt.id,
+            'job_number' : job.job_number,
+            'work_state' : job.work_state,
+            'resumed_at' : halt.resumed_at.isoformat(),
+        })
 
 
 # ─────────────────────────────────────────────────────────────────────────────

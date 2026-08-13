@@ -12,6 +12,11 @@ urlpatterns = [
     path('<int:pk>/transition/', views.JobTransitionView.as_view(),  name='job-transition'),
     path('<int:pk>/files/',      views.JobFileUploadView.as_view(),  name='job-file-upload'),
 
+    # Lifecycle axes
+    path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),
+    path('<int:pk>/halt/',   views.JobHaltView.as_view(),     name='job-halt'),
+    path('<int:pk>/resume/', views.JobResumeView.as_view(),   name='job-resume'),
+
     # Routing
     path('<int:pk>/route/suggest/', views.JobRouteSuggestView.as_view(),  name='job-route-suggest'),
     path('<int:pk>/route/confirm/', views.JobRouteConfirmView.as_view(),  name='job-route-confirm'),

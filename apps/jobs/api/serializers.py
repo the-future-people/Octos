@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from apps.jobs.models import Job, JobFile, JobLineItem, Service, PricingRule, JobStatusLog
+from apps.jobs.models import (
+    Job, JobFile, JobLineItem, Service, PricingRule, JobStatusLog, JobHalt,
+)
+from apps.jobs.models.job_halt import JobHalt
 from apps.jobs.pricing_engine import PricingEngine
 
 
@@ -518,6 +521,27 @@ class JobCreateSerializer(serializers.ModelSerializer):
 class JobTransitionSerializer(serializers.Serializer):
     to_status = serializers.CharField()
     notes     = serializers.CharField(required=False, allow_blank=True)
+
+
+class JobAxisMoveSerializer(serializers.Serializer):
+    """
+    One move on one lifecycle axis. Deliberately does not validate
+    to_state against a list here — legal next states depend on the job's
+    current state and job_type, which the engine already owns. Validating
+    in two places invites the two lists drifting apart.
+    """
+    axis     = serializers.ChoiceField(choices=['PAYMENT', 'WORK', 'HANDOVER'])
+    to_state = serializers.CharField()
+    notes    = serializers.CharField(required=False, allow_blank=True)
+
+
+class JobHaltSerializer(serializers.Serializer):
+    reason = serializers.ChoiceField(
+        choices=[c[0] for c in JobHalt.Reason.choices]
+    )
+    # Optional by design — a mandatory note becomes ritual, the same text
+    # typed every time, and tells you less than the reason code alone.
+    note = serializers.CharField(required=False, allow_blank=True)
 
 
 class JobRouteSerializer(serializers.Serializer):
