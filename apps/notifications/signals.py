@@ -21,34 +21,12 @@ def _wire_job_signals():
     try:
         from apps.jobs.models import Job, JobStatusLog
 
-        @receiver(post_save, sender=Job, dispatch_uid='notif_job_created')
-        def on_job_created(sender, instance, created, **kwargs):
-            if not created:
-                return
-            recipients = _branch_managers(instance.branch)
-            notify_many(
-                recipients=recipients,
-                verb='job_created',
-                message=f'New job created: {instance.title or instance.job_number}',
-                link='/portal/jobs/',
-            )
+        # Job creation and routine status movement are deliberately NOT notified.
+        # At branch volume this is hundreds of events a day; the Jobs portal
+        # carries live counters per lifecycle axis instead.
+        # Exceptions only (halts, failures) will be wired here later.
 
-        @receiver(post_save, sender=JobStatusLog, dispatch_uid='notif_job_status')
-        def on_job_status_changed(sender, instance, created, **kwargs):
-            if not created:
-                return
-            job        = instance.job
-            recipients = _branch_managers(job.branch)
-            notify_many(
-                recipients=recipients,
-                verb='job_status_changed',
-                message=(
-                    f'Job {job.job_number or job.title} '
-                    f'moved to {instance.to_status}'
-                ),
-                link='/portal/jobs/',
-                actor=instance.actor,
-            )
+        return
 
     except Exception as exc:
         logger.warning('Could not wire job signals: %s', exc)
@@ -114,7 +92,7 @@ def _branch_managers(branch):
             User.objects.filter(
                 branch=branch,
                 is_active=True,
-                role__name__icontains='branch manager',
+                role__name='BRANCH_MANAGER',
             )
         )
     except Exception:
