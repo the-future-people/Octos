@@ -293,6 +293,71 @@ class JobStatusEngine:
 
         return [s for s in raw if not self._cross_axis_block(axis, s)]
 
+    # ── Halts ────────────────────────────────────────────────────
+
+    @transaction.atomic
+    def halt(self, reason, actor, note=''):
+        """
+        Stop work on a job. A halt is a condition, not a place — the work
+        state is left exactly as it is, so resuming restores the stage the
+        job was actually in rather than a remembered guess.
+
+        The Coordinator halts and resumes freely: they are closest to the
+        work, and requiring permission means jobs sit idle.
+        """
+        from apps.jobs.models import JobHalt
+
+        if not self._may_move_axis('WORK', actor):
+            raise PermissionError(
+                f"{actor.full_name or actor.email} cannot halt "
+                f"{self.job.job_number}."
+            )
+
+        if self.active_halt():
+            raise ValueError(f"{self.job.job_number} is already halted.")
+
+        if self.job.work_state == 'DONE':
+            raise ValueError(
+                f"{self.job.job_number} is already finished — nothing to halt."
+            )
+
+        return JobHalt.objects.create(
+            job                = self.job,
+            reason             = reason,
+            note               = note,
+            work_state_at_halt = self.job.work_state,
+            halted_by          = actor,
+        )
+
+    @transaction.atomic
+    def resume(self, actor):
+        """
+        Resume the active halt. The work state was never overwritten, so
+        there is nothing to restore — closing the record is the whole
+        operation.
+        """
+        if not self._may_move_axis('WORK', actor):
+            raise PermissionError(
+                f"{actor.full_name or actor.email} cannot resume "
+                f"{self.job.job_number}."
+            )
+
+        halt = self.active_halt()
+        if not halt:
+            raise ValueError(f"{self.job.job_number} is not halted.")
+
+        halt.resumed_at = timezone.now()
+        halt.resumed_by = actor
+        halt.save(update_fields=['resumed_at', 'resumed_by', 'updated_at'])
+        return halt
+
+    def active_halt(self):
+        """The open halt on this job, or None."""
+        return self.job.halts.filter(resumed_at__isnull=True).first()
+
+    def is_halted(self) -> bool:
+        return self.active_halt() is not None
+
     # ── Core axis transition ─────────────────────────────────────
 
     @transaction.atomic
@@ -315,6 +380,15 @@ class JobStatusEngine:
             raise ValueError(
                 f"Cannot move {self.job.job_number} {axis.lower()} "
                 f"from '{from_state}' to '{to_state}'. Allowed: {allowed}"
+            )
+
+        # Guard: a halted job cannot move on the work axis. Payment and
+        # handover are unaffected — a customer can still settle a balance
+        # while the machine is down.
+        if axis == 'WORK' and self.is_halted():
+            raise ValueError(
+                f"{self.job.job_number} is halted. Resume it before "
+                f"moving the work forward."
             )
 
         # Guard: cross-axis rules
