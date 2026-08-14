@@ -103,6 +103,9 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     result['balance_due']        = str(job.balance_due) if job.balance_due else '0.00'
     result['payment_method']     = payment_method
 
+    # ── Lifecycle axes ────────────────────────────────────────────────
+    _apply_payment_axes(job, actor)
+
     # ── Issue receipt ─────────────────────────────────────────────────
     _issue_receipt(job, validated_data, actor, payment_method, split_legs, amount_paid, result)
 
@@ -121,6 +124,82 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     return result
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+def _apply_payment_axes(job, actor):
+    """
+    Writes the lifecycle axes after a payment lands.
+
+    Payment state reads amounts, never the deposit percentage — a 100%
+    tier on a job whose cost later changed is not evidence of settlement.
+    This mirrors the backfill migration's rule exactly.
+
+    Instant work is finished before the cashier ever sees it and the
+    customer leaves with it in hand, so a counter sale closes all three
+    axes at once: SETTLED / DONE / HANDED_OVER. Production and design
+    jobs move their work and handover axes elsewhere, by the people who
+    own them.
+    """
+    from django.utils import timezone
+    from apps.jobs.models import JobStatusLog
+
+    paid = job.amount_paid or Decimal('0')
+    cost = job.estimated_cost or Decimal('0')
+
+    if cost > 0 and paid >= cost:
+        payment_state = 'SETTLED'
+    elif paid > 0:
+        payment_state = 'DEPOSIT_PAID'
+    else:
+        payment_state = 'UNPAID'
+
+    fields = []
+    now    = timezone.now()
+
+    if job.payment_state != payment_state:
+        JobStatusLog.objects.create(
+            job             = job,
+            axis            = JobStatusLog.Axis.PAYMENT,
+            from_status     = job.payment_state,
+            to_status       = payment_state,
+            actor           = actor,
+            notes           = 'Payment confirmed at the counter.',
+            transitioned_at = now,
+        )
+        job.payment_state = payment_state
+        fields.append('payment_state')
+
+    if job.job_type == 'INSTANT' and payment_state == 'SETTLED':
+        if job.work_state != 'DONE':
+            JobStatusLog.objects.create(
+                job             = job,
+                axis            = JobStatusLog.Axis.WORK,
+                from_status     = job.work_state,
+                to_status       = 'DONE',
+                actor           = actor,
+                notes           = 'Instant job — work completed before payment.',
+                transitioned_at = now,
+            )
+            job.work_state = 'DONE'
+            fields.append('work_state')
+
+        if job.handover_state != 'HANDED_OVER':
+            JobStatusLog.objects.create(
+                job             = job,
+                axis            = JobStatusLog.Axis.HANDOVER,
+                from_status     = job.handover_state,
+                to_status       = 'HANDED_OVER',
+                actor           = actor,
+                notes           = 'Counter sale — collected at payment.',
+                transitioned_at = now,
+            )
+            job.handover_state  = 'HANDED_OVER'
+            job.handed_over_at  = now
+            job.handed_over_by  = actor
+            fields += ['handover_state', 'handed_over_at', 'handed_over_by']
+
+    if fields:
+        job.save(update_fields=fields + ['updated_at'])
+
+
 def _handle_full_credit(job, validated_data, actor, notes):
     """
     Full credit payment flow — amount_paid=0, full job value
@@ -194,6 +273,12 @@ def _handle_full_credit(job, validated_data, actor, notes):
     result['balance_due']        = '0.00'
     result['payment_method']     = 'CREDIT'
     result['credit_amount']      = str(credit_amount)
+
+    # Full credit means nothing has been paid — the balance sits on the
+    # account. Payment state stays UNPAID, which is the honest reading,
+    # and the work is released against the credit agreement rather than
+    # against settlement.
+    _apply_payment_axes(job, actor)
 
     # Issue receipt with CREDIT payment method
     _issue_receipt(job, validated_data, actor, 'CREDIT', [], Decimal('0.00'), result)
