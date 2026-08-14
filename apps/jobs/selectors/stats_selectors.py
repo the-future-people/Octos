@@ -41,6 +41,11 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
         if since:
             qs = qs.filter(created_at__gte=since)
 
+    # Cancelled jobs are excluded from every axis counter. A cancelled job
+    # still carries whatever axis states it had when it was cancelled, and
+    # counting it as "awaiting payment" would put dead work in a live queue.
+    live = ~Q(status='CANCELLED')
+
     totals = qs.aggregate(
         total       = Count('id'),
         complete    = Count('id', filter=Q(status='COMPLETE')),
@@ -49,6 +54,26 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
         cancelled   = Count('id', filter=Q(status='CANCELLED')),
         routed      = Count('id', filter=Q(is_routed=True)),
         revenue     = Sum('amount_paid', filter=Q(status='COMPLETE')),
+
+        # ── Lifecycle axes ────────────────────────────────────────
+        awaiting_payment = Count('id', filter=live & ~Q(payment_state='SETTLED')),
+        in_production    = Count('id', filter=live & Q(
+            work_state__in=['RECEIVED', 'IN_PRODUCTION',
+                            'FINISHING', 'QUALITY_CHECK'],
+        )),
+        ready_for_pickup = Count('id', filter=live & Q(
+            work_state='DONE',
+            handover_state='AWAITING_COLLECTION',
+        )),
+        out_for_delivery = Count('id', filter=live & Q(
+            handover_state='OUT_FOR_DELIVERY',
+        )),
+        handed_over      = Count('id', filter=live & Q(
+            handover_state='HANDED_OVER',
+        )),
+        halted           = Count('id', filter=live & Q(
+            halts__resumed_at__isnull=True,
+        ), distinct=True),
     )
 
     registered = qs.filter(customer__isnull=False).count()
@@ -64,6 +89,13 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
         'revenue'    : str(totals['revenue'] or 0),
         'registered' : registered,
         'walkin'     : walkin,
+
+        'awaiting_payment': totals['awaiting_payment'] or 0,
+        'in_production'   : totals['in_production']    or 0,
+        'ready_for_pickup': totals['ready_for_pickup'] or 0,
+        'out_for_delivery': totals['out_for_delivery'] or 0,
+        'handed_over'     : totals['handed_over']      or 0,
+        'halted'          : totals['halted']           or 0,
     }
     if sheet_id and not period and not job_type:
         cache.set(_cache_key, result, 90)
