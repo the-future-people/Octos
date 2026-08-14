@@ -1,8 +1,8 @@
-"""
-Quote serializers.
+﻿"""
+Proforma serializers.
 
 Kept separate from serializers.py, which is already large and serves a
-different concern — quotes have their own lifecycle and their own rules.
+different concern — proformas have their own lifecycle and their own rules.
 """
 
 from rest_framework import serializers
@@ -10,7 +10,7 @@ from rest_framework import serializers
 from apps.jobs.models import ProformaInvoice
 
 
-class QuoteLineSerializer(serializers.Serializer):
+class ProformaLineSerializer(serializers.Serializer):
     """
     One requested line. Deliberately carries no price — pricing is the
     engine's job, and a client-supplied amount on a document that commits
@@ -24,9 +24,9 @@ class QuoteLineSerializer(serializers.Serializer):
     ring_size   = serializers.IntegerField(required=False, allow_null=True, default=None)
 
 
-class QuoteCreateSerializer(serializers.Serializer):
+class ProformaCreateSerializer(serializers.Serializer):
     customer       = serializers.IntegerField()
-    line_items     = QuoteLineSerializer(many=True)
+    line_items     = ProformaLineSerializer(many=True)
     contact_person = serializers.CharField(required=False, allow_blank=True, default='')
     contact_phone  = serializers.CharField(required=False, allow_blank=True, default='')
     contact_email  = serializers.EmailField(required=False, allow_blank=True, default='')
@@ -34,16 +34,16 @@ class QuoteCreateSerializer(serializers.Serializer):
 
     def validate_line_items(self, value):
         if not value:
-            raise serializers.ValidationError('A quote needs at least one service.')
+            raise serializers.ValidationError('A proforma needs at least one service.')
         return value
 
 
-class QuoteReviseSerializer(serializers.Serializer):
+class ProformaReviseSerializer(serializers.Serializer):
     """
     A revision replaces the line items wholesale. Partial acceptance is the
     same operation — the manager sends back only what the customer wants.
     """
-    line_items = QuoteLineSerializer(many=True)
+    line_items = ProformaLineSerializer(many=True)
     notes      = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_line_items(self, value):
@@ -52,14 +52,14 @@ class QuoteReviseSerializer(serializers.Serializer):
         return value
 
 
-class QuoteConvertSerializer(serializers.Serializer):
+class ProformaConvertSerializer(serializers.Serializer):
     # Free text rather than a choice list: what was agreed is a commercial
     # note, and the cashier still executes the actual payment through the
     # existing deposit and credit paths.
     agreed_terms = serializers.CharField(required=False, allow_blank=True, default='')
 
 
-class QuoteListSerializer(serializers.ModelSerializer):
+class ProformaListSerializer(serializers.ModelSerializer):
     customer_name = serializers.SerializerMethodField()
     issued_by_name = serializers.SerializerMethodField()
     is_expired     = serializers.BooleanField(read_only=True)
@@ -86,7 +86,7 @@ class QuoteListSerializer(serializers.ModelSerializer):
     def get_days_left(self, obj):
         """
         Negative means overdue. Drives the follow-up prompt in the UI —
-        a quote nobody chases is just paperwork.
+        a proforma nobody chases is just paperwork.
         """
         from django.utils import timezone
         if not obj.valid_until or obj.status != ProformaInvoice.Status.ISSUED:
@@ -94,13 +94,13 @@ class QuoteListSerializer(serializers.ModelSerializer):
         return (obj.valid_until - timezone.localdate()).days
 
 
-class QuoteDetailSerializer(QuoteListSerializer):
+class ProformaDetailSerializer(ProformaListSerializer):
     revision_of   = serializers.SerializerMethodField()
     revised_to    = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
 
-    class Meta(QuoteListSerializer.Meta):
-        fields = QuoteListSerializer.Meta.fields + [
+    class Meta(ProformaListSerializer.Meta):
+        fields = ProformaListSerializer.Meta.fields + [
             'line_items', 'subtotal', 'vat_amount', 'nhil_amount',
             'getfund_amount', 'contact_person', 'contact_phone',
             'contact_email', 'notes', 'agreed_terms',

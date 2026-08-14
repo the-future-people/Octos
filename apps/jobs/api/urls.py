@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from . import quote_views
+from . import proforma_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 
 urlpatterns = [
@@ -18,13 +18,13 @@ urlpatterns = [
     path('<int:pk>/halt/',   views.JobHaltView.as_view(),     name='job-halt'),
     path('<int:pk>/resume/', views.JobResumeView.as_view(),   name='job-resume'),
 
-    # Quotes (proforma invoices)
-    path('quotes/',                    quote_views.QuoteListView.as_view(),    name='quote-list'),
-    path('quotes/create/',             quote_views.QuoteCreateView.as_view(),  name='quote-create'),
-    path('quotes/<int:pk>/',           quote_views.QuoteDetailView.as_view(),  name='quote-detail'),
-    path('quotes/<int:pk>/issue/',     quote_views.QuoteIssueView.as_view(),   name='quote-issue'),
-    path('quotes/<int:pk>/revise/',    quote_views.QuoteReviseView.as_view(),  name='quote-revise'),
-    path('quotes/<int:pk>/convert/',   quote_views.QuoteConvertView.as_view(), name='quote-convert'),
+    # Proformas
+    path('proformas/',                  proforma_views.ProformaListView.as_view(),    name='proforma-list'),
+    path('proformas/create/',           proforma_views.ProformaCreateView.as_view(),  name='proforma-create'),
+    path('proformas/<int:pk>/',         proforma_views.ProformaDetailView.as_view(),  name='proforma-detail'),
+    path('proformas/<int:pk>/issue/',   proforma_views.ProformaIssueView.as_view(),   name='proforma-issue'),
+    path('proformas/<int:pk>/revise/',  proforma_views.ProformaReviseView.as_view(),  name='proforma-revise'),
+    path('proformas/<int:pk>/convert/', proforma_views.ProformaConvertView.as_view(), name='proforma-convert'),
 
     # Routing
     path('<int:pk>/route/suggest/', views.JobRouteSuggestView.as_view(),  name='job-route-suggest'),

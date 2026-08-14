@@ -112,13 +112,13 @@ class Job(AuditModel):
     WHATSAPP = 'WHATSAPP'
     EMAIL    = 'EMAIL'
     PHONE    = 'PHONE'
-    QUOTE    = 'QUOTE'
+    PROFORMA = 'PROFORMA'
     CHANNEL_CHOICES = [
         (WALK_IN,  'Walk-in'),
         (WHATSAPP, 'WhatsApp'),
         (EMAIL,    'Email'),
         (PHONE,    'Phone'),
-        (QUOTE,    'Accepted quote'),
+        (PROFORMA, 'Accepted proforma'),
     ]
 
     # ── Priority ─────────────────────────────────────────────────

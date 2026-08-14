@@ -1,5 +1,5 @@
-"""
-Quote API.
+﻿"""
+Proforma API.
 
 Every endpoint here is Branch Manager and above — issuing, revising and
 converting are price commitments made on behalf of the branch. The engine
@@ -13,11 +13,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.jobs.models import ProformaInvoice
-from apps.jobs.services.quote_engine import QuoteEngine
+from apps.jobs.services.proforma_engine import ProformaEngine
 
-from .quote_serializers import (
-    QuoteCreateSerializer, QuoteReviseSerializer, QuoteConvertSerializer,
-    QuoteListSerializer, QuoteDetailSerializer,
+from .proforma_serializers import (
+    ProformaCreateSerializer, ProformaReviseSerializer, ProformaConvertSerializer,
+    ProformaListSerializer, ProformaDetailSerializer,
 )
 
 
@@ -31,21 +31,21 @@ def _branch_or_400(request):
     return branch, None
 
 
-def _get_quote(pk, branch):
+def _get_proforma(pk, branch):
     return ProformaInvoice.objects.select_related(
         'customer', 'issued_by', 'converted_by', 'supersedes', 'job',
     ).filter(pk=pk, branch=branch).first()
 
 
-class QuoteListView(generics.ListAPIView):
+class ProformaListView(generics.ListAPIView):
     """
-    GET /api/v1/jobs/quotes/?status=ISSUED
+    GET /api/v1/jobs/proformas/?status=ISSUED
 
     Superseded versions are hidden by default. They are kept as documents
-    and reachable through a quote's revision chain, but a list of every
+    and reachable through a proforma's revision chain, but a list of every
     draft price a customer was ever shown is noise.
     """
-    serializer_class   = QuoteListSerializer
+    serializer_class   = ProformaListSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
@@ -70,8 +70,8 @@ class QuoteListView(generics.ListAPIView):
         return qs.order_by('-created_at')
 
 
-class QuoteDetailView(generics.RetrieveAPIView):
-    serializer_class   = QuoteDetailSerializer
+class ProformaDetailView(generics.RetrieveAPIView):
+    serializer_class   = ProformaDetailSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
@@ -83,8 +83,8 @@ class QuoteDetailView(generics.RetrieveAPIView):
         ).filter(branch=branch)
 
 
-class QuoteCreateView(APIView):
-    """POST /api/v1/jobs/quotes/create/ — creates a DRAFT."""
+class ProformaCreateView(APIView):
+    """POST /api/v1/jobs/proformas/create/ — creates a DRAFT."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -94,7 +94,7 @@ class QuoteCreateView(APIView):
         if err:
             return err
 
-        serializer = QuoteCreateSerializer(data=request.data)
+        serializer = ProformaCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -103,12 +103,12 @@ class QuoteCreateView(APIView):
             customer = CustomerProfile.objects.get(pk=data['customer'])
         except CustomerProfile.DoesNotExist:
             return Response(
-                {'detail': 'Customer not found. Quotes go to registered customers only.'},
+                {'detail': 'Customer not found. Proformas go to registered customers only.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
-            quote = QuoteEngine(branch).create(
+            proforma = ProformaEngine(branch).create(
                 customer       = customer,
                 raw_lines      = data['line_items'],
                 actor          = request.user,
@@ -123,13 +123,13 @@ class QuoteCreateView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
-            QuoteDetailSerializer(quote).data,
+            ProformaDetailSerializer(proforma).data,
             status=status.HTTP_201_CREATED,
         )
 
 
-class QuoteIssueView(APIView):
-    """POST /api/v1/jobs/quotes/<pk>/issue/ — sends it; the clock starts."""
+class ProformaIssueView(APIView):
+    """POST /api/v1/jobs/proformas/<pk>/issue/ — sends it; the clock starts."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
@@ -137,24 +137,24 @@ class QuoteIssueView(APIView):
         if err:
             return err
 
-        quote = _get_quote(pk, branch)
-        if not quote:
-            return Response({'detail': 'Quote not found.'},
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'},
                             status=status.HTTP_404_NOT_FOUND)
 
         try:
-            quote = QuoteEngine(branch).issue(quote, actor=request.user)
+            proforma = ProformaEngine(branch).issue(proforma, actor=request.user)
         except PermissionError as e:
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(QuoteDetailSerializer(quote).data)
+        return Response(ProformaDetailSerializer(proforma).data)
 
 
-class QuoteReviseView(APIView):
+class ProformaReviseView(APIView):
     """
-    POST /api/v1/jobs/quotes/<pk>/revise/
+    POST /api/v1/jobs/proformas/<pk>/revise/
 
     Returns the new version. The old one is kept and marked superseded —
     a customer may be holding it.
@@ -166,18 +166,18 @@ class QuoteReviseView(APIView):
         if err:
             return err
 
-        quote = _get_quote(pk, branch)
-        if not quote:
-            return Response({'detail': 'Quote not found.'},
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'},
                             status=status.HTTP_404_NOT_FOUND)
 
-        serializer = QuoteReviseSerializer(data=request.data)
+        serializer = ProformaReviseSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            revision = QuoteEngine(branch).revise(
-                quote     = quote,
+            revision = ProformaEngine(branch).revise(
+                proforma     = proforma,
                 raw_lines = serializer.validated_data['line_items'],
                 actor     = request.user,
                 notes     = serializer.validated_data['notes'],
@@ -188,14 +188,14 @@ class QuoteReviseView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
-            QuoteDetailSerializer(revision).data,
+            ProformaDetailSerializer(revision).data,
             status=status.HTTP_201_CREATED,
         )
 
 
-class QuoteConvertView(APIView):
+class ProformaConvertView(APIView):
     """
-    POST /api/v1/jobs/quotes/<pk>/convert/
+    POST /api/v1/jobs/proformas/<pk>/convert/
 
     The customer accepted. Creates the job on today's sheet and puts it in
     the cashier queue.
@@ -209,18 +209,18 @@ class QuoteConvertView(APIView):
         if err:
             return err
 
-        quote = _get_quote(pk, branch)
-        if not quote:
-            return Response({'detail': 'Quote not found.'},
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'},
                             status=status.HTTP_404_NOT_FOUND)
 
-        serializer = QuoteConvertSerializer(data=request.data)
+        serializer = ProformaConvertSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            job = QuoteEngine(branch).convert(
-                quote        = quote,
+            job = ProformaEngine(branch).convert(
+                proforma        = proforma,
                 actor        = request.user,
                 agreed_terms = serializer.validated_data['agreed_terms'],
             )
@@ -231,10 +231,10 @@ class QuoteConvertView(APIView):
 
         return Response(
             {
-                'detail' : f'{quote.proforma_number} accepted. '
+                'detail' : f'{proforma.proforma_number} accepted. '
                            f'{job.job_number} is now with the cashier.',
                 'job'    : JobListSerializer(job, context={'request': request}).data,
-                'quote'  : QuoteDetailSerializer(quote).data,
+                'proforma'  : ProformaDetailSerializer(proforma).data,
             },
             status=status.HTTP_201_CREATED,
         )

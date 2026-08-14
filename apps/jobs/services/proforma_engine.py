@@ -1,13 +1,18 @@
-"""
-Quote engine — proforma invoices and their conversion into jobs.
+﻿"""
+Proforma engine — proforma invoices and their conversion into jobs.
 
-A quote is a price commitment sent to a customer. Everything here follows
-from that:
+"Proforma" is used throughout, in the code and in the interface, because
+it is the word customers use. Institutional procurement asks for a
+proforma by name; a second internal word for the same document would need
+translating by whoever is covering the counter.
+
+A proforma is a price commitment sent to a customer. Everything here
+follows from that:
 
   - Revisions are new rows, never edits. A customer holding a printed v1
     must be able to accept v1, so v1 has to still exist as a document.
   - Pricing goes through PricingEngine. Manual amounts would be a route
-    around the pricing rules, and a quote is the worst place for that
+    around the pricing rules, and a proforma is the worst place for that
     because the figure is promised to someone.
   - Registered customers only. Conversion needs a real profile for credit
     terms and history, and free text carries none of it.
@@ -20,7 +25,7 @@ Lifecycle:
                     -> SUPERSEDED   (revised, new version issued)
                     -> EXPIRED      (21 days, terminal)
 
-Expiry is deliberately terminal. An expired quote is replaced by a new one
+Expiry is deliberately terminal. An expired proforma is replaced by a new one
 at current prices, never revived — otherwise a stale price becomes
 negotiable and the 21-day limit means nothing.
 """
@@ -38,10 +43,10 @@ VALIDITY_DAYS = 21
 
 # Roles permitted to issue, revise and convert. Deliberately narrow: this
 # is a price commitment made on behalf of the branch.
-QUOTE_ROLES = {'BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'}
+PROFORMA_ROLES = {'BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'}
 
 
-class QuoteEngine:
+class ProformaEngine:
 
     def __init__(self, branch):
         self.branch = branch
@@ -49,14 +54,14 @@ class QuoteEngine:
     # ── Guards ───────────────────────────────────────────────────
 
     @staticmethod
-    def _may_quote(actor):
+    def _may_issue(actor):
         role = getattr(getattr(actor, 'role', None), 'name', '') or ''
-        return role in QUOTE_ROLES
+        return role in PROFORMA_ROLES
 
     def _require_permission(self, actor, verb):
-        if not self._may_quote(actor):
+        if not self._may_issue(actor):
             raise PermissionError(
-                f"{actor.full_name or actor.email} cannot {verb} a quote."
+                f"{actor.full_name or actor.email} cannot {verb} a proforma."
             )
 
     # ── Pricing ──────────────────────────────────────────────────
@@ -124,13 +129,13 @@ class QuoteEngine:
     @transaction.atomic
     def create(self, customer, raw_lines, actor, notes='',
                contact_person='', contact_phone='', contact_email=''):
-        """Create a DRAFT quote. Nothing is committed to the customer yet."""
+        """Create a DRAFT proforma. Nothing is committed to the customer yet."""
         from apps.jobs.models import ProformaInvoice
 
         self._require_permission(actor, 'create')
 
         if not raw_lines:
-            raise ValueError('A quote needs at least one service.')
+            raise ValueError('A proforma needs at least one service.')
 
         priced, subtotal = self._price_lines(raw_lines)
 
@@ -160,29 +165,29 @@ class QuoteEngine:
     # ── Issue ────────────────────────────────────────────────────
 
     @transaction.atomic
-    def issue(self, quote, actor):
+    def issue(self, proforma, actor):
         """Send it. The clock starts here."""
         from apps.jobs.models import ProformaInvoice
 
         self._require_permission(actor, 'issue')
 
-        if quote.status != ProformaInvoice.Status.DRAFT:
+        if proforma.status != ProformaInvoice.Status.DRAFT:
             raise ValueError(
-                f"{quote.proforma_number} has already been issued."
+                f"{proforma.proforma_number} has already been issued."
             )
 
-        quote.status      = ProformaInvoice.Status.ISSUED
-        quote.issued_at   = timezone.now()
-        quote.valid_until = timezone.localdate() + timedelta(days=VALIDITY_DAYS)
-        quote.save(update_fields=[
+        proforma.status      = ProformaInvoice.Status.ISSUED
+        proforma.issued_at   = timezone.now()
+        proforma.valid_until = timezone.localdate() + timedelta(days=VALIDITY_DAYS)
+        proforma.save(update_fields=[
             'status', 'issued_at', 'valid_until', 'updated_at',
         ])
-        return quote
+        return proforma
 
     # ── Revise ───────────────────────────────────────────────────
 
     @transaction.atomic
-    def revise(self, quote, raw_lines, actor, notes=''):
+    def revise(self, proforma, raw_lines, actor, notes=''):
         """
         Issue a new version. The customer never edits anything — they ask,
         the manager revises, and a fresh document goes out.
@@ -195,33 +200,33 @@ class QuoteEngine:
 
         self._require_permission(actor, 'revise')
 
-        if quote.status not in (ProformaInvoice.Status.DRAFT,
+        if proforma.status not in (ProformaInvoice.Status.DRAFT,
                                 ProformaInvoice.Status.ISSUED):
             raise ValueError(
-                f"{quote.proforma_number} is {quote.get_status_display().lower()} "
+                f"{proforma.proforma_number} is {proforma.get_status_display().lower()} "
                 f"and cannot be revised."
             )
-        if quote.is_expired:
+        if proforma.is_expired:
             raise ValueError(
-                f"{quote.proforma_number} has expired. Raise a new quote at "
+                f"{proforma.proforma_number} has expired. Raise a new proforma at "
                 f"current prices."
             )
 
         priced, subtotal = self._price_lines(raw_lines)
 
-        base = quote.proforma_number.split('-v')[0]
+        base = proforma.proforma_number.split('-v')[0]
 
         revision = ProformaInvoice.objects.create(
-            branch          = quote.branch,
-            customer        = quote.customer,
-            issued_to       = quote.issued_to,
-            contact_person  = quote.contact_person,
-            contact_phone   = quote.contact_phone,
-            contact_email   = quote.contact_email,
-            proforma_number = f"{base}-v{quote.version + 1}",
-            sequence        = quote.sequence,
-            version         = quote.version + 1,
-            supersedes      = quote,
+            branch          = proforma.branch,
+            customer        = proforma.customer,
+            issued_to       = proforma.issued_to,
+            contact_person  = proforma.contact_person,
+            contact_phone   = proforma.contact_phone,
+            contact_email   = proforma.contact_email,
+            proforma_number = f"{base}-v{proforma.version + 1}",
+            sequence        = proforma.sequence,
+            version         = proforma.version + 1,
+            supersedes      = proforma,
             line_items      = priced,
             subtotal        = subtotal,
             total           = subtotal,
@@ -229,23 +234,23 @@ class QuoteEngine:
             valid_until     = timezone.localdate() + timedelta(days=VALIDITY_DAYS),
             status          = ProformaInvoice.Status.ISSUED,
             issued_by       = actor,
-            notes           = notes or quote.notes,
+            notes           = notes or proforma.notes,
         )
 
-        quote.status = ProformaInvoice.Status.SUPERSEDED
-        quote.save(update_fields=['status', 'updated_at'])
+        proforma.status = ProformaInvoice.Status.SUPERSEDED
+        proforma.save(update_fields=['status', 'updated_at'])
 
         return revision
 
     # ── Convert ──────────────────────────────────────────────────
 
     @transaction.atomic
-    def convert(self, quote, actor, agreed_terms=''):
+    def convert(self, proforma, actor, agreed_terms=''):
         """
         The customer accepted. Create the job and put it in front of the
         cashier.
 
-        The job is recorded today, not on the day the quote went out —
+        The job is recorded today, not on the day the proforma went out —
         materials are consumed today and revenue must not diverge from the
         sheet that carries the cost. The cashier applies the deposit or the
         credit arrangement; agreed_terms only records what was agreed.
@@ -255,15 +260,15 @@ class QuoteEngine:
 
         self._require_permission(actor, 'convert')
 
-        if not quote.is_convertible:
-            if quote.is_expired:
+        if not proforma.is_convertible:
+            if proforma.is_expired:
                 raise ValueError(
-                    f"{quote.proforma_number} expired on {quote.valid_until}. "
-                    f"Raise a new quote at current prices."
+                    f"{proforma.proforma_number} expired on {proforma.valid_until}. "
+                    f"Raise a new proforma at current prices."
                 )
             raise ValueError(
-                f"{quote.proforma_number} is "
-                f"{quote.get_status_display().lower()} and cannot be converted."
+                f"{proforma.proforma_number} is "
+                f"{proforma.get_status_display().lower()} and cannot be converted."
             )
 
         sheet, _ = SheetEngine(self.branch).get_or_open_today()
@@ -273,7 +278,7 @@ class QuoteEngine:
                 'Convert once the branch has opened.'
             )
 
-        names = [li['service_name'] for li in quote.line_items]
+        names = [li['service_name'] for li in proforma.line_items]
         if len(names) == 1:
             title = names[0]
         elif len(names) <= 3:
@@ -286,18 +291,18 @@ class QuoteEngine:
             job_type        = 'PRODUCTION',
             status          = Job.PENDING_PAYMENT,
             title           = title,
-            customer        = quote.customer,
+            customer        = proforma.customer,
             intake_by       = actor,
-            intake_channel  = 'QUOTE',
-            estimated_cost  = quote.total,
+            intake_channel  = Job.PROFORMA,
+            estimated_cost  = proforma.total,
             daily_sheet     = sheet,
             payment_state   = 'UNPAID',
             work_state      = 'RECEIVED',
             handover_state  = 'AWAITING_COLLECTION',
-            notes           = f"Converted from {quote.proforma_number}.",
+            notes           = f"Converted from {proforma.proforma_number}.",
         )
 
-        for i, li in enumerate(quote.line_items):
+        for i, li in enumerate(proforma.line_items):
             JobLineItem.objects.create(
                 job        = job,
                 service    = Service.objects.get(pk=li['service_id']),
@@ -309,12 +314,12 @@ class QuoteEngine:
                 position   = i,
             )
 
-        quote.status       = ProformaInvoice.Status.CONVERTED
-        quote.job          = job
-        quote.converted_at = timezone.now()
-        quote.converted_by = actor
-        quote.agreed_terms = agreed_terms or ''
-        quote.save(update_fields=[
+        proforma.status       = ProformaInvoice.Status.CONVERTED
+        proforma.job          = job
+        proforma.converted_at = timezone.now()
+        proforma.converted_by = actor
+        proforma.agreed_terms = agreed_terms or ''
+        proforma.save(update_fields=[
             'status', 'job', 'converted_at', 'converted_by',
             'agreed_terms', 'updated_at',
         ])
@@ -322,7 +327,7 @@ class QuoteEngine:
         from apps.core.broadcast import broadcast_invalidation
         broadcast_invalidation(self.branch.id, [
             'paymentQueue', 'jobs', 'jobStats', 'recentJobs',
-            'quotes', 'cashierSummary',
+            'proformas', 'cashierSummary',
         ])
 
         return job
@@ -330,7 +335,7 @@ class QuoteEngine:
     # ── Expiry ───────────────────────────────────────────────────
 
     @staticmethod
-    def expire_stale_quotes():
+    def expire_stale_proformas():
         """
         Terminal by design. Runs daily; returns the number expired.
         """

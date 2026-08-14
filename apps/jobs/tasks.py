@@ -1,4 +1,4 @@
-from celery import shared_task
+﻿from celery import shared_task
 import logging
 logger = logging.getLogger(__name__)
 
@@ -9,15 +9,15 @@ def expire_drafts():
 
 
 @shared_task
-def expire_quotes():
+def expire_proformas():
     """
-    Expire quotes past their 21 days, and tell the manager who issued each
-    one. A quote that dies unanswered is a lost sale, and finding out when
+    Expire proformas past their 21 days, and tell the manager who issued each
+    one. A proforma that dies unanswered is a lost sale, and finding out when
     the customer calls in week four is finding out too late.
     """
     from django.utils import timezone
     from apps.jobs.models import ProformaInvoice
-    from apps.jobs.services.quote_engine import QuoteEngine
+    from apps.jobs.services.proforma_engine import ProformaEngine
     from apps.notifications.services import notify
 
     # Collected before expiring, since the update changes the status these
@@ -31,7 +31,7 @@ def expire_quotes():
         )
     )
 
-    count = QuoteEngine.expire_stale_quotes()
+    count = ProformaEngine.expire_stale_quotes()
 
     for q in stale:
         if not q.issued_by:
@@ -39,30 +39,30 @@ def expire_quotes():
         try:
             notify(
                 recipient = q.issued_by,
-                verb      = 'quote_expired',
+                verb      = 'proforma_expired',
                 message   = (
                     f"{q.proforma_number} for {q.issued_to} "
                     f"(GHS {q.total}) expired without an answer."
                 ),
-                link      = '/portal/quotes/',
+                link      = '/portal/proformas/',
             )
         except Exception:
-            logger.exception('Failed to notify on expired quote %s', q.pk)
+            logger.exception('Failed to notify on expired proforma %s', q.pk)
 
-    logger.info('expire_quotes: expired %s quote(s)', count)
+    logger.info('expire_proformas: expired %s proforma(s)', count)
     return count
 
 
 # Days after issue at which the issuing manager is nudged. The last is the
-# three-days-left warning — after 21 days the quote is gone and a new one
+# three-days-left warning — after 21 days the proforma is gone and a new one
 # must be raised at current prices.
-QUOTE_REMINDER_DAYS = (3, 10, 18)
+PROFORMA_REMINDER_DAYS = (3, 10, 18)
 
 
 @shared_task
-def remind_open_quotes():
+def remind_open_proformas():
     """
-    Nudge the manager who issued a quote that has gone quiet.
+    Nudge the manager who issued a proforma that has gone quiet.
 
     Deliberately internal only. Chasing the customer directly needs
     WhatsApp, which is not integrated yet, and an email nobody reads is
@@ -75,15 +75,15 @@ def remind_open_quotes():
     today = timezone.localdate()
     sent  = 0
 
-    open_quotes = (
+    open_proformas = (
         ProformaInvoice.objects
         .select_related('issued_by', 'customer')
         .filter(status=ProformaInvoice.Status.ISSUED, issued_at__isnull=False)
     )
 
-    for q in open_quotes:
+    for q in open_proformas:
         age = (today - q.issued_at.date()).days
-        if age not in QUOTE_REMINDER_DAYS:
+        if age not in PROFORMA_REMINDER_DAYS:
             continue
         # One nudge per day at most, however many times this runs.
         if q.last_reminder_at and q.last_reminder_at.date() == today:
@@ -107,15 +107,15 @@ def remind_open_quotes():
         try:
             notify(
                 recipient = q.issued_by,
-                verb      = 'quote_followup',
+                verb      = 'proforma_followup',
                 message   = body,
-                link      = '/portal/quotes/',
+                link      = '/portal/proformas/',
             )
             q.last_reminder_at = timezone.now()
             q.save(update_fields=['last_reminder_at', 'updated_at'])
             sent += 1
         except Exception:
-            logger.exception('Failed to send quote reminder for %s', q.pk)
+            logger.exception('Failed to send proforma reminder for %s', q.pk)
 
-    logger.info('remind_open_quotes: sent %s reminder(s)', sent)
+    logger.info('remind_open_proformas: sent %s reminder(s)', sent)
     return sent
