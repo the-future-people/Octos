@@ -57,6 +57,14 @@ class JobsFixtureMixin:
             name='CASHIER', display_name='Cashier',
             is_constrained=False, scope='BRANCH',
         )
+        cls.attendant_role = Role.objects.create(
+            name='ATTENDANT', display_name='Attendant',
+            is_constrained=False, scope='BRANCH',
+        )
+        cls.coordinator_role = Role.objects.create(
+            name='FLOW_COORDINATOR', display_name='Flow Coordinator',
+            is_constrained=False, scope='BRANCH',
+        )
 
         cls.branch = Branch.objects.create(
             name='Test Branch', code='TSTB',
@@ -104,6 +112,32 @@ class JobsFixtureMixin:
         )
         cls.cashier.set_password('test-pass-123')
         cls.cashier.save()
+
+        cls.attendant = CustomUser(
+            employee_id='TST-ATT-001',
+            first_name='Test', last_name='Attendant',
+            email='attendant@test.local',
+            employment_status='ACTIVE',
+            is_active=True, is_staff=False, is_superuser=False,
+            is_clocked_in=False, must_change_password=False,
+            is_business_owner=False, download_pin_set=False,
+            branch=cls.branch, role=cls.attendant_role,
+        )
+        cls.attendant.set_password('test-pass-123')
+        cls.attendant.save()
+
+        cls.coordinator = CustomUser(
+            employee_id='TST-CRD-001',
+            first_name='Test', last_name='Coordinator',
+            email='coordinator@test.local',
+            employment_status='ACTIVE',
+            is_active=True, is_staff=False, is_superuser=False,
+            is_clocked_in=False, must_change_password=False,
+            is_business_owner=False, download_pin_set=False,
+            branch=cls.branch, role=cls.coordinator_role,
+        )
+        cls.coordinator.set_password('test-pass-123')
+        cls.coordinator.save()
 
         cls.service = Service.objects.create(
             name='Test Photocopy', code='TSTSVC',
@@ -343,3 +377,233 @@ class CreditEngineRegressionTests(JobsFixtureMixin, TestCase):
         )
         self.assertEqual(job.partial_credit_amount, Decimal('20.00'))
         self.assertIn('partial_credit_amount', result)
+
+class WorkAxisTests(JobsFixtureMixin, TestCase):
+    """
+    The production work ladder. Nothing in production has ever exercised
+    this — every job at Westland is INSTANT — so these tests are the only
+    evidence the ladder works at all.
+    """
+
+    def _production_job(self, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Work axis test',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+            payment_state='DEPOSIT_PAID',
+            work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_full_production_ladder(self):
+        job    = self._production_job()
+        engine = JobStatusEngine(job)
+        for state in ['IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK', 'DONE']:
+            engine.move_work(state, actor=self.coordinator)
+            job.refresh_from_db()
+            self.assertEqual(job.work_state, state)
+
+    def test_cannot_skip_a_stage(self):
+        job = self._production_job()
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_work('DONE', actor=self.coordinator)
+
+    def test_instant_job_goes_straight_to_done(self):
+        job = self._production_job(job_type='INSTANT')
+        JobStatusEngine(job).move_work('DONE', actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'DONE')
+
+    def test_cashier_cannot_move_work(self):
+        job = self._production_job()
+        with self.assertRaises(PermissionError):
+            JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.cashier)
+
+    def test_bm_may_override_any_axis(self):
+        job = self._production_job()
+        JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.bm)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'IN_PRODUCTION')
+
+    def test_unpaid_production_cannot_start(self):
+        job = self._production_job(payment_state='UNPAID')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.coordinator)
+
+    def test_work_move_logs_with_axis(self):
+        job = self._production_job()
+        JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.coordinator)
+        log = JobStatusLog.objects.filter(job=job).first()
+        self.assertEqual(log.axis, 'WORK')
+        self.assertEqual(log.from_status, 'RECEIVED')
+        self.assertEqual(log.to_status, 'IN_PRODUCTION')
+
+
+class HandoverAxisTests(JobsFixtureMixin, TestCase):
+    """
+    The rule that protects the money: an attendant can never release an
+    unpaid job.
+    """
+
+    def _ready_job(self, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Handover test',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+            payment_state='SETTLED',
+            work_state='DONE',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_settled_and_done_can_be_handed_over(self):
+        job = self._ready_job()
+        JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.attendant)
+        job.refresh_from_db()
+        self.assertEqual(job.handover_state, 'HANDED_OVER')
+        self.assertIsNotNone(job.handed_over_at)
+        self.assertEqual(job.handed_over_by_id, self.attendant.id)
+
+    def test_unpaid_job_cannot_be_released(self):
+        job = self._ready_job(payment_state='UNPAID')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.attendant)
+
+    def test_deposit_paid_job_cannot_be_released(self):
+        job = self._ready_job(payment_state='DEPOSIT_PAID')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.attendant)
+
+    def test_unfinished_job_cannot_be_released(self):
+        job = self._ready_job(work_state='FINISHING')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.attendant)
+
+    def test_coordinator_cannot_hand_over(self):
+        job = self._ready_job()
+        with self.assertRaises(PermissionError):
+            JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.coordinator)
+
+    def test_handover_derives_legacy_complete(self):
+        job = self._ready_job()
+        JobStatusEngine(job).move_handover('HANDED_OVER', actor=self.attendant)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'COMPLETE')
+
+
+class PaymentAxisTests(JobsFixtureMixin, TestCase):
+
+    def _job(self, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Payment axis test',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+            payment_state='UNPAID',
+            work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_cashier_can_take_a_deposit_then_settle(self):
+        job    = self._job()
+        engine = JobStatusEngine(job)
+        engine.move_payment('DEPOSIT_PAID', actor=self.cashier)
+        engine.move_payment('SETTLED', actor=self.cashier)
+        job.refresh_from_db()
+        self.assertEqual(job.payment_state, 'SETTLED')
+
+    def test_settled_is_terminal(self):
+        job = self._job(payment_state='SETTLED')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_payment('DEPOSIT_PAID', actor=self.cashier)
+
+    def test_attendant_cannot_move_payment(self):
+        job = self._job()
+        with self.assertRaises(PermissionError):
+            JobStatusEngine(job).move_payment('SETTLED', actor=self.attendant)
+
+    def test_unrecognised_role_owns_nothing(self):
+        no_role = CustomUser(
+            employee_id='TST-NUL-001',
+            first_name='No', last_name='Role',
+            email='norole@test.local',
+            employment_status='ACTIVE', is_active=True,
+            branch=self.branch, role=None,
+        )
+        no_role.set_password('test-pass-123')
+        no_role.save()
+
+        job = self._job()
+        with self.assertRaises(PermissionError):
+            JobStatusEngine(job).move_payment('SETTLED', actor=no_role)
+
+
+class HaltTests(JobsFixtureMixin, TestCase):
+
+    def _in_production_job(self, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Halt test',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+            payment_state='DEPOSIT_PAID',
+            work_state='FINISHING',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_halt_preserves_the_stage(self):
+        job  = self._in_production_job()
+        halt = JobStatusEngine(job).halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertEqual(halt.work_state_at_halt, 'FINISHING')
+        self.assertEqual(job.work_state, 'FINISHING')
+
+    def test_halted_job_cannot_move_work(self):
+        job    = self._in_production_job()
+        engine = JobStatusEngine(job)
+        engine.halt('MATERIALS_OUT', actor=self.coordinator)
+        with self.assertRaises(ValueError):
+            engine.move_work('QUALITY_CHECK', actor=self.coordinator)
+
+    def test_resume_reopens_the_same_stage(self):
+        job    = self._in_production_job()
+        engine = JobStatusEngine(job)
+        engine.halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        engine.resume(actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertFalse(engine.is_halted())
+        engine.move_work('QUALITY_CHECK', actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'QUALITY_CHECK')
+
+    def test_cannot_halt_twice(self):
+        job    = self._in_production_job()
+        engine = JobStatusEngine(job)
+        engine.halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        with self.assertRaises(ValueError):
+            engine.halt('MATERIALS_OUT', actor=self.coordinator)
+
+    def test_payment_still_moves_while_halted(self):
+        job    = self._in_production_job()
+        engine = JobStatusEngine(job)
+        engine.halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        engine.move_payment('SETTLED', actor=self.cashier)
+        job.refresh_from_db()
+        self.assertEqual(job.payment_state, 'SETTLED')
+
+    def test_halts_are_kept_not_overwritten(self):
+        job    = self._in_production_job()
+        engine = JobStatusEngine(job)
+        engine.halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        engine.resume(actor=self.coordinator)
+        engine.halt('MATERIALS_OUT', actor=self.coordinator)
+        self.assertEqual(job.halts.count(), 2)
