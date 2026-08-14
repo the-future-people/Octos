@@ -251,23 +251,105 @@ class CustomerProfile(AuditModel):
         if not self.title:
             return ''
         if self.title == self.OTHER_TITLE:
-            return self.title_other or ''
+            return self._tidy_name(self.title_other)
         return dict(self.TITLE_CHOICES).get(self.title, '')
+
+    @classmethod
+    def _tidy_name(cls, value: str) -> str:
+        """
+        Names arrive inconsistently — 'ABCDE EFGH' from one entry path,
+        'Abcd, EFGH' from another. Normalising on read rather than on write
+        keeps the stored value exactly as the customer gave it, so nothing
+        is lost if a real name turns out not to fit the rule.
+
+        Handles the particles that should not be capitalised mid-name, and
+        the ones that should be capitalised after a prefix — O'Brien,
+        McDonald — which a plain title() gets wrong.
+        """
+        if not value:
+            return ''
+
+        cleaned = value.replace(',', ' ')
+        out     = []
+
+        for word in cleaned.split():
+            lower = word.lower()
+            if lower in ('van', 'von', 'der', 'de', 'da', 'di', 'du', 'la', 'le'):
+                out.append(lower)
+                continue
+            fixed = lower.capitalize()
+            for prefix in ("mc", "mac", "o'"):
+                if lower.startswith(prefix) and len(lower) > len(prefix):
+                    fixed = (
+                        prefix.capitalize()
+                        + lower[len(prefix):].capitalize()
+                    )
+                    break
+            if '-' in fixed:
+                fixed = '-'.join(p.capitalize() for p in fixed.split('-'))
+            out.append(fixed)
+
+        return ' '.join(out)
 
     @property
     def full_name(self) -> str:
-        return f"{self.first_name} {self.last_name}".strip()
+        """
+        Title included — the title is part of how a person is addressed,
+        and showing it in one place and not another is the inconsistency
+        this is meant to remove.
+        """
+        return ' '.join(p for p in (
+            self.title_display,
+            self._tidy_name(self.first_name),
+            self._tidy_name(self.last_name),
+        ) if p).strip()
 
     @property
     def titled_name(self) -> str:
-        """Title + last name for formal addressing e.g. receipts, messages."""
-        parts = [self.title_display, self.last_name]
-        return ' '.join(p for p in parts if p).strip() or self.full_name
+        """
+        Title + surname only, for a formal greeting — 'Dear Dr Mensah'.
+        full_name now carries the title too, so the fallback here returns
+        the untitled name rather than full_name, which would repeat it.
+        """
+        parts = [self.title_display, self._tidy_name(self.last_name)]
+        titled = ' '.join(p for p in parts if p).strip()
+        if titled:
+            return titled
+        return ' '.join(p for p in (
+            self._tidy_name(self.first_name),
+            self._tidy_name(self.last_name),
+        ) if p).strip()
+
+    @classmethod
+    def _tidy_company(cls, value: str) -> str:
+        """
+        Company names carry acronyms that are genuinely capitalised — WASS,
+        ATM, GH — and no rule can tell those from a name typed in caps.
+        Short all-caps words are left alone; anything longer is normalised,
+        so DEHYENA CHAMBERS reads as Dehyena Chambers while WASS Ghana
+        Limited keeps its acronym.
+
+        Four letters is the cut-off because real acronyms in use here are
+        three or four, and the shortest surname-like word that needs
+        fixing is longer than that.
+        """
+        if not value:
+            return ''
+        out = []
+        for word in value.split():
+            stripped = word.strip('.,')
+            if stripped.isupper() and stripped.isalpha() and len(stripped) <= 4:
+                out.append(word)
+            else:
+                out.append(cls._tidy_name(word))
+        return ' '.join(out)
 
     @property
     def display_name(self) -> str:
         """Company name if set, otherwise full name."""
-        return self.company_name or self.full_name or self.phone
+        if self.company_name:
+            return self._tidy_company(self.company_name)
+        return self.full_name or self.phone
 
 # ── Customer Edit Audit Log ───────────────────────────────────────────────────
 
