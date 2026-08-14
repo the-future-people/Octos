@@ -220,7 +220,9 @@ class ReceiptEngine:
 
         # ── Customer ──────────────────────────────────────────────────
         lines.append(row('Customer:', receipt.customer_name or 'Walk-in'))
-        if receipt.company_name:
+        # A business account already reads as the business on the customer
+        # line, so printing the same name twice adds nothing.
+        if receipt.company_name and receipt.company_name != receipt.customer_name:
             lines.append(row('Company:', receipt.company_name))
         lines.append(row('Phone:', receipt.customer_phone or '—'))
         lines.append(SEP)
@@ -357,7 +359,7 @@ class ReceiptEngine:
             f"*Payment:* {receipt.get_payment_method_display()}",
         ]
 
-        if receipt.company_name:
+        if receipt.company_name and receipt.company_name != receipt.customer_name:
             lines.append(f"*Company:* {receipt.company_name}")
 
         lines += [
@@ -373,10 +375,16 @@ class ReceiptEngine:
         """
         Return (customer_name, phone) for the receipt snapshot.
         Falls back to walk-in details if no customer profile.
+
+        Business accounts are named by the business, never the individual
+        who happened to come in. A representative may leave the company or
+        be replaced, and the receipt records who owes the money — which is
+        the business. display_name already resolves this: company_name for
+        a business, the person's name otherwise.
         """
         if job.customer:
             return (
-                job.customer.full_name or 'Customer',
+                job.customer.display_name or 'Customer',
                 getattr(job.customer, 'phone', '') or walk_in_phone,
             )
         return 'Walk-in Customer', walk_in_phone
