@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import quote_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 
 urlpatterns = [
@@ -16,6 +17,14 @@ urlpatterns = [
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),
     path('<int:pk>/halt/',   views.JobHaltView.as_view(),     name='job-halt'),
     path('<int:pk>/resume/', views.JobResumeView.as_view(),   name='job-resume'),
+
+    # Quotes (proforma invoices)
+    path('quotes/',                    quote_views.QuoteListView.as_view(),    name='quote-list'),
+    path('quotes/create/',             quote_views.QuoteCreateView.as_view(),  name='quote-create'),
+    path('quotes/<int:pk>/',           quote_views.QuoteDetailView.as_view(),  name='quote-detail'),
+    path('quotes/<int:pk>/issue/',     quote_views.QuoteIssueView.as_view(),   name='quote-issue'),
+    path('quotes/<int:pk>/revise/',    quote_views.QuoteReviseView.as_view(),  name='quote-revise'),
+    path('quotes/<int:pk>/convert/',   quote_views.QuoteConvertView.as_view(), name='quote-convert'),
 
     # Routing
     path('<int:pk>/route/suggest/', views.JobRouteSuggestView.as_view(),  name='job-route-suggest'),
