@@ -33,7 +33,7 @@ class JobListView(generics.ListAPIView):
         user = self.request.user
         qs   = Job.objects.select_related(
             'branch', 'assigned_to', 'customer', 'intake_by'
-        )
+        ).prefetch_related('halts')
 
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)

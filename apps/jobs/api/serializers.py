@@ -140,6 +140,7 @@ class JobListSerializer(serializers.ModelSerializer):
     deposit_due      = serializers.SerializerMethodField()
     line_items       = JobLineItemSerializer(many=True, read_only=True)
     line_item_count  = serializers.SerializerMethodField()
+    is_halted        = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
@@ -152,7 +153,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'customer', 'customer_credit', 'customer_wallet_balance',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
-            'payment_state', 'work_state', 'handover_state',
+            'payment_state', 'work_state', 'handover_state', 'is_halted',
         ]
 
     def get_customer_name(self, obj):
@@ -160,6 +161,9 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_intake_by_name(self, obj):
         return obj.intake_by.full_name if obj.intake_by else None
+
+    def get_is_halted(self, obj):
+        return any(h.resumed_at is None for h in obj.halts.all())
 
     def get_customer_credit(self, obj):
         if not obj.customer:
