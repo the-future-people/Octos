@@ -23,10 +23,11 @@ class ProformaInvoice(AuditModel):
     """
 
     class Status(models.TextChoices):
-        DRAFT     = 'DRAFT',     'Draft'
-        ISSUED    = 'ISSUED',    'Issued'
-        CONVERTED = 'CONVERTED', 'Converted to Job'
-        EXPIRED   = 'EXPIRED',   'Expired'
+        DRAFT      = 'DRAFT',      'Draft'
+        ISSUED     = 'ISSUED',     'Issued'
+        CONVERTED  = 'CONVERTED',  'Converted to Job'
+        SUPERSEDED = 'SUPERSEDED', 'Superseded by a revision'
+        EXPIRED    = 'EXPIRED',    'Expired'
 
     branch      = models.ForeignKey(
         'organization.Branch',
@@ -53,10 +54,35 @@ class ProformaInvoice(AuditModel):
         help_text='Auto-incremented sequence per branch per year',
     )
 
+    # ── Versioning ────────────────────────────────────────────
+    # A quote is a price commitment sent to someone. If a customer holds a
+    # printed v1 and accepts it, v1 must still exist as a document rather
+    # than as a diff — so a revision is a new row, not an edit.
+    version    = models.PositiveIntegerField(default=1)
+    supersedes = models.OneToOneField(
+        'self',
+        on_delete    = models.PROTECT,
+        null         = True,
+        blank        = True,
+        related_name = 'superseded_by',
+        help_text    = 'The earlier version this revision replaces',
+    )
+
     # ── Recipient ─────────────────────────────────────────────
+    # Registered customers only. Conversion needs a real profile for credit
+    # terms, spend history and wallet; free text cannot carry any of that.
+    customer        = models.ForeignKey(
+        'customers.CustomerProfile',
+        on_delete=models.PROTECT,
+        related_name='proforma_invoices',
+    )
     issued_to       = models.CharField(
         max_length=150,
-        help_text='Organisation or individual name',
+        help_text=(
+            'Name as printed on the quote. Snapshotted at issue — the '
+            'customer record may change later, and the quote must show '
+            'what was actually sent.'
+        ),
     )
     contact_person  = models.CharField(
         max_length=100,
@@ -69,10 +95,19 @@ class ProformaInvoice(AuditModel):
     # ── Validity ──────────────────────────────────────────────
     issued_at       = models.DateTimeField(null=True, blank=True)
     valid_until     = models.DateField(
-        help_text='7 days from issue date — system enforced',
+        help_text=(
+            '21 days from issue — system enforced, and reset on each '
+            'revision. Expiry is terminal: an expired quote is replaced by '
+            'a new one at current prices, never revived.'
+        ),
+    )
+    last_reminder_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Last follow-up reminder sent to the issuing manager',
     )
     status          = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=Status.choices,
         default=Status.DRAFT,
     )
@@ -133,6 +168,15 @@ class ProformaInvoice(AuditModel):
         related_name='proformas_converted',
         null=True,
         blank=True,
+    )
+    agreed_terms    = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text=(
+            "What the customer agreed to at acceptance — a deposit "
+            "percentage, or CREDIT. The cashier still executes it; this "
+            "records what was agreed when the quote was accepted."
+        ),
     )
 
     # ── Notes ─────────────────────────────────────────────────
