@@ -231,6 +231,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.expire_drafts',
         'schedule': crontab(hour=2, minute=0),
     },
+    'expire-quotes-nightly': {
+        'task': 'apps.jobs.tasks.expire_quotes',
+        'schedule': crontab(hour=2, minute=15),
+    },
+    'remind-open-quotes-daily': {
+        'task': 'apps.jobs.tasks.remind_open_quotes',
+        'schedule': crontab(hour=8, minute=30),
+    },
     'check-credit-due-daily': {
         'task': 'apps.finance.tasks.check_credit_due',
         'schedule': crontab(hour=7, minute=30),
