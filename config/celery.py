@@ -13,4 +13,5 @@ app.autodiscover_tasks([
     'apps.jobs',
     'apps.analytics',
     'apps.notifications',
+    'apps.accounts',
 ])
