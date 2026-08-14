@@ -49,6 +49,30 @@ class JobListView(generics.ListAPIView):
         if status_param:
             qs = qs.filter(status=status_param)
 
+        # Lifecycle queues. Each name maps to exactly one definition, here,
+        # so the Jobs portal counters and the list they filter into can
+        # never disagree about what "ready for pickup" means.
+        queue = self.request.query_params.get('queue')
+        if queue:
+            qs = qs.exclude(status='CANCELLED')
+            if queue == 'awaiting_payment':
+                qs = qs.exclude(payment_state='SETTLED')
+            elif queue == 'in_production':
+                qs = qs.filter(work_state__in=[
+                    'RECEIVED', 'IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK',
+                ])
+            elif queue == 'ready_for_pickup':
+                qs = qs.filter(
+                    work_state='DONE',
+                    handover_state='AWAITING_COLLECTION',
+                )
+            elif queue == 'out_for_delivery':
+                qs = qs.filter(handover_state='OUT_FOR_DELIVERY')
+            elif queue == 'handed_over':
+                qs = qs.filter(handover_state='HANDED_OVER')
+            elif queue == 'halted':
+                qs = qs.filter(halts__resumed_at__isnull=True).distinct()
+
         daily_sheet = self.request.query_params.get('daily_sheet')
         if daily_sheet:
             qs = qs.filter(daily_sheet_id=daily_sheet)
