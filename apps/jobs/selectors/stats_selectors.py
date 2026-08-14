@@ -17,7 +17,7 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
     Called by JobStatsView.
     """
     from django.core.cache import cache
-    from apps.jobs.models import Job
+    from apps.jobs.models import Job, JobHalt
     from django.db import models
 
     if sheet_id and not period and not job_type:
@@ -71,9 +71,14 @@ def get_branch_stats(branch, sheet_id=None, period=None, job_type=None) -> dict:
         handed_over      = Count('id', filter=live & Q(
             handover_state='HANDED_OVER',
         )),
+        # Not a join filter: a LEFT JOIN gives a NULL resumed_at to jobs
+        # with no halts at all, so halts__resumed_at__isnull=True matched
+        # every job that had never been halted.
         halted           = Count('id', filter=live & Q(
-            halts__resumed_at__isnull=True,
-        ), distinct=True),
+            pk__in=JobHalt.objects.filter(
+                resumed_at__isnull=True,
+            ).values('job_id'),
+        )),
     )
 
     registered = qs.filter(customer__isnull=False).count()

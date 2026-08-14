@@ -607,3 +607,50 @@ class HaltTests(JobsFixtureMixin, TestCase):
         engine.resume(actor=self.coordinator)
         engine.halt('MATERIALS_OUT', actor=self.coordinator)
         self.assertEqual(job.halts.count(), 2)
+
+class HaltedCounterTests(JobsFixtureMixin, TestCase):
+    """
+    A LEFT JOIN gives a NULL resumed_at to jobs that have no halts at all,
+    so filtering on halts__resumed_at__isnull=True counted every job in the
+    branch as halted. It reached production and read 29 of 29 halted.
+    """
+
+    def setUp(self):
+        common = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, intake_by=self.attendant,
+            estimated_cost=Decimal('50.00'), daily_sheet=self.sheet,
+            payment_state='DEPOSIT_PAID', work_state='IN_PRODUCTION',
+            handover_state='AWAITING_COLLECTION',
+        )
+        self.never_halted = Job.objects.create(title='Never halted', **common)
+        self.halted       = Job.objects.create(title='Halted', **common)
+        self.resumed      = Job.objects.create(title='Resumed', **common)
+
+        JobStatusEngine(self.halted).halt('MATERIALS_OUT', actor=self.coordinator)
+        engine = JobStatusEngine(self.resumed)
+        engine.halt('MACHINE_BREAKDOWN', actor=self.coordinator)
+        engine.resume(actor=self.coordinator)
+
+    def test_only_actively_halted_jobs_are_counted(self):
+        from apps.jobs.selectors.stats_selectors import get_branch_stats
+        stats = get_branch_stats(self.branch)
+        self.assertEqual(stats['halted'], 1)
+        self.assertEqual(stats['in_production'], 3)
+
+    def test_halted_queue_returns_only_the_halted_job(self):
+        from apps.jobs.models import JobHalt
+        halted_ids = set(
+            Job.objects.filter(
+                branch=self.branch,
+                pk__in=JobHalt.objects.filter(
+                    resumed_at__isnull=True,
+                ).values('job_id'),
+            ).values_list('pk', flat=True)
+        )
+        self.assertEqual(halted_ids, {self.halted.pk})
+
+    def test_a_resumed_job_is_not_halted(self):
+        from apps.jobs.selectors.stats_selectors import get_branch_stats
+        JobStatusEngine(self.halted).resume(actor=self.coordinator)
+        self.assertEqual(get_branch_stats(self.branch)['halted'], 0)

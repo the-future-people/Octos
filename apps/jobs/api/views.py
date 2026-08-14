@@ -71,7 +71,15 @@ class JobListView(generics.ListAPIView):
             elif queue == 'handed_over':
                 qs = qs.filter(handover_state='HANDED_OVER')
             elif queue == 'halted':
-                qs = qs.filter(halts__resumed_at__isnull=True).distinct()
+                # Existence check, not a join filter. A LEFT JOIN gives a
+                # NULL resumed_at to jobs with no halts at all, so filtering
+                # on halts__resumed_at__isnull=True returned every job.
+                from apps.jobs.models import JobHalt
+                qs = qs.filter(
+                    pk__in=JobHalt.objects.filter(
+                        resumed_at__isnull=True,
+                    ).values('job_id')
+                )
 
         daily_sheet = self.request.query_params.get('daily_sheet')
         if daily_sheet:
