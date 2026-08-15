@@ -25,6 +25,7 @@ urlpatterns = [
     path('proformas/<int:pk>/issue/',   proforma_views.ProformaIssueView.as_view(),   name='proforma-issue'),
     path('proformas/<int:pk>/revise/',  proforma_views.ProformaReviseView.as_view(),  name='proforma-revise'),
     path('proformas/<int:pk>/convert/', proforma_views.ProformaConvertView.as_view(), name='proforma-convert'),
+    path('proformas/<int:pk>/pdf/',     proforma_views.ProformaPDFView.as_view(),     name='proforma-pdf'),
 
     # Routing
     path('<int:pk>/route/suggest/', views.JobRouteSuggestView.as_view(),  name='job-route-suggest'),

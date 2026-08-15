@@ -238,3 +238,39 @@ class ProformaConvertView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+class ProformaPDFView(APIView):
+    """
+    GET /api/v1/jobs/proformas/<pk>/pdf/
+
+    Streams the document. Nothing is written to disk: MEDIA_ROOT is an
+    ephemeral container filesystem, and a proforma is fully derivable from
+    its stored lines, so a saved file would be a stale copy waiting to be
+    destroyed on the next deploy.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from django.http import HttpResponse
+        from apps.jobs.pdf.proforma_pdf import build_proforma_pdf
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            pdf = build_proforma_pdf(proforma)
+        except Exception as e:
+            return Response({'detail': f'Could not build the document: {e}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = (
+            f'attachment; filename="{proforma.proforma_number}.pdf"'
+        )
+        return response
