@@ -200,6 +200,29 @@ class ProformaEngine:
 
         self._require_permission(actor, 'revise')
 
+        # A service withdrawn since issue means the branch no longer offers
+        # it. Patching the document around the hole would send a customer a
+        # revision that quietly dropped something they asked for, so the
+        # whole proforma is refused and a fresh one is raised at current
+        # prices instead.
+        from apps.jobs.models import Service
+        quoted_ids = {li['service_id'] for li in proforma.line_items}
+        live_ids   = set(
+            Service.objects
+            .filter(pk__in=quoted_ids, is_active=True)
+            .values_list('pk', flat=True)
+        )
+        withdrawn = quoted_ids - live_ids
+        if withdrawn:
+            names = ', '.join(
+                li['service_name'] for li in proforma.line_items
+                if li['service_id'] in withdrawn
+            )
+            raise ValueError(
+                f"{proforma.proforma_number} quotes a service no longer "
+                f"offered ({names}). Raise a new proforma instead."
+            )
+
         if proforma.status not in (ProformaInvoice.Status.DRAFT,
                                 ProformaInvoice.Status.ISSUED):
             raise ValueError(
