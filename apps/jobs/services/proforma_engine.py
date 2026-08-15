@@ -286,9 +286,20 @@ class ProformaEngine:
         else:
             title = ', '.join(names[:3]) + f' +{len(names) - 3} more'
 
+        # An all-instant proforma is instant work ordered ahead, and typing
+        # it as production would put it on a work ladder it never travels.
+        # Anything with a production or design line is production.
+        line_service_ids = [li['service_id'] for li in quote.line_items]
+        categories = set(
+            Service.objects
+            .filter(pk__in=line_service_ids)
+            .values_list('category', flat=True)
+        )
+        job_type = 'INSTANT' if categories == {'INSTANT'} else 'PRODUCTION'
+
         job = Job.objects.create(
             branch          = self.branch,
-            job_type        = 'PRODUCTION',
+            job_type        = job_type,
             status          = Job.PENDING_PAYMENT,
             title           = title,
             customer        = proforma.customer,
