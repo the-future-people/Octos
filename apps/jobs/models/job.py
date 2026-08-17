@@ -485,6 +485,36 @@ class Job(AuditModel):
     def is_design(self) -> bool:
         return self.job_type == self.DESIGN
 
+    # ── Verification ─────────────────────────────────────────────
+
+    # Channels where nobody is standing at the counter and nobody at the
+    # branch has yet looked at what was sent. A walk-in needs no
+    # verification — anything unclear is asked on the spot.
+    #
+    # PROFORMA is deliberately absent. A quote is built line by line by a
+    # manager, agreed with the customer and converted deliberately; that is
+    # more scrutiny than a verification, not less.
+    REMOTE_CHANNELS = {'WHATSAPP', 'EMAIL', 'PHONE'}
+
+    @property
+    def needs_verification(self) -> bool:
+        """
+        Derived rather than stored, so there is no second source of truth
+        to drift from the channel the job arrived on.
+        """
+        return self.intake_channel in self.REMOTE_CHANNELS
+
+    @property
+    def latest_verification(self):
+        """Most recent check. Verifications are ordered newest first."""
+        return self.verifications.first()
+
+    @property
+    def is_verified(self) -> bool:
+        """Cleared for production. False where no check has passed yet."""
+        latest = self.latest_verification
+        return bool(latest and latest.passed)
+
     @property
     def balance_due(self):
         """Remaining amount owed after deposit."""

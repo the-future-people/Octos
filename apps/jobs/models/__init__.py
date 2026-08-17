@@ -6,6 +6,7 @@ from .service import Service
 from .pricing import PricingRule, PriceOverrideLog
 from .job_status_log import JobStatusLog
 from .proforma_invoice import ProformaInvoice
+from .job_verification import JobVerification
 
 __all__ = [
     'Job',
@@ -17,4 +18,5 @@ __all__ = [
     'PriceOverrideLog',
     'JobStatusLog',
     'ProformaInvoice',
+    'job_verification'
 ]
