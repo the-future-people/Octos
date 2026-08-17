@@ -280,3 +280,121 @@ class TimingApplicationTests(TimingFixtureMixin, TestCase):
 
         timing = StationTiming.objects.get(branch=self.branch, station=self.print_st)
         self.assertLess(float(timing.observed_minutes_per_unit), 0.6)
+
+class PredictionTests(TimingFixtureMixin, TestCase):
+    """
+    The calendar walk is the easiest part of this to get subtly wrong, and
+    a wrong ready-time is exactly what a customer judges the business on.
+    """
+
+    def setUp(self):
+        from apps.production.services.prediction_service import PredictionService
+        self.svc = PredictionService(self.branch)
+
+    def _predict(self, lines, at):
+        return self.svc.predict(lines, at=at)
+
+    def test_own_work_only_when_nothing_is_queued(self):
+        """100 sheets at the seed figure: 2 setup + 0.05 × 100 = 7 minutes."""
+        p = self._predict([(self.printing, 100, 1)], self._at(9, 0))
+        self.assertAlmostEqual(p.own_minutes, 7.0, places=1)
+        self.assertEqual(p.queue_minutes, 0.0)
+
+    def test_buffer_is_applied(self):
+        """The promise sits above the expectation. Late costs more than early."""
+        p = self._predict([(self.printing, 100, 1)], self._at(9, 0))
+        self.assertAlmostEqual(p.total_minutes, 7.0 * 1.3, places=1)
+
+    def test_ready_time_lands_within_the_working_day(self):
+        p = self._predict([(self.printing, 100, 1)], self._at(9, 0))
+        self.assertEqual(p.ready_at.date(), timezone.localdate())
+        self.assertFalse(p.is_next_day)
+
+    def test_arriving_before_opening_waits_for_opening(self):
+        p = self._predict([(self.printing, 10, 1)], self._at(6, 0))
+        self.assertGreaterEqual(p.ready_at.time(), self.branch.opening_time)
+
+    def test_arriving_within_the_grace_still_runs_today(self):
+        """
+        7:22pm with a closing time of 7:30 is inside the ten-minute grace.
+        The branch is winding down but people are there.
+        """
+        p = self._predict([(self.printing, 10, 1)], self._at(19, 22))
+        self.assertFalse(p.is_next_day)
+
+    def test_arriving_at_closing_rolls_to_the_next_day(self):
+        """
+        The customer is told at the point of ordering rather than
+        discovering it when they come back.
+        """
+        p = self._predict([(self.printing, 10, 1)], self._at(19, 30))
+        self.assertTrue(p.is_next_day)
+
+    def test_work_that_cannot_finish_today_carries_over(self):
+        """
+        Three hours of work starting at 6pm does not finish at 9pm. The
+        branch closed at 7:30.
+        """
+        p = self._predict([(self.printing, 5000, 1)], self._at(18, 0))
+        self.assertTrue(p.is_next_day)
+        self.assertGreaterEqual(p.ready_at.time(), self.branch.opening_time)
+
+    def test_a_queued_job_pushes_the_estimate_out(self):
+        job = self._job([(self.printing, 1000, 1)], work_state='RECEIVED')
+        p = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+        self.assertGreater(p.queue_minutes, 0)
+
+    def test_a_halted_job_does_not_consume_station_time(self):
+        """
+        A halted job is not being worked on. It will consume time when it
+        resumes, but predicting when that happens would be a guess.
+        """
+        from apps.jobs.models import JobHalt
+
+        job = self._job([(self.printing, 1000, 1)], work_state='IN_PRODUCTION')
+        JobHalt.objects.create(
+            job=job, reason='MACHINE_BREAKDOWN',
+            work_state_at_halt='IN_PRODUCTION', halted_by=self.actor,
+        )
+        p = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+        self.assertEqual(p.queue_minutes, 0.0)
+
+    def test_confidence_is_estimated_without_observations(self):
+        """A number the branch cannot hit is worse than no number."""
+        p = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+        self.assertEqual(p.confidence, 'estimated')
+        self.assertFalse(p.is_reliable)
+
+    def test_confidence_becomes_measured_once_observed(self):
+        from apps.production.services.timing_service import TimingService
+
+        at = self._at(9, 0)
+        for _ in range(10):
+            TimingService._apply({
+                'branch': self.branch, 'station': 'PRINT',
+                'at': at, 'per_unit': 0.08, 'is_clean': True,
+            })
+
+        p = self._predict([(self.printing, 10, 1)], at)
+        self.assertEqual(p.confidence, 'measured')
+
+    def test_measured_timings_replace_the_seed(self):
+        """Once the branch has been observed, its own figures are used."""
+        from apps.production.services.timing_service import TimingService
+
+        at = self._at(9, 0)
+        for _ in range(10):
+            TimingService._apply({
+                'branch': self.branch, 'station': 'PRINT',
+                'at': at, 'per_unit': 0.20, 'is_clean': True,
+            })
+
+        p = self._predict([(self.printing, 100, 1)], at)
+        # 2 setup + 0.20 × 100 = 22, not the seed's 7.
+        self.assertAlmostEqual(p.own_minutes, 22.0, places=1)
+
+    def test_binding_counts_documents_not_sheets(self):
+        """A ten-page document bound once is one binding, not ten."""
+        p = self._predict([(self.binding, 3, 10)], self._at(9, 0))
+        # 2 setup + 2.50 × 3 = 9.5
+        self.assertAlmostEqual(p.own_minutes, 9.5, places=1)
