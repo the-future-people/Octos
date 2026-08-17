@@ -654,3 +654,124 @@ class HaltedCounterTests(JobsFixtureMixin, TestCase):
         from apps.jobs.selectors.stats_selectors import get_branch_stats
         JobStatusEngine(self.halted).resume(actor=self.coordinator)
         self.assertEqual(get_branch_stats(self.branch)['halted'], 0)
+
+class VerificationTests(JobsFixtureMixin, TestCase):
+    """
+    A walk-in needs no verification — the customer was standing there. A
+    remote order has nobody to ask, so someone opens the file before five
+    hundred flyers are printed from it.
+    """
+
+    def _job(self, channel, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Verification test',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet, intake_channel=channel,
+            payment_state='DEPOSIT_PAID', work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_walk_in_needs_no_verification(self):
+        job = self._job('WALK_IN')
+        self.assertFalse(job.needs_verification)
+
+    def test_remote_order_needs_verification(self):
+        job = self._job('WHATSAPP')
+        self.assertTrue(job.needs_verification)
+
+    def test_proforma_needs_no_verification(self):
+        """
+        A quote is built line by line by a manager, agreed with the
+        customer and converted deliberately. That is more scrutiny than a
+        verification, not less.
+        """
+        job = self._job('PROFORMA')
+        self.assertFalse(job.needs_verification)
+
+    def test_unverified_remote_job_cannot_start_production(self):
+        job = self._job('WHATSAPP')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.coordinator)
+
+    def test_walk_in_starts_production_without_verification(self):
+        job = self._job('WALK_IN')
+        JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'IN_PRODUCTION')
+
+    def test_verified_remote_job_starts_production(self):
+        job    = self._job('WHATSAPP')
+        engine = JobStatusEngine(job)
+        engine.verify(actor=self.coordinator, note='Artwork checked, 300dpi.')
+        engine.move_work('IN_PRODUCTION', actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'IN_PRODUCTION')
+
+    def test_rejection_does_not_clear_the_job(self):
+        from apps.jobs.models import JobVerification
+
+        job    = self._job('WHATSAPP')
+        engine = JobStatusEngine(job)
+        engine.reject_verification(
+            outcome=JobVerification.Outcome.ARTWORK_PROBLEM,
+            actor=self.coordinator,
+            note='72dpi, unusable at A3.',
+        )
+        job.refresh_from_db()
+        self.assertFalse(job.is_verified)
+
+    def test_a_job_can_be_rechecked_after_a_rejection(self):
+        """
+        The customer sends better artwork and it is checked again. Both
+        outcomes are kept — a flag would hold only the last one and lose
+        why it was ever rejected.
+        """
+        from apps.jobs.models import JobVerification
+
+        job    = self._job('WHATSAPP')
+        engine = JobStatusEngine(job)
+        engine.reject_verification(
+            outcome=JobVerification.Outcome.ARTWORK_PROBLEM,
+            actor=self.coordinator, note='72dpi.',
+            customer_contacted=True, customer_response='Will resend.',
+        )
+        engine.verify(actor=self.coordinator, note='New file is 300dpi.')
+
+        job.refresh_from_db()
+        self.assertTrue(job.is_verified)
+        self.assertEqual(job.verifications.count(), 2)
+
+    def test_the_customer_call_is_recorded(self):
+        from apps.jobs.models import JobVerification
+
+        job = self._job('WHATSAPP')
+        JobStatusEngine(job).reject_verification(
+            outcome=JobVerification.Outcome.SPEC_UNCLEAR,
+            actor=self.coordinator,
+            note='Did not say single or double sided.',
+            customer_contacted=True,
+            customer_response='Double sided, and make it 200 not 100.',
+        )
+        v = job.verifications.first()
+        self.assertTrue(v.customer_contacted)
+        self.assertIn('Double sided', v.customer_response)
+
+    def test_attendant_cannot_verify(self):
+        job = self._job('WHATSAPP')
+        with self.assertRaises(PermissionError):
+            JobStatusEngine(job).verify(actor=self.attendant)
+
+    def test_verifying_a_walk_in_is_refused(self):
+        job = self._job('WALK_IN')
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).verify(actor=self.coordinator)
+
+    def test_verifying_twice_is_refused(self):
+        job    = self._job('WHATSAPP')
+        engine = JobStatusEngine(job)
+        engine.verify(actor=self.coordinator)
+        with self.assertRaises(ValueError):
+            engine.verify(actor=self.coordinator)

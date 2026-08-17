@@ -358,6 +358,78 @@ class JobStatusEngine:
     def is_halted(self) -> bool:
         return self.active_halt() is not None
 
+    # ── Verification ─────────────────────────────────────────────
+
+    @transaction.atomic
+    def verify(self, actor, note='', customer_contacted=False,
+               customer_response=''):
+        """
+        Clear a remote order for production.
+
+        The coordinator's job: open the file, read the spec, decide whether
+        it can be made as ordered. A walk-in never reaches here — the
+        customer was standing there and anything unclear was asked on the
+        spot.
+        """
+        from apps.jobs.models import JobVerification
+
+        if not self._may_move_axis('WORK', actor):
+            raise PermissionError(
+                f"{actor.full_name or actor.email} cannot verify "
+                f"{self.job.job_number}."
+            )
+
+        if not self.job.needs_verification:
+            raise ValueError(
+                f"{self.job.job_number} came in at the counter and needs "
+                f"no verification."
+            )
+
+        if self.job.is_verified:
+            raise ValueError(
+                f"{self.job.job_number} has already been cleared."
+            )
+
+        return JobVerification.objects.create(
+            job                = self.job,
+            outcome            = JobVerification.Outcome.PASSED,
+            note               = note,
+            customer_contacted = customer_contacted,
+            customer_response  = customer_response,
+            checked_by         = actor,
+        )
+
+    @transaction.atomic
+    def reject_verification(self, outcome, actor, note='',
+                            customer_contacted=False, customer_response=''):
+        """
+        Record that a remote order cannot proceed as sent.
+
+        Deliberately does not halt the job. Halting is the coordinator's
+        own act — it makes the state visible before anyone picks up the
+        phone, and some problems need no call at all. Coupling the two
+        would take that judgement away.
+        """
+        from apps.jobs.models import JobVerification
+
+        if not self._may_move_axis('WORK', actor):
+            raise PermissionError(
+                f"{actor.full_name or actor.email} cannot verify "
+                f"{self.job.job_number}."
+            )
+
+        if outcome == JobVerification.Outcome.PASSED:
+            raise ValueError('Use verify() to clear a job.')
+
+        return JobVerification.objects.create(
+            job                = self.job,
+            outcome            = outcome,
+            note               = note,
+            customer_contacted = customer_contacted,
+            customer_response  = customer_response,
+            checked_by         = actor,
+        )
+
     # ── Core axis transition ─────────────────────────────────────
 
     @transaction.atomic
@@ -469,6 +541,14 @@ class JobStatusEngine:
                 return (
                     f"{job.job_number} has no deposit — "
                     f"production cannot start until the cashier takes payment."
+                )
+            # Nobody at the branch has looked at what was sent. Printing
+            # five hundred flyers from an unopened file is how a customer
+            # gets a refund and the branch eats the stock.
+            if job.needs_verification and not job.is_verified:
+                return (
+                    f"{job.job_number} has not been verified. A coordinator "
+                    f"must check the file and specification first."
                 )
 
         return None
