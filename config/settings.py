@@ -236,6 +236,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.expire_proformas',
         'schedule': crontab(hour=2, minute=15),
     },
+    'observe-station-timings-nightly': {
+        'task': 'apps.production.tasks.observe_station_timings',
+        'schedule': crontab(hour=3, minute=0),
+    },
     'remind-open-proformas-daily': {
         'task': 'apps.jobs.tasks.remind_open_proformas',
         'schedule': crontab(hour=8, minute=30),
