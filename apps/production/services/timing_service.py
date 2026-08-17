@@ -236,15 +236,18 @@ class TimingService:
         local  = timezone.localtime(obs['at'])
         weight = CLEAN_WEIGHT if obs['is_clean'] else APPORTIONED_WEIGHT
 
+        # Created empty, then folded in below. Seeding the values here as
+        # well would count the first observation twice — the weight was
+        # applied on creation and added again by the rolling mean.
         timing, _ = StationTiming.objects.select_for_update().get_or_create(
             branch=obs['branch'],
             station=station,
             hour_of_day=local.hour,
             day_of_week=local.weekday(),
             defaults={
-                'observed_minutes_per_unit': Decimal(str(round(obs['per_unit'], 4))),
-                'sample_count':              weight,
-                'last_observed_at':          obs['at'],
+                'observed_minutes_per_unit': Decimal('0'),
+                'sample_count':              0,
+                'last_observed_at':          None,
             },
         )
 
