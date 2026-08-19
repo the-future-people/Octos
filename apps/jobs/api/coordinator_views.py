@@ -35,6 +35,33 @@ def _get_job(pk, branch):
     )
 
 
+def _predicted_ready(job):
+    """
+    When the floor says this job will be done. Returns None where the job
+    has no priceable route or the branch has no machines for it — better
+    nothing than a number nobody can hit.
+    """
+    from apps.production.services.prediction_service import PredictionService
+
+    try:
+        lines = [
+            (li.service, li.quantity or 1, li.pages or 1)
+            for li in job.line_items.all()
+        ]
+        if not lines:
+            return None
+        p = PredictionService(job.branch).predict(lines)
+        return {
+            'ready_at':    p.ready_at.isoformat(),
+            'minutes':     p.total_minutes,
+            'is_next_day': p.is_next_day,
+            'confidence':  p.confidence,
+        }
+    except Exception:
+        # A prediction failing must never take the board down with it.
+        return None
+
+
 class VerificationQueueView(APIView):
     """
     GET /api/v1/jobs/coordinator/verification-queue/
@@ -69,9 +96,13 @@ class VerificationQueueView(APIView):
         # rather than a column, so the filter happens here.
         pending = [j for j in candidates if not j.is_verified]
 
-        return Response(
-            JobListSerializer(pending, many=True, context={'request': request}).data
-        )
+        data = JobListSerializer(
+            pending, many=True, context={'request': request}
+        ).data
+        for row, job in zip(data, pending):
+            row['predicted'] = _predicted_ready(job)
+
+        return Response(data)
 
 
 class ProductionBoardView(APIView):
@@ -114,6 +145,7 @@ class ProductionBoardView(APIView):
 
         for job in jobs:
             data = JobListSerializer(job, context={'request': request}).data
+            data['predicted'] = _predicted_ready(job)
             # A halted job is shown apart rather than in its column. It is
             # not being worked on, and leaving it in place makes a column
             # look busier than the floor actually is.
