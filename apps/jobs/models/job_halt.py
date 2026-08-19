@@ -34,6 +34,19 @@ class JobHalt(AuditModel):
     )
 
     reason = models.CharField(max_length=30, choices=Reason.choices)
+
+    # Which machine, where a machine caused it. Set when a device is marked
+    # down, so bringing it back resumes exactly the jobs it stopped —
+    # matching on a note prefix would break silently the day the wording
+    # changed. Null for halts with no machine behind them: materials out,
+    # a customer pause, a quality failure.
+    machine = models.ForeignKey(
+        'production.Machine',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='halts_caused',
+    )
     # Optional by design. A mandatory note becomes ritual — the same text
     # typed every time — and tells you less than the reason code alone.
     note = models.TextField(blank=True)
