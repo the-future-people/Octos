@@ -154,7 +154,8 @@ class JobListSerializer(serializers.ModelSerializer):
             'customer', 'customer_credit', 'customer_wallet_balance',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
-            'payment_state', 'work_state', 'handover_state', 'is_halted',
+                        'payment_state', 'work_state', 'handover_state', 'is_halted',
+            'verification',
         ]
 
     def get_customer_name(self, obj):
