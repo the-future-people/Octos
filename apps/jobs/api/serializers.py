@@ -166,7 +166,6 @@ class JobListSerializer(serializers.ModelSerializer):
     line_item_count  = serializers.SerializerMethodField()
     is_halted        = serializers.SerializerMethodField()
     verification     = serializers.SerializerMethodField()
-    predicted        = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
