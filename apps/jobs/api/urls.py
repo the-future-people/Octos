@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 from . import proforma_views
+from . import coordinator_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 
 urlpatterns = [
@@ -12,6 +13,12 @@ urlpatterns = [
     # Job actions
     path('<int:pk>/transition/', views.JobTransitionView.as_view(),  name='job-transition'),
     path('<int:pk>/files/',      views.JobFileUploadView.as_view(),  name='job-file-upload'),
+
+    # Coordinator
+    path('coordinator/verification-queue/', coordinator_views.VerificationQueueView.as_view(), name='verification-queue'),
+    path('coordinator/board/',              coordinator_views.ProductionBoardView.as_view(),   name='production-board'),
+    path('<int:pk>/verify/',                coordinator_views.VerifyJobView.as_view(),         name='job-verify'),
+    path('<int:pk>/verify/reject/',         coordinator_views.RejectVerificationView.as_view(), name='job-verify-reject'),
 
     # Lifecycle axes
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),

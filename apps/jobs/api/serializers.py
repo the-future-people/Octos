@@ -141,6 +141,7 @@ class JobListSerializer(serializers.ModelSerializer):
     line_items       = JobLineItemSerializer(many=True, read_only=True)
     line_item_count  = serializers.SerializerMethodField()
     is_halted        = serializers.SerializerMethodField()
+    verification     = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
@@ -164,6 +165,27 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_is_halted(self, obj):
         return any(h.resumed_at is None for h in obj.halts.all())
+
+    def get_verification(self, obj):
+        """
+        Where this job stands on checking. Null for anything taken at the
+        counter, which needs none.
+        """
+        if not obj.needs_verification:
+            return None
+        latest = obj.verifications.all()[0] if obj.verifications.all() else None
+        if not latest:
+            return {'required': True, 'checked': False}
+        return {
+            'required':        True,
+            'checked':         True,
+            'passed':          latest.passed,
+            'outcome':         latest.outcome,
+            'outcome_display': latest.get_outcome_display(),
+            'note':            latest.note,
+            'checked_at':      latest.checked_at.isoformat(),
+            'checked_by':      latest.checked_by.full_name if latest.checked_by else None,
+        }
 
     def get_customer_credit(self, obj):
         if not obj.customer:
