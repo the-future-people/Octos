@@ -143,8 +143,31 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.StaticFilesStorage'
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# ── Media storage ────────────────────────────────────────────────
+#
+# Customer artwork. Two things drive this design:
+#
+# It must survive a deploy. MEDIA_ROOT defaulted to BASE_DIR / 'media',
+# inside the code directory, so every deploy replaced it — files uploaded
+# in the morning were gone by evening. It now points at a mounted volume in
+# production, set by MEDIA_ROOT_PATH.
+#
+# It must not be publicly readable. A customer's artwork at a guessable URL
+# is a real exposure, so nothing is served directly: every file goes
+# through a view that checks who is asking. That is why MEDIA_URL points at
+# an app route rather than a static path, and why it does not change when
+# the backend moves to object storage.
+MEDIA_URL = '/api/v1/jobs/files/'
+MEDIA_ROOT = Path(config('MEDIA_ROOT_PATH', default=str(BASE_DIR / 'media')))
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.StaticFilesStorage',
+    },
+}
 
 # Default primary key
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

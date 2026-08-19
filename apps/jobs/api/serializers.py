@@ -38,17 +38,41 @@ class PricingRuleSerializer(serializers.ModelSerializer):
 
 class JobFileSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.SerializerMethodField()
+    url              = serializers.SerializerMethodField()
+    filename         = serializers.SerializerMethodField()
+    size_kb          = serializers.SerializerMethodField()
 
     class Meta:
         model  = JobFile
         fields = [
-            'id', 'file', 'file_type', 'uploaded_by',
-            'uploaded_by_name', 'notes', 'created_at',
+            'id', 'url', 'filename', 'size_kb', 'file_type',
+            'uploaded_by', 'uploaded_by_name', 'notes', 'created_at',
         ]
         read_only_fields = ['uploaded_by', 'created_at']
 
     def get_uploaded_by_name(self, obj):
         return obj.uploaded_by.full_name if obj.uploaded_by else None
+
+    def get_url(self, obj):
+        """
+        A route, never a storage path. The raw file.url would expose where
+        the bytes live and bypass the permission check on the way in.
+        """
+        return f'/api/v1/jobs/files/{obj.pk}/'
+
+    def get_filename(self, obj):
+        import os
+        return os.path.basename(obj.file.name) if obj.file else None
+
+    def get_size_kb(self, obj):
+        """
+        None where the record survives but the bytes do not, which is what
+        an ephemeral filesystem leaves behind after a deploy.
+        """
+        try:
+            return round(obj.file.size / 1024, 1)
+        except (FileNotFoundError, ValueError, OSError):
+            return None
 
 
 class JobFileUploadSerializer(serializers.ModelSerializer):
@@ -142,6 +166,7 @@ class JobListSerializer(serializers.ModelSerializer):
     line_item_count  = serializers.SerializerMethodField()
     is_halted        = serializers.SerializerMethodField()
     verification     = serializers.SerializerMethodField()
+    predicted        = serializers.SerializerMethodField()
 
     class Meta:
         model  = Job
