@@ -144,6 +144,12 @@ class ProductionBoardView(APIView):
         halted = []
 
         for job in jobs:
+            # A job still waiting to be checked is not on the floor. It
+            # belongs in the arrivals rail alone, or a coordinator sees the
+            # same job twice and can press Start on something nobody has
+            # opened the file for.
+            if job.needs_verification and not job.is_verified:
+                continue
             data = JobListSerializer(job, context={'request': request}).data
             data['predicted'] = _predicted_ready(job)
             # A halted job is shown apart rather than in its column. It is
