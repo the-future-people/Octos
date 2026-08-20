@@ -92,9 +92,19 @@ class VerificationQueueView(APIView):
             .order_by('created_at')
         )
 
-        # is_verified reads the latest verification, which is a property
+                # is_verified reads the latest verification, which is a property
         # rather than a column, so the filter happens here.
-        pending = [j for j in candidates if not j.is_verified]
+        #
+        # A halted job is excluded even though it is still unverified. A
+        # suspension holds a job precisely because it cannot proceed, and
+        # leaving it in the rail would put it back at the tip for someone
+        # to open a file that has already been looked at and found wanting.
+        # It belongs in the suspended list until it is resumed.
+        pending = [
+            j for j in candidates
+            if not j.is_verified
+            and not any(h.resumed_at is None for h in j.halts.all())
+        ]
 
         data = JobListSerializer(
             pending, many=True, context={'request': request}
@@ -263,3 +273,131 @@ class RejectVerificationView(APIView):
             'job_number': job.job_number,
             'detail':     f'{job.job_number} sent back — {outcome.replace("_", " ").lower()}.',
         })
+
+class SuspendJobView(APIView):
+    """
+    POST /api/v1/jobs/<pk>/verify/suspend/
+    Body: { outcome, note?, customer_contacted?, customer_response? }
+
+    A job that has been inspected, is not cleared, and cannot proceed until
+    someone answers a question. It is two facts, not one: what the
+    coordinator found, and that the job is held while it stands.
+
+    Recording only the halt would lose the finding — the job comes back to
+    the workspace with a reason code and no account of what was wrong with
+    it. Recording only the rejection would leave it sitting in the arrivals
+    rail with a known problem and nothing showing it is held.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from django.db import transaction
+        from apps.core.broadcast import broadcast_invalidation
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        job = _get_job(pk, branch)
+        if not job:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        outcome = request.data.get('outcome')
+        # PASSED is a clearance, not a suspension. Accepting it here would
+        # record a job as both cleared and held.
+        valid = [
+            c[0] for c in JobVerification.Outcome.choices
+            if c[0] != JobVerification.Outcome.PASSED
+        ]
+        if outcome not in valid:
+            return Response(
+                {'detail': f'Outcome must be one of: {", ".join(valid)}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        note = request.data.get('note', '')
+
+        try:
+            # Both writes or neither. A rejection recorded without its halt
+            # is the worse half-state: a known problem the board does not
+            # show as stopped.
+            with transaction.atomic():
+                engine = JobStatusEngine(job)
+                engine.reject_verification(
+                    outcome            = outcome,
+                    actor              = request.user,
+                    note               = note,
+                    customer_contacted = bool(request.data.get('customer_contacted')),
+                    customer_response  = request.data.get('customer_response', ''),
+                )
+                engine.halt(
+                    reason = 'AWAITING_CUSTOMER',
+                    actor  = request.user,
+                    note   = note,
+                )
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(branch.id, [
+            'verificationQueue', 'suspendedJobs', 'productionBoard',
+            'jobs', 'job-detail',
+        ])
+        return Response({
+            'success':    True,
+            'job_number': job.job_number,
+            'detail':     f'{job.job_number} suspended — {outcome.replace("_", " ").lower()}.',
+        })
+
+
+class SuspendedJobsView(APIView):
+    """
+    GET /api/v1/jobs/coordinator/suspended/
+
+    Jobs inspected, held, and waiting on an answer. A separate list rather
+    than part of the board: they are not on the floor, and a suspended job
+    left in the arrivals rail would invite a coordinator to open a job
+    somebody is already chasing.
+
+    Oldest first, because a job held for three days is the one at risk.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.jobs.api.serializers import JobListSerializer
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        candidates = (
+            Job.objects
+            .filter(branch=branch, work_state='RECEIVED')
+            .exclude(status__in=['CANCELLED', 'DRAFT'])
+            .select_related('customer', 'intake_by')
+            .prefetch_related('line_items__service', 'verifications', 'halts')
+            .order_by('created_at')
+        )
+
+        rows = []
+        for job in candidates:
+            active = next(
+                (h for h in job.halts.all() if h.resumed_at is None), None
+            )
+            if not active or job.is_verified:
+                continue
+            data = JobListSerializer(job, context={'request': request}).data
+            # What was found and when it stopped — the coordinator picking
+            # this up later did not necessarily suspend it.
+            data['halt'] = {
+                'reason':    active.reason,
+                'note':      active.note,
+                'halted_at': active.halted_at.isoformat() if active.halted_at else None,
+            }
+            latest = job.verifications.order_by('-checked_at').first()
+            data['finding'] = latest.outcome if latest else None
+            rows.append(data)
+
+        return Response(rows)
