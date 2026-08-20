@@ -120,12 +120,32 @@ class JobDetailView(generics.RetrieveAPIView):
         user = self.request.user
         qs   = Job.objects.select_related(
             'branch', 'assigned_to', 'customer', 'intake_by'
-        ).prefetch_related('files', 'status_logs', 'halts')
+        ).prefetch_related(
+            'files', 'status_logs', 'halts', 'line_items__service',
+        )
 
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)
 
         return qs
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Prediction is stitched on rather than serialized, and only when
+        asked for. Working out when a job will be ready walks the
+        branch's opening hours and every station on its route — real work
+        that the cashier and the branch manager have no use for on a job
+        they are only reading.
+
+        The coordinator's workspace asks for it, because the gap between
+        what was promised and what the floor can actually do is the thing
+        that decides whether a job jumps the queue.
+        """
+        response = super().retrieve(request, *args, **kwargs)
+        if request.query_params.get('predict'):
+            from apps.jobs.api.coordinator_views import _predicted_ready
+            response.data['predicted'] = _predicted_ready(self.get_object())
+        return response
 
 
 class JobCreateView(generics.CreateAPIView):
