@@ -191,8 +191,10 @@ class ResolveHandoverViewTests(JobsFixtureMixin, TestCase):
     """Section B — cashier affirms an INTAKE_HELD job."""
 
     def setUp(self):
+        from apps.jobs.models import JobLineItem
+
         self.job = Job.objects.create(
-            branch=self.branch, job_type='INSTANT', status=Job.INTAKE_HELD,
+            branch=self.branch, job_type='INSTANT',status=Job.INTAKE_HELD,
             title='Handover affirm test', intake_by=self.bm, estimated_cost=75,
             post_closing=True, post_closing_reason='Automated test',
             daily_sheet=None,
@@ -241,6 +243,8 @@ class DisputeHandoverViewTests(JobsFixtureMixin, TestCase):
     """Section C — cashier reports BM did not hand over cash."""
 
     def setUp(self):
+        from apps.jobs.models import JobLineItem
+
         self.job = Job.objects.create(
             branch=self.branch, job_type='INSTANT', status=Job.INTAKE_HELD,
             title='Handover dispute test', intake_by=self.bm, estimated_cost=60,
@@ -273,6 +277,8 @@ class DiscardDraftViewTests(JobsFixtureMixin, TestCase):
     """Section E — discarding a draft must now log through the engine."""
 
     def setUp(self):
+        from apps.jobs.models import JobLineItem
+
         self.job = Job.objects.create(
             branch=self.branch, job_type='INSTANT', status=Job.DRAFT,
             title='Draft discard test', intake_by=self.bm, estimated_cost=30,
@@ -775,3 +781,51 @@ class VerificationTests(JobsFixtureMixin, TestCase):
         engine.verify(actor=self.coordinator)
         with self.assertRaises(ValueError):
             engine.verify(actor=self.coordinator)
+
+class SerializerContractTests(JobsFixtureMixin, TestCase):
+    """
+    DRF only validates a serializer's fields when one is first built, which
+    happens at request time — so manage.py check passes on a field declared
+    but missing from the fields list, and the first person to notice is a
+    cashier whose queue has gone blank.
+
+    Twice in one day. This builds each job serializer against a real object
+    so the same fault fails here instead.
+    """
+
+    def setUp(self):
+        from apps.jobs.models import JobLineItem
+
+        self.job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT',
+            status=Job.PENDING_PAYMENT, title='Serializer contract',
+            intake_by=self.attendant, estimated_cost=Decimal('50.00'),
+            daily_sheet=self.sheet,
+            payment_state='UNPAID', work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+        )
+        JobLineItem.objects.create(
+            job=self.job, service=self.service, quantity=1, pages=1,
+            unit_price=Decimal('50.00'), line_total=Decimal('50.00'), position=0,
+        )
+
+    def test_job_list_serializer_builds(self):
+        from apps.jobs.api.serializers import JobListSerializer
+        data = JobListSerializer(self.job).data
+        self.assertEqual(data['job_number'], self.job.job_number)
+
+    def test_job_detail_serializer_builds(self):
+        from apps.jobs.api.serializers import JobDetailSerializer
+        data = JobDetailSerializer(self.job).data
+        self.assertEqual(data['job_number'], self.job.job_number)
+
+    def test_job_file_serializer_builds(self):
+        from apps.jobs.api.serializers import JobFileSerializer
+        JobFileSerializer()
+
+    def test_proforma_serializers_build(self):
+        from apps.jobs.api.proforma_serializers import (
+            ProformaListSerializer, ProformaDetailSerializer,
+        )
+        ProformaListSerializer()
+        ProformaDetailSerializer()
