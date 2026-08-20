@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import models
 
-from apps.jobs.models import Job, JobFile, Service, PricingRule
+from apps.jobs.models import Job, JobFile, Service, PricingRule, job_file
 from apps.jobs.status_engine import JobStatusEngine
 from apps.jobs.routing_engine import RoutingEngine
 from apps.jobs.pricing_engine import PricingEngine
@@ -450,6 +450,12 @@ class JobFileUploadView(APIView):
             uploaded_by=request.user,
             **serializer.validated_data,
         )
+        # Measured after the row exists, reading back from storage rather
+        # than from the request. The bytes on disk are what will be served
+        # later, so they are what should be measured — and a file that
+        # cannot be read must not fail the upload it arrived on.
+        from apps.jobs.services.file_metadata import extract
+        extract(job_file)
 
         from .serializers import JobFileSerializer
         return Response(
