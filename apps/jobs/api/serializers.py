@@ -175,6 +175,7 @@ class JobListSerializer(serializers.ModelSerializer):
     branch_email     = serializers.EmailField(source='branch.email', read_only=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name    = serializers.SerializerMethodField()
+    customer_phone   = serializers.SerializerMethodField()
     customer_credit  = serializers.SerializerMethodField()
     customer_wallet_balance = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
@@ -192,7 +193,8 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
-            'customer', 'customer_credit', 'customer_wallet_balance',
+            'customer', 'customer_phone', 'customer_credit',
+            'customer_wallet_balance',
             'line_items', 'line_item_count', 'branch_address',
             'branch_phone', 'branch_email',
                         'payment_state', 'work_state', 'handover_state', 'is_halted',
@@ -201,6 +203,13 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_customer_name(self, obj):
         return obj.customer.full_name if obj.customer else None
+    def get_customer_phone(self, obj):
+        """
+        A coordinator who finds a problem needs to reach the person who
+        sent it. Nothing here reaches the counter — that is the attendant's
+        and the cashier's ground.
+        """
+        return obj.customer.phone if obj.customer else None
 
     def get_intake_by_name(self, obj):
         return obj.intake_by.full_name if obj.intake_by else None
@@ -267,6 +276,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
     branch_name         = serializers.CharField(source='branch.name', read_only=True)
     assigned_to_name    = serializers.CharField(source='assigned_to.name', read_only=True)
     customer_name       = serializers.SerializerMethodField()
+    customer_phone      = serializers.SerializerMethodField()
     intake_by_name      = serializers.SerializerMethodField()
     files               = JobFileSerializer(many=True, read_only=True)
     status_logs         = JobStatusLogSerializer(many=True, read_only=True)
@@ -283,7 +293,8 @@ class JobDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'job_number', 'title', 'job_type', 'status', 'priority',
             'branch', 'branch_name', 'assigned_to', 'assigned_to_name',
-            'customer', 'customer_name', 'intake_by', 'intake_by_name',
+            'customer', 'customer_name', 'customer_phone',
+            'intake_by', 'intake_by_name',
             'description', 'specifications', 'intake_channel',
             'estimated_time', 'estimated_cost', 'final_cost',
             'deposit_percentage', 'amount_paid', 'deposit_due', 'balance_due',
@@ -297,6 +308,14 @@ class JobDetailSerializer(serializers.ModelSerializer):
 
     def get_customer_name(self, obj):
         return obj.customer.full_name if obj.customer else None
+
+    def get_customer_phone(self, obj):
+        """
+        A coordinator who finds a problem needs to reach the person who
+        sent it. Nothing here reaches the counter — that is the attendant's
+        and the cashier's ground.
+        """
+        return obj.customer.phone if obj.customer else None
 
     def get_intake_by_name(self, obj):
         return obj.intake_by.full_name if obj.intake_by else None
