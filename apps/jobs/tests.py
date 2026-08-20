@@ -820,8 +820,50 @@ class SerializerContractTests(JobsFixtureMixin, TestCase):
         self.assertEqual(data['job_number'], self.job.job_number)
 
     def test_job_file_serializer_builds(self):
+
+        """
+        Built against a real object, not an empty serializer. Constructing
+        one with no instance declares the fields but never runs the method
+        bodies, so a SerializerMethodField that raises passes silently —
+        which is most of what this serializer is.
+        """
+
+        from django.core.files.base import ContentFile
         from apps.jobs.api.serializers import JobFileSerializer
-        JobFileSerializer()
+        from apps.jobs.models import JobFile
+
+        job_file = JobFile.objects.create(
+            job=self.job, uploaded_by=self.attendant,
+            file=ContentFile(b'x' * 2048, name='contract.pdf'),
+            original_filename='contract.pdf', size_bytes=2048,
+            metadata_state=JobFile.MEASURED, page_count=2,
+            width_mm=Decimal('148.00'), height_mm=Decimal('210.00'),
+        )
+        data = JobFileSerializer(job_file).data
+        self.assertEqual(data['filename'], 'contract.pdf')
+        self.assertEqual(data['size_kb'], 2.0)
+        self.assertEqual(data['page_count'], 2)
+        self.assertEqual(data['url'], f'/api/v1/jobs/files/{job_file.pk}/')
+        job_file.file.delete(save=False)
+
+    def test_job_file_serializer_survives_missing_bytes(self):
+        """
+        A record whose file is gone is not hypothetical — it is what an
+        ephemeral filesystem leaves after every deploy, and the coordinator
+        portal must still render the row rather than fail the whole list.
+        """
+        from apps.jobs.api.serializers import JobFileSerializer
+        from apps.jobs.models import JobFile
+
+        job_file = JobFile.objects.create(
+            job=self.job, uploaded_by=self.attendant,
+            file='jobs/2026/01/01/vanished.pdf',
+            original_filename='vanished.pdf',
+        )
+        data = JobFileSerializer(job_file).data
+        self.assertEqual(data['filename'], 'vanished.pdf')
+        self.assertIsNone(data['size_kb'])
+        self.assertEqual(data['metadata_state'], JobFile.PENDING)
 
     def test_proforma_serializers_build(self):
         from apps.jobs.api.proforma_serializers import (

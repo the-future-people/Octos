@@ -47,6 +47,11 @@ class JobFileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'url', 'filename', 'size_kb', 'file_type',
             'uploaded_by', 'uploaded_by_name', 'notes', 'created_at',
+            # Measured on upload. A coordinator judges a file on these,
+            # so they travel with the record rather than requiring the
+            # file to be opened elsewhere.
+            'metadata_state', 'page_count', 'width_px', 'height_px',
+            'width_mm', 'height_mm', 'dpi', 'colour_mode', 'content_type',
         ]
         read_only_fields = ['uploaded_by', 'created_at']
 
@@ -61,14 +66,26 @@ class JobFileSerializer(serializers.ModelSerializer):
         return f'/api/v1/jobs/files/{obj.pk}/'
 
     def get_filename(self, obj):
+        """
+        The name it arrived under, in preference to the stored name, which
+        may carry a collision suffix the customer never chose.
+        """
+        if obj.original_filename:
+            return obj.original_filename
         import os
         return os.path.basename(obj.file.name) if obj.file else None
-
+    
     def get_size_kb(self, obj):
         """
+        Read from the record where it was measured. Falling back to storage
+        keeps rows uploaded before measurement working, at the cost of a
+        stat call — which becomes a network call once files move off disk.
+
         None where the record survives but the bytes do not, which is what
         an ephemeral filesystem leaves behind after a deploy.
         """
+        if obj.size_bytes is not None:
+            return round(obj.size_bytes / 1024, 1)
         try:
             return round(obj.file.size / 1024, 1)
         except (FileNotFoundError, ValueError, OSError):
