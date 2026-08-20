@@ -843,8 +843,24 @@ class SerializerContractTests(JobsFixtureMixin, TestCase):
         self.assertEqual(data['filename'], 'contract.pdf')
         self.assertEqual(data['size_kb'], 2.0)
         self.assertEqual(data['page_count'], 2)
-        self.assertEqual(data['url'], f'/api/v1/jobs/files/{job_file.pk}/')
+                # The path is asserted, not the signature: a token embeds a
+        # timestamp, so pinning the exact string would fail on the clock
+        # rather than on a fault.
+        self.assertTrue(data['url'].startswith(f'/api/v1/jobs/files/{job_file.pk}/?t='))
         job_file.file.delete(save=False)
+
+    def test_file_token_round_trips(self):
+        """
+        The signature must name one file and no other. A token valid for
+        somebody else's artwork would be worse than no check at all.
+        """
+        from apps.jobs.api.file_views import sign_file_id, unsigned_file_id
+
+        token = sign_file_id(41)
+        self.assertEqual(unsigned_file_id(token), 41)
+        self.assertNotEqual(unsigned_file_id(token), 42)
+        self.assertIsNone(unsigned_file_id('nonsense'))
+        self.assertIsNone(unsigned_file_id(token + 'x'))
 
     def test_job_file_serializer_survives_missing_bytes(self):
         """

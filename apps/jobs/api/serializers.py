@@ -62,8 +62,14 @@ class JobFileSerializer(serializers.ModelSerializer):
         """
         A route, never a storage path. The raw file.url would expose where
         the bytes live and bypass the permission check on the way in.
+
+        Signed, because a browser fetching an <img> or an <iframe> sends
+        none of the client's headers and the request arrives anonymous.
+        The signature is issued here, to a caller who has already passed
+        the branch check, and it expires.
         """
-        return f'/api/v1/jobs/files/{obj.pk}/'
+        from apps.jobs.api.file_views import sign_file_id
+        return f'/api/v1/jobs/files/{obj.pk}/?t={sign_file_id(obj.pk)}'
 
     def get_filename(self, obj):
         """

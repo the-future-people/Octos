@@ -16,15 +16,40 @@ import logging
 import mimetypes
 import os
 
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import FileResponse, Http404
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.jobs.models import JobFile
 
 logger = logging.getLogger(__name__)
+
+# A browser fetching an <img> or an <iframe> runs none of the client's
+# request interceptors, so the Authorization header never travels and the
+# file comes back 401. Every preview in the coordinator's workspace fails
+# that way, which defeats the point of inspection.
+#
+# So a file URL carries a signature, issued by the serializer to someone
+# who has already passed the branch check. The signature is the grant: it
+# names one file, and it expires.
+_signer = TimestampSigner(salt='jobs.file-access')
+
+FILE_LINK_MAX_AGE = 60 * 30
+
+
+def sign_file_id(pk):
+    return _signer.sign(str(pk))
+
+
+def unsigned_file_id(token):
+    """The pk a token vouches for, or None if it is forged or stale."""
+    try:
+        return int(_signer.unsign(token, max_age=FILE_LINK_MAX_AGE))
+    except (BadSignature, SignatureExpired, ValueError):
+        return None
 
 # Serving files is one of the easier ways to hand an attacker the contents
 # of a server, so the allowed set is explicit rather than a blocklist.
@@ -45,7 +70,9 @@ class JobFileDownloadView(APIView):
     coordinator at one branch has no business reading artwork sent to
     another.
     """
-    permission_classes = [IsAuthenticated]
+        # Deliberately open at the door, closed immediately inside: either a
+    # signature naming this exact file, or a logged-in user at its branch.
+    permission_classes = [AllowAny]
 
     def get(self, request, pk):
         job_file = (
@@ -57,14 +84,24 @@ class JobFileDownloadView(APIView):
         if not job_file:
             raise Http404
 
-        branch = getattr(request.user, 'branch', None)
-        # Finance and HQ roles carry no branch and legitimately see
-        # everything; everyone else is held to their own.
-        if branch and job_file.job.branch_id != branch.id:
-            logger.warning(
-                'File %s requested by %s from another branch',
-                job_file.pk, request.user.pk,
-            )
+        token = request.query_params.get('t')
+        if token:
+            # The signature must name this file. A valid token for one
+            # file is worth nothing against another.
+            if unsigned_file_id(token) != job_file.pk:
+                logger.warning('Bad or expired file token for %s', job_file.pk)
+                raise Http404
+        elif request.user.is_authenticated:
+            branch = getattr(request.user, 'branch', None)
+            # Finance and HQ roles carry no branch and legitimately see
+            # everything; everyone else is held to their own.
+            if branch and job_file.job.branch_id != branch.id:
+                logger.warning(
+                    'File %s requested by %s from another branch',
+                    job_file.pk, request.user.pk,
+                )
+                raise Http404
+        else:
             raise Http404
 
         try:
