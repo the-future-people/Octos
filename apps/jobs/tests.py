@@ -887,3 +887,174 @@ class SerializerContractTests(JobsFixtureMixin, TestCase):
         )
         ProformaListSerializer()
         ProformaDetailSerializer()
+
+class ProformaConversionTests(JobsFixtureMixin, TestCase):
+    """
+    Conversion is the entire point of a proforma and had never once run.
+    A stale variable left over from the rename — `quote.line_items` where
+    the parameter is `proforma` — sat in the branch that decides job type,
+    raising NameError on the first customer who ever accepted one.
+
+    manage.py check cannot see it. Nothing but running the path can.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        from apps.jobs.models import PricingRule
+
+        cls.customer = CustomerProfile.objects.create(
+            phone='0555000222', affiliation_active=True,
+            customer_type=CustomerProfile.INDIVIDUAL,
+            visit_count=0, total_spend=Decimal('0'),
+            tier=CustomerProfile.REGULAR, confidence_score=0,
+            is_priority=False, is_walkin=False,
+            first_name='Proforma', last_name='Customer',
+        )
+        # A second service in a different category, so the job-type branch
+        # is exercised both ways rather than only the instant one.
+        cls.production_service = Service.objects.create(
+            name='Test Banner', code='TSTBAN',
+            category='PRODUCTION', unit='PER_PIECE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+        for service in (cls.service, cls.production_service):
+            PricingRule.objects.create(
+                service=service, branch=cls.branch,
+                base_price=Decimal('10.00'),
+                color_multiplier=Decimal('1.00'), is_active=True,
+            )
+
+    def _issued(self, lines=None):
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        engine = ProformaEngine(self.branch)
+        proforma = engine.create(
+            customer=self.customer,
+            raw_lines=lines or [{'service': self.service.pk, 'quantity': 2, 'pages': 1}],
+            actor=self.bm,
+        )
+        engine.issue(proforma, actor=self.bm)
+        proforma.refresh_from_db()
+        return proforma
+
+    def test_conversion_creates_a_job(self):
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued()
+        job = ProformaEngine(self.branch).convert(
+            proforma=proforma, actor=self.bm, agreed_terms='Pay on collection.',
+        )
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.customer_id, self.customer.pk)
+        self.assertEqual(job.estimated_cost, proforma.total)
+        self.assertEqual(job.status, Job.PENDING_PAYMENT)
+        self.assertEqual(job.payment_state, 'UNPAID')
+        self.assertEqual(job.work_state, 'RECEIVED')
+
+    def test_the_job_lands_on_todays_sheet(self):
+        """
+        Not the day the proforma went out. Materials are consumed today
+        and revenue must not diverge from the sheet carrying the cost.
+        """
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        job = ProformaEngine(self.branch).convert(
+            proforma=self._issued(), actor=self.bm,
+        )
+        self.assertEqual(job.daily_sheet_id, self.sheet.pk)
+
+    def test_line_items_carry_over(self):
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued([
+            {'service': self.service.pk, 'quantity': 2, 'pages': 1},
+            {'service': self.production_service.pk, 'quantity': 1, 'pages': 1},
+        ])
+        job = ProformaEngine(self.branch).convert(proforma=proforma, actor=self.bm)
+
+        self.assertEqual(job.line_items.count(), 2)
+        self.assertEqual(
+            sum(li.line_total for li in job.line_items.all()),
+            proforma.total,
+        )
+
+    def test_all_instant_proforma_makes_an_instant_job(self):
+        """
+        Instant work ordered ahead. Typing it as production would put it
+        on a work ladder it never travels.
+        """
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        job = ProformaEngine(self.branch).convert(
+            proforma=self._issued(), actor=self.bm,
+        )
+        self.assertEqual(job.job_type, 'INSTANT')
+
+    def test_any_production_line_makes_a_production_job(self):
+        """
+        This is the branch the NameError was sitting in.
+        """
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued([
+            {'service': self.service.pk, 'quantity': 1, 'pages': 1},
+            {'service': self.production_service.pk, 'quantity': 1, 'pages': 1},
+        ])
+        job = ProformaEngine(self.branch).convert(proforma=proforma, actor=self.bm)
+        self.assertEqual(job.job_type, 'PRODUCTION')
+
+    def test_the_proforma_is_marked_converted_and_linked(self):
+        from apps.jobs.models import ProformaInvoice
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued()
+        # A code, not prose — a deposit percentage or CREDIT. The column is
+        # 20 characters deliberately: the cashier reads this as an
+        # instruction, and a sentence is not one.
+        job = ProformaEngine(self.branch).convert(
+            proforma=proforma, actor=self.bm, agreed_terms='70',
+        )
+        proforma.refresh_from_db()
+
+        self.assertEqual(proforma.status, ProformaInvoice.Status.CONVERTED)
+        self.assertEqual(proforma.job_id, job.pk)
+        self.assertEqual(proforma.converted_by_id, self.bm.pk)
+        self.assertIsNotNone(proforma.converted_at)
+        self.assertEqual(proforma.agreed_terms, '70')
+
+    def test_converting_twice_is_refused(self):
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued()
+        engine = ProformaEngine(self.branch)
+        engine.convert(proforma=proforma, actor=self.bm)
+        proforma.refresh_from_db()
+
+        with self.assertRaises(ValueError):
+            engine.convert(proforma=proforma, actor=self.bm)
+
+    def test_an_expired_proforma_is_refused(self):
+        """
+        Terminal by design, and the message must send the manager to a new
+        document at current prices rather than leaving them guessing.
+        """
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        proforma = self._issued()
+        proforma.valid_until = timezone.localdate() - datetime.timedelta(days=1)
+        proforma.save(update_fields=['valid_until'])
+
+        with self.assertRaises(ValueError) as caught:
+            ProformaEngine(self.branch).convert(proforma=proforma, actor=self.bm)
+        self.assertIn('expired', str(caught.exception).lower())
+
+    def test_a_converted_job_needs_no_verification(self):
+        from apps.jobs.services.proforma_engine import ProformaEngine
+
+        job = ProformaEngine(self.branch).convert(
+            proforma=self._issued(), actor=self.bm,
+        )
+        self.assertFalse(job.needs_verification)

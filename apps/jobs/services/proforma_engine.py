@@ -312,7 +312,7 @@ class ProformaEngine:
         # An all-instant proforma is instant work ordered ahead, and typing
         # it as production would put it on a work ladder it never travels.
         # Anything with a production or design line is production.
-        line_service_ids = [li['service_id'] for li in quote.line_items]
+        line_service_ids = [li['service_id'] for li in proforma.line_items]
         categories = set(
             Service.objects
             .filter(pk__in=line_service_ids)

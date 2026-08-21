@@ -56,7 +56,13 @@ class ProformaConvertSerializer(serializers.Serializer):
     # Free text rather than a choice list: what was agreed is a commercial
     # note, and the cashier still executes the actual payment through the
     # existing deposit and credit paths.
-    agreed_terms = serializers.CharField(required=False, allow_blank=True, default='')
+        # A code the cashier reads as an instruction, not prose. The column is
+    # 20 characters deliberately, and an unconstrained CharField let a
+    # longer value through DRF for the database to refuse with a 500.
+    agreed_terms = serializers.ChoiceField(
+        choices=['70', '100', 'CREDIT'],
+        required=False, allow_blank=True, default='',
+    )
 
 
 class ProformaListSerializer(serializers.ModelSerializer):
