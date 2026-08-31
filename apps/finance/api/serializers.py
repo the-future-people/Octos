@@ -414,6 +414,16 @@ class StrandedSheetSerializer(serializers.Serializer):
     cashier_name      = serializers.CharField(allow_null=True)
     has_float         = serializers.BooleanField()
     float_id          = serializers.IntegerField(allow_null=True)
+    # A day can strand with the cashier's sign-off already done. The form
+    # then confirms her figure rather than asking for a fresh count.
+    is_signed_off     = serializers.BooleanField()
+    signed_closing    = serializers.DecimalField(
+        max_digits=10, decimal_places=2, allow_null=True,
+    )
+    signed_off_at     = serializers.DateTimeField(allow_null=True)
+    signed_variance   = serializers.DecimalField(
+        max_digits=10, decimal_places=2, allow_null=True,
+    )
     suggested_opening = serializers.DecimalField(max_digits=10, decimal_places=2)
     cash_collected    = serializers.DecimalField(max_digits=10, decimal_places=2)
     petty_cash_out    = serializers.DecimalField(max_digits=10, decimal_places=2)

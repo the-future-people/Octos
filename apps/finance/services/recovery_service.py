@@ -143,6 +143,15 @@ class RecoveryService:
             'cashier_name'      : cashier.full_name if cashier else None,
             'has_float'         : existing_float is not None,
             'float_id'          : existing_float.pk if existing_float else None,
+            # A sheet can strand with its float already signed: the cashier
+            # counted, signed and went home, and only the close never
+            # happened. The form must then confirm her figure rather than
+            # ask for a fresh count, or it invites a number that recovery
+            # will refuse and that nobody physically counted.
+            'is_signed_off'     : bool(existing_float and existing_float.is_signed_off),
+            'signed_closing'    : existing_float.closing_cash if existing_float and existing_float.is_signed_off else None,
+            'signed_off_at'     : existing_float.signed_off_at if existing_float and existing_float.is_signed_off else None,
+            'signed_variance'   : existing_float.variance if existing_float and existing_float.is_signed_off else None,
             'suggested_opening' : opening,
             'cash_collected'    : cash_collected,
             'petty_cash_out'    : petty_out,
