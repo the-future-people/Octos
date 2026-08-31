@@ -250,32 +250,55 @@ class RecoveryService:
             float_record.opening_float = opening_float
             float_record.save(update_fields=['opening_float', 'updated_at'])
 
-        if float_record.is_signed_off:
-            return {'ok': False, 'error': 'This shift is already signed off.'}
+                # A sheet can strand with its float already signed: the cashier
+        # counted, signed and went home, and only the close never happened.
+        # That is a completed step, not a conflict — the day still needs
+        # closing, and refusing here leaves it stranded forever.
+        #
+        # The cashier's own figure stands. It is not rewritten with a
+        # number the manager keyed weeks later, and a disagreement is a
+        # conversation between two people rather than something to
+        # silently resolve in favour of whoever opened the modal.
+        already_signed = float_record.is_signed_off
+        if already_signed:
+            if float_record.closing_cash != closing_cash:
+                return {
+                    'ok': False,
+                    'error': (
+                        f'{reconciled_with.full_name} signed this shift off at '
+                        f'GHS {float_record.closing_cash}. Enter that figure to '
+                        f'close the day, or speak to her if it is wrong — a '
+                        f'signed count is not overwritten from here.'
+                    ),
+                }
 
-        shift_notes = (
-            f'Recovered on {timezone.localdate():%d %b %Y} by '
-            f'{recovered_by.full_name}. Cash physically counted and '
-            f'reconciled with {reconciled_with.full_name}. '
-            f'Reason: {DailySalesSheet.RecoveryReason(reason).label}. {notes}'
-        )
+        if not already_signed:
+            shift_notes = (
+                f'Recovered on {timezone.localdate():%d %b %Y} by '
+                f'{recovered_by.full_name}. Cash physically counted and '
+                f'reconciled with {reconciled_with.full_name}. '
+                f'Reason: {DailySalesSheet.RecoveryReason(reason).label}. {notes}'
+            )
 
-        signed = FloatEngine.sign_off(
-            float_record   = float_record,
-            closing_cash   = closing_cash,
-            breakdown      = {},
-            variance_notes = variance_notes,
-            shift_notes    = shift_notes,
-            signed_off_by  = recovered_by,
-        )
-        if not signed['ok']:
-            return {'ok': False, 'error': signed['error']}
+            signed = FloatEngine.sign_off(
+                float_record   = float_record,
+                closing_cash   = closing_cash,
+                breakdown      = {},
+                variance_notes = variance_notes,
+                shift_notes    = shift_notes,
+                signed_off_by  = recovered_by,
+            )
+            if not signed['ok']:
+                return {'ok': False, 'error': signed['error']}
 
-        float_record.is_recovery_entry = True
-        float_record.reconciled_with   = reconciled_with
-        float_record.save(update_fields=[
-            'is_recovery_entry', 'reconciled_with', 'updated_at',
-        ])
+            # The manager keyed a figure the cashier did not sign, so the
+            # entry is marked as recovered and carries who it was counted
+            # with. A shift the cashier signed herself is neither.
+            float_record.is_recovery_entry = True
+            float_record.reconciled_with   = reconciled_with
+            float_record.save(update_fields=[
+                'is_recovery_entry', 'reconciled_with', 'updated_at',
+            ])
 
         # auto=True is what stages the following day's float, which is the
         # whole point of the recovery — it unblocks the next stranded day.
@@ -292,14 +315,20 @@ class RecoveryService:
             'recovered_by', 'recovered_at', 'updated_at',
         ])
 
-        cls._notify_rm_recovered(sheet, recovered_by, signed['variance'])
+                # Read from the float rather than from the sign-off result: on a
+        # shift the cashier signed herself there was no sign-off call in
+        # this run, and the variance she recorded is the one that counts.
+        float_record.refresh_from_db()
+        variance = float_record.variance or Decimal('0.00')
+
+        cls._notify_rm_recovered(sheet, recovered_by, variance)
 
         logger.info(
             'RecoveryService: sheet %s (%s) recovered by %s — variance GHS %s',
-            sheet.pk, sheet.date, recovered_by.full_name, signed['variance'],
+            sheet.pk, sheet.date, recovered_by.full_name, variance,
         )
 
-        return {'ok': True, 'sheet': sheet, 'variance': signed['variance']}
+        return {'ok': True, 'sheet': sheet, 'variance': variance}
 
     # ── Notifications ─────────────────────────────────────────
 
