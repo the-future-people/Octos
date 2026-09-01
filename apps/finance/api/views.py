@@ -2106,6 +2106,13 @@ class WeeklyReportListView(generics.ListAPIView):
     """
     serializer_class = WeeklyReportListSerializer
     permission_classes = [IsAuthenticated]
+    # The page groups every filing into month folders, so a truncated
+    # response silently drops whole months off the end — March and April
+    # vanished at 25 of 30 records with nothing to say they had. The list
+    # is bounded by how long the branch has traded and stays small for
+    # years; when it stops being small, page by year rather than by count,
+    # so a page break never falls inside a month.
+    pagination_class = None
 
     def get_queryset(self):
         user = self.request.user
