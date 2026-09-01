@@ -32,10 +32,22 @@ class WeeklyReportService:
         )
         is_saturday  = today.weekday() == 5
         is_month_end = today == last_day_of_month
-        if not is_saturday and not is_month_end:
+
+        # The rule exists to stop a week being filed before it has
+        # finished, and it reads the calendar to work that out. A week that
+        # ended weeks ago has plainly finished, but the calendar says
+        # nothing about it — so a week whose Saturday passed unfiled could
+        # never be filed at all, and the month behind it never closed.
+        #
+        # Past weeks are judged on whether they are over. The current week
+        # still answers to Saturday or the month end, because a week in
+        # progress can look complete on a quiet Wednesday.
+        week_has_ended = report.date_to < today
+
+        if not week_has_ended and not is_saturday and not is_month_end:
             return None, [
-                'Weekly report can only be submitted on Saturday '
-                'or the last day of the month.'
+                'This week is not finished. It can be submitted on '
+                'Saturday, or on the last day of the month.'
             ]
 
         if not report.daily_sheets.exists():
