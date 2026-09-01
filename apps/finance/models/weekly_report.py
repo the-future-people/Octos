@@ -32,6 +32,14 @@ class WeeklyReport(AuditModel):
         help_text='ISO week number (1–52)',
     )
     year        = models.PositiveIntegerField()
+    month       = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text=(
+            'The month this report belongs to. A week split by a month '
+            'boundary is filed twice — once in each month — so the month '
+            'is what tells the two apart.'
+        ),
+    )
     date_from   = models.DateField(help_text='Monday of the week')
     date_to     = models.DateField(help_text='Saturday of the week')
 
@@ -88,8 +96,13 @@ class WeeklyReport(AuditModel):
     pdf_path        = models.CharField(max_length=500, blank=True)
 
     class Meta:
-        ordering        = ['-year', '-week_number']
-        unique_together = [['branch', 'week_number', 'year']]
+        ordering        = ['-year', '-week_number', '-date_from']
+        # A report never straddles a month: everything belonging to a month
+        # is filed within that month, so a calendar week split by a month
+        # boundary becomes two filings — a few days of the old month, and
+        # the rest of the new one. Both carry the same ISO week number, so
+        # the month is part of what makes a report unique.
+        unique_together = [['branch', 'week_number', 'year', 'month']]
         verbose_name        = 'Weekly Report'
         verbose_name_plural = 'Weekly Reports'
 

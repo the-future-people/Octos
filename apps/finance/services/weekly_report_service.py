@@ -134,10 +134,16 @@ class WeeklyReportService:
         week_number = today.isocalendar()[1]
         year        = today.isocalendar()[0]
 
+        # A week split by a month boundary is filed twice — the days in the
+        # old month, and the days in the new one. Both carry the same ISO
+        # week number, so the month is what tells them apart. Without it the
+        # second half would find the first and overwrite its dates, and the
+        # days in the earlier month would belong to no filing at all.
         report, created = WeeklyReport.objects.get_or_create(
             branch      = branch,
             week_number = week_number,
             year        = year,
+            month       = effective_from.month,
             defaults    = {
                 'date_from': effective_from,
                 'date_to'  : effective_to,
@@ -162,9 +168,12 @@ class WeeklyReportService:
         report.net_cash_in_till     = closed.aggregate(t=Sum('net_cash_in_till'))['t']     or 0
         report.total_jobs_created   = closed.aggregate(t=Sum('total_jobs_created'))['t']   or 0
 
+        # Bounded by the report's own dates, not the calendar week: a
+        # report covering the last three days of a month must not count
+        # jobs from the days that belong to the next one's filing.
         week_jobs = Job.objects.filter(
             branch                  = branch,
-            created_at__date__range = [monday, saturday],
+            created_at__date__range = [effective_from, effective_to],
         )
         report.total_jobs_complete   = week_jobs.filter(status='COMPLETE').count()
         report.total_jobs_cancelled  = week_jobs.filter(status='CANCELLED').count()
