@@ -2265,7 +2265,11 @@ def _generate_weekly_pdf(report):
             self.report = report
 
         def draw(self):
-            c = self.canvas
+            # ReportLab sets self.canv on the flowable during drawOn.
+            # There is no self.canvas, so this raised on every render and
+            # the caller's except swallowed it — the weekly filing has
+            # never produced a PDF.
+            c = self.canv
             W = self.width
             H = self.height
 
