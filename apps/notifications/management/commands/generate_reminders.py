@@ -86,12 +86,32 @@ class Command(BaseCommand):
                 )
                 continue
 
-            shift_end = datetime.fromisoformat(schedule['shift_end'])
+            shift_end  = datetime.fromisoformat(schedule['shift_end'])
+            signoff_at = datetime.fromisoformat(schedule['signoff_at'])
             mins_remaining = int((shift_end - now).total_seconds() / 60)
 
-            # Outside the 30-minute pre-close window entirely (too early
-            # or already past shift_end) — nothing to create.
-            if mins_remaining > WINDOW_MINUTES or mins_remaining < 0:
+            # Two phases, and only the cashier has the second.
+            #
+            #   Phase 1, everyone: the half hour before the shift ends.
+            #   Phase 2, cashier only: from the end of the shift until the
+            #   sign-off deadline. She often has nothing left to do but
+            #   sign off, and without this she is not asked until the
+            #   compulsory wizard appears an hour later.
+            #
+            # Both read the times the shift engine already computes, so
+            # there is no second clock to drift from the first.
+            phase = None
+            if 0 <= mins_remaining <= WINDOW_MINUTES:
+                phase = 'PRE_CLOSE'
+            elif role_name == 'CASHIER' and mins_remaining < 0:
+                mins_to_signoff = int((signoff_at - now).total_seconds() / 60)
+                if mins_to_signoff > 0:
+                    phase = 'PRE_SIGNOFF'
+                else:
+                    # Past the deadline the wizard takes over and cannot
+                    # be dismissed. A reminder beside it would be noise.
+                    continue
+            if phase is None:
                 continue
 
             # Cashier-only: stop early if already signed off, even
@@ -106,18 +126,34 @@ class Command(BaseCommand):
                 if already_signed_off:
                     continue
 
-            bucket = (WINDOW_MINUTES - mins_remaining) // BUCKET_SIZE_MINUTES
+            link = ''
+            if phase == 'PRE_CLOSE':
+                bucket  = (WINDOW_MINUTES - mins_remaining) // BUCKET_SIZE_MINUTES
+                left    = mins_remaining
+                message = (
+                    f"Your shift ends at {shift_end.strftime('%-I:%M %p')}. "
+                    f"{left} minute{'' if left == 1 else 's'} remaining."
+                )
+            else:
+                left    = int((signoff_at - now).total_seconds() / 60)
+                bucket  = f"s{left // BUCKET_SIZE_MINUTES}"
+                message = (
+                    f"{left} minute{'' if left == 1 else 's'} left to sign off."
+                )
+                # Where this reminder leads, if anywhere. The portal reads
+                # the link rather than the wording, so changing the
+                # sentence cannot quietly remove the way through.
+                link = 'signoff'
+
             dedupe_key = f"shift_ending-{user.pk}-{today.isoformat()}-{bucket}"
 
-            _, was_created = Notification.objects.get_or_create(
+            notification, was_created = Notification.objects.get_or_create(
                 dedupe_key=dedupe_key,
                 defaults=dict(
                     recipient=user,
                     verb=Notification.Verb.SHIFT_ENDING,
-                    message=(
-                        f"Your shift ends at {shift_end.strftime('%I:%M %p')}. "
-                        f"{mins_remaining} minute(s) remaining."
-                    ),
+                    message=message,
+                    link=link,
                     category=Notification.Category.REMINDER,
                     display_mode=Notification.DisplayMode.INTERRUPTIVE,
                     requires_pin=False,
@@ -125,6 +161,16 @@ class Command(BaseCommand):
             )
             if was_created:
                 created += 1
+                # A warning about the clock is only true at the moment it
+                # is made. Older ones are superseded rather than left to
+                # be clicked through: someone returning at 7:20 should see
+                # 7:20, not four stale modals in a row.
+                Notification.objects.filter(
+                    recipient=user,
+                    verb=Notification.Verb.SHIFT_ENDING,
+                    is_read=False,
+                    dedupe_key__startswith=f"shift_ending-{user.pk}-{today.isoformat()}-",
+                ).exclude(pk=notification.pk).update(is_read=True)
 
         self.stdout.write(self.style.SUCCESS(f'shift reminders — {created} created'))
 
