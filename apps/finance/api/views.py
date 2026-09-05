@@ -3926,3 +3926,142 @@ class WalletBalanceListView(APIView):
             }
             for c in holders
         ])
+
+class MonthlyCloseRespondClarificationView(APIView):
+    """
+    POST /api/v1/finance/monthly-close/<id>/respond-clarification/
+
+    The branch manager answers what Finance asked. The engine has always
+    had respond_clarification and the model has always had the state to
+    move into — there was simply no way in, so a close that reached
+    NEEDS_CLARIFICATION could not leave it.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            close = MonthlyClose.objects.get(pk=pk)
+        except MonthlyClose.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # The manager of the branch the close belongs to, and nobody else.
+        # Finance asked this branch a question; another branch's manager
+        # answering it would be nonsense.
+        branch = getattr(request.user, 'branch', None)
+        role   = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role != 'SUPER_ADMIN' and (not branch or branch.id != close.branch_id):
+            return Response(
+                {'detail': 'This close belongs to another branch.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        answer = request.data.get('response', '').strip()
+        if not answer:
+            return Response(
+                {'detail': 'A response cannot be empty.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        engine = MonthlyCloseEngine(close.branch, close.month, close.year)
+        close, errors = engine.respond_clarification(request.user, answer)
+
+        if errors:
+            return Response({'detail': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id':      close.pk,
+            'status':  close.status,
+            'message': f"Response sent. {close.month_name} {close.year} is back with Finance.",
+        })
+
+
+class MonthReviewView(APIView):
+    """
+    GET /api/v1/finance/monthly-close/review/?month=8&year=2026
+
+    Every day of the month, inside the weekly filing that covers it, with
+    the checks and any note already written. This is what the branch
+    manager reads before filing — twenty-six days is more than anyone
+    reads carefully every time, so the days worth a second look say so.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.selectors.month_review import get_month_review
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            month = int(request.query_params.get('month', timezone.localdate().month))
+            year  = int(request.query_params.get('year', timezone.localdate().year))
+        except ValueError:
+            return Response({'detail': 'Invalid month or year.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(get_month_review(branch, month, year))
+
+
+class DayNoteCreateView(APIView):
+    """
+    POST /api/v1/finance/sheets/<pk>/notes/
+    Body: { body, kind? }
+
+    Says why a day is the way it is. Usually written while reviewing the
+    month, against a day the checks flagged — an explanation given once,
+    so it is not asked for again.
+
+    Notes are never edited or removed: a day that looked odd, was
+    explained, and was queried anyway should read in that order.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.finance.models import DailySalesSheet, DaySheetNote
+        from apps.finance.services.close_checks import check_month
+
+        try:
+            sheet = DailySalesSheet.objects.select_related('branch').get(pk=pk)
+        except DailySalesSheet.DoesNotExist:
+            return Response({'detail': 'Not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        branch = getattr(request.user, 'branch', None)
+        role   = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role != 'SUPER_ADMIN' and (not branch or branch.id != sheet.branch_id):
+            return Response({'detail': 'That day belongs to another branch.'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        body = request.data.get('body', '').strip()
+        if not body:
+            return Response({'detail': 'A note cannot be empty.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        kind = request.data.get('kind', DaySheetNote.Kind.REVIEW)
+        if kind not in DaySheetNote.Kind.values:
+            return Response({'detail': 'Unknown note type.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # What the checks said at the time. Thresholds will change, and a
+        # note explaining a flag reads oddly later if the flag it answered
+        # no longer fires.
+        checks = check_month(sheet.branch, sheet.date.month, sheet.date.year)
+        flagged_for = checks['days'].get(sheet.date.isoformat(), [])
+
+        note = DaySheetNote.objects.create(
+            daily_sheet = sheet,
+            kind        = kind,
+            body        = body,
+            author      = request.user,
+            flagged_for = flagged_for,
+        )
+
+        return Response({
+            'id':         note.pk,
+            'kind':       note.kind,
+            'body':       note.body,
+            'author':     request.user.full_name,
+            'created_at': note.created_at.isoformat(),
+        }, status=status.HTTP_201_CREATED)

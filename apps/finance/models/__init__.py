@@ -13,6 +13,7 @@ from .payment_leg import PaymentLeg
 from .monthly_close import MonthlyClose
 from .public_holiday import PublicHoliday
 from .customer_wallet import CustomerWalletTransaction
+from .day_note import DaySheetNote
 
 __all__ = [
     'DailySalesSheet',
@@ -31,4 +32,5 @@ __all__ = [
     'MonthlyClose',
     'PublicHoliday',
     'CustomerWalletTransaction',
+    'DaySheetNote',
 ]
