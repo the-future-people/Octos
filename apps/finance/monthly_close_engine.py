@@ -57,6 +57,32 @@ class MonthlyCloseEngine:
         last_day  = date(self.year, self.month, calendar.monthrange(self.year, self.month)[1])
 
         checks = {}
+        today = timezone.localdate()
+
+        # 0. The month must be over.
+        #
+        # Every other check asks whether what has happened so far is
+        # complete, and on a quiet Saturday in the first week of the month
+        # all four are satisfied — the branch has closed for the day, this
+        # week is filed, nothing is pending. September was submitted to
+        # Finance on the 5th with twenty-five trading days still to come.
+        #
+        # Nothing else here knows what day it is, so this is the only
+        # check that can say so.
+        month_over = today > last_day
+        if month_over:
+            detail = f"{calendar.month_name[self.month]} has ended."
+        else:
+            days_left = (last_day - today).days
+            detail = (
+                f"{calendar.month_name[self.month]} is still running — "
+                f"{days_left} day{'' if days_left == 1 else 's'} to go."
+            )
+        checks['month_has_ended'] = {
+            'pass'  : month_over,
+            'label' : 'The month has ended',
+            'detail': detail,
+        }
 
         # 1. All daily sheets for the month must be closed
         open_sheets = DailySalesSheet.objects.filter(
