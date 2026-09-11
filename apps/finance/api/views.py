@@ -4065,3 +4065,62 @@ class DayNoteCreateView(APIView):
             'author':     request.user.full_name,
             'created_at': note.created_at.isoformat(),
         }, status=status.HTTP_201_CREATED)
+
+
+class OutstandingWeekView(APIView):
+    """
+    GET /api/v1/finance/weekly/outstanding/
+
+    The week this branch owes, or nothing. Polled by the branch manager's
+    portal, which blocks until it is filed.
+
+    A draft is prepared as a side effect when one is missing: the Saturday
+    task is a convenience and this is the guarantee, so a week nobody
+    prepared is still a week that can be filed right now.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.models import DailySalesSheet
+        from apps.finance.services.weekly_report_service import WeeklyReportService
+
+        # Filing is the manager's job. The cashier and the attendant keep
+        # working — a branch that cannot trade because a filing is late is
+        # a worse outcome than a late filing.
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role != 'BRANCH_MANAGER':
+            return Response({'outstanding': None})
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'outstanding': None})
+
+        report = WeeklyReportService.outstanding_week(branch)
+        if report is None:
+            return Response({'outstanding': None})
+
+        # A week with a day still open cannot be submitted, and the modal
+        # must say which day rather than offer a button that fails.
+        open_days = list(
+            DailySalesSheet.objects
+            .filter(
+                branch = branch,
+                date__range = [report.date_from, report.date_to],
+                status = DailySalesSheet.Status.OPEN,
+            )
+            .order_by('date')
+            .values_list('date', flat=True)
+        )
+
+        return Response({
+            'outstanding': {
+                'id':          report.pk,
+                'week_number': report.week_number,
+                'date_from':   report.date_from.isoformat(),
+                'date_to':     report.date_to.isoformat(),
+                'jobs':        report.total_jobs_created,
+                'total':       str(report.total_collected),
+                'can_submit':  not open_days,
+                'open_days':   [d.isoformat() for d in open_days],
+            }
+        })

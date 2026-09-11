@@ -12,6 +12,7 @@ from .views import (
     MonthlyCloseRespondClarificationView,
     MonthReviewView,
     DayNoteCreateView,
+    OutstandingWeekView,
     StrandedSheetsView,
     RecoverSheetView,
     CashierFloatSetView,
@@ -145,6 +146,8 @@ urlpatterns = [
     # ── Weekly Report ─────────────────────────────────────────────────────────
     path('weekly/',                              WeeklyReportListView.as_view(),              name='weekly-list'),
     path('weekly/prepare/',                      WeeklyReportPrepareView.as_view(),           name='weekly-prepare'),
+    # Above the <int:pk> patterns, or 'outstanding' is tried as a key.
+    path('weekly/outstanding/',                  OutstandingWeekView.as_view(),               name='weekly-outstanding'),
     path('weekly/<int:pk>/',                     WeeklyReportDetailView.as_view(),            name='weekly-detail'),
     path('weekly/<int:pk>/notes/',               WeeklyReportNotesView.as_view(),             name='weekly-notes'),
     path('weekly/<int:pk>/submit/',              WeeklyReportSubmitView.as_view(),            name='weekly-submit'),
