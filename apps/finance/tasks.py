@@ -37,6 +37,19 @@ def recovery_float_check():
 
 
 @shared_task
+def prepare_weekly_filings():
+    """
+    Saturday evening. Builds the draft so the figures are waiting when the
+    manager opens the page; submitting stays a person's act.
+
+    A convenience, not the guarantee — the portal prepares the week itself
+    on Monday if this never ran.
+    """
+    from django.core.management import call_command
+    call_command('prepare_weekly_filings')
+
+
+@shared_task
 def expire_wallet_credits():
     """
     Runs once daily. Zeroes out wallet balances inactive for 6+ months,

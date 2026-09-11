@@ -1,6 +1,8 @@
 # apps/finance/services/weekly_report_service.py
 
 import logging
+from datetime import date, timedelta
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -8,6 +10,71 @@ logger = logging.getLogger(__name__)
 
 
 class WeeklyReportService:
+
+    # Weeks ending on or after this date must be filed, and the branch
+    # manager is blocked until they are. Weeks before it are history and
+    # left alone — the branch has traded since March, and a mandatory
+    # modal that opens on something from May is a bad way to meet a new
+    # rule.
+    #
+    # A fixed date rather than "recently", so the rule means the same
+    # thing next year as it does today.
+    ENFORCED_FROM = date(2026, 9, 7)
+
+    @staticmethod
+    def outstanding_week(branch, today=None):
+        """
+        The week this branch owes, or None.
+
+        Returns the earliest week that has ended, falls inside the
+        enforced period, and has not been submitted. A draft is prepared
+        if none exists: the Saturday task is a convenience and must not
+        be the thing everything depends on, so a week nobody prepared is
+        still a week that can be filed.
+        """
+        from datetime import timedelta
+        from apps.finance.models import DailySalesSheet, WeeklyReport
+
+        if today is None:
+            today = timezone.localdate()
+
+        # Walk back week by week from the last completed one. Bounded by
+        # the enforced date, so this is a handful of iterations rather
+        # than a scan over everything the branch has ever traded.
+        monday = today - timedelta(days=today.weekday())
+        cursor = monday - timedelta(days=7)
+
+        outstanding = None
+        while cursor >= WeeklyReportService.ENFORCED_FROM:
+            saturday = cursor + timedelta(days=5)
+
+            # A week nobody traded in is not owed. Sheets alone do not
+            # mean trading: one opens every morning whether anyone comes
+            # in or not.
+            traded = DailySalesSheet.objects.filter(
+                branch=branch, date__range=[cursor, saturday],
+            ).exclude(total_jobs_created=0).exists()
+
+            if traded:
+                # A week split by a month boundary is two filings, one in
+                # each month. Checking only the Monday's month would find
+                # the first half and pass while the second was never
+                # filed at all.
+                months = {cursor.month, saturday.month}
+                filed = WeeklyReport.objects.filter(
+                    branch      = branch,
+                    year        = cursor.isocalendar()[0],
+                    week_number = cursor.isocalendar()[1],
+                    month__in   = months,
+                ).exclude(status=WeeklyReport.Status.DRAFT).count()
+
+                if filed < len(months):
+                    outstanding = cursor
+
+            cursor -= timedelta(days=7)
+
+        if outstanding is None:
+            return None
 
     @staticmethod
     @transaction.atomic

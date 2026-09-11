@@ -271,9 +271,15 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.check_credit_due',
         'schedule': crontab(hour=7, minute=30),
     },
-    'recovery-float-check-daily': {
+        'recovery-float-check-daily': {
         'task': 'apps.finance.tasks.recovery_float_check',
         'schedule': crontab(hour=16, minute=0),
+    },
+    # Saturday at 8pm, after the branch has closed and the cashier has
+    # signed off. Only ever prepares — submitting is the manager's.
+    'prepare-weekly-filings-saturday': {
+        'task': 'apps.finance.tasks.prepare_weekly_filings',
+        'schedule': crontab(hour=20, minute=0, day_of_week=6),
     },
     'refresh-weather-cache': {
         'task': 'apps.analytics.tasks.weather.refresh_weather_cache',
