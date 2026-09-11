@@ -76,6 +76,14 @@ class WeeklyReportService:
         if outstanding is None:
             return None
 
+        # Prepared here rather than assumed to exist. This is the
+        # guarantee; Saturday is only the convenience, and a week nobody
+        # prepared is still a week that must be filed.
+        report, _ = WeeklyReportService.prepare(
+            branch, today=outstanding + timedelta(days=5),
+        )
+        return report
+
     @staticmethod
     @transaction.atomic
     def submit(report, submitted_by) -> tuple:
