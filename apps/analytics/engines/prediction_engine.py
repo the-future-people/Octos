@@ -534,7 +534,7 @@ class PredictionEngine:
             else:
                 p_weekday = 1 / 6  # uniform prior across 6 working days
 
-            # ── Already settled today — don't double count ─────────
+            # ── Reported only: current_balance already excludes these ─────────
             settled_today = float(
                 all_payments.filter(
                     created_at__date=today
@@ -568,11 +568,10 @@ class PredictionEngine:
             time_factor = min(hours_remaining / 8.0, 1.0)
 
             # ── Final contribution ────────────────────────────────
-            remaining_outstanding = max(outstanding - settled_today, 0)
             p_settle = p_weekday * recency_boost * time_factor
             p_settle = max(0.0, min(p_settle, 0.8))  # cap at 80%
 
-            contribution = remaining_outstanding * p_settle * weight
+            contribution = outstanding * p_settle * weight
 
             return {
                 'contribution': round(contribution, 2),
