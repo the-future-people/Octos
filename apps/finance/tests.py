@@ -631,3 +631,59 @@ class LiveRevenueTests(RecoveryFixtureMixin, TestCase):
         r = self._revenue()
 
         self.assertEqual(r['net_cash_in_till'], '170.00')
+
+class EODSummaryRevenueTests(RecoveryFixtureMixin, TestCase):
+    """
+    The end-of-day summary the BM reads before closing. Same hardcoded
+    cash + momo + pos as everywhere else, so the same blind spot.
+    """
+
+    def setUp(self):
+        self.sheet = self.make_sheet(0)
+
+    def _job(self, method, amount):
+        from apps.jobs.models import Job
+        return Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
+            title=f'{method} job', intake_by=self.cashier,
+            estimated_cost=Decimal(str(amount)),
+            amount_paid=Decimal(str(amount)),
+            payment_method=method, daily_sheet=self.sheet,
+        )
+
+    def _revenue(self):
+        from apps.finance.services.eod_service import EODService
+        return EODService.get_summary(self.sheet, self.branch)['revenue']
+
+    def test_methods_are_totalled_separately(self):
+        self._job('CASH', '100.00')
+        self._job('MOMO',  '40.00')
+        self._job('POS',   '10.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['cash'],  '100.00')
+        self.assertEqual(r['momo'],  '40.00')
+        self.assertEqual(r['pos'],   '10.00')
+        self.assertEqual(r['total'], '150.00')
+
+    def test_credit_is_reported_apart_from_the_total(self):
+        self._job('CASH',   '100.00')
+        self._job('CREDIT', '300.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['credit_issued'], '300.00')
+        self.assertEqual(r['total'],         '100.00')
+
+    def test_net_cash_is_cash_plus_settlements_less_petty(self):
+        self._job('CASH', '200.00')
+        self.sheet.total_credit_settled = Decimal('50.00')
+        self.sheet.total_petty_cash_out = Decimal('30.00')
+        self.sheet.save(update_fields=[
+            'total_credit_settled', 'total_petty_cash_out',
+        ])
+
+        r = self._revenue()
+
+        self.assertEqual(r['net_cash_in_till'], '220.00')

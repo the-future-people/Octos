@@ -29,9 +29,14 @@ class EODService:
             status='COMPLETE',
             amount_paid__isnull=False,
         )
-        live_cash = get_method_total(completed_jobs_qs, 'CASH')
-        live_momo = get_method_total(completed_jobs_qs, 'MOMO')
-        live_pos  = get_method_total(completed_jobs_qs, 'POS')
+        from apps.finance import payment_methods as pm
+
+        collected = [m for m in pm.METHODS if m.collected]
+        amounts   = {
+            m.code: get_method_total(completed_jobs_qs, m.code)
+            for m in collected
+        }
+
         live_credit  = jobs.filter(
             status='COMPLETE',
             payment_method='CREDIT',
@@ -39,19 +44,22 @@ class EODService:
         ).aggregate(t=Sum('amount_paid'))['t'] or Decimal('0.00')
         live_petty   = sheet.total_petty_cash_out
         live_settled = sheet.total_credit_settled
-        live_net     = live_cash + live_settled - live_petty
 
-        revenue = {
-            'cash'            : str(live_cash),
-            'momo'            : str(live_momo),
-            'pos'             : str(live_pos),
-            'total'           : str(live_cash + live_momo + live_pos),
+        # Settlements arrive in the drawer alongside the day's cash, and
+        # only cash is in the drawer at all.
+        in_till  = sum(
+            (amounts[m.code] for m in collected if m.in_till), Decimal('0.00')
+        )
+        live_net = in_till + live_settled - live_petty
+
+        revenue = {m.code.lower(): str(amounts[m.code]) for m in collected}
+        revenue.update({
+            'total'           : str(sum(amounts.values(), Decimal('0.00'))),
             'credit_issued'   : str(live_credit),
             'credit_settled'  : str(live_settled),
             'petty_cash_out'  : str(live_petty),
             'net_cash_in_till': str(live_net),
-        }
-
+        })
         # ── Jobs ──────────────────────────────────────────────────────
         total_jobs     = jobs.count()
         completed_jobs = jobs.filter(status='COMPLETE').count()
