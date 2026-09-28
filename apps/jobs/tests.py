@@ -1132,3 +1132,62 @@ class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
         )
         job = Job.objects.get(pk=result['id'])
         self.assertEqual(job.job_type, 'INSTANT')
+
+
+class CashierQueueSplitTests(JobsFixtureMixin, TestCase):
+    """
+    The cashier's queue splits by job type, and the server decides the
+    split so every portal that asks gets the same answer.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        common = dict(
+            branch=cls.branch, status=Job.PENDING_PAYMENT,
+            intake_by=cls.bm, daily_sheet=cls.sheet,
+            estimated_cost=Decimal('10.00'),
+        )
+        cls.instant_a   = Job.objects.create(title='Photocopies', job_type=Job.INSTANT,    **common)
+        cls.instant_b   = Job.objects.create(title='Passport photo', job_type=Job.INSTANT, **common)
+        cls.processed   = Job.objects.create(title='Banner', job_type=Job.PRODUCTION,      **common)
+        Job.objects.create(title='Other branch banner', job_type=Job.PRODUCTION,
+                           branch=cls.other_branch, status=Job.PENDING_PAYMENT,
+                           intake_by=cls.bm, estimated_cost=Decimal('10.00'))
+
+    def _get(self, kind=None):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.cashier)
+        url = '/api/v1/jobs/cashier/queue/'
+        if kind:
+            url += f'?kind={kind}'
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.data
+
+    def _titles(self, data):
+        results = data['results'] if isinstance(data, dict) else data
+        return {j['title'] for j in results}
+
+    def test_instant_queue_holds_only_instant_jobs(self):
+        self.assertEqual(
+            self._titles(self._get('instant')),
+            {'Photocopies', 'Passport photo'},
+        )
+
+    def test_processed_queue_holds_only_processed_jobs(self):
+        self.assertEqual(self._titles(self._get('processed')), {'Banner'})
+
+    def test_no_kind_returns_the_whole_queue(self):
+        self.assertEqual(
+            self._titles(self._get()),
+            {'Photocopies', 'Passport photo', 'Banner'},
+        )
+
+    def test_counts_cover_both_queues_regardless_of_the_one_asked_for(self):
+        data = self._get('instant')
+        self.assertEqual(data['counts'], {'instant': 2, 'processed': 1})
+
+    def test_another_branch_never_appears(self):
+        self.assertNotIn('Other branch banner', self._titles(self._get()))

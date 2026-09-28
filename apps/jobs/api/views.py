@@ -368,14 +368,29 @@ class JobResumeView(APIView):
 
 class CashierQueueView(generics.ListAPIView):
     """
-    GET /api/v1/jobs/cashier/queue/
-    Returns all PENDING_PAYMENT jobs for the cashier's branch.
-    Ordered oldest-first so the cashier works the queue in sequence.
+    GET /api/v1/jobs/cashier/queue/?kind=instant|processed
+
+    Returns PENDING_PAYMENT jobs for the cashier's branch, oldest first
+    so she works the queue in sequence.
+
+    Instant and processed are separate queues because they are separate
+    kinds of work: an instant job is a counter sale, while a processed
+    job is taking a deposit on work that has to be made. The server
+    decides which is which, from the job's type, so every portal that
+    asks gets the same answer.
+
+    No kind means the whole queue, which is what the sign-off wizard
+    and older callers expect.
     """
     serializer_class   = JobListSerializer
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
+    KINDS = {
+        'instant'  : [Job.INSTANT],
+        'processed': [Job.PRODUCTION, Job.DESIGN],
+    }
+
+    def _base_queryset(self):
         user = self.request.user
         qs   = Job.objects.select_related(
             'branch', 'customer', 'intake_by'
@@ -385,6 +400,30 @@ class CashierQueueView(generics.ListAPIView):
             qs = qs.filter(branch=user.branch)
 
         return qs.order_by('created_at')  # FIFO
+
+    def get_queryset(self):
+        qs   = self._base_queryset()
+        kind = self.request.query_params.get('kind')
+
+        if kind in self.KINDS:
+            qs = qs.filter(job_type__in=self.KINDS[kind])
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        """Both counts ride along, so a tab can show its badge without
+        a second request for a queue it isn't displaying."""
+        response = super().list(request, *args, **kwargs)
+        base     = self._base_queryset()
+        counts   = {
+            kind: base.filter(job_type__in=types).count()
+            for kind, types in self.KINDS.items()
+        }
+        if isinstance(response.data, dict):
+            response.data['counts'] = counts
+        else:
+            response.data = {'results': response.data, 'counts': counts}
+        return response
 
 class CashierSummaryView(APIView):
     """
