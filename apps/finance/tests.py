@@ -379,3 +379,83 @@ class RecoverSheetTests(RecoveryFixtureMixin, TestCase):
         self.assertEqual(result['variance'], Decimal('0.00'))
         float_record = CashierFloat.objects.get(daily_sheet=sheet)
         self.assertEqual(float_record.opening_float, Decimal('50.00'))
+
+class SnapshotTotalsTests(RecoveryFixtureMixin, TestCase):
+    """
+    _snapshot_totals freezes the day's figures at close. This pins what it
+    produces today, so moving it onto the payment registry can be proved to
+    change nothing. The last test is the one that matters: a method the
+    sorting does not recognise currently lands in no total at all, and the
+    money disappears from the books with no error raised.
+    """
+
+    def setUp(self):
+        self.sheet = self.make_sheet(0)
+
+    def _receipt(self, method, amount, seq):
+        return Receipt.objects.create(
+            daily_sheet=self.sheet,
+            cashier=self.cashier,
+            receipt_number=f'RTB-SNAP-{seq:04d}',
+            sequence=seq,
+            receipt_type='JOB_PAYMENT',
+            payment_method=method,
+            amount_paid=Decimal(str(amount)),
+            balance_due=Decimal('0.00'),
+            subtotal=Decimal(str(amount)),
+            vat_rate=Decimal('0'), vat_amount=Decimal('0'),
+            nhil_amount=Decimal('0'), getfund_amount=Decimal('0'),
+            is_void=False,
+        )
+
+    def _snapshot(self):
+        from apps.finance.sheet_engine import SheetEngine
+        SheetEngine(self.branch)._snapshot_totals(self.sheet)
+        self.sheet.refresh_from_db()
+
+    def test_totals_are_sorted_by_method(self):
+        self._receipt('CASH', '100.00', 1)
+        self._receipt('CASH',  '50.00', 2)
+        self._receipt('MOMO',  '75.00', 3)
+        self._receipt('POS',   '25.00', 4)
+
+        self._snapshot()
+
+        self.assertEqual(self.sheet.total_cash, Decimal('150.00'))
+        self.assertEqual(self.sheet.total_momo, Decimal('75.00'))
+        self.assertEqual(self.sheet.total_pos,  Decimal('25.00'))
+
+    def test_void_receipts_are_ignored(self):
+        self._receipt('CASH', '100.00', 5)
+        voided = self._receipt('CASH', '999.00', 6)
+        voided.is_void = True
+        voided.save(update_fields=['is_void'])
+
+        self._snapshot()
+
+        self.assertEqual(self.sheet.total_cash, Decimal('100.00'))
+
+    def test_credit_receipts_total_as_credit_issued(self):
+        self._receipt('CASH',   '100.00', 7)
+        self._receipt('CREDIT', '300.00', 8)
+
+        self._snapshot()
+
+        self.assertEqual(self.sheet.total_cash,           Decimal('100.00'))
+        self.assertEqual(self.sheet.total_credit_issued,  Decimal('300.00'))
+
+    def test_an_unknown_method_is_reported_not_silently_dropped(self):
+        """
+        A method the registry does not know still cannot be totalled — it
+        has no column to go to. What changed is that it is now named in
+        the logs with its sheet and its amount, instead of disappearing.
+        """
+        self._receipt('CASH',   '100.00', 9)
+        self._receipt('ONLINE', '250.00', 10)
+
+        with self.assertLogs('apps.finance.sheet_engine', level='ERROR') as logged:
+            self._snapshot()
+
+        self.assertIn('ONLINE', ''.join(logged.output))
+        self.assertIn('250.00', ''.join(logged.output))
+        self.assertEqual(self.sheet.total_cash, Decimal('100.00'))

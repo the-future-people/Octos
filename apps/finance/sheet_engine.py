@@ -587,23 +587,26 @@ class SheetEngine:
             total=Sum('amount_paid')
         )
         
-        total_cash = Decimal('0.00')
-        total_momo = Decimal('0.00')
-        total_pos = Decimal('0.00')
-        total_credit_issued = Decimal('0.00')
-        
+        from apps.finance import payment_methods as pm
+
+        # One registry decides which total each method feeds. The if/elif
+        # this replaces dropped anything it did not recognise into no
+        # total at all, so a new payment method lost its money silently.
+        totals = pm.zero_totals()
+
+        def add(method, amount):
+            entry = pm.get(method)
+            if entry is None or not entry.sheet_field:
+                logger.error(
+                    'SheetEngine: sheet %s carries GHS %s under unknown '
+                    'payment method %r — not counted in any total.',
+                    sheet.pk, amount, method,
+                )
+                return
+            totals[entry.sheet_field] += amount
+
         for agg in payment_aggregates:
-            method = agg['payment_method']
-            amount = agg['total'] or Decimal('0.00')
-            
-            if method == 'CASH':
-                total_cash += amount
-            elif method == 'MOMO':
-                total_momo += amount
-            elif method == 'POS':
-                total_pos += amount
-            elif method == 'CREDIT':
-                total_credit_issued += amount
+            add(agg['payment_method'], agg['total'] or Decimal('0.00'))
 
         # Handle SPLIT payments efficiently with a single subquery
         split_receipt_ids = receipts.filter(
@@ -621,12 +624,7 @@ class SheetEngine:
                 method = leg['payment_method']
                 amount = leg['total'] or Decimal('0.00')
                 
-                if method == 'CASH':
-                    total_cash += amount
-                elif method == 'MOMO':
-                    total_momo += amount
-                elif method == 'POS':
-                    total_pos += amount
+                add(method, amount)
 
         # Get other totals
         total_petty = PettyCash.objects.filter(
@@ -642,13 +640,11 @@ class SheetEngine:
             status=Job.COMPLETE,
         ).count()
 
-        net_cash = total_cash - total_petty
+        net_cash = totals['total_cash'] - total_petty
 
         sheet.total_jobs_created = total_jobs
-        sheet.total_cash = total_cash
-        sheet.total_momo = total_momo
-        sheet.total_pos = total_pos
-        sheet.total_credit_issued = total_credit_issued
+        for field, amount in totals.items():
+            setattr(sheet, field, amount)
         sheet.total_credit_settled = total_credit_settled
         sheet.total_petty_cash_out = total_petty
         sheet.net_cash_in_till = net_cash
