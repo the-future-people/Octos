@@ -312,13 +312,11 @@ class ProformaEngine:
         # An all-instant proforma is instant work ordered ahead, and typing
         # it as production would put it on a work ladder it never travels.
         # Anything with a production or design line is production.
+        from apps.jobs.services.job_service import derive_job_type
         line_service_ids = [li['service_id'] for li in proforma.line_items]
-        categories = set(
-            Service.objects
-            .filter(pk__in=line_service_ids)
-            .values_list('category', flat=True)
+        job_type = derive_job_type(
+            Service.objects.filter(pk__in=line_service_ids)
         )
-        job_type = 'INSTANT' if categories == {'INSTANT'} else 'PRODUCTION'
 
         job = Job.objects.create(
             branch          = self.branch,

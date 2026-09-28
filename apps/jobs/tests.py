@@ -1058,3 +1058,77 @@ class ProformaConversionTests(JobsFixtureMixin, TestCase):
             proforma=self._issued(), actor=self.bm,
         )
         self.assertFalse(job.needs_verification)
+
+
+class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
+    """
+    The job's type follows the services on it. Before this rule existed,
+    every counter job was created as INSTANT outright, so a banner booked
+    at the counter travelled the instant path and never reached the floor.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import PricingRule
+        super().setUpTestData()
+        cls.banner = Service.objects.create(
+            name='Derive Banner', code='DRVBAN',
+            category='PRODUCTION', unit='PER_PIECE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+        cls.logo = Service.objects.create(
+            name='Derive Logo', code='DRVLOGO',
+            category='DESIGN', unit='PER_PIECE',
+            requires_design=True, requires_file_upload=False,
+            is_active=True,
+        )
+        for service in (cls.service, cls.banner, cls.logo):
+            PricingRule.objects.create(
+                service=service, branch=cls.branch,
+                base_price=Decimal('10.00'),
+                color_multiplier=Decimal('1.00'), is_active=True,
+            )
+
+    def test_all_instant_services_give_an_instant_job(self):
+        from apps.jobs.services.job_service import derive_job_type
+        self.assertEqual(derive_job_type([self.service]), 'INSTANT')
+
+    def test_one_production_service_makes_the_whole_job_production(self):
+        from apps.jobs.services.job_service import derive_job_type
+        self.assertEqual(
+            derive_job_type([self.service, self.banner]),
+            'PRODUCTION',
+        )
+
+    def test_design_service_is_refused(self):
+        from apps.jobs.services.job_service import derive_job_type
+        with self.assertRaises(ValueError) as ctx:
+            derive_job_type([self.service, self.logo])
+        self.assertIn('esign', str(ctx.exception))
+
+    def test_draft_with_a_banner_is_saved_as_production(self):
+        """The fault this rule exists to close: save_draft hardcoded INSTANT."""
+        from apps.jobs.services.job_service import save_draft
+        result = save_draft(
+            user=self.bm,
+            branch=self.branch,
+            data={'line_items': [
+                {'service': self.service.pk, 'pages': 1, 'sets': 1},
+                {'service': self.banner.pk, 'pages': 1, 'sets': 1},
+            ]},
+        )
+        job = Job.objects.get(pk=result['id'])
+        self.assertEqual(job.job_type, 'PRODUCTION')
+
+    def test_draft_of_only_instant_services_stays_instant(self):
+        from apps.jobs.services.job_service import save_draft
+        result = save_draft(
+            user=self.bm,
+            branch=self.branch,
+            data={'line_items': [
+                {'service': self.service.pk, 'pages': 1, 'sets': 1},
+            ]},
+        )
+        job = Job.objects.get(pk=result['id'])
+        self.assertEqual(job.job_type, 'INSTANT')

@@ -301,6 +301,30 @@ def _create_line_items(job, priced_items: List[Dict]) -> None:
         )
 
 
+def derive_job_type(services) -> str:
+    """
+    The job's type follows the services on it. One rule, used by every
+    creation path, so a banner booked at the counter types the same as
+    one ordered ahead on a proforma.
+
+    A job is instant only if every service is instant: one production
+    line means the work has to be made, whatever else is on the ticket.
+
+    Design work has no path of its own yet, so it is refused here rather
+    than sent down a ladder nobody has travelled.
+    """
+    categories = {s.category for s in services}
+
+    if 'DESIGN' in categories:
+        raise ValueError(
+            'Design services cannot be booked yet. Remove the design line '
+            'to continue, or raise it with the branch manager.'
+        )
+    if categories == {'INSTANT'}:
+        return 'INSTANT'
+    return 'PRODUCTION'
+
+
 # ── Service commands ─────────────────────────────────────────────────────────
 
 @transaction.atomic
@@ -378,7 +402,7 @@ def save_draft(user, branch, data: dict) -> Dict[str, Any]:
         intake_by=user,
         customer=customer,
         title=_build_title(names),
-        job_type='INSTANT',
+        job_type=derive_job_type([i['service'] for i in priced_items]),
         status=Job.DRAFT,
         estimated_cost=total,
         daily_sheet=sheet,
@@ -523,7 +547,7 @@ def create_late_job(user, branch, data: dict) -> Any:
         daily_sheet=daily_sheet,
         customer=customer,
         title=_build_title(names),
-        job_type='INSTANT',
+        job_type=derive_job_type([i['service'] for i in priced_items]),
         status=job_status,
         estimated_cost=total,
         post_closing=True,

@@ -429,6 +429,10 @@ class JobCreateSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             'branch': {'required': False},
+            # Derived from the services in create(); a client that sends
+            # one is ignored rather than refused, so older callers keep
+            # working while the rule stays in one place.
+            'job_type': {'read_only': True},
         }
 
     def validate(self, attrs):
@@ -555,9 +559,19 @@ class JobCreateSerializer(serializers.ModelSerializer):
             validated_data['estimated_cost'] = pricing['total']
             priced_items = None
 
+        # ── Job type ──────────────────────────────────────────
+        # Derived from the services, never taken from the client: a
+        # banner is production wherever it was booked from.
+        from apps.jobs.services.job_service import derive_job_type
+        try:
+            validated_data['job_type'] = derive_job_type(
+                [i['service'] for i in priced_items] if priced_items else [service]
+            )
+        except ValueError as e:
+            raise serializers.ValidationError(str(e))
+
         # ── Status ────────────────────────────────────────────
-        if validated_data.get('job_type') != 'DESIGN':
-            validated_data['status'] = Job.PENDING_PAYMENT
+        validated_data['status'] = Job.PENDING_PAYMENT
 
         # ── Daily sheet ───────────────────────────────────────
         from apps.finance.sheet_engine import SheetEngine
