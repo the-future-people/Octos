@@ -1,5 +1,3 @@
-from apps.finance import payment_methods as pm
-
 from rest_framework import serializers
 from apps.jobs.models import (
     Job, JobFile, JobLineItem, Service, PricingRule, JobStatusLog, JobHalt,
