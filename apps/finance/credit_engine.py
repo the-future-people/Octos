@@ -153,25 +153,24 @@ class CreditEngine:
         from apps.finance.models import CreditPayment
 
         # Validate payment method
-        valid_methods = {
-            CreditPayment.PaymentMethod.CASH,
-            CreditPayment.PaymentMethod.MOMO,
-            CreditPayment.PaymentMethod.POS,
-        }
-        if payment_method not in valid_methods:
+        from apps.finance import payment_methods as pm
+
+        entry = pm.get(payment_method)
+        if entry is None or not entry.can_settle:
+            allowed = ', '.join(m.label for m in pm.METHODS if m.can_settle)
             raise ValueError(
                 f"Invalid payment method '{payment_method}'. "
-                f"Credit settlements accept Cash, MoMo or POS only."
+                f"Credit settlements accept {allowed} only."
             )
 
         # Validate references
-        if payment_method == CreditPayment.PaymentMethod.MOMO and not momo_reference:
+        references = {
+            'momo_reference'   : momo_reference,
+            'pos_approval_code': pos_approval_code,
+        }
+        if entry.requires and not references.get(entry.requires):
             raise ValueError(
-                'MoMo reference number is mandatory for MoMo settlements.'
-            )
-        if payment_method == CreditPayment.PaymentMethod.POS and not pos_approval_code:
-            raise ValueError(
-                'POS approval code is mandatory for POS settlements.'
+                f'A reference is mandatory for {entry.label} settlements.'
             )
 
         # Validate amount

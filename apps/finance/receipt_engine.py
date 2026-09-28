@@ -73,13 +73,16 @@ class ReceiptEngine:
         from apps.finance.models import Receipt
 
         # ── Validate payment reference fields ─────────────────────────
-        if payment_method == Receipt.PaymentMethod.MOMO and not momo_reference:
+        from apps.finance import payment_methods as pm
+
+        entry      = pm.get(payment_method)
+        references = {
+            'momo_reference'   : momo_reference,
+            'pos_approval_code': pos_approval_code,
+        }
+        if entry and entry.requires and not references.get(entry.requires):
             raise ValueError(
-                'MoMo reference number is mandatory for MoMo payments.'
-            )
-        if payment_method == Receipt.PaymentMethod.POS and not pos_approval_code:
-            raise ValueError(
-                'POS approval code is mandatory for POS payments.'
+                f'A reference is mandatory for {entry.label} payments.'
             )
 
         # ── Customer snapshot ─────────────────────────────────────────

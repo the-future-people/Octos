@@ -1,3 +1,5 @@
+from apps.finance import payment_methods as pm
+
 from rest_framework import serializers
 from apps.finance.models import (
     DailySalesSheet,
@@ -322,7 +324,7 @@ class CreditSettlementSerializer(serializers.Serializer):
     """Cashier records a credit settlement payment."""
     amount            = serializers.DecimalField(max_digits=10, decimal_places=2)
     payment_method    = serializers.ChoiceField(
-        choices=[('CASH', 'Cash'), ('MOMO', 'Mobile Money'), ('POS', 'POS')]
+        choices=pm.choices(can_settle=True),
     )
     momo_reference    = serializers.CharField(required=False, allow_blank=True)
     pos_approval_code = serializers.CharField(required=False, allow_blank=True)
