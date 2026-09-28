@@ -119,10 +119,12 @@ class SheetSummaryService:
             amount_paid__isnull=False,
         )
 
-        cash  = get_method_total(completed, 'CASH')
-        momo  = get_method_total(completed, 'MOMO')
-        pos   = get_method_total(completed, 'POS')
-        total = cash + momo + pos
+        from apps.finance import payment_methods as pm
+
+        # Money the branch received, per method. Credit is reported
+        # separately below because it is owed, not collected.
+        collected = [m for m in pm.METHODS if m.collected]
+        amounts   = {m.code: get_method_total(completed, m.code) for m in collected}
 
         credit_issued = Job.objects.filter(
             daily_sheet    = sheet,
@@ -133,39 +135,38 @@ class SheetSummaryService:
         from apps.finance.models import CreditPayment
         from django.db.models import Sum as DSum
 
-        # Credit settlements broken down by payment method
-        settlement_qs = CreditPayment.objects.filter(daily_sheet=sheet)
-        settle_cash = settlement_qs.filter(
-            payment_method='CASH'
-        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
-        settle_momo = settlement_qs.filter(
-            payment_method='MOMO'
-        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
-        settle_pos  = settlement_qs.filter(
-            payment_method='POS'
-        ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
-        credit_settled = settle_cash + settle_momo + settle_pos
+        settlement_qs  = CreditPayment.objects.filter(daily_sheet=sheet)
+        credit_settled = Decimal('0')
 
-        # Add settlements into the method breakdown
-        cash  = cash  + settle_cash
-        momo  = momo  + settle_momo
-        pos   = pos   + settle_pos
-        total = cash  + momo + pos
+        # A settlement is money in the drawer like any other payment, so
+        # it adds into its own method rather than sitting apart.
+        for m in collected:
+            if not m.can_settle:
+                continue
+            settled = settlement_qs.filter(
+                payment_method=m.code
+            ).aggregate(t=DSum('amount'))['t'] or Decimal('0')
+            amounts[m.code] += settled
+            credit_settled  += settled
 
+        total     = sum(amounts.values(), Decimal('0'))
         petty_out = sheet.total_petty_cash_out or Decimal('0')
-        net_cash  = cash - petty_out
 
-        return {
-            'cash'            : str(cash),
-            'momo'            : str(momo),
-            'pos'             : str(pos),
+        # Only cash is in the till, so petty cash comes off cash alone.
+        net_cash = sum(
+            (amounts[m.code] for m in collected if m.in_till), Decimal('0')
+        ) - petty_out
+
+        out = {m.code.lower(): str(amounts[m.code]) for m in collected}
+        out.update({
             'total'           : str(total),
             'credit_issued'   : str(credit_issued),
             'credit_settled'  : str(credit_settled),
             'petty_cash_out'  : str(petty_out),
             'net_cash_in_till': str(net_cash),
             'is_live'         : True,
-        }
+        })
+        return out
 
     @staticmethod
     def _frozen_revenue(sheet) -> dict:
@@ -303,9 +304,8 @@ class SheetSummaryService:
             completed   = Job.objects.filter(daily_sheet=sheet, status=Job.COMPLETE)
             n_complete  = completed.count()
             if n_complete > 0:
-                total = get_method_total(completed, 'CASH') + \
-                        get_method_total(completed, 'MOMO') + \
-                        get_method_total(completed, 'POS')
+                from apps.jobs.selectors.revenue_selectors import get_revenue_breakdown
+                total = get_revenue_breakdown(completed)['total']
                 avg_job_value_today = round(float(total) / n_complete, 2)
         except Exception:
             logger.exception('SheetSummaryService: avg job value today failed for sheet %s', sheet.pk)
@@ -346,11 +346,8 @@ class SheetSummaryService:
             from apps.jobs.selectors.revenue_selectors import get_method_total
 
             completed_today = Job.objects.filter(daily_sheet=sheet, status=Job.COMPLETE)
-            current_revenue = float(
-                get_method_total(completed_today, 'CASH') +
-                get_method_total(completed_today, 'MOMO') +
-                get_method_total(completed_today, 'POS')
-            )
+            from apps.jobs.selectors.revenue_selectors import get_revenue_breakdown
+            current_revenue = float(get_revenue_breakdown(completed_today)['total'])
 
             prediction = PredictionEngine(sheet.branch).predict(
                 sheet           = sheet,

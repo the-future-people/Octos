@@ -537,3 +537,97 @@ class RevenueBreakdownTests(RecoveryFixtureMixin, TestCase):
         self.assertEqual(result['POS']['total'],  '60.00')
         self.assertEqual(result['total']['total'], '160.00')
         self.assertEqual(result['total']['count'], 2)
+
+class LiveRevenueTests(RecoveryFixtureMixin, TestCase):
+    """
+    What the cashier strip and the BM day sheet show while the day is
+    still running. Credit settlements are folded into the method
+    breakdown here, because money settling a debt is money in the drawer
+    the same as any other payment.
+    """
+
+    def setUp(self):
+        self.sheet = self.make_sheet(0)
+
+    def _job(self, method, amount):
+        from apps.jobs.models import Job
+        return Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
+            title=f'{method} job', intake_by=self.cashier,
+            estimated_cost=Decimal(str(amount)),
+            amount_paid=Decimal(str(amount)),
+            payment_method=method, daily_sheet=self.sheet,
+        )
+
+    def _settlement(self, method, amount):
+        from apps.finance.models import CreditPayment, CreditAccount
+        from apps.customers.models import CustomerProfile
+        customer = CustomerProfile.objects.create(
+            phone=f'0555{amount}'[:10], affiliation_active=True,
+            customer_type=CustomerProfile.INDIVIDUAL,
+            visit_count=0, total_spend=Decimal('0'),
+            tier=CustomerProfile.REGULAR, confidence_score=0,
+            is_priority=False, is_walkin=False,
+            first_name='Settle', last_name=str(amount),
+        )
+        account = CreditAccount.objects.create(
+            customer=customer, branch=self.branch,
+            account_type=CreditAccount.AccountType.INDIVIDUAL,
+            status=CreditAccount.Status.ACTIVE,
+            credit_limit=Decimal('1000.00'),
+            current_balance=Decimal(str(amount)),
+            payment_terms=30,
+        )
+        return CreditPayment.objects.create(
+            credit_account=account, daily_sheet=self.sheet,
+            received_by=self.cashier, amount=Decimal(str(amount)),
+            payment_method=method,
+            balance_before=Decimal(str(amount)), balance_after=Decimal('0'),
+        )
+
+    def _revenue(self):
+        from apps.finance.services.sheet_summary_service import SheetSummaryService
+        return SheetSummaryService._live_revenue(self.sheet)
+
+    def test_methods_are_totalled_separately(self):
+        self._job('CASH', '100.00')
+        self._job('MOMO',  '40.00')
+        self._job('POS',   '10.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['cash'],  '100.00')
+        self.assertEqual(r['momo'],  '40.00')
+        self.assertEqual(r['pos'],   '10.00')
+        self.assertEqual(r['total'], '150.00')
+        self.assertTrue(r['is_live'])
+
+    def test_credit_issued_is_reported_but_not_in_the_total(self):
+        self._job('CASH',   '100.00')
+        self._job('CREDIT', '300.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['credit_issued'], '300.00')
+        self.assertEqual(r['total'],         '100.00')
+
+    def test_settlements_add_into_their_method(self):
+        self._job('CASH', '100.00')
+        self._settlement('CASH', '60.00')
+        self._settlement('MOMO', '25.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['cash'],           '160.00')
+        self.assertEqual(r['momo'],           '25.00')
+        self.assertEqual(r['credit_settled'], '85.00')
+        self.assertEqual(r['total'],          '185.00')
+
+    def test_net_cash_in_till_is_cash_less_petty(self):
+        self._job('CASH', '200.00')
+        self.sheet.total_petty_cash_out = Decimal('30.00')
+        self.sheet.save(update_fields=['total_petty_cash_out'])
+
+        r = self._revenue()
+
+        self.assertEqual(r['net_cash_in_till'], '170.00')
