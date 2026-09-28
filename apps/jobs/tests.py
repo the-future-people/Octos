@@ -1192,4 +1192,64 @@ class CashierQueueSplitTests(JobsFixtureMixin, TestCase):
     def test_another_branch_never_appears(self):
         self.assertNotIn('Other branch banner', self._titles(self._get()))
 
+class PaymentValidationTests(TestCase):
+    """
+    CashierPaymentSerializer's rules now come from the payment registry
+    rather than a chain of ifs. These pin the behaviour, because nothing
+    else in the suite runs this validation — it only fires when a real
+    payment is submitted at the counter.
+    """
+
+    def _valid(self, **overrides):
+        data = {'deposit_percentage': 100, 'payment_method': 'CASH'}
+        data.update(overrides)
+        from apps.jobs.api.serializers import CashierPaymentSerializer
+        return CashierPaymentSerializer(data=data)
+
+    def test_cash_needs_no_reference(self):
+        s = self._valid()
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_momo_without_a_reference_is_refused(self):
+        s = self._valid(payment_method='MOMO')
+        self.assertFalse(s.is_valid())
+        self.assertIn('momo_reference', s.errors)
+
+    def test_momo_with_a_reference_is_accepted(self):
+        s = self._valid(payment_method='MOMO', momo_reference='12345678901')
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_pos_without_an_approval_code_is_refused(self):
+        s = self._valid(payment_method='POS')
+        self.assertFalse(s.is_valid())
+        self.assertIn('pos_approval_code', s.errors)
+
+    def test_split_and_wallet_are_still_accepted_methods(self):
+        wallet = self._valid(payment_method='WALLET')
+        self.assertTrue(wallet.is_valid(), wallet.errors)
+
+        split = self._valid(payment_method='SPLIT', split_legs=[
+            {'method': 'CASH', 'amount': '50.00'},
+            {'method': 'MOMO', 'amount': '50.00', 'reference': '12345678901'},
+        ])
+        self.assertTrue(split.is_valid(), split.errors)
+
+    def test_a_split_leg_must_be_a_splittable_method(self):
+        s = self._valid(payment_method='SPLIT', split_legs=[
+            {'method': 'CASH',   'amount': '50.00'},
+            {'method': 'CREDIT', 'amount': '50.00'},
+        ])
+        self.assertFalse(s.is_valid())
+
+    def test_a_momo_leg_needs_eleven_digits(self):
+        s = self._valid(payment_method='SPLIT', split_legs=[
+            {'method': 'CASH', 'amount': '50.00'},
+            {'method': 'MOMO', 'amount': '50.00', 'reference': '123'},
+        ])
+        self.assertFalse(s.is_valid())
+        self.assertIn('11 digits', str(s.errors))
+
+    def test_an_unknown_method_is_refused(self):
+        s = self._valid(payment_method='ONLINE')
+        self.assertFalse(s.is_valid())
 
