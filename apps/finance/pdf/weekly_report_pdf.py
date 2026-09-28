@@ -46,13 +46,15 @@ def _generate_weekly_pdf(report):
     W, H = A4
 
     # Colors
-    FARHAT_RED = colors.HexColor('#E31E24')
-    FARHAT_GOLD = colors.HexColor('#F5A623')
-    WHITE = colors.white
-    BLACK = colors.HexColor('#111111')
-    GREY = colors.HexColor('#666666')
-    LIGHT_GREY = colors.HexColor('#f5f5f5')
-    BORDER_GREY = colors.HexColor('#e0e0e0')
+    from apps.core.pdf import base
+
+    FARHAT_RED  = base.FARHAT_RED
+    FARHAT_GOLD = base.FARHAT_GOLD
+    WHITE       = base.WHITE
+    BLACK       = base.INK
+    GREY        = base.MUTED
+    LIGHT_GREY  = base.BG
+    BORDER_GREY = base.BORDER
 
     def fmt(n):
         return f"GHS {float(n or 0):,.2f}"
