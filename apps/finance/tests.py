@@ -687,3 +687,39 @@ class EODSummaryRevenueTests(RecoveryFixtureMixin, TestCase):
         r = self._revenue()
 
         self.assertEqual(r['net_cash_in_till'], '220.00')
+
+
+class TotalCollectedTests(RecoveryFixtureMixin, TestCase):
+    """
+    total_collected feeds the weekly filings, the monthly close, the risk
+    engines and the BM reports. It was a hardcoded sum of three columns,
+    so a new payment method would have been missing from all of them.
+    """
+
+    def test_sheet_collected_covers_methods_and_settlements(self):
+        sheet = self.make_sheet(0)
+        sheet.total_cash            = Decimal('100.00')
+        sheet.total_momo            = Decimal('40.00')
+        sheet.total_pos             = Decimal('10.00')
+        sheet.total_credit_issued   = Decimal('500.00')
+        sheet.total_credit_settled  = Decimal('25.00')
+        sheet.save()
+
+        # Credit issued is owed, not received, so it stays out.
+        self.assertEqual(sheet.total_collected, Decimal('175.00'))
+
+    def test_weekly_collected_is_the_methods_alone(self):
+        from apps.finance.models import WeeklyReport
+        import datetime
+
+        report = WeeklyReport.objects.create(
+            branch=self.branch, week_number=40, year=2026, month=9,
+            date_from=timezone.localdate() - datetime.timedelta(days=5),
+            date_to=timezone.localdate(),
+            total_cash=Decimal('200.00'),
+            total_momo=Decimal('75.00'),
+            total_pos=Decimal('25.00'),
+            total_credit_issued=Decimal('400.00'),
+        )
+
+        self.assertEqual(report.total_collected, Decimal('300.00'))

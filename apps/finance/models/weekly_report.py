@@ -111,7 +111,19 @@ class WeeklyReport(AuditModel):
 
     @property
     def total_collected(self):
-        return self.total_cash + self.total_momo + self.total_pos
+        """
+        Reads the registry, so a new payment method appears in weekly
+        filings the day it is added. This report has no settlement
+        column, so it is the collected methods alone.
+        """
+        from apps.finance import payment_methods as pm
+        from decimal import Decimal
+
+        return sum(
+            (getattr(self, m.sheet_field, None) or Decimal('0')
+             for m in pm.METHODS if m.collected and m.sheet_field),
+            Decimal('0'),
+        )
 
     @property
     def is_locked(self):

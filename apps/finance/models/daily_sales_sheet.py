@@ -178,8 +178,21 @@ class DailySalesSheet(AuditModel):
 
     @property
     def total_collected(self):
-        """Total cash actually received — excludes credit issued."""
-        return self.total_cash + self.total_momo + self.total_pos + self.total_credit_settled
+        """
+        Money actually received — excludes credit issued, which is owed.
+        Reads the registry so a new payment method is counted the day it
+        is added, rather than being left out of every total that builds
+        on this one.
+        """
+        from apps.finance import payment_methods as pm
+        from decimal import Decimal
+
+        collected = sum(
+            (getattr(self, m.sheet_field, None) or Decimal('0')
+             for m in pm.METHODS if m.collected and m.sheet_field),
+            Decimal('0'),
+        )
+        return collected + self.total_credit_settled
 
     @property
     def is_disrupted(self):
