@@ -28,12 +28,18 @@ def _generate_invoice_pdf(invoice):
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-    FARHAT_RED  = colors.HexColor('#E31E24')
-    CHARCOAL    = colors.HexColor('#1A1A1A')
-    DARK_GREY   = colors.HexColor('#444444')
-    MID_GREY    = colors.HexColor('#777777')
-    LIGHT_GREY  = colors.HexColor('#F0F0F0')
-    WHITE       = colors.white
+    # Colours come from the house palette now. The old locals are kept as
+    # aliases so the four hundred lines below read as they did — only the
+    # shades change, from this file's own greys to the warm set every
+    # Octos document uses.
+    from apps.core.pdf import base
+
+    FARHAT_RED  = base.FARHAT_RED
+    CHARCOAL    = base.INK
+    DARK_GREY   = base.BODY
+    MID_GREY    = base.MUTED
+    LIGHT_GREY  = base.BG
+    WHITE       = base.WHITE
 
     PAGE_W, PAGE_H = A4
     LM = RM = 20 * mm
