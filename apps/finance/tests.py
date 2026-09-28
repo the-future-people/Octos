@@ -797,3 +797,50 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
         self.assertTrue(os.path.exists(invoice.pdf_path), invoice.pdf_path)
         with open(invoice.pdf_path, 'rb') as f:
             self.assertEqual(f.read(5), b'%PDF-')
+
+    def test_proforma_pdf_renders_to_bytes(self):
+        """
+        The proforma is the document customers actually receive, and it
+        had no test at all. Its conversion path had never run either —
+        the first real acceptance raised NameError.
+        """
+        from apps.jobs.models import ProformaInvoice
+        from apps.jobs.pdf.proforma_pdf import build_proforma_pdf
+        import datetime
+
+        from apps.customers.models import CustomerProfile
+        customer = CustomerProfile.objects.create(
+            phone='0244000000', affiliation_active=True,
+            customer_type=CustomerProfile.INDIVIDUAL,
+            visit_count=0, total_spend=Decimal('0'),
+            tier=CustomerProfile.REGULAR, confidence_score=0,
+            is_priority=False, is_walkin=False,
+            first_name='Test', last_name='Proforma',
+        )
+
+        proforma = ProformaInvoice.objects.create(
+            branch=self.branch,
+            customer=customer,
+            proforma_number='PFI-RTB-2026-00001',
+            sequence=1,
+            issued_to='Mr Test Customer',
+            contact_phone='0244000000',
+            valid_until=timezone.localdate() + datetime.timedelta(days=21),
+            line_items=[{
+                'service_id': 1,
+                'label': 'A3 Colour Printing 1-sided',
+                'quantity': 1,
+                'pages': 18,
+                'is_color': True,
+                'unit_price': '5.00',
+                'line_total': '90.00',
+            }],
+            subtotal=Decimal('90.00'),
+            total=Decimal('90.00'),
+            issued_by=self.bm,
+        )
+
+        pdf_bytes = build_proforma_pdf(proforma)
+
+        self.assertTrue(pdf_bytes.startswith(b'%PDF-'))
+        self.assertGreater(len(pdf_bytes), 1000)

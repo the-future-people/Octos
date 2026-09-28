@@ -25,11 +25,14 @@ from reportlab.platypus import (
 
 from apps.core.branding import LOGO_B64
 
-FARHAT_RED = colors.HexColor('#E31E24')
-CHARCOAL   = colors.HexColor('#1A1A1A')
-DARK_GREY  = colors.HexColor('#444444')
-MID_GREY   = colors.HexColor('#777777')
-PALE_GREY  = colors.HexColor('#F0F0F0')
+# The house palette, shared with every other Octos document.
+from apps.core.pdf import base
+
+FARHAT_RED = base.FARHAT_RED
+CHARCOAL   = base.INK
+DARK_GREY  = base.BODY
+MID_GREY   = base.MUTED
+PALE_GREY  = base.BG
 WHITE      = colors.white
 
 
