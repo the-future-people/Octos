@@ -723,3 +723,77 @@ class TotalCollectedTests(RecoveryFixtureMixin, TestCase):
         )
 
         self.assertEqual(report.total_collected, Decimal('300.00'))
+
+
+class PDFRenderTests(RecoveryFixtureMixin, TestCase):
+    """
+    No PDF in this system has ever had a test. The weekly filing PDF
+    raised on every render for months because CoverPage.draw() reached
+    for self.canvas instead of self.canv, and the caller's except
+    swallowed it. These assert only that real bytes come out, which is
+    exactly what nobody was checking.
+    """
+
+    def test_weekly_pdf_renders_to_a_real_file(self):
+        import os
+        from apps.finance.models import WeeklyReport
+        from apps.finance.api.views import _generate_weekly_pdf
+        import datetime
+
+        report = WeeklyReport.objects.create(
+            branch=self.branch, week_number=40, year=2026, month=9,
+            date_from=timezone.localdate() - datetime.timedelta(days=5),
+            date_to=timezone.localdate(),
+            total_cash=Decimal('200.00'),
+            total_momo=Decimal('75.00'),
+            total_pos=Decimal('25.00'),
+            total_jobs_created=12,
+        )
+
+        _generate_weekly_pdf(report)
+
+        self.assertTrue(report.pdf_path, 'no pdf_path was set')
+        self.assertTrue(os.path.exists(report.pdf_path), report.pdf_path)
+        with open(report.pdf_path, 'rb') as f:
+            head = f.read(5)
+        self.assertEqual(head, b'%PDF-')
+        self.assertGreater(os.path.getsize(report.pdf_path), 1000)
+
+    def test_monthly_close_pdf_renders_to_bytes(self):
+        from apps.finance.models import MonthlyClose
+        from apps.finance.monthly_close_engine import MonthlyCloseEngine
+
+        close = MonthlyClose.objects.create(
+            branch=self.branch, month=9, year=2026,
+            summary_snapshot={
+                'revenue': {
+                    'total_cash': '200.00', 'total_momo': '75.00',
+                    'total_pos': '25.00', 'total_collected': '300.00',
+                    'cash_pct': 66.7, 'momo_pct': 25.0, 'pos_pct': 8.3,
+                },
+                'daily': [], 'weekly': [],
+            },
+        )
+
+        pdf_bytes = MonthlyCloseEngine(self.branch, 9, 2026).generate_pdf(close)
+
+        self.assertTrue(pdf_bytes.startswith(b'%PDF-'))
+        self.assertGreater(len(pdf_bytes), 1000)
+
+    def test_invoice_pdf_renders_to_a_real_file(self):
+        import os
+        from apps.finance.models import Invoice
+        from apps.finance.api.views import _generate_invoice_pdf
+
+        invoice = Invoice.objects.create(
+            branch=self.branch,
+            invoice_number='INV-RTB-TEST-0001',
+            total=Decimal('509.00'),
+            generated_by=self.bm,
+        )
+
+        _generate_invoice_pdf(invoice)
+
+        self.assertTrue(os.path.exists(invoice.pdf_path), invoice.pdf_path)
+        with open(invoice.pdf_path, 'rb') as f:
+            self.assertEqual(f.read(5), b'%PDF-')
