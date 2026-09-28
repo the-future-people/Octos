@@ -45,6 +45,7 @@ class DailySalesSheetListSerializer(serializers.ModelSerializer):
             'total_jobs_created', 'total_fresh_revenue',
             'total_deposits', 'total_balances',
             'total_cash', 'total_momo', 'total_pos',
+            'total_collected',
             'total_credit_issued', 'total_credit_settled', 'total_refunds',
             'total_damages', 'total_petty_cash_out',
             'net_cash_in_till', 'vat_collected',
