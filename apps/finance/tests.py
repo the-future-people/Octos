@@ -783,7 +783,7 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
     def test_invoice_pdf_renders_to_a_real_file(self):
         import os
         from apps.finance.models import Invoice
-        from apps.finance.api.views import _generate_invoice_pdf
+        from apps.finance.pdf.invoice_pdf import _generate_invoice_pdf
 
         invoice = Invoice.objects.create(
             branch=self.branch,
