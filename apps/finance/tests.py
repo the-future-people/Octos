@@ -737,7 +737,7 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
     def test_weekly_pdf_renders_to_a_real_file(self):
         import os
         from apps.finance.models import WeeklyReport
-        from apps.finance.api.views import _generate_weekly_pdf
+        from apps.finance.pdf.weekly_report_pdf import _generate_weekly_pdf
         import datetime
 
         report = WeeklyReport.objects.create(
