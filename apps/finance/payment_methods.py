@@ -50,6 +50,9 @@ class PaymentMethod:
     can_split   : bool = False
     can_settle  : bool = False
     requires    : Optional[str] = None
+    # What the required value must look like, when it matters. MoMo
+    # references are 11 digits; a POS code has no fixed shape.
+    requires_digits : Optional[int] = None
 
 
 CASH = PaymentMethod(
@@ -64,7 +67,7 @@ MOMO = PaymentMethod(
     in_till=False, collected=True,
     sheet_field='total_momo',
     can_split=True, can_settle=True,
-    requires='momo_reference',
+    requires='momo_reference', requires_digits=11,
 )
 
 POS = PaymentMethod(

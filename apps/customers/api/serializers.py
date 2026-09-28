@@ -1,3 +1,5 @@
+from apps.finance import payment_methods as pm
+
 from rest_framework import serializers
 from apps.customers.models import CustomerProfile
 from apps.customers.models.customer import CustomerEditLog
@@ -255,21 +257,20 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
 class CreditSettleSerializer(serializers.Serializer):
     """Used by cashier to record a credit settlement."""
     amount     = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
-    method     = serializers.ChoiceField(choices=['CASH', 'MOMO', 'POS'])
+    method     = serializers.ChoiceField(
+        choices=pm.codes(can_settle=True),
+    )
     reference  = serializers.CharField(max_length=100, required=False, allow_blank=True)
     sheet_id   = serializers.IntegerField()
     notes      = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, data):
-        method    = data.get('method')
-        reference = data.get('reference', '')
-        if method == 'MOMO' and not reference:
+        # Which methods need a reference is the registry's business, not
+        # a chain of ifs that has to be extended for every new one.
+        entry = pm.get(data.get('method'))
+        if entry and entry.requires and not data.get('reference', ''):
             raise serializers.ValidationError(
-                {'reference': 'MoMo reference number is required.'}
-            )
-        if method == 'POS' and not reference:
-            raise serializers.ValidationError(
-                {'reference': 'POS approval code is required.'}
+                {'reference': f'A reference is required for {entry.label} settlements.'}
             )
         return data
 
