@@ -1191,3 +1191,5 @@ class CashierQueueSplitTests(JobsFixtureMixin, TestCase):
 
     def test_another_branch_never_appears(self):
         self.assertNotIn('Other branch banner', self._titles(self._get()))
+
+

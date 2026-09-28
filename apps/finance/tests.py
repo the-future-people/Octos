@@ -459,3 +459,81 @@ class SnapshotTotalsTests(RecoveryFixtureMixin, TestCase):
         self.assertIn('ONLINE', ''.join(logged.output))
         self.assertIn('250.00', ''.join(logged.output))
         self.assertEqual(self.sheet.total_cash, Decimal('100.00'))
+
+class RevenueBreakdownTests(RecoveryFixtureMixin, TestCase):
+    """
+    The live figures the cashier and BM read during the day. Like the
+    frozen totals, these were hand-written sums of cash + momo + pos, so
+    any method not named was excluded from the day's revenue without
+    anyone being told. This pins the numbers before they move onto the
+    registry.
+    """
+
+    def setUp(self):
+        self.sheet = self.make_sheet(0)
+
+    def _job(self, method, amount):
+        from apps.jobs.models import Job
+        return Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
+            title=f'{method} job', intake_by=self.cashier,
+            estimated_cost=Decimal(str(amount)),
+            amount_paid=Decimal(str(amount)),
+            payment_method=method, daily_sheet=self.sheet,
+        )
+
+    def test_breakdown_totals_each_method(self):
+        from apps.jobs.selectors.revenue_selectors import get_revenue_breakdown
+        from apps.jobs.models import Job
+
+        self._job('CASH', '100.00')
+        self._job('CASH',  '50.00')
+        self._job('MOMO',  '75.00')
+        self._job('POS',   '25.00')
+
+        result = get_revenue_breakdown(Job.objects.filter(daily_sheet=self.sheet))
+
+        self.assertEqual(result['cash'],  Decimal('150.00'))
+        self.assertEqual(result['momo'],  Decimal('75.00'))
+        self.assertEqual(result['pos'],   Decimal('25.00'))
+        self.assertEqual(result['total'], Decimal('250.00'))
+        self.assertEqual(result['job_count'], 4)
+
+    def test_credit_is_not_revenue_collected(self):
+        """Credit is owed, not received, so it stays out of the total."""
+        from apps.jobs.selectors.revenue_selectors import get_revenue_breakdown
+        from apps.jobs.models import Job
+
+        self._job('CASH',   '100.00')
+        self._job('CREDIT', '300.00')
+
+        result = get_revenue_breakdown(Job.objects.filter(daily_sheet=self.sheet))
+
+        self.assertEqual(result['total'], Decimal('100.00'))
+
+    def test_live_totals_keep_their_key_names(self):
+        """The API and the portals read these keys by name."""
+        from apps.jobs.selectors.revenue_selectors import get_sheet_live_totals
+
+        self._job('CASH', '100.00')
+        self._job('MOMO', '40.00')
+
+        result = get_sheet_live_totals(self.sheet)
+
+        self.assertEqual(result['total_cash'],      Decimal('100.00'))
+        self.assertEqual(result['total_momo'],      Decimal('40.00'))
+        self.assertEqual(result['total_collected'], Decimal('140.00'))
+        self.assertEqual(result['net_cash_in_till'], Decimal('100.00'))
+
+    def test_cashier_summary_keys_are_method_codes(self):
+        from apps.jobs.selectors.revenue_selectors import get_cashier_summary
+
+        self._job('CASH', '100.00')
+        self._job('POS',   '60.00')
+
+        result = get_cashier_summary(self.branch, self.sheet.date)
+
+        self.assertEqual(result['CASH']['total'], '100.00')
+        self.assertEqual(result['POS']['total'],  '60.00')
+        self.assertEqual(result['total']['total'], '160.00')
+        self.assertEqual(result['total']['count'], 2)

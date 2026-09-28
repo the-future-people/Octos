@@ -45,18 +45,22 @@ def get_revenue_breakdown(jobs_qs) -> dict:
         amount_paid__isnull=False,
     )
 
-    cash  = get_method_total(completed, 'CASH')
-    momo  = get_method_total(completed, 'MOMO')
-    pos   = get_method_total(completed, 'POS')
-    total = cash + momo + pos
+    from apps.finance import payment_methods as pm
 
-    return {
-        'cash'     : cash,
-        'momo'     : momo,
-        'pos'      : pos,
-        'total'    : total,
-        'job_count': completed.count(),
+    # "cash + momo + pos" was always shorthand for money the branch
+    # actually received. The registry knows which methods those are, so a
+    # new one is counted the day it is added instead of being left out of
+    # the day's revenue with nobody told.
+    by_method = {
+        m.code: get_method_total(completed, m.code)
+        for m in pm.METHODS if m.collected
     }
+
+    out = {m.code.lower(): amount for m, amount in
+           ((pm.get(code), amount) for code, amount in by_method.items())}
+    out['total']     = sum(by_method.values(), Decimal('0'))
+    out['job_count'] = completed.count()
+    return out
 
 
 def get_sheet_live_totals(sheet) -> dict:
@@ -91,6 +95,11 @@ def get_cashier_summary(branch, date) -> dict:
     from apps.jobs.models import Job
     from apps.finance.models import PaymentLeg, CreditPayment, DailySalesSheet
     from django.db.models import Count
+    from apps.finance import payment_methods as pm
+
+    # Methods whose money the branch actually received. Credit is owed,
+    # not collected, so it has never belonged in this strip.
+    COLLECTED = [m.code for m in pm.METHODS if m.collected]
 
     jobs = Job.objects.filter(
         branch=branch,
@@ -131,11 +140,9 @@ def get_cashier_summary(branch, date) -> dict:
             )
             return {'total': Decimal(str(r['total'] or 0)), 'count': r['count'] or 0}
 
-        s_cash = _settle('CASH')
-        s_momo = _settle('MOMO')
-        s_pos  = _settle('POS')
+        settled = {code: _settle(code) for code in COLLECTED}
     except DailySalesSheet.DoesNotExist:
-        s_cash = s_momo = s_pos = {'total': Decimal('0'), 'count': 0}
+        settled = {code: {'total': Decimal('0'), 'count': 0} for code in COLLECTED}
 
     def _combine(job_t, settle_t):
         return {
@@ -147,9 +154,9 @@ def get_cashier_summary(branch, date) -> dict:
     j_momo = _method_total('MOMO')
     j_pos  = _method_total('POS')
 
-    cash  = _combine(j_cash, s_cash)
-    momo  = _combine(j_momo, s_momo)
-    pos   = _combine(j_pos,  s_pos)
+    cash  = _combine(j_cash, settled['CASH'])
+    momo  = _combine(j_momo, settled['MOMO'])
+    pos   = _combine(j_pos,  settled['POS'])
     grand = Decimal(cash['total']) + Decimal(momo['total']) + Decimal(pos['total'])
     count = cash['count'] + momo['count'] + pos['count']
 
