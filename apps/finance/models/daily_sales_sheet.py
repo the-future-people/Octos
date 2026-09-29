@@ -92,6 +92,10 @@ class DailySalesSheet(AuditModel):
     total_cash           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_momo           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_pos            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_online         = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Paid through Print Octos — earned by the branch, never in its till',
+    )
     total_credit_issued   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_credit_settled  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_refunds        = models.DecimalField(max_digits=12, decimal_places=2, default=0)

@@ -60,6 +60,10 @@ class WeeklyReport(AuditModel):
     total_cash           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_momo           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_pos            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_online         = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Paid through Print Octos — earned by the branch, never in its till',
+    )
     total_petty_cash_out = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_credit_issued  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     net_cash_in_till     = models.DecimalField(max_digits=12, decimal_places=2, default=0)

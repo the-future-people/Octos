@@ -138,6 +138,7 @@ class Job(AuditModel):
     POS    = 'POS'
     CREDIT = 'CREDIT'
     WALLET = 'WALLET'
+    ONLINE = 'ONLINE'
 
     PAYMENT_METHOD_CHOICES = [
         (CASH,   'Cash'),
@@ -145,6 +146,7 @@ class Job(AuditModel):
         (POS,    'POS'),
         (CREDIT, 'Credit Account'),
         (WALLET, 'Wallet Credit'),
+        (ONLINE, 'Online Payment'),
     ]
 
     # ── Core fields ──────────────────────────────────────────────

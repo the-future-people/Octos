@@ -29,6 +29,7 @@ class Receipt(AuditModel):
         MOMO   = 'MOMO',   'Mobile Money'
         POS    = 'POS',    'POS'
         CREDIT = 'CREDIT', 'Credit Account'
+        ONLINE = 'ONLINE', 'Paid Online'
 
     class ReceiptType(models.TextChoices):
         JOB_PAYMENT        = 'JOB_PAYMENT',        'Job Payment'
