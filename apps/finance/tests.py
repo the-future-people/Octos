@@ -460,15 +460,32 @@ class SnapshotTotalsTests(RecoveryFixtureMixin, TestCase):
         has no column to go to. What changed is that it is now named in
         the logs with its sheet and its amount, instead of disappearing.
         """
-        self._receipt('CASH',   '100.00', 9)
-        self._receipt('ONLINE', '250.00', 10)
+        self._receipt('CASH',    '100.00', 9)
+        self._receipt('CHEQUE',  '250.00', 10)
 
         with self.assertLogs('apps.finance.sheet_engine', level='ERROR') as logged:
             self._snapshot()
 
-        self.assertIn('ONLINE', ''.join(logged.output))
+        self.assertIn('CHEQUE', ''.join(logged.output))
         self.assertIn('250.00', ''.join(logged.output))
         self.assertEqual(self.sheet.total_cash, Decimal('100.00'))
+
+    def test_online_money_is_earned_but_never_in_the_till(self):
+        """
+        Yesterday this same receipt was logged as an unknown method and
+        counted nowhere. One registry entry later, it lands in its own
+        column, counts as revenue, and still cannot touch the till.
+        """
+        self._receipt('CASH',   '100.00', 11)
+        self._receipt('ONLINE', '250.00', 12)
+
+        self._snapshot()
+
+        self.assertEqual(self.sheet.total_cash,   Decimal('100.00'))
+        self.assertEqual(self.sheet.total_online, Decimal('250.00'))
+        self.assertEqual(self.sheet.total_collected, Decimal('350.00'))
+        # The drawer holds the cash and nothing else.
+        self.assertEqual(self.sheet.net_cash_in_till, Decimal('100.00'))
 
 class RevenueBreakdownTests(RecoveryFixtureMixin, TestCase):
     """
@@ -642,6 +659,17 @@ class LiveRevenueTests(RecoveryFixtureMixin, TestCase):
 
         self.assertEqual(r['net_cash_in_till'], '170.00')
 
+    def test_online_counts_as_revenue_but_not_as_till_cash(self):
+        self._job('CASH',   '100.00')
+        self._job('ONLINE', '250.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['cash'],   '100.00')
+        self.assertEqual(r['online'], '250.00')
+        self.assertEqual(r['total'],  '350.00')
+        self.assertEqual(r['net_cash_in_till'], '100.00')
+
 class EODSummaryRevenueTests(RecoveryFixtureMixin, TestCase):
     """
     The end-of-day summary the BM reads before closing. Same hardcoded
@@ -698,6 +726,16 @@ class EODSummaryRevenueTests(RecoveryFixtureMixin, TestCase):
 
         self.assertEqual(r['net_cash_in_till'], '220.00')
 
+    def test_online_appears_in_the_eod_summary(self):
+        self._job('CASH',   '100.00')
+        self._job('ONLINE', '250.00')
+
+        r = self._revenue()
+
+        self.assertEqual(r['online'], '250.00')
+        self.assertEqual(r['total'],  '350.00')
+        self.assertEqual(r['net_cash_in_till'], '100.00')
+
 
 class TotalCollectedTests(RecoveryFixtureMixin, TestCase):
     """
@@ -711,12 +749,15 @@ class TotalCollectedTests(RecoveryFixtureMixin, TestCase):
         sheet.total_cash            = Decimal('100.00')
         sheet.total_momo            = Decimal('40.00')
         sheet.total_pos             = Decimal('10.00')
+        sheet.total_online          = Decimal('250.00')
         sheet.total_credit_issued   = Decimal('500.00')
         sheet.total_credit_settled  = Decimal('25.00')
         sheet.save()
 
-        # Credit issued is owed, not received, so it stays out.
-        self.assertEqual(sheet.total_collected, Decimal('175.00'))
+        # Credit issued is owed, not received, so it stays out. Online
+        # is the opposite: the branch never touched the money, but it
+        # earned it, so it counts.
+        self.assertEqual(sheet.total_collected, Decimal('425.00'))
 
     def test_weekly_collected_is_the_methods_alone(self):
         from apps.finance.models import WeeklyReport
@@ -729,10 +770,11 @@ class TotalCollectedTests(RecoveryFixtureMixin, TestCase):
             total_cash=Decimal('200.00'),
             total_momo=Decimal('75.00'),
             total_pos=Decimal('25.00'),
+            total_online=Decimal('250.00'),
             total_credit_issued=Decimal('400.00'),
         )
 
-        self.assertEqual(report.total_collected, Decimal('300.00'))
+        self.assertEqual(report.total_collected, Decimal('550.00'))
 
 
 class PDFRenderTests(RecoveryFixtureMixin, TestCase):
@@ -757,6 +799,7 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
             total_cash=Decimal('200.00'),
             total_momo=Decimal('75.00'),
             total_pos=Decimal('25.00'),
+            total_online=Decimal('250.00'),
             total_jobs_created=12,
         )
 
@@ -778,8 +821,8 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
             summary_snapshot={
                 'revenue': {
                     'total_cash': '200.00', 'total_momo': '75.00',
-                    'total_pos': '25.00', 'total_collected': '300.00',
-                    'cash_pct': 66.7, 'momo_pct': 25.0, 'pos_pct': 8.3,
+                    'total_pos': '25.00', 'total_online': '250.00', 'total_collected': '550.00',
+                    'cash_pct': 66.7, 'momo_pct': 25.0, 'pos_pct': 8.3, 'online_pct': 58.8,
                 },
                 'daily': [], 'weekly': [],
             },

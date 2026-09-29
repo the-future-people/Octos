@@ -84,8 +84,23 @@ CREDIT = PaymentMethod(
     sheet_field='total_credit_issued',
 )
 
+ONLINE = PaymentMethod(
+    code='ONLINE', label='Paid Online',
+    # The branch earns it and never touches it: the money lands in an
+    # HQ-controlled account, so it counts as revenue but can never reach
+    # a cashier's variance. She can only be held to what she can count.
+    #
+    # Deliberately neither splittable nor settleable. An online payment
+    # is all or nothing, not one leg of a counter split. And a credit
+    # account belongs to someone the branch has traded with for a long
+    # time, who settles by cash, momo or bank — online settlement is a
+    # different flow that does not exist.
+    in_till=False, collected=True,
+    sheet_field='total_online',
+)
+
 # Every method, in the order they should be displayed.
-METHODS = (CASH, MOMO, POS, CREDIT)
+METHODS = (CASH, MOMO, POS, CREDIT, ONLINE)
 
 BY_CODE = {m.code: m for m in METHODS}
 

@@ -1250,6 +1250,12 @@ class PaymentValidationTests(TestCase):
         self.assertIn('11 digits', str(s.errors))
 
     def test_an_unknown_method_is_refused(self):
-        s = self._valid(payment_method='ONLINE')
+        s = self._valid(payment_method='CHEQUE')
         self.assertFalse(s.is_valid())
+
+    def test_online_is_accepted_and_needs_no_reference(self):
+        """Online payments carry their own provider reference, not one
+        the cashier types."""
+        s = self._valid(payment_method='ONLINE')
+        self.assertTrue(s.is_valid(), s.errors)
 

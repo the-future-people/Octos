@@ -649,12 +649,12 @@ class SheetEngine:
         sheet.total_petty_cash_out = total_petty
         sheet.net_cash_in_till = net_cash
 
+        # The method fields come from the registry, like the totals
+        # themselves. Naming them here by hand is how total_online was
+        # computed correctly and then dropped at save time.
         sheet.save(update_fields=[
             'total_jobs_created',
-            'total_cash',
-            'total_momo',
-            'total_pos',
-            'total_credit_issued',
+            *totals.keys(),
             'total_credit_settled',
             'total_petty_cash_out',
             'net_cash_in_till',
