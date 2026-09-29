@@ -1326,3 +1326,78 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
         )
         self.assertEqual(result['total'], Decimal('30.00'))
 
+    def test_quoting_from_a_spec(self):
+        """
+        What the form calls. Dimensions and quantity in, price and the
+        breakdown the screen shows out — so the counter, the storefront
+        and any future quote all get the same answer from one place.
+        """
+        from apps.jobs.pricing_engine import quote_line
+
+        q = quote_line(
+            service=self.flexy, branch=self.branch,
+            specifications={'width_in': 72, 'height_in': 36},
+            quantity=1,
+        )
+
+        self.assertTrue(q['success'], q.get('error'))
+        self.assertEqual(q['total'], Decimal('58.50'))
+        self.assertEqual(q['area_sqft'], Decimal('18'))
+        self.assertEqual(q['unit_price'], Decimal('58.50'))
+        self.assertFalse(q['minimum_applied'])
+
+    def test_quoting_multiplies_by_quantity(self):
+        from apps.jobs.pricing_engine import quote_line
+
+        q = quote_line(
+            service=self.flexy, branch=self.branch,
+            specifications={'width_in': 72, 'height_in': 36},
+            quantity=4,
+        )
+        self.assertEqual(q['total'], Decimal('234.00'))
+        self.assertEqual(q['unit_price'], Decimal('58.50'))
+
+    def test_quoting_reports_when_the_minimum_bit(self):
+        """The screen has to say why GHS 30 is not 3 sq ft of material."""
+        from apps.jobs.pricing_engine import quote_line
+
+        q = quote_line(
+            service=self.flexy, branch=self.branch,
+            specifications={'width_in': 12, 'height_in': 12},
+            quantity=3,
+        )
+        self.assertEqual(q['total'], Decimal('30.00'))
+        self.assertEqual(q['unit_price'], Decimal('10.00'))
+        self.assertTrue(q['minimum_applied'])
+
+    def test_an_area_service_without_dimensions_is_refused(self):
+        """
+        specifications is free-form JSON, so nothing stops a caller
+        omitting the dimensions. Silently pricing that as zero area is
+        exactly how a banner would be sold for nothing.
+        """
+        from apps.jobs.pricing_engine import quote_line
+
+        q = quote_line(
+            service=self.flexy, branch=self.branch,
+            specifications={}, quantity=1,
+        )
+        self.assertFalse(q['success'])
+        self.assertIn('width', q['error'].lower())
+
+    def test_quoting_a_per_page_service_still_works(self):
+        """The same function serves instant work — one quote path, not two."""
+        from apps.jobs.models import PricingRule
+        from apps.jobs.pricing_engine import quote_line
+
+        PricingRule.objects.create(
+            service=self.service, branch=self.branch,
+            base_price=Decimal('0.50'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+        q = quote_line(
+            service=self.service, branch=self.branch,
+            specifications={'pages': 10}, quantity=2,
+        )
+        self.assertTrue(q['success'], q.get('error'))
+        self.assertEqual(q['total'], Decimal('10.00'))

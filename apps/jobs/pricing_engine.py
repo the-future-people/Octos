@@ -2,7 +2,83 @@ from decimal import Decimal
 from apps.jobs.models import PricingRule
 
 
+# Units whose quantity is an area rather than a count.
+AREA_UNITS = ('SQFT', 'SQCM', 'SQM')
+
 def square_feet(width_in, height_in) -> Decimal:
+    """
+    (width" × height") ÷ 144 — the area basis every large-format job is
+    priced on. Dimensions are taken in inches because that is what the
+    customer gives and what the machine cuts.
+
+    The area is not rounded. Only the money is, at the end.
+    """
+    return (
+        Decimal(str(width_in)) * Decimal(str(height_in))
+    ) / Decimal('144')
+
+def quote_line(service, branch, specifications=None, quantity=1) -> dict:
+    """
+    Price one line of a job from its filled-in specification.
+
+    The single quote path. The counter, the storefront and any future
+    assessment all call this, so a banner costs the same wherever it is
+    quoted — and the arithmetic that turns inches into an area lives in
+    one place rather than in whoever happens to be calling.
+
+    specifications is the same free-form dict the line item carries, so
+    an area service is refused outright when its dimensions are absent.
+    Pricing a missing width as zero area is how a banner gets sold for
+    nothing.
+    """
+    specs     = specifications or {}
+    unit_norm = (service.unit or '').upper().replace('PER_', '')
+    quantity  = int(quantity or 1)
+
+    if unit_norm in AREA_UNITS:
+        width  = specs.get('width_in')
+        height = specs.get('height_in')
+        if not width or not height:
+            return {
+                'success': False,
+                'error': (
+                    f'{service.name} is priced by area and needs a width '
+                    f'and a height in inches.'
+                ),
+                'total': Decimal('0.00'),
+            }
+        area   = square_feet(width, height)
+        result = PricingEngine.get_price(
+            service=service, branch=branch,
+            quantity=area, pages=quantity,
+        )
+        if not result['success']:
+            return result
+
+        total      = result['total']
+        unit_price = (total / Decimal(str(quantity))).quantize(Decimal('0.01'))
+        floor      = PricingEngine(service, branch).rule.minimum_price or Decimal('0')
+        result.update({
+            'area_sqft'      : area,
+            'unit_price'     : unit_price,
+            'minimum_applied': bool(floor and unit_price <= floor),
+        })
+        return result
+
+    pages  = int(specs.get('pages') or 1)
+    result = PricingEngine.get_price(
+        service=service, branch=branch,
+        quantity=quantity, pages=pages,
+        is_color=bool(specs.get('is_color')),
+    )
+    if result['success']:
+        result.setdefault('area_sqft', None)
+        result.setdefault(
+            'unit_price',
+            (result['total'] / Decimal(str(quantity))).quantize(Decimal('0.01')),
+        )
+        result.setdefault('minimum_applied', False)
+    return result
     """
     (width" × height") ÷ 144 — the area basis every large-format job is
     priced on. Dimensions are taken in inches because that is what the
@@ -106,8 +182,13 @@ class PricingEngine:
             # Per-copy/piece services: base × pages × sets × color
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
         elif unit_norm in ('SQFT', 'SQCM', 'SQM'):
-            # Area-based: base × quantity only (quantity = area)
-            subtotal = base * multiplier * Decimal(str(quantity))
+            # Area-based: quantity is the area of one piece, pages is how
+            # many of them. Ignoring pages here priced four banners as one.
+            subtotal = (
+                base * multiplier
+                * Decimal(str(quantity))
+                * Decimal(str(pages))
+            )
         elif unit_norm == 'JOB':
             # Flat per job — no quantity multiplication
             subtotal = base * multiplier
