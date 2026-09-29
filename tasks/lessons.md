@@ -203,3 +203,98 @@ how much would it improve?" before building it.
 
 Twice a "missing feature" was working code that had never been deployed.
 `git status` on both repos before concluding anything is broken.
+
+# Lessons — additions, 29 September 2026
+
+Append these to `tasks/lessons.md`. Existing entries stay as they are.
+
+---
+
+## A test that depends on when it runs will fail when you are not looking
+
+Two in one day:
+
+- `make_sheet` counted calendar days then stepped back off Sunday, so on
+  a Monday `days_ago=2` and `days_ago=3` landed on the same Saturday and
+  collided on a unique constraint. One day in seven.
+- `DeriveJobTypeTests` called `save_draft`, which refuses after the shift
+  ends. Green all afternoon, red at 19:30.
+
+Freeze the clock or patch the gate. A suite that fails at certain hours
+teaches you to distrust it, and the first instinct on a Monday morning is
+that you broke something.
+
+```python
+@patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+       return_value={'can_create_jobs': True, 'lock_reason': ''})
+```
+
+A class-level patch passes the mock to every test method, so each one
+needs an extra parameter. Miss one and it errors with "takes 1 positional
+argument but 2 were given".
+
+---
+
+## A paste can delete the function above it
+
+`square_feet` vanished when the block meant to sit above it replaced it
+instead. The tests then failed on an import error that looked like the
+new code was wrong.
+
+After any large paste, list what is actually in the file before
+debugging what it does:
+
+```
+Select-String -Path <file> -Pattern "^def |^class " -Encoding UTF8
+```
+
+---
+
+## The same calculation in two languages will drift
+
+`NewJobModal.jsx` reimplemented the pricing engine in JavaScript for
+speed. By the time anyone looked, it was missing the piece count on area
+services and knew nothing about the minimum price, so a small banner
+quoted at 3.25 on screen and cost 10.00 on the server.
+
+Every price now comes from the server. The 400ms debounce means one call
+per pause, not per keystroke.
+
+---
+
+## Hardcoding a service's fields invites the next one
+
+Binding's ring size and passport's output mode were each written by hand
+into the modal's state, the modal's render, the price endpoint and the
+payload. Four places, twice over. A third service would have been twelve.
+
+`spec_template` existed the whole time and nothing rendered it.
+
+---
+
+## A field nobody renders is not a working feature
+
+`spec_template` was written by two seed commands, exposed in a
+serializer, and read by no UI at all. The Production tab showed services
+with no way to enter their specifications.
+
+Before building on a field, grep for something that reads it.
+
+---
+
+## Clamp input on blur, not on every keystroke
+
+`Math.max(min, parseInt(value))` in an `onChange` turned the first digit
+of 168 into a 6, so no three-digit number could be typed at all. Keep the
+raw value while typing; correct it when the field loses focus.
+
+---
+
+## An if/elif over units will silently drop one of them
+
+`calculate` multiplied area services by the area and ignored `pages`
+entirely, so four banners priced as one. The branch looked complete and
+had been there since the engine was written.
+
+Any branch that handles some inputs differently needs a test per branch,
+not per function.

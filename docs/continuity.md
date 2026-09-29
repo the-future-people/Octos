@@ -1,11 +1,11 @@
 # Octos — Continuity
 
-**Current as of 29 September 2026.**
+**Current as of 29 September 2026, end of day.**
 
-This is the state-of-play document. Paste it at the start of a session.
-It gets rewritten as things change, not appended to forever — history
-lives in git, reasoning lives in `docs/decisions.md`, and rules that
-stop repeats live in `tasks/lessons.md`.
+Paste this at the start of a session. It gets rewritten as things change,
+not appended to — history lives in git, reasoning lives in
+`docs/decisions.md`, and rules that stop repeats live in
+`tasks/lessons.md`.
 
 ---
 
@@ -15,164 +15,172 @@ stop repeats live in `tasks/lessons.md`.
 and the doubled `octos-web\octos-web`. Home:
 `Desktop\The_Future_People_Explorations\Octos` and `octos-web`.
 
-**Home database is empty of usable data** — no branch, no users. Seed
-created permissions and roles only. Tests run fine there (Django builds
-its own test database); anything needing real data does not. The
-decision between hand-seeding and restoring a production dump is still
-open.
+**Home database is empty of usable data** — no branch, no users. Tests
+run fine there (Django builds its own test database); anything needing
+real data does not. Hand-seed or restore a production dump: still open.
 
 **Production:** Railway (backend), Vercel (frontend). Westland is the
-only live branch. Every job in the database is INSTANT; no production or
-design job has ever run.
+only live branch.
 
-**Tests:** 135 across finance, jobs and analytics. Run them with
+**Tests:** 145 across finance, jobs and analytics.
 
 ```
 docker-compose --env-file .env.docker exec web python manage.py test apps.finance.tests apps.jobs.tests apps.analytics.tests -v 1 --keepdb
 ```
 
 `apps/` has no `__init__.py`, so `test apps.finance` fails discovery —
-always name the module (`apps.finance.tests`).
+always name the module.
 
 ---
 
-## Shipped in the 28–29 September sessions
+## Shipped 28–29 September
 
 ### Payment method registry
 
-`apps/finance/payment_methods.py` is the single source of truth for what
-a payment method is. Migrated onto it, each with tests pinning the
-numbers before and after:
+`apps/finance/payment_methods.py` is the single source of truth. Every
+consumer that computes or validates reads it: sheet totals, revenue
+breakdown, cashier summary, live revenue, EOD summary,
+`total_collected` on both sheet and weekly report, three serializers,
+and the credit and receipt engines.
 
-- `SheetEngine._snapshot_totals` — frozen sheet totals
-- `get_revenue_breakdown`, `get_cashier_summary` — revenue selectors
-- `SheetSummaryService._live_revenue` — the live portal figures
-- `EODService.get_summary` — end-of-day summary
-- `DailySalesSheet.total_collected`, `WeeklyReport.total_collected`
-- `CashierPaymentSerializer`, `CreditSettleSerializer`,
-  `CreditSettlementSerializer` — choices and reference validation
-- `CreditEngine.settle`, `ReceiptEngine.issue` — engine validation
-
-**`ONLINE` is registered and live in production.** Migration `0031` adds
+**`ONLINE` is registered and live**, migration `0031` adding
 `total_online` to `DailySalesSheet` and `WeeklyReport`. Nothing writes an
-online receipt yet — there is no payment integration — but the
-accounting is ready.
+online receipt yet — there is no payment integration — but the accounting
+is ready.
 
 ### Cashier queue split
 
 Instant and processed as separate tabs, filtered server-side by
-`job_type` with counts for both, filled-active toggle with bolt and
-printer icons. Live.
+`job_type` with counts for both. Live.
 
-`derive_job_type()` now decides a job's type from its services at every
-creation path: `save_draft`, the late-job path, `proforma_engine`, and
-the API serializer (where `job_type` became read-only). Design services
-are refused at intake.
+`derive_job_type()` decides a job's type from its services at every
+creation path. Design services are refused at intake.
 
 ### PDFs
 
-All five builders are now plain functions in `pdf/` folders, on one
-palette (`apps/core/pdf/base.py`), each with a render test:
+Five builders, all plain functions in `pdf/` folders, all on one palette
+(`apps/core/pdf/base.py`), all with render tests. `views.py` went from
+4,126 lines to 3,464. `close_service.py` — 1,071 lines, byte-identical to
+`monthly_close_engine.py`, imported by nothing — was deleted.
 
-| Document | Where it lives |
-|---|---|
-| Day sheet | `finance/pdf/sheet_pdf.py` |
-| Weekly filing | `finance/pdf/weekly_report_pdf.py` |
-| Invoice | `finance/pdf/invoice_pdf.py` |
-| Branch statement | `finance/pdf/branch_statement_pdf.py` |
-| Proforma | `jobs/pdf/proforma_pdf.py` |
-| Monthly close | still inside `monthly_close_engine.py` |
+### Large-format pricing — the first correctly priced production work
 
-`views.py` went from 4,126 lines to 3,464. `close_service.py` — 1,071
-lines, byte-identical to `monthly_close_engine.py`, imported by nothing
-— was deleted.
+- `square_feet()` and `quote_line()` in `apps/jobs/pricing_engine.py`
+- `minimum_price` on `PricingRule`, migration `jobs.0030`
+- **Flexy Banner** at GHS 3.25/sq ft and **SAV Sticker** at 2.80, both
+  minimum GHS 10 per piece, seeded at Westland via
+  `manage.py seed_large_format`
+- The placeholder Banner Printing (flat GHS 50, never used) deleted with
+  its six pricing rules
+- `PriceCalculateView` quotes through `quote_line` and accepts any spec
+  field
+- `NewJobModal` renders `spec_template` and prices through the server
+
+Verified on production: 168 × 150 flexy quotes at GHS 568.75.
 
 ### Fixes
 
-- **Credit signal double-count.** `_credit_signal` subtracted
-  `settled_today` from a `current_balance` that already excluded it.
-  Fixed, with regression tests.
-- **`make_sheet` test fixture** counted calendar days then stepped off
-  Sunday, so two values collided on Mondays only.
-- **`from pdb import pm`** removed from three files.
+- **Credit signal double-count** — `settled_today` subtracted from a
+  balance that already excluded it
+- **Area services ignored the piece count** — four banners priced as one
+- **Two pricing implementations** — the browser had its own, already
+  drifted
+- **`make_sheet`** collided with itself on Mondays
+- **`DeriveJobTypeTests`** failed after 19:30
+- **`from pdb import pm`** removed from three files
 - **Michael Dwumfour's job 4910** recorded by hand: 200 cash, 309 to
-  credit account 5, all axes settled.
+  credit account 5
 
 ---
 
 ## Outstanding
 
+### Decisions needed before more building
+
+- **A job has one `job_type`**, so a customer wanting photocopies and a
+  banner together cannot have one job. The cart in `NewJobModal` empties
+  when the tab changes, which is the symptom. Two jobs, or one job that
+  waits for its slowest line?
+- **The post-closing entry point** should probably replace the New Job
+  modal after hours rather than sit beside it. Carries a required reason
+  and produces `INTAKE_HELD`, so the after-hours version must say so.
+  Trigger on the lock status, not a clock.
+- **Small sticker tier bands.** The catalogue gives one point: 100 at
+  GHS 280. Needs 1, 10, 50 and 500 to have a shape.
+
 ### Blocks real work
 
 - **The payment modal has no credit option at all.** The backend has
   handled full and partial credit since the tests were written; the
-  counter has never had a way to send it. This is what forced a manual
-  shell entry on 24 September.
+  counter has never had a way to send it. This forced a manual shell
+  entry on 24 September.
 - **`deposit_percentage` accepts only 70 or 100**, so an arbitrary
   part-payment (200 of 509) cannot be entered from the counter.
 - **`balance_due` ignores partial credit** — job 4910 reads 309 owing
-  while the same 309 sits on the credit account. The debt shows twice.
+  while the same 309 sits on the credit account.
 
 ### Known gaps
 
 - **Creating a credit account has no portal flow.** Every one lands in
-  the shell with no approval trail, despite `nominated_by` and
-  `approved_by` existing.
+  the shell with no approval trail.
 - **The weekly filing's low-stock alert lists seven machines every
   week** — printers and monitors are in inventory as consumables with
-  opening 0. A flag that fires every week is not a flag, and it buries
-  the two real ones.
-- **Branch Manager Notes renders `--`** when empty instead of being
-  omitted.
-- **September's monthly close** is still SUBMITTED in error, submitted
-  on the 5th with 25 days of the month to come. The reset was written,
-  never run.
+  opening 0. It buries the two real ones.
+- **Branch Manager Notes renders `--`** when empty.
+- **September's monthly close** is still SUBMITTED in error. Reset
+  written, never run.
 - **`power cut` missing from `JobHalt.Reason`.**
 - **Machine down/up has an API, a service and no UI.**
 - **Info strip shows em-dashes** for ON THE FLOOR and MACHINES.
 - **No UI to file a past week.**
-- **Generic serializer contract test** — walk every `ModelSerializer`
-  and build it. The declared-but-missing fault has happened five times.
+- **Generic serializer contract test** — walk every `ModelSerializer`.
 - **`agreed_terms` choices** were inferred, never confirmed.
 - **`FLOW_COORDINATOR` and the six finance roles** exist only in
-  production, not in version control.
+  production.
 - **Monthly close PDF** is the last builder still inside its engine.
-- **`pypdf`** is used for sheet PDF encryption despite the standing note
-  against it.
+- **`pypdf`** used for sheet PDF encryption despite the note against it.
+- **`PER_LINEAR_M`** missing from `UNIT_CHOICES`; DTF film supply needs it.
 
 ### Carried forward
 
 Postgres password rotation; no way to undo a proforma acceptance; Sunday
-block bypassed in `SheetEngine.get_or_open_today()`; S3-compatible
-storage (Cloudflare R2), which the signed-URL work made a configuration
-change rather than a rewrite.
+block bypassed in `SheetEngine.get_or_open_today()`; Cloudflare R2
+storage, now a configuration change rather than a rewrite.
 
 ---
 
 ## Next
 
-**Print Octos — the customer-facing online ordering workflow.** The
-design is settled in `docs/decisions.md`; nothing is built. Open
-questions that block it:
+**The catalogue, in batches.** Flexy and SAV are done and prove the
+pattern. The service catalogue drafted for the new building has roughly
+seventy more across eight sections, most with prices still marked as
+estimates. Add them in groups as each group's numbers firm up, starting
+with what sells most. Three pricing shapes are still missing:
+`PER_LINEAR_M`, a separate line for embroidery digitizing, and laser
+engraving priced by machine minutes.
 
-- Which sheet a payment at 23:40 or on a Sunday lands on
-- Fees and settlement — ~1.95%, gross with fees separate, batch payouts
-  reconciled against receipts, with no owner yet
-- Refunds and chargebacks after a monthly close
-- A deposit paid online and a balance paid in branch, on different
-  sheets
-- Webhook idempotency — the webhook marks a job paid, not the customer
-  returning to the page
-- **A job that belongs to nobody** — every job today is created at a
-  branch by a member of staff. An online order arrives owned by no one
-  and only becomes a branch's job once routing and payment settle. That
-  is a new state ahead of `RECEIVED`, and the foundation the rest sits
-  on.
+**Print Octos.** Design settled in `docs/decisions.md`, nothing built.
+The build order:
 
-**Also queued:** the coordinator's own sign-off, splitting
-`FLOW_COORDINATOR` into incoming and outgoing with a shift end time for
-each, and the prediction engine's Phase 1 (forecast logging, the two
-deletions, the corrected variance analysis).
+1. Catalogue can describe a processed job — **done for flexy and SAV**
+2. One quoting function — **done: `quote_line`**
+3. `OnlineOrder` and lead identity, in `apps/storefront`
+4. File checks
+5. Routing, capacity hold, promised date
+6. Payment and webhook — blocked on Hubtel vs Paystack and the HQ
+   account structure
+7. Conversion to a `Job` at a branch
+8. Tracking, suspension, replacement uploads
+
+Still unanswered from the design: which sheet a payment at 23:40 or on a
+Sunday lands on; fees and settlement reconciliation; refunds after a
+monthly close; a deposit online and a balance in branch on different
+sheets; webhook idempotency.
+
+**Also queued:** the coordinator's own sign-off and splitting
+`FLOW_COORDINATOR` into incoming and outgoing; the prediction engine's
+Phase 1 (forecast logging, the two deletions, the corrected variance
+analysis); the Can-Do Sandbox.
 
 ---
 
@@ -184,6 +192,6 @@ All three documents get updated before a session ends:
 - **`tasks/lessons.md`** — rules that stop repeats (append only)
 - **`docs/decisions.md`** — why things are the way they are
 
-`tasks/` is gitignored except for `lessons.md`, which is un-ignored so
-it travels between machines. That gitignore line is why the lessons file
-went unwritten for weeks.
+`tasks/` is gitignored except `lessons.md`. Note the gitignore shape:
+`tasks/*` then `!tasks/lessons.md`. Ignoring the directory itself means
+git never looks inside and the exception cannot apply.

@@ -272,3 +272,164 @@ An hourly task records a forecast whether or not anyone opens the
 dashboard. Weekly filings previously ran only when someone opened the
 tab, and weeks nobody visited were never filed. It also gives the 95%
 completeness criterion a denominator.
+
+# Decisions — additions, 29 September 2026
+
+Append these to `docs/decisions.md` under the sections named. Where a
+section already exists, these entries join it.
+
+---
+
+## Payments — addition
+
+### Online orders are paid in full
+
+The 70% deposit exists because the customer is standing in front of you
+and is known. A stranger on the internet is not. Online orders pay 100%
+before the job is made.
+
+The deposit tiers stay as they are for counter and proforma work.
+
+---
+
+## Online orders — additions
+
+### The storefront leads with processed work
+
+Banners, business cards, ID cards, stickers. Instant services — photocopy,
+typing, lamination — are reachable by search but not promoted.
+
+Nobody goes online to order a photocopy; they walk in. Online earns its
+place on jobs worth planning ahead for, where the customer wants to know
+the price and the turnaround before leaving the house. The front page
+shows a turnaround rather than a price for each category, because "2
+days" is the question the customer actually has and the price depends on
+size anyway.
+
+### The specification screen collects facts, nothing else
+
+Service name, dimensions, quantity, price. No preset sizes, no "what's it
+for" framing.
+
+The "this is what you're printing" step already answers whether the
+customer has chosen the right thing. Asking the same question twice, in
+two different shapes, would make both weaker.
+
+### There is a separate model for an order that belongs to nobody
+
+`Job` is branch-shaped throughout: a branch, a daily sheet, a
+branch-scoped job number, a place in branch queues. An online order has
+none of those until routing and payment settle, and a `Job` with a null
+branch would leak into every queue and every sheet total.
+
+So an online order is its own model, converted into a `Job` when it lands
+at a branch. The precedent is `ProformaInvoice`, which is exactly this
+shape already: a customer-facing record that becomes a job on a trigger.
+
+### The storefront is its own app
+
+`apps/storefront`, importing from `jobs`, `customers` and `finance` with
+nothing importing back.
+
+It will grow lead identity, payment webhooks, file checks and a public
+authentication model that have nothing to do with staff JWTs. A proforma
+is created by staff for staff; an online order is created by a stranger
+on the internet. That is a different trust boundary and deserves its own
+wall.
+
+---
+
+## Pricing
+
+### Large format is priced by area, from inches
+
+`(width" × height") ÷ 144 × rate`. Dimensions are taken in inches because
+that is what the customer gives and what the machine cuts. The area is
+never rounded; only the money is, at the end.
+
+- **Flexy banner:** GHS 3.25 per sq ft
+- **SAV sticker:** GHS 2.80 per sq ft
+
+The service catalogue drafted for the new building proposes 5.20, which
+is high against local market rates. 3.25 stands until supplier quotes
+land.
+
+### The minimum is GHS 10 per piece, before quantity
+
+A small banner costs the same in file prep, cutting and packing as a
+large one. Three 12 × 12 pieces are three minimums, not one — each is a
+piece of material and a piece of work.
+
+It lives on `PricingRule` as `minimum_price`, defaulting to 0, so any
+service can set one. The catalogue's proposed 80–120 minimum on all
+large-format work is deferred: it may be right for the new building, it
+is not what the shop charges today.
+
+### Small stickers are tiered per piece, not priced by area
+
+Area pricing badly under-prices small work: 100 × 3×3in stickers area-price
+at about GHS 50 and are worth GHS 280. They are a separate service using
+`pricing_tiers`, which the engine already supports. Bands still to be set.
+
+### One quote path: `quote_line`
+
+Service, specification, quantity in; price, area and breakdown out. The
+counter, the storefront, the price endpoint and any future assessment all
+call it.
+
+It carries every spec key the service declares through to the engine as a
+condition, so binding's ring size and passport's output mode work without
+being named anywhere. Naming them was how they ended up hardcoded in four
+places.
+
+### An area service with no dimensions is refused, not priced as zero
+
+`specifications` is free-form JSON and nothing enforces its contents.
+Pricing a missing width as zero area is how a banner gets sold for
+nothing.
+
+### The browser does no pricing arithmetic
+
+Every price comes from the server. `NewJobModal` used to calculate simple
+services locally for speed, which meant two implementations that had
+already drifted.
+
+The 400ms debounce means one network call per pause. If it proves slow at
+the counter, the answer is a faster endpoint, not a second engine.
+
+### The form is built from `spec_template`
+
+Field descriptors on the service declare what to collect: `key`, `label`,
+`type`, `required`, `default`, plus `min`/`max`/`unit` for numbers and
+`options` for selects. Services without one keep the old Sheets and
+Copies inputs.
+
+The field existed and nothing rendered it. Meanwhile two services had
+their fields hardcoded into the modal instead.
+
+---
+
+## Still open
+
+Raised today, not settled.
+
+- **A job has one `job_type`, so a customer wanting photocopies and a
+  banner together cannot have one job.** Either two jobs at their own
+  paces, or one job that cannot complete until the slowest line does —
+  and the customer cannot collect the fast part. The handover rules
+  point towards two jobs.
+- **The post-closing entry point should probably replace the New Job
+  modal rather than sit beside it**, so the BM cannot pick the wrong one
+  after hours. It carries a required reason and produces `INTAKE_HELD`
+  rather than `PENDING_PAYMENT`, so the after-hours version must say so
+  plainly. The trigger should follow the same lock status the portal
+  already reads, not a clock: a job taken at 19:00 after the cashier has
+  signed off still cannot reach her.
+- **Can-Do Sandbox.** Staff upload a photo or short video of what a
+  customer brought in; the system identifies the job, what it takes, the
+  cost, the time, and whether the branch can do it. The value is in the
+  can-do answer grounded in Octos's own catalogue, machines and stock —
+  not in the photo recognition, which should be allowed to say it does
+  not know. It answers the same question routing asks before holding
+  capacity, so it should be built on a capability model rather than as a
+  one-off.
