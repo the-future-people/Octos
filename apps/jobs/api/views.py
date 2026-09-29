@@ -875,15 +875,6 @@ class PriceCalculateView(APIView):
 
         is_color = request.query_params.get('is_color', 'false').lower() == 'true'
 
-        # Conditional pricing params
-        condition_params = {}
-        ring_size   = request.query_params.get('ring_size')
-        output_mode = request.query_params.get('output_mode')
-        if ring_size:
-            condition_params['ring_size'] = int(ring_size)
-        if output_mode:
-            condition_params['output_mode'] = output_mode
-
         try:
             service = Service.objects.get(pk=service_id)
             branch  = Branch.objects.get(pk=branch_id)
@@ -892,14 +883,34 @@ class PriceCalculateView(APIView):
         except Branch.DoesNotExist:
             return Response({'detail': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        result = PricingEngine.get_price(
-            service          = service,
-            branch           = branch,
-            quantity         = quantity,
-            is_color         = is_color,
-            pages            = pages,
-            condition_params = condition_params,
+        # Anything the service's spec_template declares, carried through
+        # as given. Naming each field here is how ring_size and
+        # output_mode ended up hardcoded in three places.
+        reserved = {'service', 'branch', 'quantity', 'is_color'}
+        specs    = {
+            key: value for key, value in request.query_params.items()
+            if key not in reserved
+        }
+        for key in ('width_in', 'height_in', 'pages'):
+            if specs.get(key):
+                try:
+                    specs[key] = int(specs[key])
+                except ValueError:
+                    return Response(
+                        {'detail': f'{key} must be a whole number.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        specs['is_color'] = is_color
+
+        from apps.jobs.pricing_engine import quote_line
+        result = quote_line(
+            service        = service,
+            branch         = branch,
+            specifications = specs,
+            quantity       = quantity,
         )
+        if not result.get('success'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
 
 class SaveDraftView(APIView):

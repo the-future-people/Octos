@@ -65,11 +65,22 @@ def quote_line(service, branch, specifications=None, quantity=1) -> dict:
         })
         return result
 
-    pages  = int(specs.get('pages') or 1)
+    pages = int(specs.get('pages') or 1)
+
+    # Everything else the spec carries goes to the engine as a condition.
+    # Binding prices by ring size, passport by output mode; naming them
+    # here would be the fourth place those two are hardcoded.
+    handled  = {'pages', 'is_color', 'width_in', 'height_in', 'quantity'}
+    conditions = {
+        key: value for key, value in specs.items()
+        if key not in handled and value not in (None, '')
+    }
+
     result = PricingEngine.get_price(
         service=service, branch=branch,
         quantity=quantity, pages=pages,
         is_color=bool(specs.get('is_color')),
+        condition_params=conditions,
     )
     if result['success']:
         result.setdefault('area_sqft', None)

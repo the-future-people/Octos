@@ -1401,3 +1401,71 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
         )
         self.assertTrue(q['success'], q.get('error'))
         self.assertEqual(q['total'], Decimal('10.00'))
+
+    def test_conditional_tiers_still_reach_the_engine(self):
+        """
+        Binding prices by ring size, passport by output mode — both
+        through conditional tiers. quote_line must carry those through
+        or two live services silently stop pricing.
+        """
+        from apps.jobs.models import PricingRule
+        from apps.jobs.pricing_engine import quote_line
+
+        binding = Service.objects.create(
+            name='Test Ring Binding', code='TSTBIND',
+            category='INSTANT', unit='PER_PIECE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+        PricingRule.objects.create(
+            service=binding, branch=self.branch,
+            base_price=Decimal('0.00'),
+            color_multiplier=Decimal('1.00'),
+            pricing_tiers=[
+                {'condition': 'ring_size', 'min': 6,  'max': 14, 'flat_price': 15.00},
+                {'condition': 'ring_size', 'min': 15, 'max': 24, 'flat_price': 25.00},
+            ],
+            is_active=True,
+        )
+
+        small = quote_line(
+            service=binding, branch=self.branch,
+            specifications={'ring_size': 10}, quantity=1,
+        )
+        self.assertTrue(small['success'], small.get('error'))
+        self.assertEqual(small['total'], Decimal('15.00'))
+
+        large = quote_line(
+            service=binding, branch=self.branch,
+            specifications={'ring_size': 20}, quantity=2,
+        )
+        self.assertEqual(large['total'], Decimal('50.00'))
+
+    def test_the_price_endpoint_quotes_an_area_service(self):
+        """
+        The endpoint the New Job modal calls. It used to name each
+        conditional field by hand and go straight to the engine, so a
+        service with dimensions had no way to be quoted at all.
+        """
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.bm)
+
+        ok = client.get('/api/v1/jobs/price/calculate/', {
+            'service': self.flexy.id, 'branch': self.branch.id,
+            'width_in': 168, 'height_in': 150, 'quantity': 1,
+        })
+        self.assertEqual(ok.status_code, 200, ok.content)
+        self.assertEqual(ok.data['total'], Decimal('568.75'))
+        self.assertEqual(ok.data['area_sqft'], Decimal('175'))
+
+    def test_the_price_endpoint_refuses_an_area_service_with_no_dimensions(self):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.bm)
+
+        bad = client.get('/api/v1/jobs/price/calculate/', {
+            'service': self.flexy.id, 'branch': self.branch.id, 'quantity': 1,
+        })
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn('width', bad.data['error'].lower())
