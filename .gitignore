@@ -58,6 +58,7 @@ celerybeat-schedule-shm
 celerybeat-schedule-wal
 
 __pycache__/
-tasks/
+tasks/*
+!tasks/lessons.md
 
 *.dump
