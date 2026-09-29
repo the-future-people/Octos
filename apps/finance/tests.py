@@ -72,11 +72,21 @@ class RecoveryFixtureMixin:
         cls.cashier.save()
 
     def make_sheet(self, days_ago, status=DailySalesSheet.Status.OPEN):
-        """An open sheet dated some number of days before today."""
-        d = timezone.localdate() - datetime.timedelta(days=days_ago)
-        # Step back off Sunday — recovery ignores days the branch never traded.
-        while d.weekday() == 6:
+        """
+        A sheet dated some number of *trading* days before today.
+
+        Counting calendar days and then stepping back off Sunday made two
+        different days_ago values collide: on a Monday, days_ago=2 is
+        Saturday and days_ago=3 is Sunday, which steps back onto the same
+        Saturday. Same branch, same date, unique constraint. It only
+        failed on Mondays, which is why it sat here unnoticed.
+        """
+        d = timezone.localdate()
+        remaining = days_ago
+        while remaining > 0:
             d -= datetime.timedelta(days=1)
+            if d.weekday() != 6:   # the branch never trades on Sunday
+                remaining -= 1
         return DailySalesSheet.objects.create(
             branch=self.branch, date=d, status=status,
         )
@@ -847,3 +857,45 @@ class PDFRenderTests(RecoveryFixtureMixin, TestCase):
 
         self.assertTrue(pdf_bytes.startswith(b'%PDF-'))
         self.assertGreater(len(pdf_bytes), 1000)
+
+    def test_day_sheet_pdf_renders_to_a_real_file(self):
+        """
+        The document produced most often, and the only one that had no
+        test — build_data and build_pdf are module-level functions, they
+        were just buried in a management command where nothing reached
+        for them.
+        """
+        import os, tempfile
+        from apps.finance.pdf.sheet_pdf import build_data, build_pdf
+
+        # Its own branch: make_sheet steps back off Sundays, so two
+        # tests asking for different days can land on the same Saturday
+        # and collide on the branch+date unique constraint.
+        import datetime
+        branch = Branch.objects.create(
+            name='Sheet PDF Branch', code='SPDF',
+            is_headquarters=False, is_regional_hq=False,
+            address='1 Sheet Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30),
+            closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        sheet = DailySalesSheet.objects.create(
+            branch=branch,
+            date=timezone.localdate() - datetime.timedelta(days=1),
+            status=DailySalesSheet.Status.CLOSED,
+        )
+        sheet.total_cash = Decimal('1153.50')
+        sheet.total_momo = Decimal('520.50')
+        sheet.total_jobs_created = 35
+        sheet.save()
+
+        out = os.path.join(tempfile.gettempdir(), f'sheet_test_{sheet.pk}.pdf')
+        build_pdf(build_data(sheet), out)
+
+        self.assertTrue(os.path.exists(out), out)
+        with open(out, 'rb') as f:
+            self.assertEqual(f.read(5), b'%PDF-')
+        self.assertGreater(os.path.getsize(out), 1000)
