@@ -56,6 +56,15 @@ class PricingRule(AuditModel):
             'flat_price for flat-fee tiers (Binding).'
         ),
     )
+    minimum_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text=(
+            'Floor price for one piece, applied before quantity. '
+            'Large-format work costs the same in file prep, cutting and '
+            'packing whatever its size, so a small piece cannot be sold '
+            'at its area price. 0 means no floor.'
+        ),
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

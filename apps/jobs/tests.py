@@ -17,7 +17,7 @@ Run inside Docker:
 
 import datetime
 from decimal import Decimal
-
+from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
@@ -1025,7 +1025,9 @@ class ProformaConversionTests(JobsFixtureMixin, TestCase):
         self.assertIsNotNone(proforma.converted_at)
         self.assertEqual(proforma.agreed_terms, '70')
 
-    def test_converting_twice_is_refused(self):
+    @patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+           return_value={'can_create_jobs': True, 'lock_reason': ''})
+    def test_converting_twice_is_refused(self, _lock):
         from apps.jobs.services.proforma_engine import ProformaEngine
 
         proforma = self._issued()
@@ -1036,7 +1038,9 @@ class ProformaConversionTests(JobsFixtureMixin, TestCase):
         with self.assertRaises(ValueError):
             engine.convert(proforma=proforma, actor=self.bm)
 
-    def test_an_expired_proforma_is_refused(self):
+    @patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+           return_value={'can_create_jobs': True, 'lock_reason': ''})
+    def test_an_expired_proforma_is_refused(self, _lock):
         """
         Terminal by design, and the message must send the manager to a new
         document at current prices rather than leaving them guessing.
@@ -1051,7 +1055,9 @@ class ProformaConversionTests(JobsFixtureMixin, TestCase):
             ProformaEngine(self.branch).convert(proforma=proforma, actor=self.bm)
         self.assertIn('expired', str(caught.exception).lower())
 
-    def test_a_converted_job_needs_no_verification(self):
+    @patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+           return_value={'can_create_jobs': True, 'lock_reason': ''})
+    def test_a_converted_job_needs_no_verification(self, _lock):
         from apps.jobs.services.proforma_engine import ProformaEngine
 
         job = ProformaEngine(self.branch).convert(
@@ -1060,6 +1066,8 @@ class ProformaConversionTests(JobsFixtureMixin, TestCase):
         self.assertFalse(job.needs_verification)
 
 
+@patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+       return_value={'can_create_jobs': True, 'lock_reason': ''})
 class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
     """
     The job's type follows the services on it. Before this rule existed,
@@ -1090,24 +1098,24 @@ class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
                 color_multiplier=Decimal('1.00'), is_active=True,
             )
 
-    def test_all_instant_services_give_an_instant_job(self):
+    def test_all_instant_services_give_an_instant_job(self, _lock):
         from apps.jobs.services.job_service import derive_job_type
         self.assertEqual(derive_job_type([self.service]), 'INSTANT')
 
-    def test_one_production_service_makes_the_whole_job_production(self):
+    def test_one_production_service_makes_the_whole_job_production(self, _lock):
         from apps.jobs.services.job_service import derive_job_type
         self.assertEqual(
             derive_job_type([self.service, self.banner]),
             'PRODUCTION',
         )
 
-    def test_design_service_is_refused(self):
+    def test_design_service_is_refused(self, _lock):
         from apps.jobs.services.job_service import derive_job_type
         with self.assertRaises(ValueError) as ctx:
             derive_job_type([self.service, self.logo])
         self.assertIn('esign', str(ctx.exception))
 
-    def test_draft_with_a_banner_is_saved_as_production(self):
+    def test_draft_with_a_banner_is_saved_as_production(self, _lock):
         """The fault this rule exists to close: save_draft hardcoded INSTANT."""
         from apps.jobs.services.job_service import save_draft
         result = save_draft(
@@ -1121,7 +1129,7 @@ class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
         job = Job.objects.get(pk=result['id'])
         self.assertEqual(job.job_type, 'PRODUCTION')
 
-    def test_draft_of_only_instant_services_stays_instant(self):
+    def test_draft_of_only_instant_services_stays_instant(self, _lock):
         from apps.jobs.services.job_service import save_draft
         result = save_draft(
             user=self.bm,
@@ -1258,4 +1266,63 @@ class PaymentValidationTests(TestCase):
         the cashier types."""
         s = self._valid(payment_method='ONLINE')
         self.assertTrue(s.is_valid(), s.errors)
+
+class AreaPricingTests(JobsFixtureMixin, TestCase):
+    """
+    Large-format work is priced (width" × height") ÷ 144 × rate. The
+    engine already multiplies base by quantity for PER_SQFT, so the
+    missing piece was the arithmetic that turns dimensions into an area,
+    and a floor under a piece too small to be worth the machine time.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import PricingRule
+        super().setUpTestData()
+        cls.flexy = Service.objects.create(
+            name='Flexy Banner', code='FLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_design=False, requires_file_upload=True,
+            is_active=True,
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=cls.branch,
+            base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'),
+            minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+    def test_area_in_square_feet_from_inches(self):
+        from apps.jobs.pricing_engine import square_feet
+        self.assertEqual(square_feet(168, 150), Decimal('175'))
+        self.assertEqual(square_feet(72, 36), Decimal('18'))
+
+    def test_a_large_banner_prices_by_area(self):
+        from apps.jobs.pricing_engine import PricingEngine, square_feet
+        result = PricingEngine.get_price(
+            service=self.flexy, branch=self.branch,
+            quantity=square_feet(168, 150),
+        )
+        self.assertTrue(result['success'], result.get('error'))
+        self.assertEqual(result['total'], Decimal('568.75'))
+
+    def test_a_small_banner_falls_to_the_minimum(self):
+        """12 × 12 inches is 1 sq ft — GHS 3.25 of material, but the same
+        file prep, cutting and packing as a large one."""
+        from apps.jobs.pricing_engine import PricingEngine, square_feet
+        result = PricingEngine.get_price(
+            service=self.flexy, branch=self.branch,
+            quantity=square_feet(12, 12),
+        )
+        self.assertEqual(result['total'], Decimal('10.00'))
+
+    def test_the_minimum_applies_per_piece_before_quantity(self):
+        """Three small banners are three pieces of material, not one."""
+        from apps.jobs.pricing_engine import PricingEngine, square_feet
+        result = PricingEngine.get_price(
+            service=self.flexy, branch=self.branch,
+            quantity=square_feet(12, 12), pages=3,
+        )
+        self.assertEqual(result['total'], Decimal('30.00'))
 

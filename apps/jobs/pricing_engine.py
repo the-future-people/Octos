@@ -2,6 +2,19 @@ from decimal import Decimal
 from apps.jobs.models import PricingRule
 
 
+def square_feet(width_in, height_in) -> Decimal:
+    """
+    (width" × height") ÷ 144 — the area basis every large-format job is
+    priced on. Dimensions are taken in inches because that is what the
+    customer gives and what the machine cuts.
+
+    The area is not rounded. Only the money is, at the end.
+    """
+    return (
+        Decimal(str(width_in)) * Decimal(str(height_in))
+    ) / Decimal('144')
+
+
 class PricingEngine:
     """
     Calculates the cost of a job based on its specifications.
@@ -100,6 +113,16 @@ class PricingEngine:
             subtotal = base * multiplier
         else:
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
+
+        # A floor under one piece, applied before quantity: a small
+        # banner costs the same in file prep, cutting and packing as a
+        # large one, so three small pieces are three minimums.
+        floor = self.rule.minimum_price or Decimal('0')
+        if floor > 0:
+            pieces    = Decimal(str(pages)) if pages else Decimal('1')
+            per_piece = subtotal / pieces
+            if per_piece < floor:
+                subtotal = floor * pieces
 
         total = subtotal.quantize(Decimal('0.01'))
 
