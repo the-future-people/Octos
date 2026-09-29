@@ -43,22 +43,26 @@ from apps.jobs.models import Job
 W, H = A4
 
 # ── Palette ───────────────────────────────────────────────
-FARHAT_RED  = HexColor('#E31E24')
-DARK        = HexColor('#1a1a1a')
-MID         = HexColor('#555555')
-LIGHT       = HexColor('#999999')
-BORDER      = HexColor('#e0ddd8')
-BG          = HexColor('#f7f6f3')
-C_GREEN     = HexColor('#1a7a4a')
-C_GREEN_BG  = HexColor('#e6f9f2')
-C_AMBER     = HexColor('#b86e00')
-C_AMBER_BG  = HexColor('#fff8e6')
-C_BLUE      = HexColor('#3355cc')
-C_BLUE_BG   = HexColor('#e8f0fe')
-C_PURPLE    = HexColor('#6b2fd4')
-C_PURPLE_BG = HexColor('#f0e8ff')
-C_RED_BG    = HexColor('#fde8e8')
-C_RED_TEXT  = HexColor('#cc3300')
+# This document's palette became the house palette — the warm greys and
+# the status pairs below are where base.py took them from.
+from apps.core.pdf import base
+
+FARHAT_RED  = base.FARHAT_RED
+DARK        = base.INK
+MID         = base.BODY
+LIGHT       = base.MUTED
+BORDER      = base.BORDER
+BG          = base.BG
+C_GREEN     = base.GREEN
+C_GREEN_BG  = base.GREEN_BG
+C_AMBER     = base.AMBER
+C_AMBER_BG  = base.AMBER_BG
+C_BLUE      = base.BLUE
+C_BLUE_BG   = base.BLUE_BG
+C_PURPLE    = base.PURPLE
+C_PURPLE_BG = base.PURPLE_BG
+C_RED_BG    = base.RED_BG
+C_RED_TEXT  = base.RED_TEXT
 
 MEDIA_ROOT  = getattr(settings, 'MEDIA_ROOT', 'media')
 LOGO_WHITE  = os.path.join(MEDIA_ROOT, 'assets', 'farhat_logo_white.png')
