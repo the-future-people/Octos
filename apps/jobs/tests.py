@@ -1469,3 +1469,46 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
         })
         self.assertEqual(bad.status_code, 400)
         self.assertIn('width', bad.data['error'].lower())
+
+class CoordinatorBoardPaymentTests(JobsFixtureMixin, TestCase):
+    """
+    Every job on the coordinator's board has been paid for. The engine
+    refuses to start an unpaid one, but a refusal at the Start button
+    comes after he has opened the job and planned to work on it.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        common = dict(
+            branch=cls.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, intake_by=cls.attendant,
+            estimated_cost=Decimal('100.00'), daily_sheet=cls.sheet,
+            work_state='RECEIVED', handover_state='AWAITING_COLLECTION',
+            intake_channel='WALK_IN',
+        )
+        cls.unpaid   = Job.objects.create(title='Unpaid banner',  payment_state='UNPAID',       **common)
+        cls.deposit  = Job.objects.create(title='Deposit banner', payment_state='DEPOSIT_PAID', **common)
+        cls.settled  = Job.objects.create(title='Settled banner', payment_state='SETTLED',      **common)
+
+    def _titles(self):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.coordinator)
+        response = client.get('/api/v1/jobs/coordinator/board/')
+        self.assertEqual(response.status_code, 200, response.content)
+        titles = set()
+        for column in response.data['columns'].values():
+            titles.update(j['title'] for j in column)
+        titles.update(j['title'] for j in response.data.get('halted', []))
+        return titles
+
+    def test_an_unpaid_job_is_not_on_the_board(self):
+        self.assertNotIn('Unpaid banner', self._titles())
+
+    def test_a_deposit_releases_the_job_to_the_floor(self):
+        """70% is enough to start. The balance comes at collection."""
+        self.assertIn('Deposit banner', self._titles())
+
+    def test_a_settled_job_is_on_the_board(self):
+        self.assertIn('Settled banner', self._titles())

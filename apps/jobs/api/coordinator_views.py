@@ -87,6 +87,7 @@ class VerificationQueueView(APIView):
                 work_state='RECEIVED',
             )
             .exclude(status__in=['CANCELLED', 'DRAFT'])
+            .exclude(payment_state='UNPAID')
             .select_related('customer', 'intake_by')
             .prefetch_related('line_items__service', 'verifications', 'halts')
             .order_by('created_at')
@@ -142,6 +143,11 @@ class ProductionBoardView(APIView):
             )
             .exclude(status__in=['CANCELLED', 'DRAFT'])
             .exclude(job_type='INSTANT')
+            # The coordinator has no business with work that has not been
+            # paid for. The engine already refuses to start an unpaid job,
+            # but refusing at the Start button means he has already opened
+            # it and decided to work on it. Every job he sees is paid.
+            .exclude(payment_state='UNPAID')
             .select_related('customer', 'intake_by')
             .prefetch_related('line_items__service', 'halts', 'verifications')
             .order_by('created_at')
