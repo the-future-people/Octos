@@ -83,6 +83,19 @@ class JobFile(AuditModel):
         help_text="As declared by the file — RGB, CMYK, Grayscale."
     )
 
+    # What raster images a PDF actually contains: each one's pixel size,
+    # the size it is drawn at, and the resolution that works out to.
+    #
+    # A PDF has no single dpi. A page can hold a 600dpi logo and a 90dpi
+    # photograph, and reporting one number for both would be the wrong
+    # number either way. So the list is kept, and `dpi` above holds the
+    # worst of those covering enough of the page to matter — a small
+    # logo cannot fail a banner, a background photograph can.
+    #
+    # Empty on a vector-only page. That is a fact about the file, not a
+    # gap in the reading.
+    pdf_images = models.JSONField(default=list, blank=True)
+
     class Meta:
         ordering = ['-created_at']
 

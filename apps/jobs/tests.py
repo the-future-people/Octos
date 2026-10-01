@@ -1512,3 +1512,92 @@ class CoordinatorBoardPaymentTests(JobsFixtureMixin, TestCase):
 
     def test_a_settled_job_is_on_the_board(self):
         self.assertIn('Settled banner', self._titles())
+
+class PDFImageResolutionTests(JobsFixtureMixin, TestCase):
+    """
+    A PDF has no single dpi. A page can hold a 600dpi logo and a 90dpi
+    photograph, and the customer who drops a phone screenshot into a
+    banner is the case worth catching.
+
+    So every image is measured, the list is kept, and `dpi` holds the
+    worst of those covering enough of the page to matter.
+    """
+
+    def _job(self):
+        return Job.objects.create(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='PDF measurement',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+        )
+
+    def _pdf(self, images):
+        """
+        A one-page A4 PDF. `images` is a list of (pixels_wide,
+        inches_drawn_wide) — so (300, 1) is a 300dpi image an inch across.
+        """
+        import io
+        from PIL import Image
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import inch
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.utils import ImageReader
+
+        buf = io.BytesIO()
+        c = rl_canvas.Canvas(buf, pagesize=A4)
+        y = 20
+        for px, drawn_inches in images:
+            img = Image.new('RGB', (px, px), (120, 120, 120))
+            holder = io.BytesIO()
+            img.save(holder, format='PNG')
+            holder.seek(0)
+            c.drawImage(ImageReader(holder), 20, y,
+                        width=drawn_inches * inch, height=drawn_inches * inch)
+            y += drawn_inches * inch + 10
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        return buf.read()
+
+    def _measured(self, images):
+        from django.core.files.base import ContentFile
+        from apps.jobs.models import JobFile
+        from apps.jobs.services.file_metadata import extract
+
+        job_file = JobFile.objects.create(
+            job=self._job(), uploaded_by=self.attendant,
+            file=ContentFile(self._pdf(images), name='artwork.pdf'),
+        )
+        extract(job_file)
+        job_file.refresh_from_db()
+        return job_file
+
+    def test_a_vector_only_pdf_reports_no_images_and_no_dpi(self):
+        """Infinitely sharp. Inventing a number here would be a lie."""
+        f = self._measured([])
+        self.assertEqual(f.pdf_images, [])
+        self.assertIsNone(f.dpi)
+
+    def test_one_image_gives_its_effective_resolution(self):
+        """300 pixels drawn across one inch is 300 dpi."""
+        f = self._measured([(300, 1)])
+        self.assertEqual(len(f.pdf_images), 1)
+        self.assertAlmostEqual(f.pdf_images[0]['dpi'], 300, delta=2)
+
+    def test_the_worst_meaningful_image_sets_the_dpi(self):
+        """A sharp logo does not rescue a soft photograph."""
+        f = self._measured([(1200, 2), (300, 4)])
+        self.assertAlmostEqual(f.dpi, 75, delta=2)
+
+    def test_a_tiny_image_cannot_fail_the_file(self):
+        """
+        A small low-resolution mark in a corner is decoration. Letting it
+        set the file's dpi would fail artwork that prints perfectly.
+        """
+        f = self._measured([(600, 4), (40, 0.4)])
+        self.assertAlmostEqual(f.dpi, 150, delta=2)
+
+    def test_the_page_size_is_still_measured(self):
+        f = self._measured([(300, 1)])
+        self.assertAlmostEqual(float(f.width_mm), 210, delta=1)
+        self.assertEqual(f.page_count, 1)

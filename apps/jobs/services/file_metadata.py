@@ -84,30 +84,120 @@ def extract(job_file):
     return job_file
 
 
+# An image covering less than this share of the page is decoration — a
+# corner logo, a rule, a watermark. It cannot be allowed to set the
+# file's resolution, or artwork that prints perfectly would be refused
+# over a small mark nobody looks at closely.
+MEANINGFUL_AREA_SHARE = Decimal('0.05')
+
+
 def _measure_pdf(job_file):
     from pypdf import PdfReader
 
     with job_file.file.open('rb') as handle:
         reader = PdfReader(handle)
         pages = len(reader.pages)
-        box = reader.pages[0].mediabox
+        page = reader.pages[0]
+        box = page.mediabox
 
         # Page one stands for the document. A PDF with mixed page sizes
         # exists, but reporting the first is more useful than reporting
         # nothing, and the coordinator has the preview to catch the rest.
-        width_mm = Decimal(str(float(box.width))) * MM_PER_POINT
-        height_mm = Decimal(str(float(box.height))) * MM_PER_POINT
+        width_pt = Decimal(str(float(box.width)))
+        height_pt = Decimal(str(float(box.height)))
+        width_mm = width_pt * MM_PER_POINT
+        height_mm = height_pt * MM_PER_POINT
 
-    return {
+        images = _pdf_images(page, width_pt, height_pt)
+
+    result = {
         'page_count': pages,
         'width_mm': width_mm.quantize(Decimal('0.01')),
         'height_mm': height_mm.quantize(Decimal('0.01')),
         'content_type': 'application/pdf',
-        # A PDF has no inherent resolution. Its images do, but reaching
-        # into them is a different job with a different failure mode, and
-        # a wrong dpi is worse than an absent one.
+        'pdf_images': images,
     }
 
+    # The worst of the images big enough to matter. A page of vector art
+    # has none, and says so by leaving dpi absent rather than inventing
+    # a number for something that is infinitely sharp.
+    meaningful = [i['dpi'] for i in images if i['meaningful'] and i['dpi']]
+    if meaningful:
+        result['dpi'] = min(meaningful)
+
+    return result
+
+
+def _pdf_images(page, page_width_pt, page_height_pt):
+    """
+    Every raster image drawn on the page, with the resolution it works
+    out to where it sits.
+
+    A PDF places an image through a transformation matrix: the pixels
+    are one thing, the size it is drawn at is another, and the
+    resolution is the first divided by the second. So a 300px logo is
+    300dpi at one inch and 75dpi at four.
+
+    The matrix is not on the image object — it lives in the page's
+    instructions, so the page is walked and each draw is watched for.
+    """
+    page_area = float(page_width_pt) * float(page_height_pt)
+    resources = page.get('/Resources', {})
+    xobjects = resources.get('/XObject', {}) if resources else {}
+    found = []
+
+    def on_operator(operator, operands, cm, tm):
+        if operator != b'Do' or not operands:
+            return
+        name = operands[0]
+        try:
+            xobject = xobjects[name].get_object()
+        except (KeyError, TypeError, AttributeError):
+            return
+        if xobject.get('/Subtype') != '/Image':
+            # A form, which may contain images of its own. Following it
+            # needs the nested matrix too; left out rather than measured
+            # wrongly.
+            return
+
+        px_w = xobject.get('/Width')
+        px_h = xobject.get('/Height')
+        if not px_w or not px_h:
+            return
+
+        # The matrix scales a unit square, so its first and fourth terms
+        # are the drawn width and height in points.
+        try:
+            drawn_w_pt = abs(float(cm[0]))
+            drawn_h_pt = abs(float(cm[3]))
+        except (TypeError, ValueError, IndexError):
+            return
+        if not drawn_w_pt or not drawn_h_pt:
+            return
+
+        # The weaker axis is what prints badly, so it is the one kept —
+        # the same rule the raster reader uses.
+        dpi = int(round(min(
+            px_w / (drawn_w_pt / 72.0),
+            px_h / (drawn_h_pt / 72.0),
+        )))
+        share = (drawn_w_pt * drawn_h_pt) / page_area if page_area else 0
+
+        found.append({
+            'name': str(name),
+            'width_px': int(px_w),
+            'height_px': int(px_h),
+            'drawn_mm': [
+                round(drawn_w_pt * float(MM_PER_POINT), 1),
+                round(drawn_h_pt * float(MM_PER_POINT), 1),
+            ],
+            'dpi': dpi,
+            'page_share': round(share, 4),
+            'meaningful': Decimal(str(share)) >= MEANINGFUL_AREA_SHARE,
+        })
+
+    page.extract_text(visitor_operand_before=on_operator)
+    return found
 
 def _measure_raster(job_file):
     from PIL import Image
