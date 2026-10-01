@@ -112,3 +112,171 @@ class OnlineOrderTests(TestCase):
         self.assertEqual(
             order.line_items[0]['specifications']['width_in'], 168,
         )
+
+class StorefrontAPITests(TestCase):
+    """
+    The first endpoints in Octos that anyone can call. Everything else
+    requires a staff JWT; a stranger pricing a banner has no account and
+    should not need one to find out what it costs.
+
+    What stands in for an account is a token on the order, returned once
+    and required afterwards. The order number is sequential and
+    guessable, so it can never be what proves the order is yours.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+        from apps.jobs.models import Service, PricingRule
+
+        cls.branch = Branch.objects.create(
+            name='Storefront Branch', code='SFB',
+            is_headquarters=False, is_regional_hq=False,
+            address='1 Storefront Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30),
+            closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.flexy = Service.objects.create(
+            name='Storefront Flexy', code='SFFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_design=False, requires_file_upload=True,
+            is_active=True,
+            spec_template=[
+                {'key': 'width_in', 'label': 'Width', 'type': 'number',
+                 'required': True, 'default': 72, 'min': 6, 'unit': 'in'},
+                {'key': 'height_in', 'label': 'Height', 'type': 'number',
+                 'required': True, 'default': 36, 'min': 6, 'unit': 'in'},
+            ],
+        )
+        # Company-wide: prices are set once and ripple to every branch.
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None,
+            base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'),
+            minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    # ── Catalogue ──────────────────────────────────────────────────
+
+    def test_the_catalogue_is_readable_without_an_account(self):
+        response = self._client().get('/api/v1/storefront/catalogue/')
+        self.assertEqual(response.status_code, 200, response.content)
+        codes = {s['code'] for s in response.data}
+        self.assertIn('SFFLEXY', codes)
+
+    def test_the_catalogue_carries_what_the_form_needs(self):
+        response = self._client().get('/api/v1/storefront/catalogue/')
+        service = next(s for s in response.data if s['code'] == 'SFFLEXY')
+        self.assertTrue(service['spec_template'])
+        self.assertEqual(service['unit'], 'PER_SQFT')
+
+    # ── Creating an order ──────────────────────────────────────────
+
+    def test_starting_an_order_returns_a_number_and_a_token(self):
+        response = self._client().post('/api/v1/storefront/orders/', {}, format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertTrue(response.data['order_number'].startswith('ORD-'))
+        self.assertTrue(response.data['access_token'])
+        self.assertEqual(response.data['status'], 'DRAFT')
+
+    def test_an_order_belongs_to_nobody_when_it_starts(self):
+        response = self._client().post('/api/v1/storefront/orders/', {}, format='json')
+        self.assertIsNone(response.data['branch'])
+        self.assertEqual(response.data['total'], '0.00')
+
+    # ── Reading one back ───────────────────────────────────────────
+
+    def test_the_token_is_what_opens_an_order(self):
+        created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._client().get(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token']},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['order_number'], created['order_number'])
+
+    def test_the_order_number_alone_opens_nothing(self):
+        """
+        ORD-2026-00001 is a guess away from ORD-2026-00002. Without the
+        token, knowing the number must be worth nothing.
+        """
+        created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._client().get(
+            f"/api/v1/storefront/orders/{created['order_number']}/"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_somebody_elses_token_opens_nothing(self):
+        mine = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        theirs = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._client().get(
+            f"/api/v1/storefront/orders/{mine['order_number']}/",
+            {'token': theirs['access_token']},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ── Adding to it ───────────────────────────────────────────────
+
+    def test_a_line_is_priced_by_the_server_not_by_what_was_sent(self):
+        """
+        A price arriving from a browser is a suggestion from a stranger.
+        The server quotes it again from the specification.
+        """
+        created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id,
+                    'quantity': 1,
+                    'specifications': {'width_in': 168, 'height_in': 150},
+                    'total': '1.00',
+                }],
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['total'], '568.75')
+        self.assertEqual(response.data['line_items'][0]['total'], '568.75')
+
+    def test_a_line_without_its_dimensions_is_refused(self):
+        created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{'service': self.flexy.id, 'quantity': 1}],
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_paid_order_cannot_be_edited(self):
+        created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        order.status = OnlineOrder.Status.PAID
+        order.paid_at = timezone.now()
+        order.save()
+
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id, 'quantity': 1,
+                    'specifications': {'width_in': 12, 'height_in': 12},
+                }],
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 409)

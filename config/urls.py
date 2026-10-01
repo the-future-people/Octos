@@ -43,6 +43,10 @@ urlpatterns = [
     path('api/v1/procurement/',   include('apps.procurement.api.urls')),
     path('api/v1/personal-notes/', include('apps.personal_notes.api.urls')),
 
+    # The public surface. Unauthenticated by design: a stranger pricing
+    # a banner has no account.
+    path('api/v1/storefront/',    include('apps.storefront.urls')),
+
     # Portals
     path('',        home_view,    name='home'),
     path('careers/', careers_view, name='careers'),

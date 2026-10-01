@@ -132,16 +132,22 @@ class PricingEngine:
         Cached 5 minutes per service+branch pair.
         """
         from django.core.cache import cache
-        cache_key = f'pricing_rule:{self.service.pk}:{self.branch.pk}'
+        # A company-wide quote has no branch. The fallback below has
+        # always existed, but until the storefront nothing called the
+        # engine without one, so the cache key assumed it was there.
+        branch_key = self.branch.pk if self.branch else 'company'
+        cache_key = f'pricing_rule:{self.service.pk}:{branch_key}'
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
-        rule = PricingRule.objects.filter(
-            service  = self.service,
-            branch   = self.branch,
-            is_active= True,
-        ).first()
+        rule = None
+        if self.branch is not None:
+            rule = PricingRule.objects.filter(
+                service  = self.service,
+                branch   = self.branch,
+                is_active= True,
+            ).first()
 
         if not rule:
             rule = PricingRule.objects.filter(
@@ -171,8 +177,8 @@ class PricingEngine:
             return {
                 'success' : False,
                 'error'   : (
-                    f"No pricing rule found for {self.service.name} "
-                    f"at {self.branch.name}"
+                    f"No pricing rule found for {self.service.name}"
+                    + (f" at {self.branch.name}" if self.branch else "")
                 ),
                 'total'   : Decimal('0.00'),
             }
@@ -221,7 +227,7 @@ class PricingEngine:
         return {
             'success'        : True,
             'service'        : self.service.name,
-            'branch'         : self.branch.name,
+            'branch'         : self.branch.name if self.branch else None,
             'unit'           : self.service.unit,
             'base_price'     : str(base),
             'color_multiplier': str(multiplier),
@@ -283,7 +289,7 @@ class PricingEngine:
         return {
             'success'        : True,
             'service'        : self.service.name,
-            'branch'         : self.branch.name,
+            'branch'         : self.branch.name if self.branch else None,
             'unit'           : unit,
             'quantity'       : quantity,
             'pages'          : pages,

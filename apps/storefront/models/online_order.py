@@ -41,6 +41,16 @@ class OnlineOrder(AuditModel):
         DELIVERY   = 'DELIVERY',   'Delivery'
 
     order_number = models.CharField(max_length=30, unique=True, editable=False)
+
+    # The order number is sequential and trivially guessable, so it
+    # cannot be what proves this order is yours. The token is returned
+    # once at creation and required on every request afterwards — and it
+    # is what the tracking link carries, so the customer reaches their
+    # own order without an account.
+    access_token = models.CharField(
+        max_length=64, unique=True, editable=False, db_index=True,
+        default='', blank=True,
+    )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True,
     )
@@ -126,6 +136,9 @@ class OnlineOrder(AuditModel):
     def save(self, *args, **kwargs):
         if not self.order_number:
             self.order_number = self._next_number()
+        if not self.access_token:
+            from secrets import token_urlsafe
+            self.access_token = token_urlsafe(32)
         super().save(*args, **kwargs)
 
     @staticmethod
