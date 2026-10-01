@@ -1601,3 +1601,177 @@ class PDFImageResolutionTests(JobsFixtureMixin, TestCase):
         f = self._measured([(300, 1)])
         self.assertAlmostEqual(float(f.width_mm), 210, delta=1)
         self.assertEqual(f.page_count, 1)
+
+
+class FileCheckTests(JobsFixtureMixin, TestCase):
+    """
+    Three verdicts: fine, warn, refuse. Refuse blocks the order; warn
+    proceeds and the acceptance is recorded, so the coordinator sees
+    that the customer was told rather than discovering it himself.
+
+    The thresholds follow the ordered output size, not the service. A
+    banner is read from across a room and a business card at arm's
+    length, and that is a fact about the size, not the product.
+    """
+
+    def _check(self, **kwargs):
+        from apps.jobs.services.file_checks import check_file
+        return check_file(**kwargs)
+
+    # ── Check 1: can it be opened, is the format accepted ──────────
+
+    def test_an_unreadable_file_is_refused(self):
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.FAILED, content_type='application/pdf',
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'refuse')
+        self.assertIn('open', result['checks'][0]['message'].lower())
+
+    def test_an_unsupported_format_is_refused_and_says_what_to_send(self):
+        """
+        .cdr and .ai are ordinary here. The message has to name the way
+        out, not list acceptable extensions at someone who does not know
+        what their file is.
+        """
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.UNSUPPORTED,
+            content_type='application/x-coreldraw',
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'refuse')
+        self.assertIn('pdf', result['checks'][0]['message'].lower())
+
+    # ── Check 2: resolution at the ordered size ────────────────────
+
+    def test_a_sharp_file_at_card_size_is_fine(self):
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=1050, height_px=600,
+            ordered_width_in=3.5, ordered_height_in=2,
+        )
+        self.assertEqual(result['verdict'], 'fine')
+
+    def test_a_soft_file_at_card_size_warns(self):
+        """180dpi on a card: visibly softer, still printable."""
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=630, height_px=360,
+            ordered_width_in=3.5, ordered_height_in=2,
+        )
+        self.assertEqual(result['verdict'], 'warn')
+
+    def test_a_screenshot_on_a_banner_is_refused(self):
+        """The case this check exists for: a phone screenshot at 6ft."""
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=1080, height_px=540,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'refuse')
+
+    def test_the_same_file_is_fine_on_a_small_print(self):
+        """1080px is hopeless at 6ft and perfectly good at 4in."""
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=1080, height_px=540,
+            ordered_width_in=3.5, ordered_height_in=2,
+        )
+        self.assertEqual(result['verdict'], 'fine')
+
+    def test_a_banner_tolerates_what_a_card_would_not(self):
+        """72dpi across six feet is normal large-format work."""
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=5184, height_px=2592,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'fine')
+
+    def test_a_vector_pdf_passes_without_a_resolution(self):
+        """
+        No images means nothing raster to judge, and vector art is the
+        best artwork there is. Warning on it would be noise.
+        """
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='application/pdf',
+            pdf_images=[], page_count=1,
+            width_mm=1828.8, height_mm=914.4,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'fine')
+
+    def test_a_pdf_is_judged_on_its_worst_meaningful_image(self):
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='application/pdf',
+            pdf_images=[
+                {'dpi': 600, 'meaningful': True},
+                {'dpi': 40,  'meaningful': True},
+            ],
+            page_count=1, width_mm=1828.8, height_mm=914.4,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'refuse')
+
+    # ── Check 3: pages and dimensions against the order ────────────
+
+    def test_a_page_count_mismatch_is_refused(self):
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='application/pdf',
+            pdf_images=[], page_count=3,
+            width_mm=210, height_mm=297,
+            ordered_width_in=8.27, ordered_height_in=11.69,
+            ordered_pages=1,
+        )
+        self.assertEqual(result['verdict'], 'refuse')
+
+    def test_a_wrong_shape_warns_rather_than_refusing(self):
+        """
+        A portrait file for a landscape banner is usually a mistake, but
+        the customer may have meant it. Tell them; do not block them.
+        """
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=5184, height_px=10368,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertEqual(result['verdict'], 'warn')
+
+    # ── Warnings ───────────────────────────────────────────────────
+
+    def test_rgb_on_large_format_warns_but_proceeds(self):
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=5184, height_px=2592, colour_mode='RGB',
+            ordered_width_in=72, ordered_height_in=36,
+            expect_cmyk=True,
+        )
+        self.assertEqual(result['verdict'], 'warn')
+
+    def test_every_check_is_reported_not_just_the_failing_one(self):
+        """
+        The screen shows each check with its own verdict, so a customer
+        sees what passed as well as what did not.
+        """
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='image/jpeg',
+            width_px=5184, height_px=2592,
+            ordered_width_in=72, ordered_height_in=36,
+        )
+        self.assertGreaterEqual(len(result['checks']), 3)
+        for check in result['checks']:
+            self.assertIn(check['verdict'], ('fine', 'warn', 'refuse'))
+            self.assertTrue(check['message'])
