@@ -316,8 +316,13 @@ CELERY_BEAT_SCHEDULE = {
 
 # CORS
 CORS_ALLOWED_ORIGINS = [
+    # The staff portal
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'https://octos-web.vercel.app',
     'https://octos-production.up.railway.app',
+    # Print Octos, the customer-facing storefront. Its own app on its
+    # own port, so a change to one cannot break the other.
+    'http://localhost:5180',
+    'http://127.0.0.1:5180',
 ]
