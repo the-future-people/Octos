@@ -79,6 +79,18 @@ class OnlineOrder(AuditModel):
     # A record of what was asked for at a moment, not a live thing the
     # floor edits; it becomes real line items at conversion.
     line_items = models.JSONField(default=list, blank=True)
+
+    # Three figures, not one.
+    #
+    # full_total is what the work is worth at catalogue prices. total is
+    # what the customer actually pays, and what the receipt, the day
+    # sheet and every report count. The difference between them is the
+    # discount, kept as its own number so a month's giveaway can be
+    # added up — storing only what was charged would make the scheme
+    # invisible the moment it had run.
+    full_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_reason = models.CharField(max_length=100, blank=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     fulfilment = models.CharField(

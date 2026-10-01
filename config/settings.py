@@ -199,6 +199,13 @@ REST_FRAMEWORK = {
         'user': '120/min',
         'login': '5/min',
         'pin_verify': '5/min',
+        # A customer specifying a banner reprices on every change —
+        # width, height, quantity, each a request. Twenty a minute is
+        # right for an API with no public face and would lock a real
+        # customer out halfway through their own order.
+        'storefront': '90/min',
+        # Guessing a code is the one thing worth slowing down.
+        'storefront_code': '6/min',
     },
 }
 

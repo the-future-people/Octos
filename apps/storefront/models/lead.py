@@ -33,13 +33,22 @@ class Lead(AuditModel):
     )
 
     # Protects history, never the job itself. Someone who has just
-    # ordered reaches that order by link with no PIN at all — the PIN is
-    # what stops a stranger reading everything this number has ever
-    # ordered by knowing the number.
-    pin = models.CharField(
+    # ordered reaches that order by its link with no code at all — the
+    # code is what stops a stranger reading everything this number has
+    # ever ordered, by knowing the number.
+    #
+    # Hashed, and never readable again. Losing it means being sent a new
+    # one, which is the same experience for the customer and leaves
+    # nothing in the database worth stealing.
+    code = models.CharField(
         max_length=128, blank=True,
-        help_text='Hashed. Set when the lead chooses to keep their history.',
+        help_text='Hashed. Set when the customer chooses to keep their history.',
     )
+
+    # The 5% is a reason to set a code, paid once to each person. Held
+    # here rather than against the code itself, so clearing a code and
+    # setting another earns nothing new.
+    code_discount_used = models.BooleanField(default=False)
 
     order_count = models.PositiveIntegerField(default=0)
     last_ordered_at = models.DateTimeField(null=True, blank=True)
@@ -56,14 +65,14 @@ class Lead(AuditModel):
         return self.order_count > 0
 
     @property
-    def has_pin(self):
-        return bool(self.pin)
+    def has_code(self):
+        return bool(self.code)
 
-    def set_pin(self, raw_pin):
-        """Four digits, hashed. Never stored as typed."""
+    def set_code(self, raw_code):
+        """Hashed on the way in. Never stored as typed."""
         from django.contrib.auth.hashers import make_password
-        self.pin = make_password(raw_pin)
+        self.code = make_password(raw_code)
 
-    def check_pin(self, raw_pin):
+    def check_code(self, raw_code):
         from django.contrib.auth.hashers import check_password
-        return bool(self.pin) and check_password(raw_pin, self.pin)
+        return bool(self.code) and check_password(raw_code, self.code)

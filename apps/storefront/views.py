@@ -17,16 +17,18 @@ the specification, through the same function the counter uses.
 """
 
 from decimal import Decimal
-
+import random
+from apps.storefront.models import Lead, OnlineOrder
+from apps.storefront.services.sms import send_sms
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from rest_framework.throttling import ScopedRateThrottle
 from apps.jobs.models import Service
 from apps.jobs.pricing_engine import quote_line
-from apps.storefront.models import OnlineOrder
+
 
 
 def _order_or_404(order_number, token):
@@ -67,6 +69,8 @@ class CatalogueView(APIView):
     """
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
 
     def get(self, request):
         services = Service.objects.filter(is_active=True).order_by('category', 'name')
@@ -97,6 +101,8 @@ class OrderCreateView(APIView):
     """
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
 
     def post(self, request):
         order = OnlineOrder.objects.create()
@@ -116,6 +122,8 @@ class OrderDetailView(APIView):
     """
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
 
     def get(self, request, order_number):
         order = _order_or_404(order_number, request.query_params.get('token'))
@@ -187,3 +195,171 @@ class OrderDetailView(APIView):
             total += Decimal(str(quote['total']))
 
         return priced, total, None
+
+DISCOUNT_RATE = Decimal('0.05')
+DISCOUNT_THRESHOLD = Decimal('100.00')
+
+
+class OrderIdentifyView(APIView):
+    """
+    POST /api/v1/storefront/orders/<order_number>/identify/
+
+    A phone number and a first name. Asked for late: a stranger should
+    know what a banner costs before being asked who they are.
+
+    A number nobody has used becomes a lead. A number that has ordered
+    before is recognised — and only challenged for a code if that
+    person chose to set one. Being stopped at the door on the visit you
+    came back is the wrong moment.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_code'
+
+    def post(self, request, order_number):
+        order = _order_or_404(order_number, request.data.get('token'))
+
+        if not order.is_open:
+            return Response(
+                {'detail': 'This order has been paid for.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        phone = (request.data.get('phone') or '').strip()
+        first_name = (request.data.get('first_name') or '').strip()
+        if not phone or not first_name:
+            return Response(
+                {'detail': 'We need a phone number and a first name.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lead = Lead.objects.filter(phone=phone).first()
+
+        if lead and lead.has_code:
+            given = (request.data.get('code') or '').strip()
+            if not given or not lead.check_code(given):
+                # The same answer whether no code was given or a wrong
+                # one was: neither tells a stranger which it was.
+                return Response(
+                    {
+                        'returning': True,
+                        'code_required': True,
+                        'detail': (
+                            "You've ordered with us before. Enter your "
+                            "code, or we can text you a new one."
+                        ),
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+        returning = lead is not None
+        if lead is None:
+            lead = Lead.objects.create(phone=phone, first_name=first_name)
+
+        order.lead = lead
+        order.save(update_fields=['lead', 'updated_at'])
+
+        return Response({
+            'returning': returning,
+            'code_required': False,
+            'first_name': lead.first_name,
+            'has_code': lead.has_code,
+            # Worth offering only when there is something in it for them
+            # and they have never had it.
+            'discount_available': bool(
+                not lead.has_code
+                and not lead.code_discount_used
+                and order.full_total >= DISCOUNT_THRESHOLD
+            ),
+        })
+
+
+class OrderCodeView(APIView):
+    """
+    POST /api/v1/storefront/orders/<order_number>/code/
+
+    Sets a code for the person on this order, and takes 5% off if the
+    order is over GHS 100 and they have never had it.
+
+    The code is generated rather than chosen — it is sent by text, and
+    a code the customer picks is one they tell someone. It is hashed on
+    the way in and never readable again: losing it means being sent a
+    new one, which is the same experience and leaves nothing in the
+    database worth stealing.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def post(self, request, order_number):
+        order = _order_or_404(order_number, request.data.get('token'))
+
+        if not order.is_open:
+            return Response(
+                {'detail': 'This order has been paid for.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if not order.lead_id:
+            return Response(
+                {'detail': 'Tell us who you are first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lead = order.lead
+        code = _make_code(lead.first_name)
+        lead.set_code(code)
+
+        discount = Decimal('0.00')
+        if not lead.code_discount_used and order.full_total >= DISCOUNT_THRESHOLD:
+            # To the nearest cedi. Pesewas off a discount read as
+            # arithmetic rather than as a gift.
+            discount = (order.full_total * DISCOUNT_RATE).quantize(Decimal('1'))
+            lead.code_discount_used = True
+            order.discount_amount = discount
+            order.discount_reason = 'Customer code — 5%'
+            order.total = order.full_total - discount
+            order.save(update_fields=[
+                'discount_amount', 'discount_reason', 'total', 'updated_at',
+            ])
+
+        lead.save(update_fields=['code', 'code_discount_used', 'updated_at'])
+
+        message = (
+            f"Your Farhat code is {code}. Keep it — it brings up your "
+            f"past orders next time."
+        )
+        if discount:
+            message = (
+                f"Your Farhat code is {code}. GHS {discount} off this "
+                f"order. Keep it — it brings up your past orders next time."
+            )
+        send_sms(lead.phone, message)
+
+        return Response({
+            # Shown once. There is no way to ask for it again — a lost
+            # code is replaced, not recovered.
+            'code': code,
+            'discount_amount': f'{discount:.2f}',
+            'full_total': f'{Decimal(order.full_total):.2f}',
+            'total': f'{Decimal(order.total):.2f}',
+            'sent_to': lead.phone,
+        })
+
+
+def _make_code(first_name):
+    """
+    Three letters from their name and three characters after it, so it
+    reads as theirs — AMA-4K2 rather than 7F2X9Q. People remember a
+    thing that looks like it belongs to them.
+
+    I and O and 1 and 0 are left out: a code read off a screen and typed
+    back in should not turn on a glyph.
+    """
+    alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    stem = ''.join(c for c in (first_name or '').upper() if c.isalpha())[:3]
+    stem = (stem or 'FAR').ljust(3, 'X')
+    tail = ''.join(random.choice(alphabet) for _ in range(3))
+    return f'{stem}-{tail}'

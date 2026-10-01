@@ -1,6 +1,3 @@
-from django.test import TestCase
-
-# Create your tests here.
 from decimal import Decimal
 
 from django.test import TestCase
@@ -16,25 +13,33 @@ class LeadTests(TestCase):
     customer table with people the shop has met once.
     """
 
-    def test_a_new_lead_is_not_returning_and_has_no_pin(self):
+    def setUp(self):
+        # Throttle counts live in the cache and do not roll back with
+        # the test transaction, so a class of fifteen requests trips the
+        # limiter and every test after it reads as broken.
+        from django.core.cache import cache
+        cache.clear()
+    
+    def test_a_new_lead_is_not_returning_and_has_no_code(self):
         lead = Lead.objects.create(phone='0244000001', first_name='Ama')
         self.assertFalse(lead.is_returning)
-        self.assertFalse(lead.has_pin)
+        self.assertFalse(lead.has_code)
 
-    def test_a_pin_is_hashed_never_stored_as_typed(self):
+    def test_a_code_is_hashed_never_stored_as_typed(self):
         """
-        Four digits is weak by nature. Storing it in the clear would make
-        one database leak a list of working PINs.
+        The code opens a customer's order history, so a readable column
+        would be a list of working keys. Losing it means being sent a
+        new one, not being told the old one.
         """
         lead = Lead.objects.create(phone='0244000002', first_name='Kofi')
-        lead.set_pin('1234')
+        lead.set_code('AMA-4K2')
         lead.save()
         lead.refresh_from_db()
 
-        self.assertNotEqual(lead.pin, '1234')
-        self.assertNotIn('1234', lead.pin)
-        self.assertTrue(lead.check_pin('1234'))
-        self.assertFalse(lead.check_pin('4321'))
+        self.assertNotEqual(lead.code, 'AMA-4K2')
+        self.assertNotIn('AMA-4K2', lead.code)
+        self.assertTrue(lead.check_code('AMA-4K2'))
+        self.assertFalse(lead.check_code('AMA-4K3'))
 
     def test_a_phone_number_belongs_to_one_lead(self):
         from django.db import IntegrityError
@@ -123,6 +128,13 @@ class StorefrontAPITests(TestCase):
     and required afterwards. The order number is sequential and
     guessable, so it can never be what proves the order is yours.
     """
+
+    def setUp(self):
+        # Throttle counts live in the cache and do not roll back with
+        # the test transaction, so a class of fifteen requests trips the
+        # limiter and every test after it reads as broken.
+        from django.core.cache import cache
+        cache.clear()
 
     @classmethod
     def setUpTestData(cls):
@@ -280,3 +292,210 @@ class StorefrontAPITests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 409)
+
+class IdentityTests(TestCase):
+    """
+    Identity is asked for late and lightly. A stranger pricing a banner
+    should know what it costs before being asked who they are, and a
+    customer coming back should not be challenged at the door.
+
+    A code is offered, never demanded. Someone who skips it loses
+    nothing they had.
+    """
+
+    def setUp(self):
+        # Throttle counts live in the cache and do not roll back with
+        # the test transaction, so a class of fifteen requests trips the
+        # limiter and every test after it reads as broken.
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _order(self, total='568.75'):
+        client = self._client()
+        created = client.post('/api/v1/storefront/orders/', {}, format='json').data
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        order.full_total = Decimal(total)
+        order.total = Decimal(total)
+        order.save()
+        return created
+
+    def _identify(self, created, **extra):
+        payload = {'token': created['access_token'],
+                   'phone': '0244111222', 'first_name': 'Ama'}
+        payload.update(extra)
+        return self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/identify/",
+            payload, format='json',
+        )
+
+    # ── A first-time customer ──────────────────────────────────────
+
+    def test_a_new_number_becomes_a_lead_and_is_attached(self):
+        created = self._order()
+        response = self._identify(created)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.data['returning'])
+        self.assertFalse(response.data['code_required'])
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.lead.phone, '0244111222')
+        self.assertEqual(order.lead.first_name, 'Ama')
+
+    def test_identifying_needs_the_orders_token(self):
+        created = self._order()
+        response = self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/identify/",
+            {'phone': '0244111222', 'first_name': 'Ama'}, format='json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ── Coming back ────────────────────────────────────────────────
+
+    def test_a_returning_number_without_a_code_attaches_freely(self):
+        """
+        Being challenged on the visit you came back is the wrong moment.
+        Nothing is protected yet, which is the customer's own choice.
+        """
+        Lead.objects.create(phone='0244111222', first_name='Ama', order_count=1)
+        created = self._order()
+        response = self._identify(created)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.data['returning'])
+        self.assertFalse(response.data['code_required'])
+
+    def test_a_returning_number_with_a_code_is_asked_for_it(self):
+        lead = Lead.objects.create(phone='0244111222', first_name='Ama', order_count=2)
+        lead.set_code('AMA-4K2')
+        lead.save()
+
+        created = self._order()
+        response = self._identify(created)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(response.data['code_required'])
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertIsNone(order.lead_id)
+
+    def test_the_right_code_attaches_the_order(self):
+        lead = Lead.objects.create(phone='0244111222', first_name='Ama', order_count=2)
+        lead.set_code('AMA-4K2')
+        lead.save()
+
+        created = self._order()
+        response = self._identify(created, code='AMA-4K2')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.lead_id, lead.id)
+
+    def test_a_wrong_code_attaches_nothing(self):
+        lead = Lead.objects.create(phone='0244111222', first_name='Ama', order_count=2)
+        lead.set_code('AMA-4K2')
+        lead.save()
+
+        created = self._order()
+        response = self._identify(created, code='AMA-9Z9')
+
+        self.assertEqual(response.status_code, 401)
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertIsNone(order.lead_id)
+
+
+class CodeDiscountTests(TestCase):
+    """
+    5% for setting a code, once per person, on orders over GHS 100. A
+    cedi off a photocopy delights nobody; thirty off a banner is a
+    reason to come back.
+    """
+
+
+    def setUp(self):
+        # Throttle counts live in the cache and do not roll back with
+        # the test transaction, so a class of fifteen requests trips the
+        # limiter and every test after it reads as broken.
+        from django.core.cache import cache
+        cache.clear()
+
+        
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _identified_order(self, total='617.50', phone='0244333444'):
+        client = self._client()
+        created = client.post('/api/v1/storefront/orders/', {}, format='json').data
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        order.full_total = Decimal(total)
+        order.total = Decimal(total)
+        order.save()
+        client.post(
+            f"/api/v1/storefront/orders/{created['order_number']}/identify/",
+            {'token': created['access_token'], 'phone': phone, 'first_name': 'Kofi'},
+            format='json',
+        )
+        return created
+
+    def _set_code(self, created):
+        return self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/code/",
+            {'token': created['access_token']}, format='json',
+        )
+    def test_setting_a_code_takes_five_percent_off(self):
+        created = self._identified_order('617.50', phone='0244777001')
+        response = self._set_code(created)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        # 5% of 617.50 is 30.875, to the nearest cedi.
+        self.assertEqual(order.discount_amount, Decimal('31.00'))
+        self.assertEqual(order.full_total, Decimal('617.50'))
+        self.assertEqual(order.total, Decimal('586.50'))
+
+    def test_the_code_comes_back_once_and_is_stored_hashed(self):
+        created = self._identified_order(phone='0244777002')
+        response = self._set_code(created)
+
+        code = response.data['code']
+        self.assertTrue(code)
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertNotEqual(order.lead.code, code)
+        self.assertTrue(order.lead.check_code(code))
+
+    def test_a_small_order_gets_a_code_but_no_discount(self):
+        created = self._identified_order('80.00', phone='0244777003')
+        response = self._set_code(created)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.discount_amount, Decimal('0.00'))
+        self.assertEqual(order.total, Decimal('80.00'))
+        self.assertTrue(order.lead.has_code)
+
+    def test_the_discount_is_paid_once_per_person(self):
+        """
+        Held against the person, not the code, so clearing a code and
+        setting another earns nothing new.
+        """
+        first = self._identified_order('617.50', phone='0244555666')
+        self._set_code(first)
+
+        second = self._identified_order('400.00', phone='0244555666')
+        self._set_code(second)
+
+        order = OnlineOrder.objects.get(order_number=second['order_number'])
+        self.assertEqual(order.discount_amount, Decimal('0.00'))
+        self.assertEqual(order.total, Decimal('400.00'))
+
+    def test_a_code_cannot_be_set_on_an_order_with_nobody_on_it(self):
+        client = self._client()
+        created = client.post('/api/v1/storefront/orders/', {}, format='json').data
+        response = self._set_code(created)
+        self.assertEqual(response.status_code, 400)
