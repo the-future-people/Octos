@@ -433,3 +433,158 @@ Raised today, not settled.
   not know. It answers the same question routing asks before holding
   capacity, so it should be built on a capability model rather than as a
   one-off.
+
+# Decisions — additions, 1 October 2026
+
+Append to `docs/decisions.md` under the sections named. The Pricing
+section already exists; Identity and Customer codes are new.
+
+---
+
+## Pricing — additions
+
+### Prices are company-wide. Branch rules do not exist.
+
+One price per service, set once, applying everywhere. If prices ever
+differ it will be regional or zonal, not per branch.
+
+`PricingRule` still has a branch field and `_get_rule` still prefers a
+branch rule over the company one. That is the mechanism for regional
+pricing later. Nothing uses it today, and nothing should: the 127 branch
+rules that existed were seeded rather than written, 91 were exact copies
+of the company rule, and the one that differed had been quietly
+undercharging every large binding for months.
+
+**A new service gets a company rule and no branch rule.**
+
+---
+
+## Identity
+
+### Identity is asked for late
+
+A stranger pricing a banner should know what it costs before being asked
+who they are. Anything that gates browsing or pricing loses the
+customer.
+
+So the order is built first, identity comes at checkout, and payment
+after that.
+
+### A first visit creates a lead, not a customer
+
+Phone number and first name, nothing more. Most first visits never come
+back, and writing every one into `CustomerProfile` would fill the
+customer table with people the shop has met once.
+
+A lead becomes a customer when the order converts to a job, not when
+they identify — someone who identifies and then abandons is not a
+customer.
+
+### An order is reached by a token, not by its number
+
+`ORD-2026-00001` is one guess away from `00002`, so the number can never
+be what proves an order is yours. A random token is returned once at
+creation and required on every request afterwards. It is also what the
+tracking link carries, so a customer reaches their own order with no
+account at all.
+
+A wrong token and a wrong number give the same 404: neither tells a
+stranger whether an order exists.
+
+---
+
+## Customer codes
+
+### A code, not a PIN, and it buys something
+
+A returning customer is offered a code that brings up their past orders.
+Calling it a PIN makes it sound like a chore; calling it a coupon would
+promise money off that is not there.
+
+So it does both honestly: it protects their history **and** takes 5% off
+the order they set it on.
+
+### 5%, once per person, on orders over GHS 100
+
+A cedi off a photocopy delights nobody. Thirty off a banner is a reason
+to come back.
+
+Once, not every time: a standing 5% for anyone who typed a code is a
+price cut, not loyalty. Held against the person rather than the code, so
+clearing a code and setting another earns nothing new.
+
+Rounded to the nearest cedi — pesewas off a discount read as arithmetic
+rather than as a gift.
+
+### Three figures are stored, not one
+
+`full_total` is what the work is worth, `discount_amount` is what came
+off, and `total` is what the customer actually pays — and what the
+receipt, the day sheet and every report count.
+
+Storing only what was charged would make the scheme invisible the moment
+it had run: there would be no way to answer what a month of codes cost.
+
+### The code is generated, hashed, and never readable again
+
+Generated rather than chosen, because it is sent by text and a code the
+customer picks is one they will tell someone. Shaped as `AMA-4K2` — three
+letters from their name — so it reads as theirs and is worth
+remembering. No I, O, 1 or 0: a code read off a screen should not turn on
+a glyph.
+
+Hashed on the way in. Losing it means being sent a new one, which is the
+same experience for the customer and leaves nothing in the database worth
+stealing. Nobody, including staff, can read a customer's code.
+
+### A code is offered, never demanded
+
+A returning customer who never set one is not challenged. Being stopped
+at the door on the visit you came back is the wrong moment, and nothing
+is protected yet anyway — which is their own choice.
+
+---
+
+## The public surface
+
+### The storefront is the first unauthenticated API in Octos
+
+Everything else requires a staff token. These endpoints do not, by
+design.
+
+That has consequences the rest of the system never had: rate limits that
+matter, an order that can be created by anyone, and prices that can never
+be taken from the request. A total arriving from a browser is a
+suggestion from a stranger; every line is quoted again server-side
+through the same function the counter uses.
+
+### Storefront requests get their own throttle rate
+
+The global anonymous limit is 20 a minute, which is right for an API with
+no public face and wrong for a shop. Specifying a banner reprices on
+every change — width, height, quantity, each a request — so a real
+customer would be locked out halfway through their own order.
+
+90 a minute for the storefront, 6 a minute for the endpoint that checks
+codes, since guessing a code is the one thing worth slowing down.
+
+### Order numbers come from a database sequence
+
+Not from the highest number so far, which is what the proforma and the
+receipt do. That is safe when one member of staff creates one document at
+a time, and not safe when two strangers can click in the same
+millisecond.
+
+---
+
+## Still open
+
+- **The three undercharged jobs** from 1 October — 04996, 05000 and
+  05001, about GHS 82 across three customers — are COMPLETE with receipts
+  issued. Absorb or call the customers: not yet decided.
+- **Receipt numbering has the same race** as the proforma. Not urgent,
+  but it becomes real the day two cashiers work one branch.
+- **Images nested inside a form XObject are skipped** by the PDF
+  resolution reader, so some files report fewer images than they contain.
+  Better than a wrong number, but it means `dpi` can be absent on a file
+  that does have raster content.

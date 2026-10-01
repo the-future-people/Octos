@@ -298,3 +298,127 @@ had been there since the engine was written.
 
 Any branch that handles some inputs differently needs a test per branch,
 not per function.
+
+# Lessons — additions, 1 October 2026
+
+Append to `tasks/lessons.md`.
+
+---
+
+## A value that lives in two places will be read from the wrong one
+
+`pages` existed as a column on the line item and, once the spec form
+arrived, inside `specifications`. The form sent it to the spec; pricing
+read the column, which stayed at 1. Ten copies of a two-page document
+were billed as ten single sheets.
+
+Three jobs went out undercharged in a single morning, and it was only
+caught because the cashier's figure was lower than the one recorded.
+
+Reconciled in the model's `save`, not in the four places a line item is
+created, because the fifth would have been missed too.
+
+**When a form starts collecting something the model already had a column
+for, one of them has to win, explicitly.**
+
+---
+
+## A fallback nothing has ever used is not working code
+
+`PricingRule` has always fallen back to a company-wide rule when no
+branch rule exists. The storefront was the first caller to ask for a
+price with no branch, and it crashed three times in a row on three
+different lines — the cache key, the result dict, the error message —
+each assuming a branch was there.
+
+The path existed in the data model, in the query, and in nobody's
+execution.
+
+---
+
+## Seeded data that looks real will be trusted
+
+127 branch pricing rules were seeded at some point for six branches,
+five of which do not trade. 91 were identical copies of the company
+rule. One was not: A3 Binding at Westland had no ring-size tiers, so
+every binding charged 20 regardless of spine thickness, where the
+company rule would have charged 25 and 35 for the larger sizes.
+
+Nobody wrote that rule deliberately. It was a seed command being
+helpful.
+
+**Before building on reference data, check how much of it was typed by a
+person.**
+
+---
+
+## Tests that share a unique value interfere with each other
+
+Three tests in one class used the same default phone number against a
+model with `unique=True` on it. Each passed alone and two failed in the
+class, depending on what ran first.
+
+**A fixture default on a unique field is a collision waiting for a
+second test.**
+
+---
+
+## Throttle counters live in the cache and do not roll back
+
+The storefront is the first unauthenticated surface in Octos, so it was
+the first thing to meet the global 20-per-minute anonymous limit. Fifteen
+tests in a row tripped it, and every test afterwards failed with errors
+that looked nothing like rate limiting.
+
+`cache.clear()` in `setUp` for any class that calls a throttled endpoint.
+
+And the discovery mattered more than the fix: 20 a minute would have
+locked a real customer out halfway through specifying a banner, since
+every change of width, height or quantity is a request.
+
+---
+
+## `from X import X` is not `import X`
+
+The editor auto-imported `from random import random`, so `random.choice`
+did not exist. Same family as the `from pdb import pm` entries above —
+an auto-import that is plausible, wrong, and only fails when the line
+runs.
+
+---
+
+## PowerShell eats nested quotes
+
+`c.execute(\"SELECT …\")` inside a double-quoted `-c` argument is a
+parser error. Use single quotes inside, or pass the value as a
+parameter:
+
+```
+c.execute('SELECT to_regclass(%s)', ['sequence_name'])
+```
+
+---
+
+## `manage.py shell` cannot exercise views
+
+`APIClient` sends the host `testserver`, which real settings reject with
+`DisallowedHost`. Django adds it automatically inside the test runner and
+nowhere else.
+
+**A view check belongs in a test, not in a shell session.**
+
+---
+
+## Reading the maximum and adding one is a race
+
+`ProformaInvoice.generate_proforma_number` and
+`Receipt.generate_receipt_number` both read the highest number so far and
+add one. The docstring says to call it in a transaction, which makes the
+second caller fail cleanly rather than corrupt — it does not make it
+succeed.
+
+Safe when one member of staff creates one document at a time. Not safe
+on a public website, where two strangers can click in the same
+millisecond. The storefront uses a Postgres sequence instead.
+
+Receipts become a real risk the day two cashiers work one branch.

@@ -195,3 +195,196 @@ All three documents get updated before a session ends:
 `tasks/` is gitignored except `lessons.md`. Note the gitignore shape:
 `tasks/*` then `!tasks/lessons.md`. Ignoring the directory itself means
 git never looks inside and the exception cannot apply.
+
+# Octos — Continuity
+
+**Current as of 1 October 2026, evening.**
+
+Paste this at the start of a session. It gets rewritten as things change,
+not appended to — history lives in git, reasoning lives in
+`docs/decisions.md`, rules that stop repeats live in `tasks/lessons.md`.
+
+---
+
+## Where things stand
+
+**Two machines.** Work: `OneDrive\Documents\The Future People\Octos-1`
+and the doubled `octos-web\octos-web`. Home:
+`Desktop\The_Future_People_Explorations\Octos` and `octos-web`.
+
+**Home database is empty of usable data** — no branch, no users. Tests
+run fine there; anything needing real data does not. Hand-seed or restore
+a production dump: still open.
+
+**Production:** Railway (backend), Vercel (frontend). Westland is the
+only live branch.
+
+**Tests: 201**, now across four apps. The storefront is easy to leave
+out:
+
+```
+docker-compose --env-file .env.docker exec web python manage.py test apps.finance.tests apps.jobs.tests apps.analytics.tests apps.storefront.tests -v 1 --keepdb
+```
+
+---
+
+## Print Octos — the build
+
+1. **Catalogue can describe a processed job** — done for flexy and SAV
+2. **One quoting function** — done: `quote_line`
+3. **`OnlineOrder`, ordering API, identity** — done
+4. **File checks** — done
+5. **Routing and capacity hold** — not started
+6. **Payment and webhook** — next. Paystack live since 29 September
+7. **Conversion to a Job** — not started
+8. **Tracking and suspension** — not started
+
+### What exists now
+
+`apps/storefront`, the first unauthenticated surface in Octos.
+
+- `GET /api/v1/storefront/catalogue/` — services with spec templates
+- `POST /orders/` — starts one, returns a number and a token
+- `GET|PATCH /orders/<number>/` — read and build, priced server-side
+- `POST /orders/<number>/identify/` — phone and first name
+- `POST /orders/<number>/code/` — sets a code, applies the 5%
+
+`OnlineOrder` numbers itself from a Postgres sequence. `Lead` holds a
+hashed code. Order numbers are guessable so a random token is what opens
+an order. Storefront throttle scopes: 90/min general, 6/min for identify.
+
+`apps/storefront/services/sms.py` wraps mNotify behind one function —
+account is set up, the call is written, not yet configured with a key.
+
+### Still unanswered from the design
+
+Which sheet a payment at 23:40 or on a Sunday lands on; fees and
+settlement reconciliation; refunds after a monthly close; a deposit
+online and a balance in branch on different sheets; webhook idempotency;
+the HQ account structure and whether branches get sub-accounts.
+
+---
+
+## Shipped 28 September – 1 October
+
+### Payment registry and ONLINE
+
+`apps/finance/payment_methods.py` is the single source of truth. Every
+consumer reads it. `ONLINE` is live with `total_online` on both the day
+sheet and the weekly report. Nothing writes one yet.
+
+### Large-format pricing
+
+`square_feet()` and `quote_line()`; `minimum_price` on `PricingRule`.
+**Flexy Banner** GHS 3.25/sq ft and **SAV Sticker** 2.80, minimum GHS 10
+per piece, seeded company-wide. The placeholder Banner Printing (flat
+GHS 50, never used) deleted.
+
+`NewJobModal` renders `spec_template` and prices through the server. The
+browser no longer calculates prices at all.
+
+### File measurement and checks
+
+PDFs now report the effective resolution of each image they contain,
+with `dpi` holding the worst of those covering enough of the page to
+matter, and nothing at all for vector art.
+
+`apps/jobs/services/file_checks.py` turns measurements into fine, warn or
+refuse against what was ordered. Thresholds follow the output size: 250
+dpi fine on a card, 72 on a banner.
+
+### The coordinator sees only paid work
+
+Both the production board and the verification queue exclude UNPAID. The
+engine already refused to start an unpaid job, but refusing at the Start
+button meant he had already opened it.
+
+### Pricing cleanup — 1 October
+
+127 branch rules deleted, 20 company rules created to replace the ones
+that only existed per branch. **A3 Binding had been charging 20 for every
+spine size** because a branch rule without tiers was overriding the
+company rule that had them.
+
+### PDFs
+
+Five builders in `pdf/` folders, one palette, render tests. `views.py`
+4,126 → 3,464 lines. `close_service.py` (1,071 lines, byte-identical
+duplicate) deleted.
+
+---
+
+## Outstanding
+
+### Costing money
+
+- **Three jobs undercharged on 1 October** — 04996, 05000, 05001, about
+  GHS 82 — by the page-count bug. COMPLETE with receipts issued. Absorb
+  or call the customers?
+- **The payment modal has no credit option.** The backend has handled
+  full and partial credit since the tests were written; the counter has
+  never had a way to send it.
+- **`deposit_percentage` accepts only 70 or 100**, so an arbitrary
+  part-payment cannot be entered.
+- **`balance_due` ignores partial credit** — job 4910 shows 309 owing
+  while the same 309 sits on the credit account.
+
+### Decisions waiting
+
+- **A job has one `job_type`**, so photocopies and a banner together
+  cannot be one job. The cart empties when the tab changes. Two jobs, or
+  one that waits for its slowest line?
+- **The post-closing entry point** should replace the New Job modal after
+  hours rather than sit beside it. Trigger on lock status, not a clock.
+- **Small sticker tier bands.** One known point: 100 at GHS 280.
+- **The attendant cannot attach a file at intake**, so a WhatsApp job
+  reaches the coordinator with nothing to open. The same file checks
+  should run there as online.
+
+### Known gaps
+
+- Creating a credit account has no portal flow
+- The weekly filing's low-stock alert lists seven machines every week
+- Branch Manager Notes renders `--` when empty
+- September's monthly close is still SUBMITTED in error
+- `power cut` missing from `JobHalt.Reason`
+- Machine down/up has an API, a service and no UI
+- Info strip shows em-dashes for ON THE FLOOR and MACHINES
+- No UI to file a past week
+- Generic serializer contract test
+- `agreed_terms` choices were inferred, never confirmed
+- `FLOW_COORDINATOR` and the six finance roles exist only in production
+- Monthly close PDF is the last builder still inside its engine
+- `PER_LINEAR_M` missing from `UNIT_CHOICES`; DTF film needs it
+- Receipt numbering has the same race as the proforma
+- Images nested in form XObjects are skipped by the PDF reader
+
+### Carried forward
+
+Postgres password rotation; no way to undo a proforma acceptance; Sunday
+block bypassed in `SheetEngine.get_or_open_today()`; Cloudflare R2.
+
+---
+
+## Also queued
+
+The catalogue in batches — seventy services across eight sections, most
+with prices still marked as estimates. Three pricing shapes missing:
+`PER_LINEAR_M`, embroidery digitizing as its own line, laser engraving by
+machine minutes.
+
+The coordinator's own sign-off, and splitting `FLOW_COORDINATOR` into
+incoming and outgoing. The prediction engine's Phase 1. The Can-Do
+Sandbox.
+
+---
+
+## Session close — not optional
+
+- **`docs/continuity.md`** — this file
+- **`tasks/lessons.md`** — rules that stop repeats (append only)
+- **`docs/decisions.md`** — why things are the way they are
+
+`tasks/` is gitignored except `lessons.md`: `tasks/*` then
+`!tasks/lessons.md`. Ignoring the directory itself means git never looks
+inside and the exception cannot apply.
