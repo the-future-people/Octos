@@ -121,7 +121,7 @@ class Command(BaseCommand):
             )
 
             rule, rule_created = PricingRule.objects.update_or_create(
-                service=service, branch=branch,
+                service=service, branch=None,
                 defaults={
                     'base_price'      : spec['rate'],
                     'color_multiplier': Decimal('1.00'),
