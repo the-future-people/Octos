@@ -113,6 +113,17 @@ class OnlineOrder(AuditModel):
     )
     paid_at = models.DateTimeField(null=True, blank=True)
 
+    # What the customer paid is `total` above. These two are what
+    # happened to it on the way in: the provider's cut, and what
+    # actually reached the bank.
+    #
+    # Both are kept so the day sheet can show the work's full value —
+    # comparable with the same job sold at the counter — and the amount
+    # that has to reconcile against a bank statement. Neither number
+    # stands in for the other.
+    payment_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    net_received = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     # ── Conversion ────────────────────────────────────────────────
     job = models.OneToOneField(
         'jobs.Job',

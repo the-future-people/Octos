@@ -18,7 +18,7 @@ the specification, through the same function the counter uses.
 
 from decimal import Decimal
 import random
-from apps.storefront.models import Lead, OnlineOrder
+from apps.storefront.models import Lead, OnlineOrder, PaystackEvent
 from apps.storefront.services.sms import send_sms
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -28,7 +28,18 @@ from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
 from apps.jobs.models import Service
 from apps.jobs.pricing_engine import quote_line
+import hashlib
+import hmac
+import json
+import logging
 
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from apps.storefront.services.fees import split_payment
+
+logger = logging.getLogger(__name__)
 
 
 def _order_or_404(order_number, token):
@@ -363,3 +374,149 @@ def _make_code(first_name):
     stem = (stem or 'FAR').ljust(3, 'X')
     tail = ''.join(random.choice(alphabet) for _ in range(3))
     return f'{stem}-{tail}'
+
+"""
+Append to apps/storefront/views.py.
+
+Imports needed at the top, alongside the ones already there:
+
+    import hashlib
+    import hmac
+    import json
+    import logging
+    from django.conf import settings
+    from django.db import IntegrityError, transaction
+    from django.utils import timezone
+    from apps.storefront.models import Lead, OnlineOrder, PaystackEvent
+    from apps.storefront.services.fees import split_payment
+
+    logger = logging.getLogger(__name__)
+"""
+
+
+class PaystackWebhookView(APIView):
+    """
+    POST /api/v1/storefront/webhook/paystack/
+
+    What marks an order paid. Not the customer returning to the page: a
+    customer who closes the tab after paying has still paid, and one who
+    reaches the success page without paying has not.
+
+    It does the least it can — record the event, mark the order, return.
+    Converting to a job, choosing a branch and writing a receipt all
+    happen elsewhere. Paystack retries anything slow or failed, and a
+    webhook that tries to do everything is one that fails halfway
+    through and gets retried into a mess.
+
+    Three things it will not skip:
+
+      the signature  without it, anyone who finds this URL can mark
+                     orders paid
+      the amount     the event says what was paid; if that is not what
+                     the order says, nobody should be printing anything
+      the duplicate  Paystack retries, and money counted twice is money
+                     the books cannot explain
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    # No throttle. Refusing Paystack's retries would only make it retry
+    # harder, and the signature is what actually keeps strangers out.
+    throttle_classes = []
+
+    def post(self, request):
+        raw = request.body
+        if not self._signed(raw, request.headers.get('x-paystack-signature', '')):
+            logger.warning('Paystack webhook with a bad signature')
+            return Response(
+                {'detail': 'Bad signature.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            return Response({'detail': 'Unreadable body.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        event_type = body.get('event', '')
+        data = body.get('data') or {}
+        reference = (data.get('reference') or '').strip()
+
+        # Anything we do not act on is still acknowledged. Refusing would
+        # make Paystack retry an event nothing is waiting for.
+        if event_type != 'charge.success' or not reference:
+            return Response({'status': 'ignored'})
+
+        order = OnlineOrder.objects.filter(payment_reference=reference).first()
+        if order is None:
+            # Acknowledged, not retried: this will never match anything.
+            logger.warning('Paystack event for unknown reference %s', reference)
+            return Response({'status': 'no matching order'})
+
+        # Paystack sends the smallest unit — pesewas.
+        paid = (Decimal(str(data.get('amount') or 0)) / Decimal('100')).quantize(
+            Decimal('0.01')
+        )
+        if paid != order.total:
+            logger.error(
+                'Paystack amount %s does not match order %s at %s',
+                paid, order.order_number, order.total,
+            )
+            return Response(
+                {'detail': 'Amount does not match the order.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                # The write is the check. A "have we seen this?" lookup
+                # followed by a write would let two simultaneous
+                # deliveries both pass; the unique constraint lets only
+                # one through, and the refusal is how we know.
+                PaystackEvent.objects.create(
+                    reference=reference,
+                    event_type=event_type,
+                    provider_id=str(data.get('id') or ''),
+                    amount_minor=int(data.get('amount') or 0),
+                    channel=data.get('channel') or '',
+                    payload=body,
+                    order=order,
+                )
+        except IntegrityError:
+            return Response({'status': 'already recorded'})
+
+        gross, fee, net = split_payment(order.total)
+        order.payment_fee = fee
+        order.net_received = net
+        order.paid_at = timezone.now()
+        order.status = OnlineOrder.Status.PAID
+        order.save(update_fields=[
+            'payment_fee', 'net_received', 'paid_at', 'status', 'updated_at',
+        ])
+
+        if order.lead_id:
+            lead = order.lead
+            lead.order_count = lead.order_count + 1
+            lead.last_ordered_at = timezone.now()
+            lead.save(update_fields=[
+                'order_count', 'last_ordered_at', 'updated_at',
+            ])
+
+        logger.info(
+            'Order %s paid: gross %s, fee %s, net %s',
+            order.order_number, gross, fee, net,
+        )
+        return Response({'status': 'recorded'})
+
+    @staticmethod
+    def _signed(raw, given):
+        """
+        HMAC-SHA512 of the raw body with the secret key, which is what
+        Paystack signs with. Compared in constant time, so the
+        comparison itself gives nothing away.
+        """
+        secret = getattr(settings, 'PAYSTACK_SECRET_KEY', '')
+        if not secret or not given:
+            return False
+        expected = hmac.new(secret.encode(), raw, hashlib.sha512).hexdigest()
+        return hmac.compare_digest(expected, given)

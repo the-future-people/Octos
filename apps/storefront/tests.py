@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.storefront.models import Lead, OnlineOrder
-
+from apps.storefront.models import Lead, OnlineOrder, PaystackEvent
 
 class LeadTests(TestCase):
     """
@@ -499,3 +499,183 @@ class CodeDiscountTests(TestCase):
         created = client.post('/api/v1/storefront/orders/', {}, format='json').data
         response = self._set_code(created)
         self.assertEqual(response.status_code, 400)
+
+class PaymentFeeTests(TestCase):
+    """
+    Paystack Ghana takes 1.95% of every local transaction — cards,
+    mobile money and bank alike — with no flat fee and no cap.
+
+    Both figures are kept. The day sheet shows what the work earned, so
+    a banner sold online is comparable with the same banner sold at the
+    counter, and it shows what actually arrived, so the day reconciles
+    against the bank. Neither number stands in for the other.
+    """
+
+    def _fee(self, amount):
+        from apps.storefront.services.fees import split_payment
+        return split_payment(Decimal(amount))
+
+    def test_the_fee_is_taken_from_what_the_customer_paid(self):
+        gross, fee, net = self._fee('568.75')
+        self.assertEqual(gross, Decimal('568.75'))
+        self.assertEqual(fee, Decimal('11.09'))
+        self.assertEqual(net, Decimal('557.66'))
+
+    def test_the_three_figures_always_reconcile(self):
+        """Whatever the rounding does, the fee and the net must add back
+        to what the customer was charged."""
+        for amount in ('10.00', '99.99', '100.00', '617.50', '1234.56'):
+            gross, fee, net = self._fee(amount)
+            self.assertEqual(fee + net, gross, f'failed on {amount}')
+
+    def test_a_small_payment_still_carries_a_fee(self):
+        """No cap and no minimum in Ghana — 1.95% of everything."""
+        gross, fee, net = self._fee('10.00')
+        self.assertEqual(fee, Decimal('0.20'))
+        self.assertEqual(net, Decimal('9.80'))
+
+class PaystackWebhookTests(TestCase):
+    """
+    What marks an order paid. Not the customer returning to the page:
+    someone who closes the tab after paying has still paid, and someone
+    who reaches the success page without paying has not.
+
+    The webhook does the least it can — records the payment, marks the
+    order, returns. Paystack retries anything slow or failed, and a
+    webhook that tries to convert a job, pick a branch and write a
+    receipt is one that fails halfway through.
+    """
+
+    URL = '/api/v1/storefront/webhook/paystack/'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _order(self, total='568.75', reference='ORD-TEST-REF-1'):
+        order = OnlineOrder.objects.create(
+            full_total=Decimal(total),
+            total=Decimal(total),
+            status=OnlineOrder.Status.AWAITING_PAYMENT,
+            payment_reference=reference,
+        )
+        return order
+
+    def _post(self, body, signature=None):
+        import json
+        from rest_framework.test import APIClient
+
+        raw = json.dumps(body)
+        if signature is None:
+            signature = self._sign(raw)
+        return APIClient().post(
+            self.URL, raw, content_type='application/json',
+            HTTP_X_PAYSTACK_SIGNATURE=signature,
+        )
+
+    @staticmethod
+    def _sign(raw):
+        import hashlib
+        import hmac
+        from django.conf import settings
+        secret = getattr(settings, 'PAYSTACK_SECRET_KEY', 'test-secret')
+        return hmac.new(
+            secret.encode(), raw.encode(), hashlib.sha512,
+        ).hexdigest()
+
+    def _event(self, reference='ORD-TEST-REF-1', amount=56875):
+        """Paystack sends amounts in the smallest unit — pesewas."""
+        return {
+            'event': 'charge.success',
+            'data': {
+                'reference': reference,
+                'amount': amount,
+                'status': 'success',
+                'channel': 'mobile_money',
+                'id': 998877,
+            },
+        }
+
+    # ── The signature ──────────────────────────────────────────────
+
+    def test_an_unsigned_event_is_refused(self):
+        """
+        Without this, anyone who finds the URL can mark orders paid.
+        """
+        order = self._order()
+        response = self._post(self._event(), signature='not-a-signature')
+
+        self.assertEqual(response.status_code, 401)
+        order.refresh_from_db()
+        self.assertFalse(order.is_paid)
+
+    def test_a_signed_event_marks_the_order_paid(self):
+        order = self._order()
+        response = self._post(self._event())
+
+        self.assertEqual(response.status_code, 200, response.content)
+        order.refresh_from_db()
+        self.assertTrue(order.is_paid)
+        self.assertEqual(order.status, OnlineOrder.Status.PAID)
+
+    # ── The money ──────────────────────────────────────────────────
+
+    def test_the_fee_and_the_net_are_recorded(self):
+        order = self._order('568.75')
+        self._post(self._event())
+
+        order.refresh_from_db()
+        self.assertEqual(order.total, Decimal('568.75'))
+        self.assertEqual(order.payment_fee, Decimal('11.09'))
+        self.assertEqual(order.net_received, Decimal('557.66'))
+
+    def test_an_amount_that_does_not_match_the_order_is_refused(self):
+        """
+        The event says what was paid. If it is not what the order says,
+        something is wrong and nobody should be printing a banner.
+        """
+        order = self._order('568.75')
+        response = self._post(self._event(amount=1000))
+
+        self.assertEqual(response.status_code, 400)
+        order.refresh_from_db()
+        self.assertFalse(order.is_paid)
+
+    # ── Arriving twice ─────────────────────────────────────────────
+
+    def test_the_same_event_twice_pays_the_order_once(self):
+        """
+        Paystack retries. A duplicate must not count the money twice.
+        """
+        order = self._order()
+        first = self._post(self._event())
+        second = self._post(self._event())
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+
+        order.refresh_from_db()
+        self.assertEqual(order.payment_fee, Decimal('11.09'))
+        self.assertEqual(
+            PaystackEvent.objects.filter(reference='ORD-TEST-REF-1').count(), 1,
+        )
+
+    # ── Everything else ────────────────────────────────────────────
+
+    def test_an_unknown_reference_is_acknowledged_not_retried(self):
+        """
+        A 200 with nothing done. Refusing would make Paystack retry an
+        event that will never match anything.
+        """
+        response = self._post(self._event(reference='ORD-NOBODY'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_an_event_we_do_not_act_on_is_acknowledged(self):
+        order = self._order()
+        body = self._event()
+        body['event'] = 'charge.failed'
+        response = self._post(body)
+
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertFalse(order.is_paid)

@@ -96,6 +96,13 @@ class DailySalesSheet(AuditModel):
         max_digits=12, decimal_places=2, default=0,
         help_text='Paid through Print Octos — earned by the branch, never in its till',
     )
+    total_payment_fees   = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text=(
+            'What the payment provider took. total_online is the gross, '
+            'so the day still reconciles against the bank.'
+        ),
+    )
     total_credit_issued   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_credit_settled  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_refunds        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
