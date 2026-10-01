@@ -1775,3 +1775,56 @@ class FileCheckTests(JobsFixtureMixin, TestCase):
         for check in result['checks']:
             self.assertIn(check['verdict'], ('fine', 'warn', 'refuse'))
             self.assertTrue(check['message'])
+
+class LineItemPageReconciliationTests(JobsFixtureMixin, TestCase):
+    """
+    pages lives in two places: the line item's own column and, once the
+    spec form existed, inside specifications. The form sent it to the
+    spec and the price was taken from the column, which stayed at 1.
+
+    Three jobs were undercharged in a single morning — 10 copies of a
+    two-page document billed as 10 single pages — before anyone noticed
+    the cashier's figure was lower than the one recorded.
+    """
+
+    def _job(self):
+        return Job.objects.create(
+            branch=self.branch, job_type='INSTANT',
+            status=Job.PENDING_PAYMENT, title='Page reconciliation',
+            intake_by=self.attendant, estimated_cost=Decimal('0.00'),
+            daily_sheet=self.sheet,
+        )
+
+    def _line(self, **kwargs):
+        from apps.jobs.models import JobLineItem
+        defaults = dict(
+            job=self._job(), service=self.service,
+            quantity=1, pages=1,
+            unit_price=Decimal('1.00'), line_total=Decimal('1.00'),
+            position=0,
+        )
+        defaults.update(kwargs)
+        return JobLineItem.objects.create(**defaults)
+
+    def test_a_spec_page_count_reaches_the_column(self):
+        line = self._line(specifications={'pages': 4})
+        line.refresh_from_db()
+        self.assertEqual(line.pages, 4)
+
+    def test_a_spec_page_count_sent_as_text_still_counts(self):
+        """The form sends form values, and a number typed into one is a
+        string until something makes it otherwise."""
+        line = self._line(specifications={'pages': '2'})
+        line.refresh_from_db()
+        self.assertEqual(line.pages, 2)
+
+    def test_a_line_with_no_page_spec_keeps_its_column(self):
+        """Scanning sets pages directly and carries no spec at all."""
+        line = self._line(pages=12, specifications={})
+        line.refresh_from_db()
+        self.assertEqual(line.pages, 12)
+
+    def test_a_nonsense_page_spec_is_ignored_rather_than_obeyed(self):
+        line = self._line(pages=3, specifications={'pages': 'two'})
+        line.refresh_from_db()
+        self.assertEqual(line.pages, 3)

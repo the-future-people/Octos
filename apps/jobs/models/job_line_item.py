@@ -107,11 +107,37 @@ class JobLineItem(AuditModel):
             f"{self.job.job_number} — "
             f"{self.service.name} × {self.quantity} = GHS {self.line_total}"
         )
-
     def save(self, *args, **kwargs):
+        self._reconcile_pages()
         if not self.label:
             self.label = self._build_label()
         super().save(*args, **kwargs)
+
+    def _reconcile_pages(self):
+        """
+        The spec's page count wins over the column.
+
+        pages lives in two places — this column and, for any service
+        whose spec_template declares it, inside specifications. The New
+        Job form sends it to the spec; pricing reads the column. For one
+        morning they disagreed, and every multi-page job was charged as
+        a single page: ten copies of a two-page document billed as ten
+        single sheets.
+
+        Reconciled here rather than in each of the four places a line
+        item is created, because the fifth would have been missed too.
+        """
+        spec_pages = (self.specifications or {}).get('pages')
+        if spec_pages in (None, ''):
+            return
+        try:
+            pages = int(spec_pages)
+        except (TypeError, ValueError):
+            # A spec value that is not a number says nothing about the
+            # page count. The column stands.
+            return
+        if pages > 0:
+            self.pages = pages
 
     def _build_label(self) -> str:
         """
