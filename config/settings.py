@@ -70,6 +70,10 @@ LOCAL_APPS = [
     'apps.notifications',
     'apps.analytics',
     'apps.personal_notes',
+    # The public-facing side. Imports from jobs, customers and finance;
+    # nothing imports back, so the storefront stays separable from the
+    # staff platform it sits in front of.
+    'apps.storefront',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
