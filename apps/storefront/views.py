@@ -32,7 +32,7 @@ import hashlib
 import hmac
 import json
 import logging
-
+from apps.storefront.services import paystack
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -520,3 +520,93 @@ class PaystackWebhookView(APIView):
             return False
         expected = hmac.new(secret.encode(), raw, hashlib.sha512).hexdigest()
         return hmac.compare_digest(expected, given)
+
+"""
+Append this class to apps/storefront/views.py.
+
+It needs one more import at the top, alongside the others:
+
+    from apps.storefront.services import paystack
+
+Imported as a module rather than as its functions, so a test can replace
+`paystack.initialise` and the view picks up the replacement.
+"""
+
+
+class OrderPayView(APIView):
+    """
+    POST /api/v1/storefront/orders/<order_number>/pay/
+
+    Hands the order to Paystack and returns somewhere to send the
+    customer. Nothing about the payment itself happens on our pages:
+    cards, mobile money and bank all live on their checkout.
+
+    This does not mark anything paid. The customer arriving at the
+    success page proves nothing — they may have closed the tab, or
+    reached it without paying. The webhook is what settles that.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def post(self, request, order_number):
+        order = _order_or_404(order_number, request.data.get('token'))
+
+        if order.is_paid or order.status == OnlineOrder.Status.PAID:
+            return Response(
+                {'detail': 'This order has already been paid for.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if not order.lead_id:
+            return Response(
+                {'detail': 'Tell us who you are first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if order.total <= 0:
+            return Response(
+                {'detail': 'There is nothing on this order yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Paystack wants an email. Most of our customers give a phone
+        # number and nothing else, so one is derived from it — the
+        # receipt that matters is the one we send by SMS.
+        email = (request.data.get('email') or '').strip()
+        if not email:
+            digits = ''.join(c for c in order.lead.phone if c.isdigit())
+            email = f'{digits}@customers.farhatpress.com'
+
+        result = paystack.initialise(
+            reference=order.order_number,
+            amount_minor=paystack.to_minor(order.total),
+            email=email,
+            callback_url=request.data.get('callback_url') or None,
+            metadata={
+                'order_number': order.order_number,
+                'customer': order.lead.first_name,
+                'phone': order.lead.phone,
+            },
+        )
+
+        if not result.get('success'):
+            # The order is left exactly as it was, so the customer can
+            # try again without rebuilding anything.
+            return Response(
+                {'detail': result.get('error', 'Could not start the payment.')},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        order.payment_reference = result.get('reference') or order.order_number
+        order.status = OnlineOrder.Status.AWAITING_PAYMENT
+        order.save(update_fields=[
+            'payment_reference', 'status', 'updated_at',
+        ])
+
+        return Response({
+            'authorization_url': result.get('authorization_url'),
+            'reference': order.payment_reference,
+            'amount': f'{Decimal(order.total):.2f}',
+        })

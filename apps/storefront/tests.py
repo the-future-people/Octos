@@ -679,3 +679,114 @@ class PaystackWebhookTests(TestCase):
         self.assertEqual(response.status_code, 200)
         order.refresh_from_db()
         self.assertFalse(order.is_paid)
+
+class PaymentInitTests(TestCase):
+    """
+    Handing an order to Paystack.
+
+    The reference sent is ours, so the webhook can name the order the
+    money belongs to. Paystack returns a URL and the customer is sent
+    there — nothing about the payment happens on our pages.
+    """
+
+    URL_FOR = '/api/v1/storefront/orders/{}/pay/'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _order(self, total='568.75', with_lead=True):
+        order = OnlineOrder.objects.create(
+            full_total=Decimal(total), total=Decimal(total),
+        )
+        if with_lead:
+            order.lead = Lead.objects.create(
+                phone='0244999888', first_name='Ama',
+            )
+            order.save()
+        return order
+
+    def _pay(self, order, **extra):
+        payload = {'token': order.access_token}
+        payload.update(extra)
+        return self._client().post(
+            self.URL_FOR.format(order.order_number), payload, format='json',
+        )
+
+    def test_starting_a_payment_returns_somewhere_to_send_the_customer(self):
+        from unittest.mock import patch
+
+        order = self._order()
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {
+                'success': True,
+                'authorization_url': 'https://checkout.paystack.com/abc123',
+                'reference': order.order_number,
+            }
+            response = self._pay(order, email='ama@example.com')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn('checkout.paystack.com', response.data['authorization_url'])
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, OnlineOrder.Status.AWAITING_PAYMENT)
+        self.assertTrue(order.payment_reference)
+
+    def test_the_reference_sent_is_ours(self):
+        """
+        It is what comes back on the webhook, so it has to name the
+        order without a lookup table in between.
+        """
+        from unittest.mock import patch
+
+        order = self._order()
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {'success': True, 'authorization_url': 'https://x/y',
+                                 'reference': order.order_number}
+            self._pay(order, email='ama@example.com')
+
+        sent = init.call_args.kwargs
+        self.assertEqual(sent['reference'], order.order_number)
+        # Paystack takes the smallest unit — pesewas.
+        self.assertEqual(sent['amount_minor'], 56875)
+
+    def test_an_empty_order_cannot_be_paid_for(self):
+        order = self._order(total='0.00')
+        response = self._pay(order, email='ama@example.com')
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_order_with_nobody_on_it_cannot_be_paid_for(self):
+        order = self._order(with_lead=False)
+        response = self._pay(order, email='ama@example.com')
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_order_already_paid_is_not_sent_again(self):
+        from django.utils import timezone
+
+        order = self._order()
+        order.status = OnlineOrder.Status.PAID
+        order.paid_at = timezone.now()
+        order.save()
+
+        response = self._pay(order, email='ama@example.com')
+        self.assertEqual(response.status_code, 409)
+
+    def test_a_refusal_from_paystack_leaves_the_order_alone(self):
+        """
+        Their outage is not our order's problem. It stays as it was and
+        the customer can try again.
+        """
+        from unittest.mock import patch
+
+        order = self._order()
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {'success': False, 'error': 'Service unavailable'}
+            response = self._pay(order, email='ama@example.com')
+
+        self.assertEqual(response.status_code, 502)
+        order.refresh_from_db()
+        self.assertEqual(order.status, OnlineOrder.Status.DRAFT)
