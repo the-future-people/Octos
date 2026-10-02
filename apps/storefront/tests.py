@@ -791,6 +791,108 @@ class PaymentInitTests(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, OnlineOrder.Status.DRAFT)
 
+    def _service_needing_a_file(self):
+        from apps.jobs.models import Service, PricingRule
+        service = Service.objects.create(
+            name='Pay Flexy', code='PAYFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_design=False, requires_file_upload=True, is_active=True,
+        )
+        PricingRule.objects.create(
+            service=service, branch=None,
+            base_price=Decimal('3.25'), color_multiplier=Decimal('1.00'),
+            minimum_price=Decimal('10.00'), is_active=True,
+        )
+        return service
+
+    def _order_for(self, service, specs=None):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        created = client.post('/api/v1/storefront/orders/', {}, format='json').data
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': service.id, 'quantity': 1,
+                    'specifications': specs or {'width_in': 72, 'height_in': 36},
+                }],
+            },
+            format='json',
+        )
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        order.lead = Lead.objects.create(phone='0244777900', first_name='Ama')
+        order.save()
+        return order
+
+    def test_a_job_needing_artwork_cannot_be_paid_for_without_it(self):
+        """
+        A branch cannot print what it has not been sent. Letting this
+        through means an order arrives on the floor with nothing on it,
+        and the money already taken.
+        """
+        order = self._order_for(self._service_needing_a_file())
+        response = self._pay(order, email='ama@example.com')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('artwork', response.data['detail'].lower())
+
+    def test_a_refused_file_does_not_count_as_artwork(self):
+        """A file we have already said we cannot print is not a file."""
+        from apps.storefront.models import OrderFile
+
+        order = self._order_for(self._service_needing_a_file())
+        OrderFile.objects.create(
+            order=order, original_filename='screenshot.jpg',
+            content_type='image/jpeg', verdict='refuse',
+        )
+        response = self._pay(order, email='ama@example.com')
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_accepted_warning_is_enough_to_pay(self):
+        """
+        Warn proceeds. The customer was told it would print softly and
+        said carry on, and that acceptance is on the record.
+        """
+        from unittest.mock import patch
+        from apps.storefront.models import OrderFile
+
+        order = self._order_for(self._service_needing_a_file())
+        OrderFile.objects.create(
+            order=order, original_filename='soft.jpg',
+            content_type='image/jpeg', verdict='warn', warning_accepted=True,
+        )
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {'success': True, 'authorization_url': 'https://x/y',
+                                 'reference': order.order_number}
+            response = self._pay(order, email='ama@example.com')
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_a_service_needing_no_file_is_unaffected(self):
+        """Photocopying brings its own paper to the counter."""
+        from unittest.mock import patch
+        from apps.jobs.models import Service, PricingRule
+
+        service = Service.objects.create(
+            name='Pay Typing', code='PAYTYPE',
+            category='INSTANT', unit='PER_PAGE',
+            requires_design=False, requires_file_upload=False, is_active=True,
+        )
+        PricingRule.objects.create(
+            service=service, branch=None,
+            base_price=Decimal('20.00'), color_multiplier=Decimal('1.00'),
+            is_active=True,
+        )
+        order = self._order_for(service, specs={'pages': 5})
+
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {'success': True, 'authorization_url': 'https://x/y',
+                                 'reference': order.order_number}
+            response = self._pay(order, email='ama@example.com')
+
+        self.assertEqual(response.status_code, 200, response.content)
+
 class OrderFileTests(TestCase):
     """
     Artwork arriving before there is a job to attach it to.

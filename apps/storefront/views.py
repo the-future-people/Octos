@@ -566,12 +566,15 @@ class OrderPayView(APIView):
                 {'detail': 'Tell us who you are first.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         if order.total <= 0:
             return Response(
                 {'detail': 'There is nothing on this order yet.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        missing = _artwork_missing(order)
+        if missing:
+            return Response({'detail': missing}, status=status.HTTP_400_BAD_REQUEST)
 
         # Paystack wants an email. Most of our customers give a phone
         # number and nothing else, so one is derived from it — the
@@ -773,3 +776,35 @@ def _file_payload(record):
         'checks': record.checks,
         'warning_accepted': record.warning_accepted,
     }
+
+def _artwork_missing(order):
+    """
+    Whether this order still needs a file before it can be paid for.
+
+    A branch cannot print what it has not been sent. Taking the money
+    first means an order reaches the floor with nothing on it, and the
+    conversation that follows starts with the customer already out of
+    pocket.
+
+    A refused file is not a file: we have already said we cannot print
+    it. A warned one is, as long as the customer said carry on — that
+    acceptance is on the record for the coordinator to see.
+    """
+    needs_file = False
+    for line in (order.line_items or []):
+        service = Service.objects.filter(pk=line.get('service')).first()
+        if service and service.requires_file_upload:
+            needs_file = True
+            break
+
+    if not needs_file:
+        return None
+
+    record = order.files.first()
+    if record is None:
+        return 'Send us your artwork before paying.'
+    if record.verdict == 'refuse':
+        return 'We can’t print the file you sent. Send another before paying.'
+    if record.verdict == 'warn' and not record.warning_accepted:
+        return 'Have a look at the note on your file before paying.'
+    return None
