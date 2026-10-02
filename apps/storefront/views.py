@@ -39,7 +39,7 @@ from django.utils import timezone
 from rest_framework.parsers import MultiPartParser
 from apps.jobs.services.file_checks import check_file
 from apps.jobs.services.file_metadata import extract
-
+from rest_framework.parsers import JSONParser, MultiPartParser
 from apps.storefront.services.fees import split_payment
 
 logger = logging.getLogger(__name__)
@@ -653,7 +653,10 @@ class OrderFileView(APIView):
     authentication_classes = []
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'storefront'
-    parser_classes = [MultiPartParser]
+    # Multipart for the upload, JSON for the acceptance — that one
+    # carries no file, and refusing it over a content type is a 415 the
+    # customer reads as the page being broken.
+    parser_classes = [MultiPartParser, JSONParser]
 
     def post(self, request, order_number):
         order = _order_or_404(order_number, request.data.get('token'))
