@@ -18,7 +18,7 @@ the specification, through the same function the counter uses.
 
 from decimal import Decimal
 import random
-from apps.storefront.models import Lead, OnlineOrder, PaystackEvent
+from apps.storefront.models import Lead, OnlineOrder, OrderFile, PaystackEvent
 from apps.storefront.services.sms import send_sms
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -36,6 +36,9 @@ from apps.storefront.services import paystack
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from rest_framework.parsers import MultiPartParser
+from apps.jobs.services.file_checks import check_file
+from apps.jobs.services.file_metadata import extract
 
 from apps.storefront.services.fees import split_payment
 
@@ -387,7 +390,6 @@ Imports needed at the top, alongside the ones already there:
     from django.conf import settings
     from django.db import IntegrityError, transaction
     from django.utils import timezone
-    from apps.storefront.models import Lead, OnlineOrder, PaystackEvent
     from apps.storefront.services.fees import split_payment
 
     logger = logging.getLogger(__name__)
@@ -610,3 +612,164 @@ class OrderPayView(APIView):
             'reference': order.payment_reference,
             'amount': f'{Decimal(order.total):.2f}',
         })
+
+"""
+Append this class to apps/storefront/views.py.
+
+It needs these imports at the top, alongside the ones already there:
+
+    from rest_framework.parsers import MultiPartParser
+    from apps.storefront.models import Lead, OnlineOrder, OrderFile, PaystackEvent
+    from apps.jobs.services.file_checks import check_file
+    from apps.jobs.services.file_metadata import extract
+"""
+
+
+# A hard ceiling, refused before anything is read. Print artwork is
+# large, and this is generous for one file — but not a door left open.
+MAX_UPLOAD_BYTES = 40 * 1024 * 1024
+
+
+class OrderFileView(APIView):
+    """
+    POST /api/v1/storefront/orders/<order_number>/file/
+    GET  /api/v1/storefront/orders/<order_number>/file/?token=…
+
+    Artwork, measured and judged against what was ordered.
+
+    The verdict belongs to the pairing, not to the file: 1080 pixels is
+    good artwork on a business card and unprintable across six feet. So
+    the GET rejudges rather than returning what was stored — a customer
+    who makes their banner bigger after uploading must be told.
+
+    Refuse blocks the order. Warn proceeds, and the acceptance is kept,
+    so the coordinator sees the customer was told rather than finding
+    the problem himself.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+    parser_classes = [MultiPartParser]
+
+    def post(self, request, order_number):
+        order = _order_or_404(order_number, request.data.get('token'))
+
+        if not order.is_open:
+            return Response(
+                {'detail': 'This order has been paid for.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': 'No file was sent.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if upload.size > MAX_UPLOAD_BYTES:
+            return Response(
+                {'detail': (
+                    'That file is too large to send over the web. Bring it '
+                    'to the branch on a flash drive, or send a smaller export.'
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # One file per order. A customer who sends better artwork has
+        # replaced the first, and the floor should never have to guess
+        # which of two to print.
+        for existing in order.files.all():
+            existing.file.delete(save=False)
+            existing.delete()
+
+        record = OrderFile.objects.create(
+            order=order,
+            file=upload,
+            original_filename=upload.name,
+            content_type=upload.content_type or '',
+        )
+
+        # Measures and saves. Never raises: a file that cannot be read is
+        # still a file that arrived, and the upload must not fail because
+        # the bytes were odd.
+        extract(record)
+        record.refresh_from_db()
+
+        verdict = _judge(order, record)
+        record.verdict = verdict['verdict']
+        record.checks = verdict['checks']
+        record.save(update_fields=['verdict', 'checks', 'updated_at'])
+
+        return Response(_file_payload(record), status=status.HTTP_201_CREATED)
+
+    def get(self, request, order_number):
+        order = _order_or_404(order_number, request.query_params.get('token'))
+        record = order.files.first()
+        if record is None:
+            return Response({'detail': 'No file on this order yet.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        # Judged again, not read back. The order may have changed size
+        # since the file arrived.
+        verdict = _judge(order, record)
+        if verdict['verdict'] != record.verdict:
+            record.verdict = verdict['verdict']
+            record.checks = verdict['checks']
+            record.save(update_fields=['verdict', 'checks', 'updated_at'])
+
+        return Response(_file_payload(record))
+
+    def patch(self, request, order_number):
+        """Accepting a warning, so the order can carry on."""
+        order = _order_or_404(order_number, request.data.get('token'))
+        record = order.files.first()
+        if record is None:
+            return Response({'detail': 'No file on this order yet.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        record.warning_accepted = bool(request.data.get('warning_accepted'))
+        record.save(update_fields=['warning_accepted', 'updated_at'])
+        return Response(_file_payload(record))
+
+
+def _judge(order, record):
+    """
+    The file against the line it belongs to.
+
+    With no line yet, only the file itself can be judged — format and
+    whether it opens. The resolution check needs a size to be judged
+    against, and inventing one would answer a question nobody asked.
+    """
+    line = (order.line_items or [None])[0]
+    specs = (line or {}).get('specifications') or {}
+
+    width_in = specs.get('width_in')
+    height_in = specs.get('height_in')
+
+    return check_file(
+        metadata_state=record.metadata_state,
+        content_type=record.content_type,
+        width_px=record.width_px,
+        height_px=record.height_px,
+        width_mm=record.width_mm,
+        height_mm=record.height_mm,
+        page_count=record.page_count,
+        colour_mode=record.colour_mode,
+        pdf_images=record.pdf_images,
+        ordered_width_in=width_in,
+        ordered_height_in=height_in,
+        ordered_pages=specs.get('pages'),
+    )
+
+
+def _file_payload(record):
+    return {
+        'filename': record.original_filename,
+        'size_kb': round(record.size_bytes / 1024, 1) if record.size_bytes else None,
+        'width_px': record.width_px,
+        'height_px': record.height_px,
+        'page_count': record.page_count,
+        'verdict': record.verdict,
+        'checks': record.checks,
+        'warning_accepted': record.warning_accepted,
+    }

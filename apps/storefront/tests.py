@@ -790,3 +790,187 @@ class PaymentInitTests(TestCase):
         self.assertEqual(response.status_code, 502)
         order.refresh_from_db()
         self.assertEqual(order.status, OnlineOrder.Status.DRAFT)
+
+class OrderFileTests(TestCase):
+    """
+    Artwork arriving before there is a job to attach it to.
+
+    The checks need the ordered size: the same file is good artwork on a
+    business card and unusable on a six-foot banner. So a file is judged
+    against the line it belongs to, and judged again when that line
+    changes — resizing a banner can turn a fine file into a refused one.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+        from apps.jobs.models import Service, PricingRule
+
+        cls.branch = Branch.objects.create(
+            name='File Branch', code='FLB',
+            is_headquarters=False, is_regional_hq=False,
+            address='1 File Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.flexy = Service.objects.create(
+            name='File Flexy', code='FLFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_design=False, requires_file_upload=True, is_active=True,
+            spec_template=[
+                {'key': 'width_in', 'label': 'Width', 'type': 'number',
+                 'required': True, 'default': 72, 'min': 6, 'unit': 'in'},
+                {'key': 'height_in', 'label': 'Height', 'type': 'number',
+                 'required': True, 'default': 36, 'min': 6, 'unit': 'in'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None,
+            base_price=Decimal('3.25'), color_multiplier=Decimal('1.00'),
+            minimum_price=Decimal('10.00'), is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _order_with_line(self, width=72, height=36):
+        client = self._client()
+        created = client.post('/api/v1/storefront/orders/', {}, format='json').data
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id, 'quantity': 1,
+                    'specifications': {'width_in': width, 'height_in': height},
+                }],
+            },
+            format='json',
+        )
+        return created
+
+    def _image(self, width_px, height_px, name='artwork.jpg'):
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        buf = io.BytesIO()
+        Image.new('RGB', (width_px, height_px), (200, 30, 30)).save(buf, 'JPEG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/jpeg')
+
+    def _upload(self, created, upload):
+        return self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/file/",
+            {'token': created['access_token'], 'file': upload},
+            format='multipart',
+        )
+
+    # ── Getting a file on ──────────────────────────────────────────
+
+    def test_a_good_file_is_accepted_and_measured(self):
+        created = self._order_with_line()
+        response = self._upload(created, self._image(7200, 3600))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['verdict'], 'fine')
+        self.assertEqual(response.data['width_px'], 7200)
+
+    def test_uploading_needs_the_orders_token(self):
+        created = self._order_with_line()
+        response = self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/file/",
+            {'file': self._image(1200, 600)},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ── The verdicts ───────────────────────────────────────────────
+
+    def test_a_screenshot_on_a_banner_is_refused(self):
+        """
+        The case these checks exist for. 1080px across six feet is 15
+        dpi, and nobody should be printing it.
+        """
+        created = self._order_with_line(width=72, height=36)
+        response = self._upload(created, self._image(1080, 540))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['verdict'], 'refuse')
+
+    def test_every_check_comes_back_not_just_the_failing_one(self):
+        created = self._order_with_line()
+        response = self._upload(created, self._image(1080, 540))
+
+        names = {c['name'] for c in response.data['checks']}
+        self.assertIn('readable', names)
+        self.assertIn('resolution', names)
+        for check in response.data['checks']:
+            self.assertTrue(check['message'])
+
+    def test_a_format_we_cannot_print_is_refused(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        created = self._order_with_line()
+        bad = SimpleUploadedFile('logo.cdr', b'not really a drawing',
+                                 content_type='application/x-coreldraw')
+        response = self._upload(created, bad)
+
+        self.assertEqual(response.data['verdict'], 'refuse')
+        self.assertIn('pdf', response.data['checks'][0]['message'].lower())
+
+    # ── Judged again when the size changes ─────────────────────────
+
+    def test_the_same_file_is_rejudged_when_the_banner_grows(self):
+        """
+        A file that was fine at card size is not fine at six feet. The
+        verdict belongs to the pairing, not to the file.
+        """
+        created = self._order_with_line(width=6, height=4)
+        first = self._upload(created, self._image(1800, 1200))
+        self.assertEqual(first.data['verdict'], 'fine')
+
+        client = self._client()
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id, 'quantity': 1,
+                    'specifications': {'width_in': 144, 'height_in': 96},
+                }],
+            },
+            format='json',
+        )
+
+        again = self._client().get(
+            f"/api/v1/storefront/orders/{created['order_number']}/file/",
+            {'token': created['access_token']},
+        )
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertEqual(again.data['verdict'], 'refuse')
+
+    # ── Replacing one ──────────────────────────────────────────────
+
+    def test_a_second_upload_replaces_the_first(self):
+        """
+        A customer who sends better artwork has one file on the order,
+        not two. The floor should never have to guess which to print.
+        """
+        from apps.storefront.models import OrderFile
+
+        created = self._order_with_line()
+        self._upload(created, self._image(1080, 540))
+        self._upload(created, self._image(7200, 3600))
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(OrderFile.objects.filter(order=order).count(), 1)
+        self.assertEqual(order.files.first().width_px, 7200)
