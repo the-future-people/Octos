@@ -43,6 +43,15 @@ class MachineType(AuditModel):
             'constrained by different things.'
         ),
     )
+    max_width_mm = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text=(
+            'Widest material this class of device takes, in millimetres. '
+            'Large format is measured by roll width rather than sheet '
+            'size, and routing compares a job against it — a banner wider '
+            'than the machine cannot be printed on it at all.'
+        ),
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta(AuditModel.Meta):
