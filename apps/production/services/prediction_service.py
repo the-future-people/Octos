@@ -172,8 +172,21 @@ class PredictionService:
 
                     observed = self._observed_per_unit(route.station)
                     per_unit = observed if observed is not None else float(route.minutes_per_unit)
-
                     per_station[code] += float(route.setup_minutes) + per_unit * units
+
+        # Capacity is people, not machines. Two trained operators at the
+        # printer means two jobs run at once and the queue there clears
+        # twice as fast; one person at finishing means everything funnels
+        # through them however fast the printing was.
+        from apps.production.models import BranchStation, Station
+
+        for code in per_station:
+            station = Station.objects.filter(code=code).first()
+            if station is None:
+                continue
+            people = BranchStation.people_at(self.branch, station)
+            if people > 1:
+                per_station[code] /= people
 
         # The busiest station this job touches, not the sum.
         return max(per_station.values()) if per_station else 0.0
