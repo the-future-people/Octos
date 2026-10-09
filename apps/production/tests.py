@@ -400,6 +400,50 @@ class PredictionTests(TimingFixtureMixin, TestCase):
         # 2 setup + 2.50 × 3 = 9.5
         self.assertAlmostEqual(p.own_minutes, 9.5, places=1)
 
+    def test_two_people_at_a_station_clear_its_queue_faster(self):
+        """
+        Capacity is people, not machines. Two trained operators at the
+        printer means two jobs run at once — and a second machine with
+        nobody to run it adds nothing at all.
+        """
+        from apps.production.models import BranchStation
+
+        self._job([(self.printing, 1000, 1)], work_state='RECEIVED')
+        self._job([(self.printing, 1000, 1)], work_state='RECEIVED')
+
+        alone = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+        # Without this the comparison below would hold on two zeros and
+        # prove nothing.
+        self.assertGreater(alone.queue_minutes, 0)
+
+        BranchStation.objects.create(
+            branch=self.branch, station=self.print_st, people=2,
+            notes='Second operator trained.',
+        )
+        together = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+
+        self.assertAlmostEqual(
+            together.queue_minutes, alone.queue_minutes / 2, places=1,
+        )
+
+    def test_one_person_is_assumed_where_nothing_is_recorded(self):
+        """
+        A station with no capacity row is one person. The common case
+        should not need a row to say so, and zero would divide the
+        queue by nothing.
+        """
+        from apps.production.models import BranchStation
+
+        self._job([(self.printing, 1000, 1)], work_state='RECEIVED')
+        implied = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+
+        BranchStation.objects.create(
+            branch=self.branch, station=self.print_st, people=1,
+        )
+        stated = self._predict([(self.printing, 10, 1)], self._at(9, 0))
+
+        self.assertEqual(implied.queue_minutes, stated.queue_minutes)
+
 
 class MachineStateTests(TimingFixtureMixin, TestCase):
     """
@@ -537,42 +581,3 @@ class MachineStateTests(TimingFixtureMixin, TestCase):
 
         with self.assertRaises(PermissionError):
             self.svc.mark_down(self.machine, reason='PAPER_JAM', actor=cashier)
-
-    def test_two_people_at_a_station_clear_its_queue_faster(self):
-        """
-        Capacity is people, not machines. Two trained operators at the
-        printer means two jobs run at once; a second machine with
-        nobody to run it adds nothing.
-        """
-        from apps.production.models import BranchStation
-
-        self._queued_job()
-        self._queued_job()
-
-        alone = PredictionService(self.branch).predict(self._lines()).total_minutes
-
-        BranchStation.objects.create(
-            branch=self.branch, station=self.print_st, people=2,
-            notes='Second operator trained.',
-        )
-        together = PredictionService(self.branch).predict(self._lines()).total_minutes
-
-        self.assertLess(together, alone)
-
-    def test_one_person_is_assumed_where_nothing_is_recorded(self):
-        """
-        A station with no capacity row is one person. The common case
-        should not need a row to say so, and zero would divide the
-        queue by nothing.
-        """
-        from apps.production.models import BranchStation
-
-        self._queued_job()
-        implied = PredictionService(self.branch).predict(self._lines()).total_minutes
-
-        BranchStation.objects.create(
-            branch=self.branch, station=self.print_st, people=1,
-        )
-        stated = PredictionService(self.branch).predict(self._lines()).total_minutes
-
-        self.assertEqual(implied, stated)
