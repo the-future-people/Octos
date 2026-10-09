@@ -50,6 +50,12 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
 
     branches = Branch.objects.filter(is_active=True).select_related('region')
 
+    # A service nobody has routed through the floor is not a fact about
+    # any one branch, so it is said once rather than once per branch.
+    unrouted = _unrouted(services)
+    if unrouted:
+        return {'options': [], 'refusals': unrouted}
+
     for branch in branches:
         problem = _why_not(branch, services, width_mm)
         if problem:
@@ -203,3 +209,23 @@ def _distance(branch, customer_location):
     dx = (lon2 - lon1) * METRES_PER_DEGREE * math.cos(math.radians((lat1 + lat2) / 2))
 
     return round(math.hypot(dx, dy))
+
+def _unrouted(services):
+    """
+    Services with no route through the floor at all.
+
+    Nothing to do with which branch: until someone says which stations
+    the work passes through and how long each takes, no branch can be
+    asked to time it.
+    """
+    from apps.production.models import ServiceStation
+
+    missing = []
+    for service in services:
+        if not ServiceStation.objects.filter(service=service).exists():
+            missing.append({
+                'branch': None,
+                'branch_name': None,
+                'reason': f'We can’t take {service.name} online yet.',
+            })
+    return missing
