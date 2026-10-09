@@ -588,3 +588,147 @@ millisecond.
   resolution reader, so some files report fewer images than they contain.
   Better than a wrong number, but it means `dpi` can be absent on a file
   that does have raster content.
+
+# Decisions — 8 and 9 October 2026
+
+Append to `docs/decisions.md`.
+
+---
+
+## The floor lives in a seed command, not only in production
+
+5 stations, 6 machine types and 49 service routes with their timings existed
+on the production database and nowhere else — set up by hand, in no
+migration and no command. A rebuilt database would have lost all of it, and
+the local database never had any of it, so nothing touching the floor could
+be exercised outside production.
+
+`seed_floor` now holds it. `--prune` is off by default: a route added on the
+floor and not yet written down should not be destroyed by a careless run.
+
+Same class of problem as the six finance roles and `FLOW_COORDINATOR`.
+
+---
+
+## Capacity is people, not machines
+
+`BranchStation` holds how many people work a station at a branch. Two
+trained operators at the printer means two jobs run at once; a second
+machine with nobody to run it adds nothing.
+
+A missing row means one person. The common case should not need a row to
+say so, and zero would make the queue divide by nothing.
+
+Rejected: deriving it from who is clocked in. Truer, but it needs every
+member of staff tagged with the stations they work and the floor keeping
+that current — a habit nobody has yet. A number someone changes when they
+train a second operator is honest and is exercised from the first day.
+
+---
+
+## Width belongs to the machine, not the machine type
+
+First attempt put `max_width_mm` on `MachineType`, which forced a 6ft and a
+10ft printer to be different types. A service route then had to name each
+width separately, and a route saying "large format" ruled out a 10ft machine
+that could do the work perfectly well.
+
+Both are large format. The width is a fact about the individual machine.
+
+---
+
+## A banner is measured by its shorter side
+
+A 168 × 36 banner needs 36 inches of roll width, not 168 — it is fed with
+the short side across the roll and the length running off it. Reading the
+larger number would refuse nearly every banner Farhat sells.
+
+---
+
+## Branch choice belongs to the customer
+
+Octos narrows to the branches that can genuinely do the work today, and the
+customer picks among them. Two branches — one ready at four across town, one
+tomorrow round the corner — and only they know which matters.
+
+Like a rider choosing between a cheap car ten minutes away and a nearer one
+that costs more.
+
+A branch appears only when it can do the work: it has the machine, the
+machine is available, the material fits, and the branch is active. Not a low
+score — absent.
+
+There is no "we are not taking orders" switch. A branch that can do the work
+should not be able to quietly decline it; the refusal comes from Octos
+reading the floor.
+
+---
+
+## Refusals are sentences, and they are said once
+
+"Westland can print up to 1900mm wide. This job needs 2400mm" tells a
+customer what to change. An empty list tells them nothing.
+
+A service with no floor route is a fact about the service, not about any
+branch, so it is said once rather than once per branch — seven branches
+each saying the same thing reads as a system fault.
+
+---
+
+## The chosen branch is checked again on the way in
+
+The options were right when they were drawn, and a machine can go down
+between seeing the list and tapping it. Trusting the id alone would let an
+order land on a floor that cannot make it.
+
+Changing the size clears the chosen branch: a branch that could make a
+36-inch banner may not be able to make a 90-inch one.
+
+---
+
+## Payment refuses an order with no branch
+
+A job has to be made somewhere. Taking the money first means an order that
+belongs to no floor and a customer already charged.
+
+---
+
+## The promise is frozen, not recomputed
+
+`Job.estimated_ready_at` is stored at the moment it is made. Recomputing it
+on each read would make it agree with the current queue forever, and the
+question worth answering later is whether the promise was kept.
+
+`Job.work_started_at` records when someone actually began. An estimate
+missed because the job queued for a day is a different failure from one
+missed because the work took longer than thought, and only both timestamps
+tell them apart. Set once — a job reaching finishing has not started twice,
+and a resumed job began when it began.
+
+---
+
+## i3200 heads, 4 pass for flexy and 6 for SAV
+
+More passes means more ink layers, less banding, proportionally slower.
+A flexy banner read from across a road does not need 6 pass, and running it
+there would halve throughput for quality nobody sees. SAV ends up on a
+window or a vehicle at arm's length, so it gets 6.
+
+The manufacturer's figures assume a machine that never pauses. Real
+throughput is lower, which is what the setup minutes carry.
+
+---
+
+## `estimate.py` was deleted the day it was written
+
+A whole ready-time engine was built before anyone looked for
+`PredictionService`, which already existed, was already called from the
+coordinator board, and was better: it reads measured timings in preference
+to seeded ones, reports confidence, and takes the busiest station rather
+than the sum of all of them.
+
+The new one summed stations, which overstates the wait.
+
+Deleted. What survived from that morning was real: `BranchStation`,
+`max_width_mm`, the floor seed, and the flexy and SAV routes that had never
+existed.

@@ -422,3 +422,105 @@ on a public website, where two strangers can click in the same
 millisecond. The storefront uses a Postgres sequence instead.
 
 Receipts become a real risk the day two cashiers work one branch.
+
+# Lessons — 8 and 9 October 2026
+
+Append to `tasks/lessons.md`.
+
+---
+
+## Search for the thing by what it does, not by what you would call it
+
+A ready-time engine was written from scratch while `PredictionService`
+already existed, was already wired to the coordinator board, and was better
+than the replacement.
+
+Searching for "estimate" found nothing. Searching for "ready", "predict" or
+"when will it be done" would have found it in seconds.
+
+Before building anything that sounds like it might already exist, search for
+the **behaviour** across several words, and check whether anything calls it.
+This is the second time — `close_service.py` was the first.
+
+---
+
+## A dependency used only inside a mocked function is untested
+
+`requests` was never in `requirements.txt`. Every payment test mocked
+`paystack.initialise`, so the module's import line never ran, and the first
+real payment in production would have failed.
+
+Any module that reaches the outside world needs one test that simply
+imports it and checks its functions exist.
+
+---
+
+## A test can pass on two zeros
+
+`assertAlmostEqual(together, alone / 2)` holds when both are zero. Asserting
+that the thing being measured is non-zero first is what makes the comparison
+mean anything.
+
+Same shape as the "unknown payment method" test that stopped meaning
+anything once `ONLINE` existed.
+
+---
+
+## A test appended to a long file joins whichever class is last
+
+Three times now, a test meant for one class landed in another, where its
+helpers do not exist. Pasting into open space at the end of a file is the
+cause.
+
+Attach new tests by editing a method that is already in the right class —
+find its last test, and add after it in the same change.
+
+---
+
+## Django in Docker does not always reload `urls.py`
+
+An HTML 404 rather than DRF's JSON means the view was never reached. A
+registered route that still 404s is a container serving stale code:
+`docker-compose restart web`.
+
+---
+
+## A shared API client's content type breaks file uploads
+
+The storefront client sets `Content-Type: application/json` globally.
+A `FormData` body sent through it arrives with no fields at all — no token,
+so the order is not found, and the error is a 404 that looks like a missing
+route.
+
+Uploads bypass the shared client entirely.
+
+---
+
+## A file input does not fire when the same file is chosen twice
+
+`onChange` fires on change, and picking the same file is not one. Clearing
+`e.target.value` immediately after reading the file makes every pick count —
+without it, a customer who re-exports their artwork under the same name taps
+and nothing happens.
+
+---
+
+## A fixture with two helpers needs both fixing
+
+Adding a rule that payment requires a branch broke six tests. Fixing
+`_order_for` left `_order` untouched, and three stayed broken through
+another round.
+
+When a new requirement breaks tests, fix every helper that builds the
+object, not the first one found.
+
+---
+
+## Reading the catalogue is reading the business
+
+The machine catalogue gave real figures — 39 m²/h at 4 pass, not the 62.9
+headline, and a vinyl cutter that stops at 680mm so banners are hand-cut.
+Guessing those numbers would have produced plausible estimates that were
+wrong in a way nobody would have caught until customers complained.
+
+When a figure can be looked up, look it up.
