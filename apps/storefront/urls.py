@@ -14,6 +14,7 @@ urlpatterns = [
     path('orders/<str:order_number>/code/', views.OrderCodeView.as_view(), name='storefront-order-code'),
     path('orders/<str:order_number>/pay/', views.OrderPayView.as_view(), name='storefront-order-pay'),
     path('orders/<str:order_number>/file/', views.OrderFileView.as_view(), name='storefront-order-file'),
+    path('orders/<str:order_number>/branches/', views.OrderBranchesView.as_view(), name='storefront-order-branches'),
 
     path('orders/<str:order_number>/', views.OrderDetailView.as_view(), name='storefront-order-detail'),
 ]

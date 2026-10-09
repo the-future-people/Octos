@@ -41,6 +41,7 @@ from apps.jobs.services.file_checks import check_file
 from apps.jobs.services.file_metadata import extract
 from rest_framework.parsers import JSONParser, MultiPartParser
 from apps.storefront.services.fees import split_payment
+from apps.production.capability import assess
 
 logger = logging.getLogger(__name__)
 
@@ -811,3 +812,139 @@ def _artwork_missing(order):
     if record.verdict == 'warn' and not record.warning_accepted:
         return 'Have a look at the note on your file before paying.'
     return None
+
+"""
+Append this class and its two helpers to apps/storefront/views.py.
+
+The import it needs at the top, alongside the others:
+
+    from apps.production.capability import assess
+"""
+
+
+# 25.4mm to the inch.
+MM_PER_INCH = Decimal('25.4')
+
+
+class OrderBranchesView(APIView):
+    """
+    GET /api/v1/storefront/orders/<order_number>/branches/?token=…
+
+    Where this order could be made, and when each branch would finish.
+
+    The customer chooses. Two branches — one ready at four across town,
+    one tomorrow round the corner — and only they know which matters.
+    So both travel with the answer and neither is picked for them.
+
+    A branch appears only when it can genuinely do the work today: it
+    has the machine, the machine is running, and the material fits.
+    Where none can, the reasons come back instead of an empty list,
+    because 'no branch can print a banner that wide' tells a customer
+    what to change and silence does not.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def get(self, request, order_number):
+        order = _order_or_404(order_number, request.query_params.get('token'))
+
+        lines = _prediction_lines(order)
+        if not lines:
+            return Response(
+                {'detail': 'There is nothing on this order yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        location = None
+        lat = request.query_params.get('latitude')
+        lon = request.query_params.get('longitude')
+        if lat and lon:
+            location = {'latitude': lat, 'longitude': lon}
+
+        result = assess(
+            lines,
+            width_mm=_roll_width_mm(order),
+            customer_location=location,
+        )
+
+        return Response({
+            'options': [
+                {
+                    'branch_id': option['branch_id'],
+                    'branch_name': option['branch_name'],
+                    'branch_code': option['branch_code'],
+                    'address': option['address'],
+                    'ready_at': option['ready_at'],
+                    'minutes': round(option['minutes']),
+                    'is_next_day': option['is_next_day'],
+                    'confidence': option['confidence'],
+                    'distance_m': option['distance_m'],
+                }
+                for option in result['options']
+            ],
+            'refusals': [
+                {'branch_name': r['branch_name'], 'reason': r['reason']}
+                for r in result['refusals']
+            ],
+        })
+
+
+def _prediction_lines(order):
+    """
+    The order's lines in the shape the prediction takes:
+    (service, quantity, pieces).
+
+    For area-priced work the quantity is the area, because that is what
+    the per-unit figure is counted in — minutes per square foot.
+    """
+    lines = []
+    for line in (order.line_items or []):
+        service = Service.objects.filter(pk=line.get('service')).first()
+        if service is None:
+            continue
+
+        pieces = int(line.get('quantity') or 1)
+        specs = line.get('specifications') or {}
+
+        unit = (service.unit or '').upper().replace('PER_', '')
+        if unit in ('SQFT', 'SQCM', 'SQM'):
+            width = specs.get('width_in')
+            height = specs.get('height_in')
+            if width and height:
+                area = (Decimal(str(width)) * Decimal(str(height))) / Decimal('144')
+            else:
+                area = Decimal('1')
+            lines.append((service, float(area), pieces))
+        else:
+            lines.append((service, pieces, int(specs.get('pages') or 1)))
+
+    return lines
+
+
+def _roll_width_mm(order):
+    """
+    How much roll width this order needs.
+
+    The shorter side, not the longer one. A banner is fed with its
+    short side across the roll and its length running off it — a
+    168 × 36 banner needs 36 inches of width, not 168. Reading the
+    larger number would refuse nearly every banner we sell.
+
+    None where no line is sized, which leaves the width check out of
+    it rather than inventing a constraint.
+    """
+    widest = None
+
+    for line in (order.line_items or []):
+        specs = line.get('specifications') or {}
+        width = specs.get('width_in')
+        height = specs.get('height_in')
+        if not (width and height):
+            continue
+
+        across = min(Decimal(str(width)), Decimal(str(height))) * MM_PER_INCH
+        widest = across if widest is None else max(widest, across)
+
+    return float(widest) if widest is not None else None

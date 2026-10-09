@@ -1076,3 +1076,167 @@ class OrderFileTests(TestCase):
         order = OnlineOrder.objects.get(order_number=created['order_number'])
         self.assertEqual(OrderFile.objects.filter(order=order).count(), 1)
         self.assertEqual(order.files.first().width_px, 7200)
+
+class BranchOptionsTests(TestCase):
+    """
+    Where this order could be made, and when each branch would finish.
+
+    The customer chooses. Two branches, one ready at four across town
+    and one tomorrow round the corner — only they know which matters,
+    so both travel with the answer and neither is picked for them.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+        from apps.jobs.models import Service, PricingRule
+        from apps.production.models import (
+            Machine, MachineType, ServiceStation, Station,
+        )
+
+        cls.branch = Branch.objects.create(
+            name='Options Branch', code='OPB',
+            is_headquarters=False, is_regional_hq=False,
+            address='1 Options Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+
+        cls.print_st = Station.objects.create(
+            code='PRINT', name='Printing', sequence=1,
+        )
+        cls.large = MachineType.objects.create(
+            code='LARGE_FORMAT', name='Large format printer',
+            station=cls.print_st,
+        )
+        cls.machine = Machine.objects.create(
+            branch=cls.branch, machine_type=cls.large,
+            name='Options printer', max_width_mm=1900,
+            is_active=True, is_available=True,
+        )
+
+        cls.flexy = Service.objects.create(
+            name='Options Flexy', code='OPFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_file_upload=False, is_active=True,
+        )
+        ServiceStation.objects.create(
+            service=cls.flexy, station=cls.print_st, machine_type=cls.large,
+            sequence=1, setup_minutes=Decimal('12'),
+            minutes_per_unit=Decimal('0.143'),
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None,
+            base_price=Decimal('3.25'), color_multiplier=Decimal('1.00'),
+            minimum_price=Decimal('10.00'), is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _order(self, width=72, height=36):
+        client = self._client()
+        created = client.post(
+            '/api/v1/storefront/orders/', {}, format='json',
+        ).data
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id, 'quantity': 1,
+                    'specifications': {'width_in': width, 'height_in': height},
+                }],
+            },
+            format='json',
+        )
+        return created
+
+    def _options(self, created, **params):
+        query = {'token': created['access_token'], **params}
+        return self._client().get(
+            f"/api/v1/storefront/orders/{created['order_number']}/branches/",
+            query,
+        )
+
+    # ── The answer ─────────────────────────────────────────────────
+
+    def test_a_branch_that_can_do_it_comes_back_with_a_time(self):
+        created = self._order()
+        response = self._options(created)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        option = response.data['options'][0]
+        self.assertEqual(option['branch_code'], 'OPB')
+        self.assertTrue(option['ready_at'])
+        self.assertIn(option['confidence'], ('estimated', 'measured'))
+
+    def test_an_order_with_nothing_on_it_is_refused(self):
+        client = self._client()
+        created = client.post(
+            '/api/v1/storefront/orders/', {}, format='json',
+        ).data
+        response = self._options(created)
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_token_is_required(self):
+        created = self._order()
+        response = self._client().get(
+            f"/api/v1/storefront/orders/{created['order_number']}/branches/",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ── Which side goes across the roll ────────────────────────────
+
+    def test_a_long_banner_fits_because_the_short_side_crosses_the_roll(self):
+        """
+        A 168 × 36 banner is not 168 inches wide on the machine. It is
+        fed with the 36-inch side across the roll and the length runs
+        off it. Reading the larger number would refuse nearly every
+        banner we sell.
+        """
+        created = self._order(width=168, height=36)
+        response = self._options(created)
+
+        self.assertEqual(len(response.data['options']), 1)
+
+    def test_a_banner_too_wide_on_both_sides_is_refused(self):
+        """
+        90 × 90 inches is 2286mm whichever way it is fed, and the
+        machine takes 1900mm.
+        """
+        created = self._order(width=90, height=90)
+        response = self._options(created)
+
+        self.assertEqual(response.data['options'], [])
+        self.assertTrue(response.data['refusals'])
+
+    def test_a_refusal_says_what_would_fit(self):
+        """
+        A customer told only 'no' changes nothing. One told the machine
+        takes 1900mm can resize.
+        """
+        created = self._order(width=90, height=90)
+        response = self._options(created)
+
+        reason = response.data['refusals'][0]['reason']
+        self.assertIn('1900', reason)
+
+    # ── Nothing available ──────────────────────────────────────────
+
+    def test_a_machine_down_leaves_no_options_but_explains_itself(self):
+        created = self._order()
+        self.machine.is_available = False
+        self.machine.save()
+
+        response = self._options(created)
+        self.assertEqual(response.data['options'], [])
+        self.assertIn('service', response.data['refusals'][0]['reason'].lower())
