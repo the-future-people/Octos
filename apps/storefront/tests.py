@@ -707,9 +707,13 @@ class PaymentInitTests(TestCase):
             order.lead = Lead.objects.create(
                 phone='0244999888', first_name='Ama',
             )
+            # Payment needs somewhere to make the job. These tests are
+            # about what happens at Paystack, so the branch is set
+            # directly rather than chosen through capability.
+            order.branch = self.branch
             order.save()
         return order
-
+    
     def _pay(self, order, **extra):
         payload = {'token': order.access_token}
         payload.update(extra)
@@ -822,6 +826,10 @@ class PaymentInitTests(TestCase):
         )
         order = OnlineOrder.objects.get(order_number=created['order_number'])
         order.lead = Lead.objects.create(phone='0244777900', first_name='Ama')
+        # Payment needs somewhere to make the job. These tests are about
+        # what happens at Paystack, not about routing, so the branch is
+        # set directly rather than chosen.
+        order.branch = self.branch
         order.save()
         return order
 
@@ -892,6 +900,54 @@ class PaymentInitTests(TestCase):
             response = self._pay(order, email='ama@example.com')
 
         self.assertEqual(response.status_code, 200, response.content)
+
+    def test_an_order_with_no_branch_cannot_be_paid_for(self):
+        """
+        A job has to be made somewhere. Taking the money first means an
+        order that belongs to no floor and a customer already charged.
+        """
+        from apps.jobs.models import Service, PricingRule
+
+        service = Service.objects.create(
+            name='Pay Nowhere', code='PAYNOWHERE',
+            category='INSTANT', unit='PER_PAGE', is_active=True,
+        )
+        PricingRule.objects.create(
+            service=service, branch=None, base_price=Decimal('20.00'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+        order = self._order_for(service, specs={'pages': 5})
+        order.branch = None
+        order.save()
+
+        response = self._pay(order, email='ama@example.com')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('where', response.data['detail'].lower())
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+
+        cls.branch = Branch.objects.create(
+            name='Pay Branch', code='PYB',
+            is_headquarters=False, is_regional_hq=False,
+            address='1 Pay Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+    
+    def test_the_paystack_module_imports(self):
+        """
+        Every other test mocks initialise, so the module's own imports
+        never run. Without this, a missing dependency would be found by
+        the first customer rather than here.
+        """
+        from apps.storefront.services import paystack
+        self.assertTrue(callable(paystack.initialise))
+        self.assertTrue(callable(paystack.verify))
 
 class OrderFileTests(TestCase):
     """
@@ -1240,3 +1296,75 @@ class BranchOptionsTests(TestCase):
         response = self._options(created)
         self.assertEqual(response.data['options'], [])
         self.assertIn('service', response.data['refusals'][0]['reason'].lower())
+        # ── Keeping the choice ─────────────────────────────────────────
+
+    def test_the_chosen_branch_is_kept_on_the_order(self):
+        """
+        The customer's pick has to survive the page. Without it the job
+        reaches conversion with nowhere to be made.
+        """
+        created = self._order()
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token'], 'branch': self.branch.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.branch_id, self.branch.id)
+
+    def test_a_branch_that_cannot_do_the_work_is_refused(self):
+        """
+        Not merely absent from the list: a pick is checked again on the
+        way in. The options were right when they were drawn, and a
+        machine can go down between then and the tap.
+        """
+        created = self._order()
+        self.machine.is_available = False
+        self.machine.save()
+
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token'], 'branch': self.branch.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_unknown_branch_is_refused(self):
+        created = self._order()
+        response = self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token'], 'branch': 999999},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_changing_the_size_clears_the_chosen_branch(self):
+        """
+        A branch that could make a 36-inch banner may not be able to
+        make a 90-inch one. The pick was made against the old size and
+        cannot be assumed to hold.
+        """
+        created = self._order()
+        client = self._client()
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token'], 'branch': self.branch.id},
+            format='json',
+        )
+
+        client.patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {
+                'token': created['access_token'],
+                'line_items': [{
+                    'service': self.flexy.id, 'quantity': 1,
+                    'specifications': {'width_in': 90, 'height_in': 90},
+                }],
+            },
+            format='json',
+        )
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertIsNone(order.branch_id)

@@ -162,9 +162,22 @@ class OrderDetailView(APIView):
                 return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
             order.line_items = priced
             order.total = total
+            # The branch was chosen against the old size. A branch that
+            # could make a 36-inch banner may not be able to make a
+            # 90-inch one, so the choice is made again rather than
+            # assumed to still hold.
+            order.branch = None
+
+        if 'branch' in request.data:
+            branch, error = _choose_branch(order, request.data['branch'])
+            if error:
+                return Response({'detail': error},
+                                status=status.HTTP_400_BAD_REQUEST)
+            order.branch = branch
 
         if 'fulfilment' in request.data:
             order.fulfilment = request.data['fulfilment']
+
         if 'delivery_address' in request.data:
             order.delivery_address = request.data['delivery_address']
 
@@ -567,6 +580,12 @@ class OrderPayView(APIView):
                 {'detail': 'Tell us who you are first.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not order.branch_id:
+            return Response(
+                {'detail': 'Choose where you’d like this made.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if order.total <= 0:
             return Response(
                 {'detail': 'There is nothing on this order yet.'},
@@ -948,3 +967,31 @@ def _roll_width_mm(order):
         widest = across if widest is None else max(widest, across)
 
     return float(widest) if widest is not None else None
+
+def _choose_branch(order, branch_id):
+    """
+    The customer's pick, checked again on the way in.
+
+    The options were right when they were drawn, and a machine can go
+    down between seeing the list and tapping it. Trusting the id alone
+    would let an order land on a floor that cannot make it.
+    """
+    from apps.organization.models import Branch
+    from apps.production.capability import branch_options
+
+    branch = Branch.objects.filter(pk=branch_id, is_active=True).first()
+    if branch is None:
+        return None, 'That branch is not one we can send this to.'
+
+    lines = _prediction_lines(order)
+    if not lines:
+        return None, 'There is nothing on this order yet.'
+
+    able = branch_options(lines, width_mm=_roll_width_mm(order))
+    if not any(option['branch_id'] == branch.id for option in able):
+        return None, (
+            f'{branch.name} can’t make this one right now. '
+            f'Pick another branch.'
+        )
+
+    return branch, None
