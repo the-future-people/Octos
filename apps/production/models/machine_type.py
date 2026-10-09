@@ -46,10 +46,11 @@ class MachineType(AuditModel):
     max_width_mm = models.PositiveIntegerField(
         null=True, blank=True,
         help_text=(
-            'Widest material this class of device takes, in millimetres. '
-            'Large format is measured by roll width rather than sheet '
-            'size, and routing compares a job against it — a banner wider '
-            'than the machine cannot be printed on it at all.'
+            'Widest material this machine takes, in millimetres. It '
+            'belongs to the machine rather than its class: a 6ft and a '
+            '10ft roll printer are both large format, and a route that '
+            'had to name each width separately would rule out machines '
+            'that could do the work perfectly well.'
         ),
     )
     is_active = models.BooleanField(default=True)

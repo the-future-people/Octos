@@ -35,13 +35,18 @@ STATIONS = [
 #
 # A press is limited by sheet size and a roll printer by width, so the
 # two fields answer different questions and both are kept.
+# code, name, station, max_paper_size
+#
+# Width is not here: it belongs to the machine, since a 6ft and a 10ft
+# roll printer are both large format and a route that named each width
+# would rule out machines that could do the work.
 MACHINE_TYPES = [
-    ('DIGITAL_PRESS', 'Digital press',        'PRINT',    'A3', None),
-    ('LARGE_FORMAT',  'Large format printer', 'PRINT',    '',   3200),
-    ('PLOTTER',       'Plotter',              'CUT',      '',   680),
-    ('CUTTER',        'Cutter',               'CUT',      'A3', None),
-    ('LAMINATOR',     'Laminator',            'LAMINATE', 'A3', None),
-    ('BINDER',        'Binding machine',      'BIND',     'A3', None),
+    ('DIGITAL_PRESS', 'Digital press',        'PRINT',    'A3'),
+    ('LARGE_FORMAT',  'Large format printer', 'PRINT',    ''),
+    ('PLOTTER',       'Plotter',              'CUT',      ''),
+    ('CUTTER',        'Cutter',               'CUT',      'A3'),
+    ('LAMINATOR',     'Laminator',            'LAMINATE', 'A3'),
+    ('BINDER',        'Binding machine',      'BIND',     'A3'),
 ]
 
 # service code, station, machine type, sequence, setup minutes,
@@ -155,14 +160,13 @@ class Command(BaseCommand):
 
         # ── Machine types ─────────────────────────────────────────────
         types = {}
-        for code, name, station_code, paper, width in MACHINE_TYPES:
+        for code, name, station_code, paper in MACHINE_TYPES:
             machine_type, _ = MachineType.objects.update_or_create(
                 code=code,
                 defaults={
                     'name': name,
                     'station': stations[station_code],
                     'max_paper_size': paper,
-                    'max_width_mm': width,
                     'is_active': True,
                 },
             )

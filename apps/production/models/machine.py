@@ -35,6 +35,17 @@ class Machine(AuditModel):
     )
     serial_number = models.CharField(max_length=80, blank=True)
 
+    max_width_mm = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text=(
+            'Widest material this machine takes, in millimetres. It '
+            'belongs to the machine rather than its class: a 6ft and a '
+            '10ft roll printer are both large format, and a route that '
+            'had to name each width separately would rule out machines '
+            'that could do the work perfectly well.'
+        ),
+    )
+
     is_active = models.BooleanField(
         default=True,
         help_text='Owned and in service. False once sold or written off.',
