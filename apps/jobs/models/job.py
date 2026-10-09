@@ -312,6 +312,24 @@ class Job(AuditModel):
         blank=True,
         help_text='Minutes',
     )
+    estimated_ready_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            'When the floor said this would be done, frozen at the moment '
+            'it was promised. Not recomputed: the question worth answering '
+            'later is whether the promise was kept, and a figure that '
+            'moves with the queue can never be wrong.'
+        ),
+    )
+    work_started_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            'When someone actually began. An estimate missed because the '
+            'job sat in a queue for a day is a different failure from one '
+            'missed because the work took longer than thought, and without '
+            'this the two cannot be told apart.'
+        ),
+    )
     estimated_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,

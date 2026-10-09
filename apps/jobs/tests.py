@@ -1828,3 +1828,70 @@ class LineItemPageReconciliationTests(JobsFixtureMixin, TestCase):
         line = self._line(pages=3, specifications={'pages': 'two'})
         line.refresh_from_db()
         self.assertEqual(line.pages, 3)
+
+class EstimateRecordingTests(JobsFixtureMixin, TestCase):
+    """
+    The promise and what happened to it.
+
+    An estimate nobody records is a guess that can never be checked, and
+    checking is the only thing that makes the next one better. So the
+    figure is frozen when it is made rather than recomputed on each
+    read — one that moves with the queue agrees with itself forever and
+    can never be found wrong.
+    """
+
+    def _job(self, **overrides):
+        defaults = dict(
+            branch=self.branch, job_type='PRODUCTION',
+            status=Job.PENDING_PAYMENT, title='Estimate recording',
+            intake_by=self.attendant, estimated_cost=Decimal('100.00'),
+            daily_sheet=self.sheet,
+            payment_state='DEPOSIT_PAID', work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+        )
+        defaults.update(overrides)
+        return Job.objects.create(**defaults)
+
+    def test_work_started_is_set_the_first_time_production_begins(self):
+        job = self._job()
+        self.assertIsNone(job.work_started_at)
+
+        JobStatusEngine(job).move_work('IN_PRODUCTION', actor=self.coordinator)
+        job.refresh_from_db()
+
+        self.assertIsNotNone(job.work_started_at)
+
+    def test_work_started_is_not_moved_by_a_later_stage(self):
+        """
+        When the work began, not when it last progressed. A job that
+        reaches finishing has not started twice.
+        """
+        job = self._job()
+        engine = JobStatusEngine(job)
+
+        engine.move_work('IN_PRODUCTION', actor=self.coordinator)
+        job.refresh_from_db()
+        first = job.work_started_at
+
+        engine.move_work('FINISHING', actor=self.coordinator)
+        job.refresh_from_db()
+
+        self.assertEqual(job.work_started_at, first)
+
+    def test_a_resumed_job_keeps_its_original_start(self):
+        """
+        A halt does not restart the work. The job began when it began,
+        and the time lost is recorded on the halt itself.
+        """
+        job = self._job()
+        engine = JobStatusEngine(job)
+
+        engine.move_work('IN_PRODUCTION', actor=self.coordinator)
+        job.refresh_from_db()
+        first = job.work_started_at
+
+        engine.halt('MATERIALS_OUT', actor=self.coordinator)
+        engine.resume(actor=self.coordinator)
+        job.refresh_from_db()
+
+        self.assertEqual(job.work_started_at, first)

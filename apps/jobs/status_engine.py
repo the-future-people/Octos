@@ -472,6 +472,22 @@ class JobStatusEngine:
         setattr(self.job, field, to_state)
         update_fields = [field, 'updated_at']
 
+        # When the work began, which is a different question from when
+        # the job arrived. An estimate missed because the job queued for
+        # a day is a different failure from one missed because the work
+        # took longer than thought, and only both timestamps tell them
+        # apart.
+        #
+        # Set once. A job reaching finishing has not started twice, and
+        # a resumed job began when it began.
+        if (
+            axis == 'WORK'
+            and to_state == 'IN_PRODUCTION'
+            and self.job.work_started_at is None
+        ):
+            self.job.work_started_at = now
+            update_fields.append('work_started_at')
+
         # Materials are consumed when the work finishes, not when the
         # customer walks in — so deduction belongs on the work axis.
         if axis == 'WORK' and to_state == 'DONE':
