@@ -26,6 +26,16 @@ class OrderFile(AuditModel):
         related_name='files',
     )
 
+    line_id = models.CharField(
+        max_length=36, blank=True, db_index=True,
+        help_text=(
+            'Which line of the order this artwork belongs to. An order '
+            'can hold a banner, flyers and programmes at once, and the '
+            "banner's file is not the flyer's — so a file belongs to a "
+            'line rather than to the order as a whole.'
+        ),
+    )
+
     file = models.FileField(upload_to='storefront/%Y/%m/%d/')
     original_filename = models.CharField(max_length=255, blank=True)
     size_bytes = models.BigIntegerField(null=True, blank=True)

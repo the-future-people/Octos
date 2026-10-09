@@ -1368,3 +1368,220 @@ class BranchOptionsTests(TestCase):
 
         order = OnlineOrder.objects.get(order_number=created['order_number'])
         self.assertIsNone(order.branch_id)
+
+class CartTests(TestCase):
+    """
+    More than one thing in an order.
+
+    A church ordering a banner, flyers and programmes together is a
+    better customer than one buying a banner — and it is how a print
+    shop is actually used. Each line carries its own artwork, because a
+    banner's file is not the flyer's.
+
+    Lines need stable ids for that. Position in a list is not an
+    identity: removing the first line would silently hand its artwork
+    to the second.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import Service, PricingRule
+
+        cls.flexy = Service.objects.create(
+            name='Cart Flexy', code='CARTFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_file_upload=True, is_active=True,
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None, base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'), minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+        cls.cards = Service.objects.create(
+            name='Cart Cards', code='CARTCARDS',
+            category='PRODUCTION', unit='PER_PIECE',
+            requires_file_upload=True, is_active=True,
+        )
+        PricingRule.objects.create(
+            service=cls.cards, branch=None, base_price=Decimal('1.50'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _order(self):
+        return self._client().post(
+            '/api/v1/storefront/orders/', {}, format='json',
+        ).data
+
+    def _put_lines(self, created, lines):
+        return self._client().patch(
+            f"/api/v1/storefront/orders/{created['order_number']}/",
+            {'token': created['access_token'], 'line_items': lines},
+            format='json',
+        )
+
+    def _image(self, width_px=3000, height_px=1500, name='art.jpg'):
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        buf = io.BytesIO()
+        Image.new('RGB', (width_px, height_px), (30, 90, 200)).save(buf, 'JPEG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/jpeg')
+
+    def _upload(self, created, line_id, upload):
+        return self._client().post(
+            f"/api/v1/storefront/orders/{created['order_number']}/file/",
+            {
+                'token': created['access_token'],
+                'line_id': line_id,
+                'file': upload,
+            },
+            format='multipart',
+        )
+
+    # ── Lines have identities ──────────────────────────────────────
+
+    def test_every_line_comes_back_with_an_id(self):
+        created = self._order()
+        response = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ])
+
+        self.assertEqual(response.status_code, 200, response.content)
+        ids = [line['id'] for line in response.data['line_items']]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(len(set(ids)), 2)
+
+    def test_an_id_survives_a_repricing(self):
+        """
+        Changing one line must not renumber the others, or their
+        artwork would follow the wrong item.
+        """
+        created = self._order()
+        first = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+        ]).data['line_items'][0]
+
+        again = self._put_lines(created, [
+            {'id': first['id'], 'service': self.flexy.id, 'quantity': 2,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+        ]).data['line_items'][0]
+
+        self.assertEqual(again['id'], first['id'])
+        self.assertEqual(again['quantity'], 2)
+
+    # ── Artwork belongs to a line ──────────────────────────────────
+
+    def test_each_line_carries_its_own_artwork(self):
+        created = self._order()
+        lines = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ]).data['line_items']
+
+        banner = self._upload(created, lines[0]['id'], self._image(name='banner.jpg'))
+        cards = self._upload(created, lines[1]['id'], self._image(name='cards.jpg'))
+
+        self.assertEqual(banner.status_code, 201, banner.content)
+        self.assertEqual(cards.status_code, 201, cards.content)
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.files.count(), 2)
+
+    def test_replacing_one_line_s_artwork_leaves_the_other_alone(self):
+        """
+        One file per line, not one per order. A customer sending better
+        artwork for the banner has not withdrawn the flyer's.
+        """
+        created = self._order()
+        lines = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ]).data['line_items']
+
+        self._upload(created, lines[0]['id'], self._image(name='banner.jpg'))
+        self._upload(created, lines[1]['id'], self._image(name='cards.jpg'))
+        self._upload(created, lines[0]['id'], self._image(name='banner-v2.jpg'))
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.files.count(), 2)
+        # Storage adds a suffix when a name is already taken on disk, so
+        # the stems are what matter rather than the exact filenames.
+        names = [f.original_filename for f in order.files.all()]
+        self.assertTrue(any(n.startswith('banner-v2') for n in names), names)
+        self.assertTrue(any(n.startswith('cards') for n in names), names)
+        self.assertFalse(any(n.startswith('banner.') for n in names), names)
+
+    def test_a_file_is_judged_against_its_own_line(self):
+        """
+        1500px is fine across a business card and hopeless across six
+        feet. The verdict belongs to the pairing.
+        """
+        created = self._order()
+        lines = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 144, 'height_in': 72}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ]).data['line_items']
+
+        on_banner = self._upload(created, lines[0]['id'], self._image(1500, 750))
+        self.assertEqual(on_banner.data['verdict'], 'refuse')
+
+    def test_removing_a_line_removes_its_artwork(self):
+        """
+        Nothing should be left pointing at a line that is gone, least
+        of all a file the floor might print.
+        """
+        created = self._order()
+        lines = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ]).data['line_items']
+
+        self._upload(created, lines[0]['id'], self._image(name='banner.jpg'))
+        self._upload(created, lines[1]['id'], self._image(name='cards.jpg'))
+
+        self._put_lines(created, [
+            {'id': lines[1]['id'], 'service': self.cards.id,
+             'quantity': 100, 'specifications': {}},
+        ])
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertEqual(order.files.count(), 1)
+        self.assertTrue(
+            order.files.first().original_filename.startswith('cards'),
+            order.files.first().original_filename,
+        )
+
+    # ── Paying for several things ──────────────────────────────────
+
+    def test_every_line_that_needs_artwork_must_have_it(self):
+        from apps.storefront.views import _artwork_missing
+
+        created = self._order()
+        lines = self._put_lines(created, [
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            {'service': self.cards.id, 'quantity': 100, 'specifications': {}},
+        ]).data['line_items']
+
+        self._upload(created, lines[0]['id'], self._image(name='banner.jpg'))
+
+        order = OnlineOrder.objects.get(order_number=created['order_number'])
+        self.assertIsNotNone(_artwork_missing(order))

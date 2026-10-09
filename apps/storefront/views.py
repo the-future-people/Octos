@@ -42,7 +42,7 @@ from apps.jobs.services.file_metadata import extract
 from rest_framework.parsers import JSONParser, MultiPartParser
 from apps.storefront.services.fees import split_payment
 from apps.production.capability import assess
-
+import uuid
 logger = logging.getLogger(__name__)
 
 
@@ -157,11 +157,25 @@ class OrderDetailView(APIView):
             )
 
         if 'line_items' in request.data:
-            priced, total, error = self._price(request.data['line_items'])
+            existing_ids = {
+                l.get('service'): l.get('id')
+                for l in (order.line_items or [])
+                if l.get('id')
+            }
+            priced, total, error = self._price(
+                request.data['line_items'], existing_ids,
+            )
             if error:
                 return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
             order.line_items = priced
             order.total = total
+
+            # Nothing should be left pointing at a line that is gone,
+            # least of all a file the floor might print.
+            kept = {line['id'] for line in priced}
+            for orphan in order.files.exclude(line_id__in=kept):
+                orphan.file.delete(save=False)
+                orphan.delete()
             # The branch was chosen against the old size. A branch that
             # could make a 36-inch banner may not be able to make a
             # 90-inch one, so the choice is made again rather than
@@ -185,7 +199,7 @@ class OrderDetailView(APIView):
         return Response(_serialise(order))
 
     @staticmethod
-    def _price(raw_lines):
+    def _price(raw_lines, existing_ids=None):
         """
         Quote every line again, through the same function the counter
         uses. Whatever price the browser sent is ignored.
@@ -195,6 +209,7 @@ class OrderDetailView(APIView):
 
         priced = []
         total = Decimal('0.00')
+        existing_ids = existing_ids or {}
 
         for line in raw_lines:
             try:
@@ -213,6 +228,18 @@ class OrderDetailView(APIView):
                 return None, None, quote.get('error', 'This line could not be priced.')
 
             priced.append({
+                # An identity that survives repricing. Position in a
+                # list is not one: removing the first line would hand
+                # its artwork to the second.
+                # Keep the identity the caller sent, or the one this
+                # service already had on the order. Minting a fresh id
+                # on every reprice would orphan the line's artwork —
+                # resizing a banner would quietly destroy the file.
+                'id': (
+                    line.get('id')
+                    or existing_ids.get(service.id)
+                    or uuid.uuid4().hex[:12]
+                ),
                 'service': service.id,
                 'service_name': service.name,
                 'quantity': quantity,
@@ -701,15 +728,29 @@ class OrderFileView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # One file per order. A customer who sends better artwork has
-        # replaced the first, and the floor should never have to guess
-        # which of two to print.
-        for existing in order.files.all():
+        line_id = (request.data.get('line_id') or '').strip()
+        if not line_id:
+            # One line still means one file, and an order with a single
+            # line need not say which. More than one and it must.
+            lines = order.line_items or []
+            if len(lines) == 1:
+                line_id = lines[0].get('id') or ''
+            elif len(lines) > 1:
+                return Response(
+                    {'detail': 'Tell us which item this artwork is for.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # One file per line, not per order. A customer sending better
+        # artwork for the banner has not withdrawn the flyer's — but the
+        # floor should never have to guess between two banners.
+        for existing in order.files.filter(line_id=line_id):
             existing.file.delete(save=False)
             existing.delete()
 
         record = OrderFile.objects.create(
             order=order,
+            line_id=line_id,
             file=upload,
             original_filename=upload.name,
             content_type=upload.content_type or '',
@@ -730,7 +771,15 @@ class OrderFileView(APIView):
 
     def get(self, request, order_number):
         order = _order_or_404(order_number, request.query_params.get('token'))
-        record = order.files.first()
+        line_id = (
+            request.query_params.get('line_id')
+            or request.data.get('line_id')
+            or ''
+        ).strip()
+        record = (
+            order.files.filter(line_id=line_id).first() if line_id
+            else order.files.first()
+        )
         if record is None:
             return Response({'detail': 'No file on this order yet.'},
                             status=status.HTTP_404_NOT_FOUND)
@@ -748,7 +797,15 @@ class OrderFileView(APIView):
     def patch(self, request, order_number):
         """Accepting a warning, so the order can carry on."""
         order = _order_or_404(order_number, request.data.get('token'))
-        record = order.files.first()
+        line_id = (
+            request.query_params.get('line_id')
+            or request.data.get('line_id')
+            or ''
+        ).strip()
+        record = (
+            order.files.filter(line_id=line_id).first() if line_id
+            else order.files.first()
+        )
         if record is None:
             return Response({'detail': 'No file on this order yet.'},
                             status=status.HTTP_404_NOT_FOUND)
@@ -762,11 +819,19 @@ def _judge(order, record):
     """
     The file against the line it belongs to.
 
-    With no line yet, only the file itself can be judged — format and
-    whether it opens. The resolution check needs a size to be judged
+    1500 pixels is good artwork on a business card and hopeless across
+    six feet, so the verdict belongs to the pairing — which line, not
+    which order.
+
+    With no line yet, only the file itself can be judged: format and
+    whether it opens. The resolution check needs a size to judge
     against, and inventing one would answer a question nobody asked.
     """
-    line = (order.line_items or [None])[0]
+    lines = order.line_items or []
+    line = next(
+        (l for l in lines if l.get('id') == record.line_id),
+        lines[0] if lines else None,
+    )
     specs = (line or {}).get('specifications') or {}
 
     width_in = specs.get('width_in')
