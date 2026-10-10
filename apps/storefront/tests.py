@@ -1664,16 +1664,22 @@ class ArtworkCheckTests(TestCase):
         self.assertEqual(response.data['verdict'], 'fine')
         self.assertEqual(OnlineOrder.objects.count(), before)
 
-    def test_nothing_is_stored_by_a_check(self):
+    def test_a_check_commits_nothing(self):
         """
-        Not an order, not a line, not a file record. A customer who
-        checks a file and walks away leaves nothing behind.
+        No order, no line, no artwork on an order. The file itself is
+        kept so the customer need not send it twice, but it belongs to
+        nothing and is swept within hours.
         """
-        from apps.storefront.models import OrderFile
+        from apps.storefront.models import OrderFile, StagedUpload
 
-        before = OrderFile.objects.count()
+        orders = OnlineOrder.objects.count()
+        files = OrderFile.objects.count()
+
         self._check(self._image())
-        self.assertEqual(OrderFile.objects.count(), before)
+
+        self.assertEqual(OnlineOrder.objects.count(), orders)
+        self.assertEqual(OrderFile.objects.count(), files)
+        self.assertEqual(StagedUpload.objects.count(), 1)
 
     def test_a_poor_file_is_refused_with_its_reasons(self):
         response = self._check(self._image(1000, 500), width=144, height=72)

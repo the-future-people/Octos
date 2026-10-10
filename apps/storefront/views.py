@@ -45,6 +45,11 @@ from apps.production.capability import assess
 import uuid
 logger = logging.getLogger(__name__)
 from apps.storefront.services.verdicts import file_hash, sign_claim
+from apps.storefront.models import (
+    Lead, OnlineOrder, OrderFile, PaystackEvent, StagedUpload,
+)
+
+
 
 def _order_or_404(order_number, token):
     """
@@ -1118,16 +1123,27 @@ class ArtworkCheckView(APIView):
 
         specs = _parse_specifications(request.data.get('specifications'))
 
-        # Hashed first, while the bytes are certainly readable. An
-        # uploaded file is consumed by whatever reads it, and measuring
-        # leaves it closed — so the identity has to be taken before the
-        # measuring, not after.
-        upload_hash = file_hash(upload)
+        # Read once, into memory. The bytes are needed three times —
+        # hashed, measured, then stored — and an uploaded file gives
+        # only one pass: whatever reads it first leaves it closed.
+        #
+        # Holding forty megabytes for the length of a request is the
+        # cost of not making the customer send it twice.
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload.seek(0)
+        content = upload.read()
+        name, content_type = upload.name, upload.content_type
+
+        def rewound():
+            return SimpleUploadedFile(name, content, content_type=content_type)
+
+        upload_hash = file_hash(rewound())
 
         # The same measuring the counter uses. Two implementations of
         # "how many dots per inch is this" would eventually disagree,
         # and a customer would get different answers about one file.
-        found = measure(_Carrier(upload))
+        found = measure(_Carrier(rewound()))
 
         verdict = check_file(
             metadata_state=found.get('metadata_state'),
@@ -1155,11 +1171,29 @@ class ArtworkCheckView(APIView):
             'token': None,
         }
 
-        # A refused file has no commit to authorise, so it gets nothing
-        # to carry. A warned one does: the customer may accept it, and
-        # that acceptance needs something to attach to.
+        # A refused file has no commit to authorise, so nothing is kept
+        # and nothing is handed back. A warned one is kept: the customer
+        # may accept it, and making them send thirty megabytes a second
+        # time is the likeliest moment they give up.
         if verdict['verdict'] != 'refuse':
+            staged = StagedUpload.objects.create(
+                file=rewound(),
+                original_filename=name,
+                size_bytes=len(content),
+                content_type=content_type or '',
+                file_hash=upload_hash,
+                verdict=verdict['verdict'],
+                checks=verdict['checks'],
+                **{k: v for k, v in found.items()
+                   if k in (
+                       'metadata_state', 'page_count', 'width_px', 'height_px',
+                       'width_mm', 'height_mm', 'dpi', 'colour_mode',
+                       'pdf_images',
+                   )},
+            )
+
             payload['token'] = sign_claim({
+                'staged': staged.pk,
                 'service': service.id,
                 'specifications': {
                     'width_in': specs.get('width_in'),
