@@ -36,51 +36,66 @@ RASTER_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '
 PDF_EXTENSIONS = {'.pdf'}
 
 
+def measure(carrier):
+    """
+    Read a file and report what is in it, writing nothing.
+
+    `carrier` is anything with a `.file` — a JobFile, an OrderFile, or a
+    throwaway holder around an upload that will never be saved. The
+    storefront judges artwork before any order exists, and that check
+    has to use these same measurements: two implementations of "how
+    many dots per inch is this" would eventually disagree, and the
+    counter and the website would give a customer different answers
+    about the same file.
+
+    Never raises. A file that cannot be read is a normal event at a
+    print counter, and whatever is carrying it must still survive.
+    """
+    found = {'metadata_state': None}
+
+    name = os.path.basename(carrier.file.name)
+    found['original_filename'] = name
+    ext = os.path.splitext(name)[1].lower()
+
+    try:
+        found['size_bytes'] = carrier.file.size
+    except (OSError, ValueError):
+        # The record can outlive the bytes — an ephemeral filesystem does
+        # exactly this on every deploy.
+        found['size_bytes'] = None
+
+    try:
+        if ext in PDF_EXTENSIONS:
+            measured = _measure_pdf(carrier)
+        elif ext in RASTER_EXTENSIONS:
+            measured = _measure_raster(carrier)
+        else:
+            found['metadata_state'] = JobFile.UNSUPPORTED
+            return found
+    except Exception:
+        # Deliberately broad. A corrupt, truncated or password-protected
+        # file is a normal event at a print counter.
+        logger.warning('Could not read file %s', name, exc_info=True)
+        found['metadata_state'] = JobFile.FAILED
+        return found
+
+    found.update(measured)
+    found['metadata_state'] = JobFile.MEASURED
+    return found
+
+
 def extract(job_file):
     """
     Measure a file and write what was found onto its record.
 
-    Never raises. A file that cannot be read is still a file that belongs
-    to a job, and an upload must not fail because the bytes were odd.
-    Returns the JobFile, saved.
+    Never raises. Returns the record, saved.
     """
-    fields = ['metadata_state', 'original_filename', 'size_bytes', 'content_type']
+    found = measure(job_file)
 
-    name = os.path.basename(job_file.file.name)
-    job_file.original_filename = name
-    ext = os.path.splitext(name)[1].lower()
-
-    try:
-        job_file.size_bytes = job_file.file.size
-    except (OSError, ValueError):
-        # The record can outlive the bytes — an ephemeral filesystem does
-        # exactly this on every deploy.
-        job_file.size_bytes = None
-
-    try:
-        if ext in PDF_EXTENSIONS:
-            measured = _measure_pdf(job_file)
-        elif ext in RASTER_EXTENSIONS:
-            measured = _measure_raster(job_file)
-        else:
-            job_file.metadata_state = JobFile.UNSUPPORTED
-            job_file.save(update_fields=fields)
-            return job_file
-    except Exception:
-        # Deliberately broad. A corrupt, truncated or password-protected
-        # file is a normal event at a print counter, and the upload it
-        # arrived on must still succeed.
-        logger.warning('Could not read file %s', job_file.pk, exc_info=True)
-        job_file.metadata_state = JobFile.FAILED
-        job_file.save(update_fields=fields)
-        return job_file
-
-    for key, value in measured.items():
+    for key, value in found.items():
         setattr(job_file, key, value)
-        fields.append(key)
 
-    job_file.metadata_state = JobFile.MEASURED
-    job_file.save(update_fields=fields)
+    job_file.save(update_fields=list(found.keys()) + ['content_type'])
     return job_file
 
 

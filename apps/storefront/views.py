@@ -15,7 +15,7 @@ Prices are never taken from the request. A total arriving from a browser
 is a suggestion from a stranger; the server quotes every line again from
 the specification, through the same function the counter uses.
 """
-
+from apps.jobs.services.file_metadata import extract, measure
 from decimal import Decimal
 import random
 from apps.storefront.models import Lead, OnlineOrder, OrderFile, PaystackEvent
@@ -44,7 +44,7 @@ from apps.storefront.services.fees import split_payment
 from apps.production.capability import assess
 import uuid
 logger = logging.getLogger(__name__)
-
+from apps.storefront.services.verdicts import file_hash, sign_claim
 
 def _order_or_404(order_number, token):
     """
@@ -1060,3 +1060,146 @@ def _choose_branch(order, branch_id):
         )
 
     return branch, None
+
+"""
+Imports it needs at the top, alongside the others:
+    from django.core.files.uploadedfile import UploadedFile
+    from apps.jobs.services.file_metadata import measure
+    from apps.storefront.services.verdicts import file_hash, sign_claim
+"""
+
+
+class ArtworkCheckView(APIView):
+    """
+    POST /api/v1/storefront/check/
+
+    Judges artwork against a size, and keeps nothing.
+
+    The customer needs to know their file will print before they commit
+    to anything — that is the only moment the warning does any good. But
+    at that point there is no order, so there is nowhere to store the
+    verdict and nothing to attach the file to.
+
+    So the answer travels with them, signed. It carries the file's hash
+    and the configuration it was judged against, and the commit checks
+    both. A verdict the browser altered, or one about a different file,
+    is refused there.
+
+    Nothing is written here. A customer who checks a file and walks away
+    leaves no order, no line and no record.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': 'No file was sent.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if upload.size > MAX_UPLOAD_BYTES:
+            return Response(
+                {'detail': (
+                    'That file is too large to send over the web. Bring it '
+                    'to the branch on a flash drive, or send a smaller export.'
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        service = Service.objects.filter(
+            pk=request.data.get('service'), is_active=True,
+        ).first()
+        if service is None:
+            return Response({'detail': 'That service is not available.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        specs = _parse_specifications(request.data.get('specifications'))
+
+        # Hashed first, while the bytes are certainly readable. An
+        # uploaded file is consumed by whatever reads it, and measuring
+        # leaves it closed — so the identity has to be taken before the
+        # measuring, not after.
+        upload_hash = file_hash(upload)
+
+        # The same measuring the counter uses. Two implementations of
+        # "how many dots per inch is this" would eventually disagree,
+        # and a customer would get different answers about one file.
+        found = measure(_Carrier(upload))
+
+        verdict = check_file(
+            metadata_state=found.get('metadata_state'),
+            content_type=upload.content_type or '',
+            width_px=found.get('width_px'),
+            height_px=found.get('height_px'),
+            width_mm=found.get('width_mm'),
+            height_mm=found.get('height_mm'),
+            page_count=found.get('page_count'),
+            colour_mode=found.get('colour_mode'),
+            pdf_images=found.get('pdf_images'),
+            ordered_width_in=specs.get('width_in'),
+            ordered_height_in=specs.get('height_in'),
+            ordered_pages=specs.get('pages'),
+        )
+
+        payload = {
+            'verdict': verdict['verdict'],
+            'checks': verdict['checks'],
+            'filename': upload.name,
+            'size_kb': round(upload.size / 1024, 1),
+            'width_px': found.get('width_px'),
+            'height_px': found.get('height_px'),
+            'page_count': found.get('page_count'),
+            'token': None,
+        }
+
+        # A refused file has no commit to authorise, so it gets nothing
+        # to carry. A warned one does: the customer may accept it, and
+        # that acceptance needs something to attach to.
+        if verdict['verdict'] != 'refuse':
+            payload['token'] = sign_claim({
+                'service': service.id,
+                'specifications': {
+                    'width_in': specs.get('width_in'),
+                    'height_in': specs.get('height_in'),
+                    'pages': specs.get('pages'),
+                },
+                'verdict': verdict['verdict'],
+                'file_hash': upload_hash,
+            })
+
+        return Response(payload)
+
+
+class _Carrier:
+    """
+    Something with a `.file`, which is all `measure` wants.
+
+    An uploaded file has the same reading interface as a stored one, so
+    the measuring does not need to know it will never be saved.
+    """
+
+    def __init__(self, upload):
+        self.file = upload
+
+
+def _parse_specifications(raw):
+    """
+    The configuration, which arrives as JSON inside a multipart form.
+
+    A form field cannot carry a nested object, so the browser sends it
+    as a string. Anything unreadable is treated as no specification at
+    all rather than refused — the file-level checks still apply, and
+    the size checks will simply find nothing to judge against.
+    """
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        return {}

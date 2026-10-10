@@ -1,5 +1,5 @@
 from decimal import Decimal
-
+import json
 from django.test import TestCase
 from django.utils import timezone
 
@@ -1585,3 +1585,183 @@ class CartTests(TestCase):
 
         order = OnlineOrder.objects.get(order_number=created['order_number'])
         self.assertIsNotNone(_artwork_missing(order))
+
+class ArtworkCheckTests(TestCase):
+    """
+    Judging a file before anything is committed.
+
+    The check has to happen while the customer can still act on it —
+    before they press Continue, not after. But nothing should exist on
+    the server at that point, so the verdict cannot be stored against
+    an order.
+
+    So the verdict comes back signed, carrying what it was judged
+    against: the file's hash, the service, the size. The commit
+    verifies it. A verdict the browser edited, or one for a different
+    file, is worthless — which is what stops a customer uploading good
+    artwork, getting a pass, and committing something else.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import Service, PricingRule
+
+        cls.flexy = Service.objects.create(
+            name='Check Flexy', code='CHKFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_file_upload=True, is_active=True,
+            spec_template=[
+                {'key': 'width_in', 'label': 'Width', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+                {'key': 'height_in', 'label': 'Height', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None, base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'), minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _image(self, width_px=11000, height_px=5500, name='art.jpg'):
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        buf = io.BytesIO()
+        Image.new('RGB', (width_px, height_px), (10, 80, 160)).save(buf, 'JPEG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/jpeg')
+
+    def _check(self, upload, width=72, height=36, service=None):
+        return self._client().post(
+            '/api/v1/storefront/check/',
+            {
+                'file': upload,
+                'service': (service or self.flexy).id,
+                'specifications': json.dumps({
+                    'width_in': width, 'height_in': height,
+                }),
+            },
+            format='multipart',
+        )
+
+    # ── Judging without committing ─────────────────────────────────
+
+    def test_a_file_is_judged_with_no_order_in_existence(self):
+        before = OnlineOrder.objects.count()
+        response = self._check(self._image())
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['verdict'], 'fine')
+        self.assertEqual(OnlineOrder.objects.count(), before)
+
+    def test_nothing_is_stored_by_a_check(self):
+        """
+        Not an order, not a line, not a file record. A customer who
+        checks a file and walks away leaves nothing behind.
+        """
+        from apps.storefront.models import OrderFile
+
+        before = OrderFile.objects.count()
+        self._check(self._image())
+        self.assertEqual(OrderFile.objects.count(), before)
+
+    def test_a_poor_file_is_refused_with_its_reasons(self):
+        response = self._check(self._image(1000, 500), width=144, height=72)
+
+        self.assertEqual(response.data['verdict'], 'refuse')
+        self.assertTrue(response.data['checks'])
+        self.assertTrue(
+            any('dpi' in c['message'].lower() for c in response.data['checks'])
+        )
+
+    def test_the_same_file_is_judged_against_the_size_given(self):
+        """
+        1000px is fine on a small print and hopeless across twelve feet.
+        The verdict belongs to the pairing, so the size travels with the
+        request.
+        """
+        # 4000 × 2000 is 333 dpi across 12 inches and 28 dpi across
+        # twelve feet. One file, two verdicts, because the verdict
+        # belongs to the pairing.
+        small = self._check(self._image(4000, 2000), width=12, height=6)
+        large = self._check(self._image(4000, 2000), width=144, height=72)
+
+        self.assertEqual(small.data['verdict'], 'fine')
+        self.assertEqual(large.data['verdict'], 'refuse')
+
+    # ── The token ──────────────────────────────────────────────────
+
+    def test_a_passing_check_returns_a_token(self):
+        response = self._check(self._image())
+        self.assertTrue(response.data['token'])
+
+    def test_a_refused_check_returns_no_token(self):
+        """
+        Nothing to carry forward. A refused file has no commit to
+        authorise.
+        """
+        response = self._check(self._image(1000, 500), width=144, height=72)
+        self.assertIsNone(response.data.get('token'))
+
+    def test_the_token_names_what_it_judged(self):
+        from apps.storefront.services.verdicts import read_token
+
+        # Large enough to pass at 96 inches — a token only comes back
+        # for a file we would print.
+        response = self._check(self._image(9600, 4800), width=96, height=48)
+        self.assertEqual(response.data['verdict'], 'fine')
+        claim = read_token(response.data['token'])
+
+        self.assertEqual(claim['service'], self.flexy.id)
+        self.assertEqual(claim['specifications']['width_in'], 96)
+        self.assertEqual(claim['verdict'], 'fine')
+        self.assertTrue(claim['file_hash'])
+
+    def test_a_tampered_token_is_refused(self):
+        """
+        The signature is what makes the claim worth anything. Without
+        it the browser could assert any verdict it liked.
+        """
+        from apps.storefront.services.verdicts import read_token
+
+        response = self._check(self._image())
+        token = response.data['token']
+        self.assertIsNone(read_token(token[:-4] + 'aaaa'))
+
+    def test_a_stale_token_is_refused(self):
+        from apps.storefront.services.verdicts import read_token, sign_claim
+
+        token = sign_claim(
+            {'service': self.flexy.id, 'verdict': 'fine', 'file_hash': 'abc'},
+            age_seconds=-10,
+        )
+        self.assertIsNone(read_token(token))
+
+    # ── Not a door into the system ─────────────────────────────────
+
+    def test_an_unknown_service_is_refused(self):
+        response = self._client().post(
+            '/api/v1/storefront/check/',
+            {'file': self._image(), 'service': 999999,
+             'specifications': json.dumps({})},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_file_that_is_not_one_we_print_is_refused(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        bad = SimpleUploadedFile('logo.cdr', b'not a drawing',
+                                 content_type='application/x-coreldraw')
+        response = self._check(bad)
+        self.assertEqual(response.data['verdict'], 'refuse')
