@@ -46,10 +46,17 @@ import uuid
 logger = logging.getLogger(__name__)
 from apps.storefront.services.verdicts import file_hash, sign_claim
 from apps.storefront.models import (
-    Lead, OnlineOrder, OrderFile, PaystackEvent, StagedUpload,
+    CommitRecord, Lead, OnlineOrder, OrderFile, PaystackEvent, StagedUpload,
 )
-
-
+from apps.storefront.services.verdicts import (
+    claim_matches, file_hash, read_token, sign_claim,
+)
+from apps.storefront.models import (
+    CommitRecord, Lead, OnlineOrder, OrderFile, PaystackEvent, StagedUpload,
+)
+from apps.storefront.services.verdicts import (
+    claim_matches, file_hash, read_token, sign_claim,
+)
 
 def _order_or_404(order_number, token):
     """
@@ -1237,3 +1244,269 @@ def _parse_specifications(raw):
         return parsed if isinstance(parsed, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+"""
+Append this class and its helpers to apps/storefront/views.py.
+
+Imports it needs at the top, alongside the others:
+
+    from apps.storefront.services.verdicts import (
+        claim_matches, file_hash, read_token, sign_claim,
+    )
+"""
+
+
+class CommitView(APIView):
+    """
+    POST /api/v1/storefront/commit/
+
+    Continue. The moment anything becomes real.
+
+    Everything before this is the customer thinking: browsing, sizing,
+    checking a file. None of it touches the server's idea of what has
+    been ordered. This does — it creates the order if there isn't one,
+    adds the line, and moves the staged artwork onto it.
+
+    Three things it will not get wrong:
+
+      the verdict   the file that passed must be the file that commits.
+                    The browser holds the verdict, so the browser could
+                    lie about it; the signature and the staged row are
+                    what make it worth anything.
+
+      the retry     a commit that succeeds and whose response is lost
+                    is a normal event on mobile data. The customer
+                    presses again, and must not buy the banner twice.
+
+      the rules     a quantity the business cannot fulfil is refused
+                    here, whatever the browser allowed. Cards come in
+                    boxes of fifty, and seventy-five is not a thing we
+                    can make.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def post(self, request):
+        key = (request.data.get('idempotency_key') or '').strip()
+        if not key:
+            return Response(
+                {'detail': 'This request needs an idempotency key.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Already done. The customer pressed twice, or the first
+        # response never arrived — either way they get what happened
+        # the first time rather than a second banner.
+        done = CommitRecord.objects.filter(idempotency_key=key).first()
+        if done is not None:
+            return Response(done.result, status=status.HTTP_200_OK)
+
+        service = Service.objects.filter(
+            pk=request.data.get('service'), is_active=True,
+        ).first()
+        if service is None:
+            return Response({'detail': 'That service is not available.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        specs = request.data.get('specifications') or {}
+        quantity = int(request.data.get('quantity') or 1)
+
+        problem = _quantity_problem(service, quantity)
+        if problem:
+            return Response({'detail': problem},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # ── The order ─────────────────────────────────────────────
+        order_number = (request.data.get('order') or '').strip()
+        if order_number:
+            order = _order_or_404(order_number, request.data.get('token'))
+            if not order.is_open:
+                return Response(
+                    {'detail': (
+                        'That order has been paid for. Starting another '
+                        'is the way to order something else.'
+                    )},
+                    status=status.HTTP_409_CONFLICT,
+                )
+        else:
+            order = None
+
+        # ── The artwork ───────────────────────────────────────────
+        staged = None
+        if service.requires_file_upload:
+            staged, refusal = _staged_for(
+                request.data.get('artwork_token'), service, specs,
+            )
+            if refusal:
+                return Response({'detail': refusal},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Make it real ──────────────────────────────────────────
+        try:
+            with transaction.atomic():
+                if order is None:
+                    order = OnlineOrder.objects.create()
+
+                lines = list(order.line_items or [])
+                lines.append({
+                    'service': service.id,
+                    'quantity': quantity,
+                    'specifications': specs,
+                })
+
+                priced, total, error = OrderDetailView._price(
+                    lines,
+                    {l.get('service'): l.get('id')
+                     for l in (order.line_items or []) if l.get('id')},
+                )
+                if error:
+                    raise _Refused(error)
+
+                order.line_items = priced
+                order.total = total
+                order.touch_expiry()
+                order.save()
+
+                line_id = priced[-1]['id']
+
+                if staged is not None:
+                    _attach(order, line_id, staged)
+
+                result = {
+                    'order_number': order.order_number,
+                    'access_token': order.access_token,
+                    'line_id': line_id,
+                    'line_count': len(priced),
+                    'total': f'{Decimal(order.total):.2f}',
+                }
+
+                # Written inside the transaction, so a retry cannot find
+                # a record for work that was rolled back.
+                CommitRecord.objects.create(
+                    idempotency_key=key, order=order, result=result,
+                )
+        except _Refused as refused:
+            return Response({'detail': str(refused)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError:
+            # Two presses arriving together. The other one won; its
+            # result is the answer to both.
+            done = CommitRecord.objects.filter(idempotency_key=key).first()
+            if done is not None:
+                return Response(done.result, status=status.HTTP_200_OK)
+            raise
+
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class _Refused(Exception):
+    """Something the customer can fix, raised inside the transaction."""
+
+
+def _quantity_problem(service, quantity):
+    """
+    Whether the business can actually make this many.
+
+    The spec template is the authority. A minimum of fifty does not
+    make every number above fifty valid — if cards come in boxes of
+    fifty then seventy-five is not a thing we can produce, however
+    reasonable it looks on a form.
+    """
+    field = next(
+        (f for f in (service.spec_template or []) if f.get('key') == 'quantity'),
+        None,
+    )
+    if field is None:
+        return None if quantity >= 1 else 'We need a quantity.'
+
+    minimum = field.get('min')
+    if minimum and quantity < minimum:
+        unit = field.get('unit') or 'items'
+        return f'The smallest order for {service.name} is {minimum} {unit}.'
+
+    maximum = field.get('max')
+    if maximum and quantity > maximum:
+        return (
+            f'That is more than we take online. Call the branch and we '
+            f'will quote it properly.'
+        )
+
+    step = field.get('step')
+    if step and minimum and (quantity - minimum) % step:
+        unit = field.get('unit') or 'items'
+        return f'{service.name} comes in {step}s — {minimum}, {minimum + step}, and so on.'
+    if step and not minimum and quantity % step:
+        return f'{service.name} comes in {step}s.'
+
+    return None
+
+
+def _staged_for(token, service, specs):
+    """
+    The staged file this verdict was about, or why it cannot be used.
+
+    The browser carries the verdict, which means the browser could
+    claim anything. What makes the claim worth something is the
+    signature, and what makes it worth something *about this file* is
+    the hash it carries — checked against the staged row it names.
+
+    Without both, a customer could upload good artwork, be told it
+    passes, and commit a screenshot.
+    """
+    claim = read_token(token)
+    if claim is None:
+        return None, (
+            'We need your artwork checked before this can be ordered. '
+            'Send the file again.'
+        )
+
+    staged = StagedUpload.objects.filter(pk=claim.get('staged')).first()
+    if staged is None:
+        return None, (
+            'That file is no longer waiting for us. Send it again.'
+        )
+
+    if not staged.is_live:
+        return None, 'That file has been waiting too long. Send it again.'
+
+    if not claim_matches(claim, service.id, specs, staged.file_hash):
+        return None, (
+            'Your artwork was checked against a different size. '
+            'Send it again so we can check it properly.'
+        )
+
+    if claim.get('verdict') == 'refuse':
+        return None, 'We can’t print that file.'
+
+    return staged, None
+
+
+def _attach(order, line_id, staged):
+    """
+    Move the staged artwork onto the line.
+
+    The measurements are copied rather than taken again: the customer
+    was shown a verdict based on those numbers, and re-reading the file
+    could only produce a different answer than the one they agreed to.
+    """
+    record = OrderFile(
+        order=order,
+        line_id=line_id,
+        original_filename=staged.original_filename,
+        size_bytes=staged.size_bytes,
+        content_type=staged.content_type,
+        verdict=staged.verdict,
+        checks=staged.checks,
+        # A warning the customer saw and continued past is a warning
+        # they accepted. Pressing the button is the acceptance.
+        warning_accepted=staged.verdict == 'warn',
+        **staged.measured(),
+    )
+    record.file.save(staged.original_filename, staged.file, save=False)
+    record.save()
+
+    staged.file.delete(save=False)
+    staged.delete()
+    return record

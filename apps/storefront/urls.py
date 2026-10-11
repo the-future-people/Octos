@@ -18,4 +18,5 @@ urlpatterns = [
 
     path('orders/<str:order_number>/', views.OrderDetailView.as_view(), name='storefront-order-detail'),
     path('check/', views.ArtworkCheckView.as_view(), name='storefront-artwork-check'),
+    path('commit/', views.CommitView.as_view(), name='storefront-commit'),
 ]

@@ -135,7 +135,7 @@ class OnlineOrder(AuditModel):
 
     # An unfinished order is swept rather than kept forever. Most orders
     # are abandoned and that is fine.
-    expires_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     notes = models.TextField(blank=True)
 
@@ -152,6 +152,16 @@ class OnlineOrder(AuditModel):
     def is_paid(self):
         return self.paid_at is not None
 
+    def touch_expiry(self):
+        """
+        Push the expiry out. Called when the customer does something
+        deliberate — adds an item, changes one — not when a page merely
+        loads. A cart that never expires because something polls it is
+        a cart that is never swept.
+        """
+        from django.utils import timezone
+        self.expires_at = timezone.now() + timezone.timedelta(days=7)
+    
     @property
     def is_open(self):
         return self.status in (self.Status.DRAFT, self.Status.AWAITING_PAYMENT)

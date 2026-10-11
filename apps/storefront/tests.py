@@ -1771,3 +1771,283 @@ class ArtworkCheckTests(TestCase):
                                  content_type='application/x-coreldraw')
         response = self._check(bad)
         self.assertEqual(response.data['verdict'], 'refuse')
+
+class CommitTests(TestCase):
+    """
+    Continue — the moment anything becomes real.
+
+    Everything before this is the customer thinking. This is where an
+    order exists, a line is added, and artwork becomes something the
+    floor will print.
+
+    Three things it must not get wrong:
+
+      the verdict   a file that passed must be the file that commits,
+                    or a customer could pass a good one and send a
+                    screenshot
+      the retry     a lost response on mobile data is normal, and the
+                    second press must not buy the banner twice
+      the rules     a quantity the business cannot fulfil must not be
+                    accepted because the browser allowed it
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import Service, PricingRule
+
+        cls.flexy = Service.objects.create(
+            name='Commit Flexy', code='CMTFLEXY',
+            category='PRODUCTION', unit='PER_SQFT',
+            requires_file_upload=True, is_active=True,
+            spec_template=[
+                {'key': 'width_in', 'label': 'Width', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+                {'key': 'height_in', 'label': 'Height', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None, base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'), minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+        cls.cards = Service.objects.create(
+            name='Commit Cards', code='CMTCARDS',
+            category='PRODUCTION', unit='PER_PIECE', is_active=True,
+            spec_template=[
+                {'key': 'quantity', 'label': 'Quantity', 'type': 'number',
+                 'required': True, 'min': 50, 'step': 50, 'unit': 'cards'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.cards, branch=None, base_price=Decimal('1.50'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        return APIClient()
+
+    def _image(self, width_px=9000, height_px=4500, name='art.jpg'):
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        buf = io.BytesIO()
+        Image.new('RGB', (width_px, height_px), (10, 80, 160)).save(buf, 'JPEG')
+        buf.seek(0)
+        return SimpleUploadedFile(name, buf.read(), content_type='image/jpeg')
+
+    def _token(self, width=72, height=36, upload=None):
+        """A real verdict from the real check endpoint."""
+        response = self._client().post(
+            '/api/v1/storefront/check/',
+            {
+                'file': upload or self._image(),
+                'service': self.flexy.id,
+                'specifications': json.dumps({
+                    'width_in': width, 'height_in': height,
+                }),
+            },
+            format='multipart',
+        )
+        return response.data['token']
+
+    def _commit(self, **overrides):
+        import uuid as _uuid
+
+        body = {
+            'idempotency_key': _uuid.uuid4().hex,
+            'service': self.flexy.id,
+            'quantity': 1,
+            'specifications': {'width_in': 72, 'height_in': 36},
+        }
+        body.update(overrides)
+        return self._client().post(
+            '/api/v1/storefront/commit/', body, format='json',
+        )
+
+    # ── Making something real ──────────────────────────────────────
+
+    def test_a_commit_creates_the_order_and_its_line(self):
+        before = OnlineOrder.objects.count()
+        response = self._commit(artwork_token=self._token())
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(OnlineOrder.objects.count(), before + 1)
+
+        order = OnlineOrder.objects.get(
+            order_number=response.data['order_number'],
+        )
+        self.assertEqual(len(order.line_items), 1)
+        self.assertEqual(order.line_items[0]['service'], self.flexy.id)
+
+    def test_the_token_comes_back_once(self):
+        """
+        The customer needs it to return to their cart, and there is no
+        way to ask for it again.
+        """
+        response = self._commit(artwork_token=self._token())
+        self.assertTrue(response.data['access_token'])
+
+    def test_a_second_item_joins_the_same_order(self):
+        first = self._commit(artwork_token=self._token())
+        order_number = first.data['order_number']
+
+        second = self._commit(
+            order=order_number,
+            token=first.data['access_token'],
+            service=self.cards.id,
+            quantity=100,
+            specifications={},
+        )
+
+        self.assertEqual(second.status_code, 201, second.content)
+        order = OnlineOrder.objects.get(order_number=order_number)
+        self.assertEqual(len(order.line_items), 2)
+
+    def test_the_artwork_lands_on_the_line(self):
+        from apps.storefront.models import OrderFile
+
+        response = self._commit(artwork_token=self._token())
+        order = OnlineOrder.objects.get(
+            order_number=response.data['order_number'],
+        )
+
+        record = OrderFile.objects.get(order=order)
+        self.assertEqual(record.line_id, order.line_items[0]['id'])
+        self.assertEqual(record.verdict, 'fine')
+        self.assertTrue(record.width_px)
+
+    def test_the_staged_file_is_not_left_behind(self):
+        from apps.storefront.models import StagedUpload
+
+        self._commit(artwork_token=self._token())
+        self.assertEqual(StagedUpload.objects.count(), 0)
+
+    # ── The verdict has to be about this file ──────────────────────
+
+    def test_a_commit_without_a_token_is_refused_where_artwork_is_needed(self):
+        response = self._commit()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('artwork', response.data['detail'].lower())
+
+    def test_a_token_for_a_different_size_is_refused(self):
+        """
+        The verdict was about a six-foot banner. Committing a twelve
+        foot one would print artwork nobody judged at that size.
+        """
+        token = self._token(width=72, height=36)
+        response = self._commit(
+            artwork_token=token,
+            specifications={'width_in': 144, 'height_in': 72},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_token_for_a_different_service_is_refused(self):
+        token = self._token()
+        response = self._commit(
+            artwork_token=token,
+            service=self.cards.id,
+            specifications={},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_tampered_token_is_refused(self):
+        token = self._token()
+        response = self._commit(artwork_token=token[:-4] + 'aaaa')
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_token_cannot_be_spent_twice(self):
+        """
+        The staged file is gone after the first commit, so a replay has
+        nothing to attach — and buying one banner must not put two on
+        the floor.
+        """
+        token = self._token()
+        first = self._commit(artwork_token=token)
+        second = self._commit(artwork_token=token)
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 400)
+
+    # ── Pressing twice ─────────────────────────────────────────────
+
+    def test_the_same_key_returns_the_first_result(self):
+        """
+        A commit completes, the response is lost, the customer presses
+        again. That is a normal event on mobile data and must not buy
+        the banner twice.
+        """
+        import uuid as _uuid
+
+        key = _uuid.uuid4().hex
+        first = self._commit(idempotency_key=key, artwork_token=self._token())
+        second = self._commit(idempotency_key=key, artwork_token=self._token())
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(
+            first.data['order_number'], second.data['order_number'],
+        )
+
+        order = OnlineOrder.objects.get(
+            order_number=first.data['order_number'],
+        )
+        self.assertEqual(len(order.line_items), 1)
+
+    def test_a_commit_needs_a_key(self):
+        response = self._client().post(
+            '/api/v1/storefront/commit/',
+            {'service': self.flexy.id, 'quantity': 1,
+             'specifications': {'width_in': 72, 'height_in': 36}},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    # ── The business's own rules ───────────────────────────────────
+
+    def test_a_quantity_below_the_minimum_is_refused(self):
+        response = self._commit(
+            service=self.cards.id, quantity=20, specifications={},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('50', response.data['detail'])
+
+    def test_a_quantity_off_the_step_is_refused(self):
+        """
+        Cards come in boxes of fifty. Seventy-five is not a thing we
+        can make, however reasonable it looks.
+        """
+        response = self._commit(
+            service=self.cards.id, quantity=75, specifications={},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_valid_quantity_is_accepted(self):
+        response = self._commit(
+            service=self.cards.id, quantity=150, specifications={},
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_a_paid_order_cannot_be_added_to(self):
+        first = self._commit(artwork_token=self._token())
+        order = OnlineOrder.objects.get(
+            order_number=first.data['order_number'],
+        )
+        order.status = OnlineOrder.Status.PAID
+        order.save()
+
+        second = self._commit(
+            order=order.order_number,
+            token=first.data['access_token'],
+            service=self.cards.id,
+            quantity=100,
+            specifications={},
+        )
+        self.assertEqual(second.status_code, 409)
