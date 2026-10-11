@@ -2344,3 +2344,119 @@ class QuoteTests(TestCase):
         self.assertEqual(OnlineOrder.objects.count(), orders)
         self.assertEqual(OrderFile.objects.count(), files)
         self.assertEqual(StagedUpload.objects.count(), staged)
+
+class TrackLookupTests(TestCase):
+    """
+    Getting back into an order without the link.
+
+    The text message carries a link with the token in it, which is the
+    ordinary way back. This is for the customer who deleted it: the
+    order number and the phone they gave, which is the same pair the
+    counter would ask for.
+
+    Neither alone is enough, and that matters. Order numbers are
+    sequential — ORD-2026-00041 is one guess from 00042 — so the number
+    proves nothing by itself. The phone is what ties it to a person.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.lead = Lead.objects.create(phone='0244111222', first_name='Adwoa')
+        cls.other = Lead.objects.create(phone='0209999888', first_name='Kofi')
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _order(self, lead=None, **overrides):
+        order = OnlineOrder.objects.create(
+            lead=lead or self.lead,
+            full_total=Decimal('104.00'), total=Decimal('104.00'),
+            **overrides,
+        )
+        return order
+
+    def _find(self, number, phone):
+        from rest_framework.test import APIClient
+        return APIClient().post(
+            '/api/v1/storefront/find/',
+            {'order': number, 'phone': phone},
+            format='json',
+        )
+
+    # ── Finding it ─────────────────────────────────────────────────
+
+    def test_the_right_pair_gives_back_the_token(self):
+        order = self._order()
+        response = self._find(order.order_number, '0244111222')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['token'], order.access_token)
+        self.assertEqual(response.data['order_number'], order.order_number)
+
+    def test_spacing_in_the_phone_does_not_matter(self):
+        """
+        People write their number the way they write it. Ours is not a
+        test of punctuation.
+        """
+        order = self._order()
+        response = self._find(order.order_number, '024 411 1222')
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_order_number_is_not_case_sensitive(self):
+        order = self._order()
+        response = self._find(order.order_number.lower(), '0244111222')
+        self.assertEqual(response.status_code, 200)
+
+    # ── Not finding it ─────────────────────────────────────────────
+
+    def test_another_persons_phone_does_not_open_it(self):
+        """
+        The number is guessable; the pair is not. Without this, walking
+        the sequence would open every order in the shop.
+        """
+        order = self._order()
+        response = self._find(order.order_number, '0209999888')
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_number_nobody_has_gives_the_same_answer(self):
+        """
+        The same refusal whether the order exists or the phone was
+        wrong. Two different answers would let someone learn which
+        order numbers are real.
+        """
+        order = self._order()
+        wrong_phone = self._find(order.order_number, '0241234567')
+        no_order = self._find('ORD-2026-99999', '0244111222')
+
+        self.assertEqual(wrong_phone.status_code, 404)
+        self.assertEqual(no_order.status_code, 404)
+        self.assertEqual(wrong_phone.data, no_order.data)
+
+    def test_an_order_with_nobody_on_it_cannot_be_found(self):
+        order = OnlineOrder.objects.create()
+        response = self._find(order.order_number, '0244111222')
+        self.assertEqual(response.status_code, 404)
+
+    def test_both_are_needed(self):
+        order = self._order()
+        self.assertEqual(self._find(order.order_number, '').status_code, 400)
+        self.assertEqual(self._find('', '0244111222').status_code, 400)
+
+    # ── Not a door to walk through ─────────────────────────────────
+
+    def test_guessing_is_throttled(self):
+        """
+        Sequential numbers and a guessable phone mean this has to cost
+        something to try. Without a limit, a script walks the year.
+        """
+        from django.core.cache import cache
+        cache.clear()
+
+        order = self._order()
+        codes = [
+            self._find(order.order_number, f'02400000{n:02d}').status_code
+            for n in range(12)
+        ]
+
+        self.assertIn(429, codes)

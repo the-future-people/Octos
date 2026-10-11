@@ -1580,3 +1580,76 @@ class QuoteView(APIView):
             'total': str(quote['total']),
             'minimum_applied': bool(quote.get('minimum_applied')),
         })
+
+class FindOrderView(APIView):
+    """
+    POST /api/v1/storefront/find/
+
+    Getting back into an order without the link.
+
+    The text message carries the token, which is the ordinary way back.
+    This is for the customer who deleted it: the order number and the
+    phone they gave, which is the same pair the counter would ask for
+    across the desk.
+
+    Neither alone opens anything, and that matters. Order numbers run
+    in sequence — ORD-2026-00041 is one guess from 00042 — so the
+    number proves nothing by itself. The phone is what ties it to a
+    person.
+
+    Throttled harder than the rest of the storefront, because this is
+    the one place where guessing could be worth someone's time.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_find'
+
+    def post(self, request):
+        number = (request.data.get('order') or '').strip().upper()
+        phone = (request.data.get('phone') or '').strip()
+
+        if not number or not phone:
+            return Response(
+                {'detail': 'We need the order number and the phone number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order = (
+            OnlineOrder.objects
+            .select_related('lead')
+            .filter(order_number=number, lead__isnull=False)
+            .first()
+        )
+
+        # One refusal for every way of being wrong. Telling someone
+        # that an order exists but the phone is wrong would let them
+        # map which numbers are real.
+        if order is None or not _same_number(order.lead.phone, phone):
+            return Response(
+                {'detail': (
+                    'We can’t find an order with that number and phone. '
+                    'Check both, or call us on 030 000 0000.'
+                )},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response({
+            'order_number': order.order_number,
+            'token': order.access_token,
+        })
+
+
+def _same_number(stored, given):
+    """
+    Whether these are the same phone number.
+
+    People write their number the way they write it — 024 411 1222,
+    0244111222, +233 24 411 1222. Ours is not a test of punctuation, so
+    the last nine digits are compared and everything else ignored.
+    """
+    def digits(value):
+        return ''.join(c for c in (value or '') if c.isdigit())[-9:]
+
+    a, b = digits(stored), digits(given)
+    return bool(a) and a == b

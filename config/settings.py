@@ -206,6 +206,10 @@ REST_FRAMEWORK = {
         'storefront': '90/min',
         # Guessing a code is the one thing worth slowing down.
         'storefront_code': '6/min',
+        # Harder than the rest of the storefront. Order numbers run in
+        # sequence and a phone number is guessable, so this is the one
+        # door where patience could pay off.
+        'storefront_find': '10/hour',
     },
 }
 
