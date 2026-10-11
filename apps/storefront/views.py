@@ -78,6 +78,11 @@ def _serialise(order):
         'status': order.status,
         'branch': order.branch_id,
         'line_items': order.line_items,
+        # All three, so the customer can see what the discount did.
+        # A lower number with nothing explaining it reads as a mistake.
+        'full_total': f'{Decimal(order.full_total):.2f}',
+        'discount_amount': f'{Decimal(order.discount_amount):.2f}',
+        'discount_reason': order.discount_reason,
         'total': f'{Decimal(order.total):.2f}',
         'fulfilment': order.fulfilment,
         'promised_for': order.promised_for,
