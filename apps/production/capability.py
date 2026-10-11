@@ -3,8 +3,8 @@ Which branches can do this work, and when each would finish.
 
 Not the reroute engine in apps/jobs. That one moves a job that already
 has a home, scores branches on capacity and queue depth, and assumes an
-origin to route away from. An order placed online has no origin, and the
-question it asks is narrower: who can print this, and when.
+origin to route away from. An order placed online has no origin, and
+the question it asks is narrower: who can print this, and when.
 
 So this answers only that, and answers it honestly. A branch appears
 when it genuinely can do the work today — it has the machine, the
@@ -17,9 +17,10 @@ judgement, not ours, so both travel with each option and they choose —
 the way a rider picks between a cheap car ten minutes away and a nearer
 one that costs more.
 
-When nothing qualifies, the reasons come back too. An empty list tells
-a customer nothing; "no branch can print a banner that wide today"
-tells them what to change.
+When nothing qualifies, the reasons come back too, and each names the
+service it is about. A customer cannot act on "Madina has no large
+format printer"; they can act on knowing which of their items is the
+one stopping the order.
 """
 
 import logging
@@ -41,14 +42,13 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
     PredictionService takes.
 
     Returns {'options': [...], 'refusals': [...]}, options soonest
-    first.
+    first. Each refusal carries the service it is about, because that
+    is the part a customer recognises.
     """
     from apps.organization.models import Branch
 
     services = [service for service, _, _ in line_items]
     options, refusals = [], []
-
-    branches = Branch.objects.filter(is_active=True).select_related('region')
 
     # A service nobody has routed through the floor is not a fact about
     # any one branch, so it is said once rather than once per branch.
@@ -56,12 +56,15 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
     if unrouted:
         return {'options': [], 'refusals': unrouted}
 
+    branches = Branch.objects.filter(is_active=True).select_related('region')
+
     for branch in branches:
-        problem = _why_not(branch, services, width_mm)
+        service_name, problem = _why_not(branch, services, width_mm)
         if problem:
             refusals.append({
                 'branch': branch,
                 'branch_name': branch.name,
+                'service_name': service_name,
                 'reason': problem,
             })
             continue
@@ -71,6 +74,7 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
             refusals.append({
                 'branch': branch,
                 'branch_name': branch.name,
+                'service_name': None,
                 'reason': 'We could not work out a time for this branch.',
             })
             continue
@@ -88,25 +92,9 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
             'distance_m': _distance(branch, customer_location),
         })
 
-    # When every branch gives the same reason, it is a fact about the
-    # work rather than about any branch — and six identical lines read
-    # as a system fault rather than an answer.
-    if not options and refusals:
-        reasons = {r['reason'] for r in refusals}
-        if len(reasons) == 1 and len(refusals) > 1:
-            service_names = ', '.join(s.name for s in services)
-            refusals = [{
-                'branch': None,
-                'branch_name': None,
-                'reason': (
-                    f'We can’t make {service_names} at any of our branches '
-                    f'right now.'
-                ),
-            }]
-
     # Soonest first. Where two land at the same moment, the nearer one
     # wins — but only as a tiebreak, since we do not know whether this
-    # customer is collecting or has it delivered.
+    # customer is collecting or having it delivered.
     options.sort(key=lambda o: (
         o['ready_at'],
         o['distance_m'] if o['distance_m'] is not None else float('inf'),
@@ -125,21 +113,21 @@ def branch_options(line_items, width_mm=None, customer_location=None, at=None):
 
 def _why_not(branch, services, width_mm):
     """
-    The reason this branch cannot take the work, or None if it can.
+    Why this branch cannot take the work: (service name, reason).
 
-    Written as a sentence a customer could read. The branch that cannot
-    print a wide banner today is not a failure of the system, and the
-    message should not read like one.
+    Both None when it can.
+
+    The reason names the step that failed rather than only the service.
+    "No machine for SAV Sticker" at a branch holding two large-format
+    printers sends whoever reads it looking in entirely the wrong
+    place — the missing thing was the cutter.
     """
     from apps.production.models import Machine, ServiceStation
 
     for service in services:
         routes = ServiceStation.objects.filter(
             service=service,
-        ).select_related('machine_type')
-
-        if not routes.exists():
-            return f'We have not set up {service.name} on the floor yet.'
+        ).select_related('machine_type', 'station')
 
         for route in routes:
             if route.machine_type_id is None:
@@ -153,30 +141,49 @@ def _why_not(branch, services, width_mm):
             )
 
             if not machines.exists():
-                # Which step, not just which service. "No machine for
-                # SAV Sticker" at a branch holding two large-format
-                # printers sends whoever reads it looking in the wrong
-                # place entirely.
-                return (
+                return service.name, (
                     f'{branch.name} has no {route.machine_type.name.lower()} '
                     f'for the {route.station.name.lower()} on {service.name}.'
                 )
+
             working = machines.filter(is_available=True)
             if not working.exists():
-                return (
-                    f'The machine for {service.name} at {branch.name} is '
-                    f'out of service today.'
+                return service.name, (
+                    f'The {route.machine_type.name.lower()} at {branch.name} '
+                    f'is out of service today.'
                 )
 
             if width_mm:
                 widest = max((m.max_width_mm or 0) for m in working)
                 if widest and width_mm > widest:
-                    return (
+                    return service.name, (
                         f'{branch.name} can print up to {widest}mm wide. '
                         f'This job needs {int(width_mm)}mm.'
                     )
 
-    return None
+    return None, None
+
+
+def _unrouted(services):
+    """
+    Services with no route through the floor at all.
+
+    Nothing to do with which branch: until someone says which stations
+    the work passes through and how long each takes, no branch can be
+    asked to time it.
+    """
+    from apps.production.models import ServiceStation
+
+    missing = []
+    for service in services:
+        if not ServiceStation.objects.filter(service=service).exists():
+            missing.append({
+                'branch': None,
+                'branch_name': None,
+                'service_name': service.name,
+                'reason': f'We can’t take {service.name} online yet.',
+            })
+    return missing
 
 
 def _predict(branch, line_items, at):
@@ -228,23 +235,3 @@ def _distance(branch, customer_location):
     dx = (lon2 - lon1) * METRES_PER_DEGREE * math.cos(math.radians((lat1 + lat2) / 2))
 
     return round(math.hypot(dx, dy))
-
-def _unrouted(services):
-    """
-    Services with no route through the floor at all.
-
-    Nothing to do with which branch: until someone says which stations
-    the work passes through and how long each takes, no branch can be
-    asked to time it.
-    """
-    from apps.production.models import ServiceStation
-
-    missing = []
-    for service in services:
-        if not ServiceStation.objects.filter(service=service).exists():
-            missing.append({
-                'branch': None,
-                'branch_name': None,
-                'reason': f'We can’t take {service.name} online yet.',
-            })
-    return missing

@@ -986,7 +986,11 @@ class OrderBranchesView(APIView):
                 for option in result['options']
             ],
             'refusals': [
-                {'branch_name': r['branch_name'], 'reason': r['reason']}
+                {
+                    'branch_name': r['branch_name'],
+                    'service_name': r.get('service_name'),
+                    'reason': r['reason'],
+                }
                 for r in result['refusals']
             ],
         })
