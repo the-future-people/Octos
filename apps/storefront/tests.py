@@ -2207,3 +2207,140 @@ class SweepTests(TestCase):
 
         self.assertEqual(result['orders'], 1)
         self.assertEqual(result['staged'], 1)
+
+class QuoteTests(TestCase):
+    """
+    What a line would cost, before anything exists to put it on.
+
+    Specify needs a price the moment a size is typed, and under the new
+    flow there is no order yet. So pricing is asked for on its own and
+    commits nothing.
+
+    The arithmetic is the counter's. A second implementation for the
+    web would drift from the shop's within a month, and a customer
+    would be quoted one price online and another at the desk.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import Service, PricingRule
+
+        cls.flexy = Service.objects.create(
+            name='Quote Flexy', code='QTFLEXY',
+            category='PRODUCTION', unit='PER_SQFT', is_active=True,
+            spec_template=[
+                {'key': 'width_in', 'label': 'Width', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+                {'key': 'height_in', 'label': 'Height', 'type': 'number',
+                 'required': True, 'min': 6, 'unit': 'in'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None, base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'), minimum_price=Decimal('10.00'),
+            is_active=True,
+        )
+
+        cls.cards = Service.objects.create(
+            name='Quote Cards', code='QTCARDS',
+            category='PRODUCTION', unit='PER_PIECE', is_active=True,
+            spec_template=[
+                {'key': 'quantity', 'label': 'Quantity', 'type': 'number',
+                 'required': True, 'min': 50, 'step': 50, 'unit': 'cards'},
+            ],
+        )
+        PricingRule.objects.create(
+            service=cls.cards, branch=None, base_price=Decimal('1.50'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _quote(self, **overrides):
+        from rest_framework.test import APIClient
+
+        body = {
+            'service': self.flexy.id,
+            'quantity': 1,
+            'specifications': {'width_in': 72, 'height_in': 36},
+        }
+        body.update(overrides)
+        return APIClient().post(
+            '/api/v1/storefront/quote/', body, format='json',
+        )
+
+    # ── The price ──────────────────────────────────────────────────
+
+    def test_a_line_is_priced_without_an_order(self):
+        before = OnlineOrder.objects.count()
+        response = self._quote()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['total'], '58.50')
+        self.assertEqual(OnlineOrder.objects.count(), before)
+
+    def test_the_area_is_worked_out_from_the_size(self):
+        """18 sq ft at GHS 3.25 — the same sum the counter does."""
+        response = self._quote()
+        self.assertEqual(response.data['unit_price'], '58.50')
+
+    def test_quantity_multiplies_it(self):
+        one = self._quote(quantity=1)
+        three = self._quote(quantity=3)
+
+        self.assertEqual(
+            Decimal(three.data['total']),
+            Decimal(one.data['total']) * 3,
+        )
+
+    def test_a_small_banner_is_charged_at_the_minimum(self):
+        response = self._quote(
+            specifications={'width_in': 6, 'height_in': 6},
+        )
+        self.assertEqual(response.data['total'], '10.00')
+        self.assertTrue(response.data['minimum_applied'])
+
+    # ── The rules, here too ────────────────────────────────────────
+
+    def test_a_quantity_below_the_minimum_is_refused(self):
+        """
+        Refused at the quote, not merely at the commit. A customer
+        should not be shown a price for something we will not make.
+        """
+        response = self._quote(
+            service=self.cards.id, quantity=20, specifications={},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('50', response.data['detail'])
+
+    def test_a_quantity_off_the_step_is_refused(self):
+        response = self._quote(
+            service=self.cards.id, quantity=75, specifications={},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    # ── Not a door into the system ─────────────────────────────────
+
+    def test_an_unknown_service_is_refused(self):
+        response = self._quote(service=999999)
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_missing_size_is_refused_rather_than_guessed(self):
+        response = self._quote(specifications={})
+        self.assertEqual(response.status_code, 400)
+
+    def test_nothing_is_created_by_a_quote(self):
+        from apps.storefront.models import OrderFile, StagedUpload
+
+        orders = OnlineOrder.objects.count()
+        files = OrderFile.objects.count()
+        staged = StagedUpload.objects.count()
+
+        self._quote()
+        self._quote(quantity=5)
+
+        self.assertEqual(OnlineOrder.objects.count(), orders)
+        self.assertEqual(OrderFile.objects.count(), files)
+        self.assertEqual(StagedUpload.objects.count(), staged)

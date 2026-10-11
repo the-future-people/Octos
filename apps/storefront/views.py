@@ -1510,3 +1510,64 @@ def _attach(order, line_id, staged):
     staged.file.delete(save=False)
     staged.delete()
     return record
+
+class QuoteView(APIView):
+    """
+    POST /api/v1/storefront/quote/
+
+    What a line would cost, committing nothing.
+
+    Specify needs a price the moment a size is typed, and under the
+    revised flow there is no order at that point — the customer is
+    still deciding. So pricing is asked for on its own.
+
+    The arithmetic is `quote_line`, the same function the counter uses.
+    A second implementation for the web would drift from the shop's
+    within a month, and a customer would be told one price online and
+    another at the desk.
+
+    Rules are enforced here as well as at commit. Showing someone a
+    price for seventy-five business cards and refusing it a screen
+    later is worse than refusing it now.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def post(self, request):
+        service = Service.objects.filter(
+            pk=request.data.get('service'), is_active=True,
+        ).first()
+        if service is None:
+            return Response({'detail': 'That service is not available.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        quantity = int(request.data.get('quantity') or 1)
+        specs = request.data.get('specifications') or {}
+
+        problem = _quantity_problem(service, quantity)
+        if problem:
+            return Response({'detail': problem},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        quote = quote_line(
+            service=service, branch=None,
+            specifications=specs, quantity=quantity,
+        )
+
+        if not quote.get('success'):
+            return Response(
+                {'detail': quote.get('error', 'We could not price that.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'service': service.id,
+            'service_name': service.name,
+            'quantity': quantity,
+            'specifications': specs,
+            'unit_price': str(quote.get('unit_price') or quote['total']),
+            'total': str(quote['total']),
+            'minimum_applied': bool(quote.get('minimum_applied')),
+        })
