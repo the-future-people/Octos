@@ -88,6 +88,22 @@ def assess(line_items, width_mm=None, customer_location=None, at=None):
             'distance_m': _distance(branch, customer_location),
         })
 
+    # When every branch gives the same reason, it is a fact about the
+    # work rather than about any branch — and six identical lines read
+    # as a system fault rather than an answer.
+    if not options and refusals:
+        reasons = {r['reason'] for r in refusals}
+        if len(reasons) == 1 and len(refusals) > 1:
+            service_names = ', '.join(s.name for s in services)
+            refusals = [{
+                'branch': None,
+                'branch_name': None,
+                'reason': (
+                    f'We can’t make {service_names} at any of our branches '
+                    f'right now.'
+                ),
+            }]
+
     # Soonest first. Where two land at the same moment, the nearer one
     # wins — but only as a tiebreak, since we do not know whether this
     # customer is collecting or has it delivered.
@@ -137,11 +153,14 @@ def _why_not(branch, services, width_mm):
             )
 
             if not machines.exists():
+                # Which step, not just which service. "No machine for
+                # SAV Sticker" at a branch holding two large-format
+                # printers sends whoever reads it looking in the wrong
+                # place entirely.
                 return (
-                    f'{branch.name} does not have the machine for '
-                    f'{service.name}.'
+                    f'{branch.name} has no {route.machine_type.name.lower()} '
+                    f'for the {route.station.name.lower()} on {service.name}.'
                 )
-
             working = machines.filter(is_available=True)
             if not working.exists():
                 return (

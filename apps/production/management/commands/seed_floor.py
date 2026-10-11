@@ -126,9 +126,13 @@ ROUTES = [
     ('FLEXY',                'FINISH',   None,            3, '5.00',  '0.2500'),
 
     ('SAV',                  'PRINT',    'LARGE_FORMAT',  1, '12.00', '0.1740'),
-    # The plotter cuts at 1000mm/s, so the blade is seconds. This is
-    # loading, registration and weeding.
-    ('SAV',                  'CUT',      'PLOTTER',       2, '8.00',  '0.4000'),
+    # Hand-trimmed. The plotter takes 680mm, so anything wider is cut
+    # by hand anyway — and until one is actually on the floor, naming
+    # it here refuses every branch for work they can do perfectly well.
+    #
+    # Once a cutter arrives, this step names PLOTTER again and the
+    # width check sends wide panels to hand finishing.
+    ('SAV',                  'CUT',      None,            2, '8.00',  '0.4000'),
 ]
 
 
