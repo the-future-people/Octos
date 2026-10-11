@@ -270,6 +270,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.expire_proformas',
         'schedule': crontab(hour=2, minute=15),
     },
+    'sweep-storefront-nightly': {
+        'task': 'apps.storefront.tasks.sweep_storefront',
+        'schedule': crontab(hour=2, minute=30),
+    },
     'observe-station-timings-nightly': {
         'task': 'apps.production.tasks.observe_station_timings',
         'schedule': crontab(hour=3, minute=0),

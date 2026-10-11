@@ -2051,3 +2051,159 @@ class CommitTests(TestCase):
             specifications={},
         )
         self.assertEqual(second.status_code, 409)
+
+class SweepTests(TestCase):
+    """
+    Clearing out what nobody completed.
+
+    Most carts are abandoned, which is fine and expected — but their
+    artwork sits on disk, and a promise that we keep a cart for seven
+    days means nothing unless something enforces the seven days.
+
+    What it must never touch is money. An order someone has paid for,
+    or is in the middle of paying for, is not abandoned however old it
+    looks — and Paystack can be slow.
+    """
+
+    def _order(self, days_ago=None, **overrides):
+        from django.utils import timezone
+
+        order = OnlineOrder.objects.create(**overrides)
+        if days_ago is not None:
+            OnlineOrder.objects.filter(pk=order.pk).update(
+                expires_at=timezone.now() - timezone.timedelta(days=days_ago),
+            )
+            order.refresh_from_db()
+        return order
+
+    def _staged(self, hours_ago=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.utils import timezone
+        from apps.storefront.models import StagedUpload
+
+        staged = StagedUpload.objects.create(
+            file=SimpleUploadedFile('art.jpg', b'x' * 64,
+                                    content_type='image/jpeg'),
+            original_filename='art.jpg', file_hash='abc123',
+            verdict='fine',
+        )
+        if hours_ago is not None:
+            StagedUpload.objects.filter(pk=staged.pk).update(
+                expires_at=timezone.now() - timezone.timedelta(hours=hours_ago),
+            )
+        return staged
+
+    # ── What goes ──────────────────────────────────────────────────
+
+    def test_an_expired_unpaid_order_is_swept(self):
+        from apps.storefront.services.sweep import sweep
+
+        order = self._order(days_ago=1)
+        sweep()
+        self.assertFalse(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_its_artwork_goes_with_it(self):
+        from apps.storefront.models import OrderFile
+        from apps.storefront.services.sweep import sweep
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        order = self._order(days_ago=1)
+        OrderFile.objects.create(
+            order=order, line_id='abc',
+            file=SimpleUploadedFile('art.jpg', b'x' * 64,
+                                    content_type='image/jpeg'),
+            original_filename='art.jpg',
+        )
+
+        sweep()
+        self.assertEqual(OrderFile.objects.filter(order=order).count(), 0)
+
+    def test_a_staged_upload_nobody_committed_is_swept(self):
+        from apps.storefront.models import StagedUpload
+        from apps.storefront.services.sweep import sweep
+
+        staged = self._staged(hours_ago=1)
+        sweep()
+        self.assertFalse(StagedUpload.objects.filter(pk=staged.pk).exists())
+
+    # ── What stays ─────────────────────────────────────────────────
+
+    def test_a_paid_order_is_never_swept(self):
+        """
+        However old. A paid order is a job somebody is waiting for.
+        """
+        from apps.storefront.services.sweep import sweep
+
+        order = self._order(days_ago=90, status=OnlineOrder.Status.PAID)
+        sweep()
+        self.assertTrue(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_an_order_awaiting_payment_is_never_swept(self):
+        """
+        The customer is on Paystack's page, or the webhook is late.
+        Deleting it now takes money for an order that no longer exists.
+        """
+        from apps.storefront.services.sweep import sweep
+
+        order = self._order(
+            days_ago=1, status=OnlineOrder.Status.AWAITING_PAYMENT,
+        )
+        sweep()
+        self.assertTrue(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_an_order_that_became_a_job_is_never_swept(self):
+        from apps.storefront.services.sweep import sweep
+
+        order = self._order(days_ago=90, status=OnlineOrder.Status.CONVERTED)
+        sweep()
+        self.assertTrue(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_an_order_still_in_date_is_left_alone(self):
+        from apps.storefront.services.sweep import sweep
+
+        order = self._order(days_ago=-3)
+        sweep()
+        self.assertTrue(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_an_order_with_no_expiry_is_left_alone(self):
+        """
+        Older rows predate the field. Deleting what we cannot date
+        would be guessing with somebody's work.
+        """
+        from apps.storefront.services.sweep import sweep
+
+        order = OnlineOrder.objects.create()
+        OnlineOrder.objects.filter(pk=order.pk).update(expires_at=None)
+
+        sweep()
+        self.assertTrue(OnlineOrder.objects.filter(pk=order.pk).exists())
+
+    def test_a_live_staged_upload_is_left_alone(self):
+        from apps.storefront.models import StagedUpload
+        from apps.storefront.services.sweep import sweep
+
+        staged = self._staged()
+        sweep()
+        self.assertTrue(StagedUpload.objects.filter(pk=staged.pk).exists())
+
+    # ── Running it twice ───────────────────────────────────────────
+
+    def test_sweeping_twice_does_no_harm(self):
+        from apps.storefront.services.sweep import sweep
+
+        self._order(days_ago=1)
+        first = sweep()
+        second = sweep()
+
+        self.assertEqual(first['orders'], 1)
+        self.assertEqual(second['orders'], 0)
+
+    def test_it_reports_what_it_did(self):
+        from apps.storefront.services.sweep import sweep
+
+        self._order(days_ago=1)
+        self._staged(hours_ago=1)
+        result = sweep()
+
+        self.assertEqual(result['orders'], 1)
+        self.assertEqual(result['staged'], 1)
