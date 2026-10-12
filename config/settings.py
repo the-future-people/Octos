@@ -178,7 +178,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.CustomUser'
-
+STOREFRONT_HOST = os.environ.get('STOREFRONT_HOST', 'print-octos.vercel.app')
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

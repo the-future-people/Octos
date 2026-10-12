@@ -579,3 +579,154 @@ class TrackingFieldsTests(TestCase):
     def test_a_line_with_no_artwork_says_nothing(self):
         line = self._read(self._order())['line_items'][0]
         self.assertIsNone(line.get('artwork_filename'))
+
+class PaymentTextTests(TestCase):
+    """
+    The text a customer gets when they pay.
+
+    It does three things: confirms the money, says where and when, and
+    carries a link they can tap. One message, because two costs double
+    and reads as a mistake.
+
+    It is sent after the job exists, not before — a link that opens a
+    page saying nothing is worse than a link that arrives a second
+    later.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.branch = Branch.objects.create(
+            name='Text Branch', code='TXB',
+            is_headquarters=False, is_regional_hq=False,
+            address='4 Text Road, Accra', phone='0302000222',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+
+    def _order(self, **overrides):
+        lead = Lead.objects.create(phone='0244700900', first_name='Afia')
+        defaults = dict(
+            lead=lead, branch=self.branch,
+            total=Decimal('92.44'), full_total=Decimal('92.44'),
+            status=OnlineOrder.Status.PAID,
+            paid_at=timezone.now(),
+        )
+        defaults.update(overrides)
+        return OnlineOrder.objects.create(**defaults)
+
+    # ── What it says ───────────────────────────────────────────────
+
+    def test_it_names_the_money_and_the_order(self):
+        from apps.storefront.services.messages import payment_text
+
+        order = self._order()
+        text = payment_text(order)
+
+        self.assertIn('92.44', text)
+        self.assertIn(order.order_number, text)
+
+    def test_it_says_where_to_collect(self):
+        """
+        Without the word "Branch" on the end — "at Westland" says
+        everything "at Westland Branch" does, six characters cheaper.
+        """
+        from apps.storefront.services.messages import payment_text
+
+        text = payment_text(self._order())
+        self.assertIn('Text', text)
+        self.assertNotIn('Text Branch', text)
+
+    def test_it_says_when_where_we_know(self):
+        from apps.storefront.services.messages import payment_text
+
+        order = self._order(
+            promised_for=timezone.now() + timezone.timedelta(hours=3),
+        )
+        self.assertIn('Ready', payment_text(order))
+
+    def test_it_carries_a_link(self):
+        from apps.storefront.services.messages import payment_text
+
+        order = self._order()
+        self.assertIn(order.short_code, payment_text(order))
+
+    def test_it_fits_in_one_message(self):
+        """
+        160 characters. Past that it splits in two and costs double,
+        for a message that reads worse.
+        """
+        from apps.storefront.services.messages import payment_text
+
+        # ── When it is sent ────────────────────────────────────────────
+
+    def test_paying_sends_it(self):
+        from unittest.mock import patch
+        from apps.finance.models import DailySalesSheet
+        from apps.storefront.services.conversion import convert
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order()
+        with patch('apps.storefront.services.conversion.send_sms') as sent:
+            convert(order)
+
+        self.assertTrue(sent.called)
+        phone, message = sent.call_args[0][:2]
+        self.assertEqual(phone, '0244700900')
+        self.assertIn(order.order_number, message)
+
+    def test_an_order_with_nobody_on_it_texts_nobody(self):
+        from unittest.mock import patch
+        from apps.finance.models import DailySalesSheet
+        from apps.storefront.services.conversion import convert
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order(lead=None)
+        with patch('apps.storefront.services.conversion.send_sms') as sent:
+            convert(order)
+
+        self.assertFalse(sent.called)
+
+    def test_a_failed_text_does_not_cost_the_job(self):
+        """
+        mNotify being down is not a reason for work not to reach the
+        floor. The customer can be told later; the banner cannot be
+        printed later than it should.
+        """
+        from unittest.mock import patch
+        from apps.finance.models import DailySalesSheet
+        from apps.storefront.services.conversion import convert
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order()
+        with patch(
+            'apps.storefront.services.conversion.send_sms',
+            side_effect=Exception('mNotify is down'),
+        ):
+            job = convert(order)
+
+        self.assertIsNotNone(job)
+
+    def test_a_long_branch_name_does_not_break_it(self):
+        from apps.storefront.services.messages import payment_text
+
+        self.branch.name = 'Kwashieman Junction Main Road Branch'
+        self.branch.save()
+
+        order = self._order(
+            promised_for=timezone.now() + timezone.timedelta(days=2),
+        )
+        self.assertLessEqual(len(payment_text(order)), 160)

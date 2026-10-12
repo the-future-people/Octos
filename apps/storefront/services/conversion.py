@@ -28,6 +28,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from apps.storefront.services.sms import send_sms
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,6 +101,7 @@ def convert(order):
     # job and its receipt are already committed, and the coordinator
     # can ask for the artwork again.
     _carry_artwork(order, job)
+    _tell_the_customer(order)
 
     logger.info(
         'Converted %s into job %s', order.order_number, job.job_number,
@@ -348,3 +351,28 @@ def _write_receipt(order, job, sheet):
             exc_info=True,
         )
         raise
+
+def _tell_the_customer(order):
+    """
+    The text that says it worked.
+
+    Sent after the job exists, so the link in it opens a page with
+    something on it — a tracking link that arrives before the order
+    does is worse than one that arrives a second later.
+
+    Never raises. mNotify being down is not a reason for work to stop
+    reaching the floor: the customer can be told late, but a banner
+    cannot be printed late because a text message failed.
+    """
+    if not order.lead_id:
+        return
+
+    from apps.storefront.services.messages import payment_text
+
+    try:
+        send_sms(order.lead.phone, payment_text(order))
+    except Exception:
+        logger.error(
+            'Could not text %s about %s',
+            order.lead.phone, order.order_number, exc_info=True,
+        )

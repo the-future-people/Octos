@@ -2460,3 +2460,69 @@ class TrackLookupTests(TestCase):
         ]
 
         self.assertIn(429, codes)
+
+class ShortLinkTests(TestCase):
+    """
+    A link short enough to text.
+
+    A tracking URL carrying the access token runs past 90 characters,
+    and an SMS has 160 before it splits into two and costs double. So
+    an order gets a short code as well: eight characters, enough that
+    nobody guesses one, short enough to leave room for the message
+    around it.
+
+    It is a second key to the same door, not a weaker one — it opens
+    exactly what the token opens, and nothing else.
+    """
+
+    def _order(self):
+        return OnlineOrder.objects.create(total=Decimal('50.00'))
+
+    def test_every_order_gets_a_code(self):
+        order = self._order()
+        self.assertTrue(order.short_code)
+        self.assertEqual(len(order.short_code), 8)
+
+    def test_two_orders_do_not_share_one(self):
+        codes = {self._order().short_code for _ in range(25)}
+        self.assertEqual(len(codes), 25)
+
+    def test_the_code_has_no_awkward_characters(self):
+        """
+        Read off a phone screen and typed back in. I and 1 and 0 and O
+        are the same character to a tired eye.
+        """
+        for _ in range(30):
+            self.assertFalse(
+                set(self._order().short_code) & set('IO10lo'),
+            )
+
+    def test_the_code_opens_the_order(self):
+        from rest_framework.test import APIClient
+
+        order = self._order()
+        response = APIClient().get(f'/api/v1/storefront/t/{order.short_code}/')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['order_number'], order.order_number)
+        self.assertEqual(response.data['token'], order.access_token)
+
+    def test_a_code_nobody_has_opens_nothing(self):
+        from rest_framework.test import APIClient
+
+        response = APIClient().get('/api/v1/storefront/t/ZZZZZZZZ/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_code_survives_a_save(self):
+        """
+        It is in a text message somebody still has. Regenerating it
+        would turn their link into a dead one.
+        """
+        order = self._order()
+        first = order.short_code
+
+        order.total = Decimal('75.00')
+        order.save()
+        order.refresh_from_db()
+
+        self.assertEqual(order.short_code, first)

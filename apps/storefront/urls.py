@@ -21,4 +21,5 @@ urlpatterns = [
     path('quote/', views.QuoteView.as_view(), name='storefront-quote'),
     path('commit/', views.CommitView.as_view(), name='storefront-commit'),
     path('find/', views.FindOrderView.as_view(), name='storefront-find-order'),
+    path('t/<str:code>/', views.ShortLinkView.as_view(), name='storefront-short-link'),
 ]

@@ -1776,3 +1776,35 @@ def _same_number(stored, given):
 
     a, b = digits(stored), digits(given)
     return bool(a) and a == b
+
+class ShortLinkView(APIView):
+    """
+    GET /api/v1/storefront/t/<code>/
+
+    The short code, exchanged for the real one.
+
+    What the link in a text message points at. It opens exactly what
+    the access token opens — the same door, a smaller key — so there
+    is nothing to protect here that the token does not already
+    protect.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_find'
+
+    def get(self, request, code):
+        order = OnlineOrder.objects.filter(
+            short_code=(code or '').strip().upper(),
+        ).first()
+
+        if order is None:
+            return Response(
+                {'detail': 'That link does not open anything.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response({
+            'order_number': order.order_number,
+            'token': order.access_token,
+        })

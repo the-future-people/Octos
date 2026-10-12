@@ -51,6 +51,17 @@ class OnlineOrder(AuditModel):
         max_length=64, unique=True, editable=False, db_index=True,
         default='', blank=True,
     )
+
+    short_code = models.CharField(
+        max_length=8, unique=True, editable=False, db_index=True,
+        default='', blank=True,
+        help_text=(
+            'A second key to the same door, short enough to text. The '
+            'access token runs to 43 characters and a tracking link '
+            'carrying it leaves no room for a message around it — an '
+            'SMS has 160 before it splits in two and costs double.'
+        ),
+    )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True,
     )
@@ -184,7 +195,29 @@ class OnlineOrder(AuditModel):
         if not self.access_token:
             from secrets import token_urlsafe
             self.access_token = token_urlsafe(32)
+        if not self.short_code:
+            self.short_code = self._make_short_code()
         super().save(*args, **kwargs)
+
+    @staticmethod
+    def _make_short_code():
+        """
+        Eight characters a tired eye can read off a phone.
+
+        I, O, 1, 0 and lowercase l are left out: a code typed back in
+        should not turn on a glyph. What remains gives 32^8 — about a
+        thousand billion — so guessing one is not a way in.
+        """
+        from secrets import choice
+
+        alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+        for _ in range(8):
+            code = ''.join(choice(alphabet) for _ in range(8))
+            if not OnlineOrder.objects.filter(short_code=code).exists():
+                return code
+        # Eight collisions in a row means something is very wrong, and
+        # a duplicate is worse than a loud failure.
+        raise RuntimeError('Could not mint a short code')
 
     @staticmethod
     def _next_number():
