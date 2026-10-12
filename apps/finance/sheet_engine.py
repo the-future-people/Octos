@@ -116,8 +116,33 @@ class SheetEngine:
                 sheet.pk, self.branch.code, target_date,
             )
             self._link_staged_floats(sheet)
+            self._link_online_jobs(sheet)
 
         return sheet, created
+
+    def _link_online_jobs(self, sheet) -> int:
+        """
+        Money that came in while the branch was shut.
+
+        An online payment at midnight is real, and the job was made
+        then — but it could not land on a sheet that did not exist.
+        This is where it lands.
+
+        Unlike the held intake jobs above, nothing needs resolving by
+        hand: Paystack confirmed the amount and there is no drawer to
+        reconcile it against.
+        """
+        try:
+            from apps.storefront.services.conversion import catch_up
+            return catch_up(self.branch)
+        except Exception:
+            # Opening the branch must not fail because the storefront
+            # did. The hourly sweep will catch whatever this missed.
+            logger.error(
+                'SheetEngine: could not attach online jobs to sheet %s',
+                sheet.pk, exc_info=True,
+            )
+            return 0
 
     @transaction.atomic
     def get_or_open_today(self, opened_by=None) -> Tuple[Optional['DailySalesSheet'], bool]:
@@ -149,6 +174,7 @@ class SheetEngine:
                 self._assign_sheet_number(sheet, today)
                 self._link_staged_floats(sheet)
                 self._link_intake_held_jobs(sheet)
+                self._link_online_jobs(sheet)
                 logger.info(
                     'SheetEngine: opened sheet %s for branch %s on %s',
                     sheet.pk, self.branch.code, today,

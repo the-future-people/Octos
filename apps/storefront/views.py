@@ -566,6 +566,14 @@ class PaystackWebhookView(APIView):
             'Order %s paid: gross %s, fee %s, net %s',
             order.order_number, gross, fee, net,
         )
+
+        # The floor hears about it. Fired rather than done here: this
+        # endpoint must answer Paystack quickly, and a conversion that
+        # fails must not make them retry a payment we have already
+        # recorded.
+        from apps.storefront.tasks import convert_order
+        convert_order.delay(order.pk)
+
         return Response({'status': 'recorded'})
 
     @staticmethod

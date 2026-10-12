@@ -320,6 +320,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.expire_wallet_credits',
         'schedule': crontab(hour=1, minute=0),  # 01:00 WAT daily
     },
+        'convert-stragglers-hourly': {
+        'task': 'apps.storefront.tasks.convert_stragglers',
+        'schedule': crontab(minute=20),
+    },
 }
 
 # CORS
