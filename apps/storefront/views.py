@@ -90,6 +90,10 @@ def _serialise(order):
         'promised_for': order.promised_for,
         'paid_at': order.paid_at,
         'is_paid': order.is_paid,
+        # So the confirmation page can show the customer the same link
+        # we text them. The text can be slow, and a link they can copy
+        # on the spot is one they never have to wait for.
+        'short_code': order.short_code,
 
         # Where the floor has got to. All empty until conversion — an
         # order that nobody has started is not a job, and saying
