@@ -51,11 +51,26 @@ class Receipt(AuditModel):
         'finance.DailySalesSheet',
         on_delete=models.PROTECT,
         related_name='receipts',
+        null=True, blank=True,
+        help_text=(
+            'The sheet this money lands on. Empty while the branch is '
+            'shut: a payment at midnight on a Sunday is real, but it '
+            'cannot land on a sheet that does not exist and must never '
+            'land on one a manager has already signed off. The next '
+            'sheet to open picks it up.'
+        ),
     )
     cashier       = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.PROTECT,
         related_name='receipts_issued',
+        null=True, blank=True,
+        help_text=(
+            'Who took the money. Empty for an online payment — Paystack '
+            'collected it and no one at the branch counted anything. A '
+            'name invented to fill this would be a lie on a document the '
+            'customer keeps.'
+        ),
     )
 
     # ── Receipt number ────────────────────────────────────────

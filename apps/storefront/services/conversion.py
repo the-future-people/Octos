@@ -1,0 +1,345 @@
+"""
+A paid order becoming work the floor can see.
+
+Everything before this is the customer's side: a cart, a price, a
+payment. This is where it crosses into the shop — a job on the board, a
+receipt in the books, artwork the press can open.
+
+Three things it is careful about.
+
+**Once only.** Paystack retries, a task can run twice, and a sweep runs
+behind the task. Two jobs for one payment means the floor prints a
+banner twice and nobody notices until collection.
+
+**Nobody took it in.** A counter job has an attendant who received it
+and a cashier who took the money. An online order has neither, and the
+fields stay empty rather than naming an invented member of staff. The
+screen says "Print Octos" where a name would go; the database says what
+is true.
+
+**The money waits for a sheet.** A payment at twenty to midnight on a
+Sunday is real, and the job should be on the board in the morning — but
+it cannot land on a sheet that does not exist, and it must never land
+on one a manager has already counted and signed off.
+"""
+
+import logging
+
+from django.db import transaction
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+
+def convert(order):
+    """
+    Make the job. Returns it, or the one that already exists, or None
+    where the order is not ready.
+
+    Safe to call twice: the second call finds the job the first made.
+    """
+    from apps.finance.models import DailySalesSheet
+    from apps.jobs.models import Job
+
+    if order.job_id:
+        return order.job
+
+    if not order.is_paid and order.status != order.Status.PAID:
+        logger.info('Not converting %s — not paid', order.order_number)
+        return None
+
+    if not order.branch_id:
+        # Nowhere to make it. Payment refuses an order with no branch,
+        # so this should not happen — but a job on no floor is worse
+        # than a conversion that waits for someone to look at it.
+        logger.error(
+            'Cannot convert %s — no branch on the order', order.order_number,
+        )
+        return None
+
+    sheet = _open_sheet(order.branch)
+
+    with transaction.atomic():
+        job = Job.objects.create(
+            branch=order.branch,
+            customer=_customer_for(order),
+            daily_sheet=sheet,
+            job_type=_job_type(order),
+            title=_title(order),
+            status=Job.PENDING_PAYMENT,
+            estimated_cost=order.total,
+            # Nobody. An online order has no attendant, and a fake one
+            # would turn up in staff lists for years.
+            intake_by=None,
+            payment_state='PAID',
+            work_state='RECEIVED',
+            handover_state='AWAITING_COLLECTION',
+            deposit_percentage=100,
+            amount_paid=order.total,
+            estimated_ready_at=order.promised_for,
+            notes=f'Ordered online — {order.order_number}',
+        )
+
+        _carry_lines(order, job)
+        _write_receipt(order, job, sheet)
+
+        order.job = job
+        order.status = order.Status.CONVERTED
+        order.save(update_fields=['job', 'status', 'updated_at'])
+
+    # Outside the transaction deliberately. A file that will not copy
+    # must not cost the customer their job — but a database error
+    # inside an atomic block poisons it, so swallowing one in there
+    # rescues nothing and fails somewhere more confusing. Out here the
+    # job and its receipt are already committed, and the coordinator
+    # can ask for the artwork again.
+    _carry_artwork(order, job)
+
+    logger.info(
+        'Converted %s into job %s', order.order_number, job.job_number,
+    )
+    return job
+
+
+def catch_up(branch):
+    """
+    Attach work that was made while the branch was shut.
+
+    Called when a sheet opens. An online job created overnight has no
+    sheet, and its money is not counted anywhere until it gets one —
+    the sheet's totals are summed from the receipts on it.
+
+    Returns how many were attached, so the task can be seen to be
+    working rather than merely scheduled.
+    """
+    from apps.finance.models import Receipt
+    from apps.jobs.models import Job
+
+    sheet = _open_sheet(branch)
+    if sheet is None:
+        return 0
+
+    waiting = Job.objects.filter(
+        branch=branch,
+        daily_sheet__isnull=True,
+        online_order__isnull=False,
+    )
+
+    moved = 0
+    for job in waiting:
+        with transaction.atomic():
+            job.daily_sheet = sheet
+            job.save(update_fields=['daily_sheet', 'updated_at'])
+
+            Receipt.objects.filter(
+                job=job, daily_sheet__isnull=True,
+            ).update(daily_sheet=sheet)
+
+            moved += 1
+            logger.info(
+                'Attached %s to sheet %s — paid while the branch was shut',
+                job.job_number, sheet.pk,
+            )
+
+    return moved
+
+
+def _open_sheet(branch):
+    """
+    Today's sheet, if it is open.
+
+    None where there is none, or where it has been closed. A manager
+    who has counted the drawer and signed off should never find the
+    total has moved since — money that arrives after that waits for
+    the next sheet rather than reopening a settled day.
+    """
+    from apps.finance.models import DailySalesSheet
+
+    return DailySalesSheet.objects.filter(
+        branch=branch,
+        date=timezone.localdate(),
+        status=DailySalesSheet.Status.OPEN,
+    ).first()
+
+
+def _customer_for(order):
+    """
+    Who this is for.
+
+    Somebody who has walked in before is the same person online, and
+    two records of them is how a customer's history splits in half —
+    the counter sees one past and the website another.
+    """
+    from apps.customers.models import CustomerProfile
+
+    if not order.lead_id:
+        return None
+
+    lead = order.lead
+
+    existing = CustomerProfile.objects.filter(phone=lead.phone).first()
+    if existing is not None:
+        return existing
+
+    # A first name and a number is all an online order has. The counter
+    # asks for more when they come in, and the record fills out then —
+    # a profile that exists is worth more than a complete one that
+    # does not.
+    return CustomerProfile.objects.create(
+        first_name=lead.first_name,
+        phone=lead.phone,
+        customer_type='INDIVIDUAL',
+        branch=order.branch,
+    )
+
+
+def _job_type(order):
+    """
+    Production or instant, by what is actually on it.
+
+    One production line makes the whole job production: a banner and a
+    photocopy together still has to go on a press, and typing it
+    instant would put it on the wrong board.
+    """
+    from apps.jobs.models import Service
+
+    ids = [line.get('service') for line in (order.line_items or [])]
+    categories = set(
+        Service.objects.filter(pk__in=ids).values_list('category', flat=True)
+    )
+    return 'PRODUCTION' if 'PRODUCTION' in categories else 'INSTANT'
+
+
+def _title(order):
+    """
+    What the coordinator reads on the board.
+
+    The services themselves, because "Online order" tells whoever is
+    looking at the board nothing about what to make.
+    """
+    names = [
+        line.get('service_name') for line in (order.line_items or [])
+        if line.get('service_name')
+    ]
+    if not names:
+        return f'Online order {order.order_number}'
+    if len(names) == 1:
+        return names[0]
+    return f'{names[0]} and {len(names) - 1} more'
+
+
+def _carry_lines(order, job):
+    """
+    The order's lines become the job's, priced as they were quoted.
+
+    Not re-priced. The customer paid what they were shown, and a rule
+    that changed overnight must not change what they bought.
+    """
+    from apps.jobs.models import JobLineItem, Service
+    from decimal import Decimal
+
+    for position, line in enumerate(order.line_items or []):
+        service = Service.objects.filter(pk=line.get('service')).first()
+        if service is None:
+            logger.error(
+                'Line on %s names service %s, which is gone',
+                order.order_number, line.get('service'),
+            )
+            continue
+
+        specs = line.get('specifications') or {}
+
+        JobLineItem.objects.create(
+            job=job,
+            service=service,
+            quantity=line.get('quantity') or 1,
+            pages=specs.get('pages') or 1,
+            specifications=specs,
+            unit_price=Decimal(str(line.get('unit_price') or '0')),
+            line_total=Decimal(str(line.get('total') or '0')),
+            position=position,
+        )
+
+
+def _carry_artwork(order, job):
+    """
+    The artwork, with the verdict the customer was shown.
+
+    The file is copied rather than moved, so the order keeps its own
+    record of what was sent — a customer asking what they uploaded
+    should get an answer even after the job is done.
+
+    The verdict travels because the coordinator should see what the
+    customer was told. A file accepted with a warning is not the same
+    as one that passed, and the floor knowing the difference is how a
+    soft print stops being a surprise.
+    """
+    from apps.jobs.models import JobFile
+
+    for record in order.files.all():
+        try:
+            job_file = JobFile(
+                job=job,
+                original_filename=record.original_filename,
+                size_bytes=record.size_bytes,
+                content_type=record.content_type,
+                metadata_state=record.metadata_state,
+                page_count=record.page_count,
+                width_px=record.width_px,
+                height_px=record.height_px,
+                width_mm=record.width_mm,
+                height_mm=record.height_mm,
+                dpi=record.dpi,
+                colour_mode=record.colour_mode,
+                pdf_images=record.pdf_images,
+                verdict=record.verdict,
+                checks=record.checks,
+            )
+            job_file.file.save(
+                record.original_filename, record.file, save=False,
+            )
+            job_file.save()
+        except Exception:
+            # Swallowed on purpose, and safe to swallow because this
+            # runs outside the transaction. The job and its receipt
+            # are already committed; a file that will not copy is
+            # something the coordinator can ask for again.
+            logger.error(
+                'Could not carry artwork %s onto %s',
+                record.pk, job.job_number, exc_info=True,
+            )
+
+
+def _write_receipt(order, job, sheet):
+    """
+    The money, in the books.
+
+    Through the receipt engine rather than by hand: it owns the
+    numbering, the tax arithmetic and the customer snapshot, and a
+    second implementation of any of those would drift from the
+    counter's within a month.
+
+    No cashier. Nobody counted this money — Paystack did.
+    """
+    from apps.finance.receipt_engine import ReceiptEngine
+    from decimal import Decimal
+
+    try:
+        ReceiptEngine(order.branch).issue(
+            job=job,
+            cashier=None,
+            daily_sheet=sheet,
+            payment_method='ONLINE',
+            amount_paid=order.total,
+            balance_due=Decimal('0.00'),
+            customer_phone=order.lead.phone if order.lead_id else '',
+        )
+    except Exception:
+        # Raised inside the transaction, so the whole conversion rolls
+        # back. A job with no receipt is money the books cannot see,
+        # and finding that later is worse than converting late.
+        logger.error(
+            'Could not write a receipt for %s', order.order_number,
+            exc_info=True,
+        )
+        raise

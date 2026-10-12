@@ -137,6 +137,18 @@ class OnlineOrder(AuditModel):
     # are abandoned and that is fine.
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
+    job = models.OneToOneField(
+        'jobs.Job',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='online_order',
+        help_text=(
+            'The job this became, once the floor had it. Set at '
+            'conversion and never changed — an order becomes work '
+            'exactly once, however many times Paystack retries.'
+        ),
+    )
+
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -194,3 +206,4 @@ class OnlineOrder(AuditModel):
             cursor.execute("SELECT nextval('storefront_order_seq')")
             sequence = cursor.fetchone()[0]
         return f"ORD-{year}-{sequence:05d}"
+

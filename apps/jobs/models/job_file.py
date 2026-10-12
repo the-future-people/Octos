@@ -35,7 +35,14 @@ class JobFile(AuditModel):
     uploaded_by = models.ForeignKey(
         'accounts.CustomUser',
         on_delete=models.PROTECT,
-        related_name='uploaded_files'
+        related_name='uploaded_files',
+        null=True, blank=True,
+        help_text=(
+            'The member of staff who put this on the job. Empty where '
+            'the customer sent it themselves through the storefront — '
+            'nobody at the branch uploaded anything, and naming someone '
+            'would misplace the responsibility for what was sent.'
+        ),
     )
     notes = models.TextField(blank=True)
 
@@ -54,6 +61,18 @@ class JobFile(AuditModel):
         (UNSUPPORTED, 'Format not readable'),
         (FAILED, 'Could not be read'),
     ]
+
+    verdict = models.CharField(
+        max_length=10, blank=True,
+        help_text=(
+            'What the resolution check made of this file: fine, warn or '
+            'refuse. Carried over from an online order so the floor sees '
+            'what the customer was told — a file accepted with a warning '
+            'is not the same as one that passed, and a soft print should '
+            'never be a surprise at collection.'
+        ),
+    )
+    checks = models.JSONField(default=list, blank=True)
 
     metadata_state = models.CharField(
         max_length=20,

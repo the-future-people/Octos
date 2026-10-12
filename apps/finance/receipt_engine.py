@@ -217,7 +217,10 @@ class ReceiptEngine:
         lines += [
             row('Receipt No:', receipt.receipt_number),
             row('Date:', receipt.created_at.strftime('%d/%m/%Y %I:%M %p')),
-            row('Cashier:', receipt.cashier.full_name),
+            row(
+                'Cashier:',
+                receipt.cashier.full_name if receipt.cashier else 'Paid online',
+            ),
             SEP,
         ]
 
