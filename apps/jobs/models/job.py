@@ -113,12 +113,14 @@ class Job(AuditModel):
     EMAIL    = 'EMAIL'
     PHONE    = 'PHONE'
     PROFORMA = 'PROFORMA'
+    ONLINE   = 'ONLINE'
     CHANNEL_CHOICES = [
         (WALK_IN,  'Walk-in'),
         (WHATSAPP, 'WhatsApp'),
         (EMAIL,    'Email'),
         (PHONE,    'Phone'),
         (PROFORMA, 'Accepted proforma'),
+        (ONLINE,   'Ordered online'),
     ]
 
     # ── Priority ─────────────────────────────────────────────────
@@ -514,7 +516,15 @@ class Job(AuditModel):
     # PROFORMA is deliberately absent. A quote is built line by line by a
     # manager, agreed with the customer and converted deliberately; that is
     # more scrutiny than a verification, not less.
-    REMOTE_CHANNELS = {'WHATSAPP', 'EMAIL', 'PHONE'}
+    # Work that arrived without anyone at the counter seeing it. The
+    # coordinator checks these before they go anywhere near a machine:
+    # nobody has looked at the artwork, confirmed the size against what
+    # the customer meant, or asked the question a person at the desk
+    # would have asked.
+    #
+    # An online order is the most remote of all — the customer never
+    # spoke to anybody.
+    REMOTE_CHANNELS = {'WHATSAPP', 'EMAIL', 'PHONE', 'ONLINE'}
 
     @property
     def needs_verification(self) -> bool:

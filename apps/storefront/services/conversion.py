@@ -71,6 +71,11 @@ def convert(order):
             # Nobody. An online order has no attendant, and a fake one
             # would turn up in staff lists for years.
             intake_by=None,
+            # Which puts it in the coordinator's arrivals queue rather
+            # than straight onto the floor. Nobody has looked at this
+            # artwork yet, and the check before a machine runs is the
+            # whole point of that column.
+            intake_channel=Job.ONLINE,
             payment_state='PAID',
             work_state='RECEIVED',
             handover_state='AWAITING_COLLECTION',
