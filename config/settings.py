@@ -223,6 +223,13 @@ SIMPLE_JWT = {
 }
 PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'test-secret')
 PAYSTACK_PUBLIC_KEY = os.environ.get('PAYSTACK_PUBLIC_KEY', '')
+
+# mNotify, for the texts a customer actually reads: their code, their
+# receipt, and the one that says it is ready. Empty by default, and the
+# sender logs instead of sending — so a developer machine never texts a
+# real customer by accident.
+MNOTIFY_API_KEY = os.environ.get('MNOTIFY_API_KEY', '')
+MNOTIFY_SENDER_ID = os.environ.get('MNOTIFY_SENDER_ID', 'Farhat')
 ASGI_APPLICATION = 'config.asgi.application'
 
 _REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
