@@ -15,4 +15,5 @@ app.autodiscover_tasks([
     'apps.notifications',
     'apps.accounts',
     'apps.production',
+    'apps.storefront',
 ])
