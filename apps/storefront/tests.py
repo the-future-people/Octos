@@ -2674,3 +2674,114 @@ class PaymentConfirmationTests(TestCase):
             self._confirm(order.order_number).status_code for _ in range(14)
         ]
         self.assertIn(429, codes)
+
+    def test_a_retried_payment_still_confirms(self):
+        """
+        The second attempt is paid under a different reference, and
+        Paystack hands that one back. A customer who backed out once
+        should still see their confirmation.
+        """
+        order = self._order()
+        order.payment_reference = f'{order.order_number}-2'
+        order.save(update_fields=['payment_reference'])
+
+        response = self._confirm(order.payment_reference)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['order_number'], order.order_number)
+
+class PaymentRetryTests(TestCase):
+    """
+    Paying a second time after backing out of the first.
+
+    Paystack requires a reference to be unique forever, and refuses a
+    second transaction that reuses one. We sent the order number — so
+    a customer who opened the payment page, changed their mind, and
+    came back found that order could never be paid at all. Not by
+    refreshing, not tomorrow, not ever.
+
+    So each attempt carries its own reference, and the order holds the
+    latest. The webhook looks orders up by the reference it is given,
+    which keeps working because that is what we stored.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+
+        cls.branch = Branch.objects.create(
+            name='Retry Branch', code='RYB',
+            is_headquarters=False, is_regional_hq=False,
+            address='3 Retry Road',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.lead = Lead.objects.create(phone='0244500600', first_name='Adjoa')
+
+    def _order(self):
+        return OnlineOrder.objects.create(
+            lead=self.lead, branch=self.branch,
+            total=Decimal('45.00'), full_total=Decimal('45.00'),
+            status=OnlineOrder.Status.AWAITING_PAYMENT,
+        )
+
+    def test_the_first_attempt_is_the_order_number(self):
+        """
+        Nothing clever on a first try — the reference a customer might
+        read out should be the one they already have.
+        """
+        order = self._order()
+        self.assertEqual(order.next_payment_reference(), order.order_number)
+
+    def test_a_second_attempt_differs(self):
+        order = self._order()
+
+        first = order.next_payment_reference()
+        order.payment_reference = first
+        order.save(update_fields=['payment_reference'])
+
+        self.assertNotEqual(order.next_payment_reference(), first)
+
+    def test_attempts_keep_counting(self):
+        order = self._order()
+        seen = set()
+
+        for _ in range(4):
+            reference = order.next_payment_reference()
+            self.assertNotIn(reference, seen)
+            seen.add(reference)
+            order.payment_reference = reference
+            order.save(update_fields=['payment_reference'])
+
+        self.assertEqual(len(seen), 4)
+
+    def test_the_order_is_still_findable(self):
+        """
+        Whatever the attempt, the reference still leads back here —
+        the webhook has no other way to know whose money this is.
+        """
+        order = self._order()
+
+        for _ in range(3):
+            reference = order.next_payment_reference()
+            order.payment_reference = reference
+            order.save(update_fields=['payment_reference'])
+
+            found = OnlineOrder.objects.filter(
+                payment_reference=reference,
+            ).first()
+            self.assertEqual(found.pk, order.pk)
+
+    def test_a_paid_order_is_not_asked_to_pay_again(self):
+        from django.utils import timezone
+
+        order = self._order()
+        order.status = OnlineOrder.Status.PAID
+        order.paid_at = timezone.now()
+        order.payment_reference = order.order_number
+        order.save()
+
+        self.assertIsNone(order.next_payment_reference())

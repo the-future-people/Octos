@@ -240,3 +240,37 @@ class OnlineOrder(AuditModel):
             sequence = cursor.fetchone()[0]
         return f"ORD-{year}-{sequence:05d}"
 
+    def next_payment_reference(self):
+        """
+        What to call this attempt at paying.
+
+        Paystack requires a reference to be unique forever and refuses
+        a second transaction reusing one. Sending the order number
+        meant a customer who opened the payment page and backed out
+        had bricked that order — it could never be paid, by refreshing
+        or otherwise.
+
+        So the first attempt is the order number, which is the thing a
+        customer might read out, and each one after it carries a
+        suffix. The reference is stored either way, so the webhook
+        still finds its way back here.
+
+        None when there is nothing to pay.
+        """
+        if self.is_paid:
+            return None
+
+        current = self.payment_reference or ''
+        if not current:
+            return self.order_number
+
+        if current == self.order_number:
+            return f'{self.order_number}-2'
+
+        # ORD-2026-00012-3 → 4. A reference we did not mint ourselves
+        # starts the count again rather than guessing at its shape.
+        tail = current.rsplit('-', 1)[-1]
+        if tail.isdigit() and current.startswith(self.order_number):
+            return f'{self.order_number}-{int(tail) + 1}'
+
+        return f'{self.order_number}-2'

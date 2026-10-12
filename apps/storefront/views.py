@@ -775,8 +775,18 @@ class OrderPayView(APIView):
             digits = ''.join(c for c in order.lead.phone if c.isdigit())
             email = f'{digits}@customers.farhatpress.com'
 
+        reference = order.next_payment_reference()
+        if reference is None:
+            return Response(
+                {'detail': 'This order has already been paid.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         result = paystack.initialise(
-            reference=order.order_number,
+            # Its own reference, so backing out of one attempt does not
+            # stop the next. Paystack never forgets a reference it has
+            # seen, and the order number alone would be seen once.
+            reference=reference,
             amount_minor=paystack.to_minor(order.total),
             email=email,
             callback_url=request.data.get('callback_url') or None,
@@ -1840,11 +1850,18 @@ class PaymentConfirmationView(APIView):
     throttle_scope = 'storefront_find'
 
     def get(self, request, reference):
+        from django.db.models import Q
+
+        given = (reference or '').strip().upper()
+
+        # Either name for it. A first attempt is paid under the order
+        # number; a retry carries a suffix, and Paystack hands back
+        # whichever one was used — so both have to lead here.
         order = (
             OnlineOrder.objects
             .select_related('branch')
             .filter(
-                order_number=(reference or '').strip().upper(),
+                Q(order_number=given) | Q(payment_reference=given),
                 paid_at__isnull=False,
             )
             .first()
