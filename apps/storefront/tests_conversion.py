@@ -383,6 +383,25 @@ class ConversionTests(TestCase):
         self.assertIn(job.intake_channel, Job.REMOTE_CHANNELS)
         self.assertTrue(job.needs_verification)
 
+    def test_it_lands_in_the_coordinator_s_arrivals(self):
+        """
+        Nobody at the counter saw this one. The artwork has not been
+        looked at, the size has not been confirmed against what the
+        customer meant, and nobody asked the question a person at the
+        desk would have asked.
+
+        So it waits to be inspected rather than going straight to a
+        machine — which is the whole point of that column.
+        """
+        from apps.storefront.services.conversion import convert
+
+        self._sheet()
+        job = convert(self._order())
+
+        self.assertEqual(job.intake_channel, Job.ONLINE)
+        self.assertIn(job.intake_channel, Job.REMOTE_CHANNELS)
+        self.assertTrue(job.needs_verification)
+
 class TrackingFieldsTests(TestCase):
     """
     What the customer sees of their own order.
