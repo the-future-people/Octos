@@ -22,4 +22,5 @@ urlpatterns = [
     path('commit/', views.CommitView.as_view(), name='storefront-commit'),
     path('find/', views.FindOrderView.as_view(), name='storefront-find-order'),
     path('t/<str:code>/', views.ShortLinkView.as_view(), name='storefront-short-link'),
+    path('confirm/<str:reference>/', views.PaymentConfirmationView.as_view(), name='storefront-confirm-payment'),
 ]

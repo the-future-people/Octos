@@ -2526,3 +2526,151 @@ class ShortLinkTests(TestCase):
         order.refresh_from_db()
 
         self.assertEqual(order.short_code, first)
+
+class PaymentConfirmationTests(TestCase):
+    """
+    What somebody who has just paid is shown.
+
+    Paystack sends them back with the reference in the address, and
+    that reference is the order number. The page is built from it
+    alone — nothing from the browser, because a cart that has been
+    cleared or a tab opened on another device would otherwise strand
+    a customer who has already paid.
+
+    Order numbers run in sequence, so this has to give away very
+    little: enough to confirm the money and point at the shop, and
+    nothing a stranger walking the numbers could use.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        import datetime
+        from apps.organization.models import Branch
+
+        cls.branch = Branch.objects.create(
+            name='Confirm Branch', code='CFB',
+            is_headquarters=False, is_regional_hq=False,
+            address='8 Confirm Street, Accra', phone='0302000333',
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.lead = Lead.objects.create(phone='0244600700', first_name='Yaa')
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _order(self, paid=True, **overrides):
+        from django.utils import timezone
+
+        defaults = dict(
+            lead=self.lead, branch=self.branch,
+            total=Decimal('92.44'), full_total=Decimal('92.44'),
+        )
+        if paid:
+            defaults.update(
+                status=OnlineOrder.Status.PAID,
+                paid_at=timezone.now(),
+            )
+        defaults.update(overrides)
+        return OnlineOrder.objects.create(**defaults)
+
+    def _confirm(self, reference):
+        from rest_framework.test import APIClient
+        return APIClient().get(
+            f'/api/v1/storefront/confirm/{reference}/',
+        )
+
+    # ── What it shows ──────────────────────────────────────────────
+
+    def test_it_confirms_the_money(self):
+        order = self._order()
+        response = self._confirm(order.order_number)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['order_number'], order.order_number)
+        self.assertEqual(response.data['total'], '92.44')
+        self.assertTrue(response.data['is_paid'])
+
+    def test_it_says_where_to_collect(self):
+        response = self._confirm(self._order().order_number)
+        branch = response.data['branch']
+
+        self.assertEqual(branch['name'], 'Confirm Branch')
+        self.assertEqual(branch['address'], '8 Confirm Street, Accra')
+        self.assertEqual(branch['phone'], '0302000333')
+
+    def test_it_carries_the_link(self):
+        """
+        The same link we text. A customer holding the confirmation
+        should not have to wait for a message to reach their order.
+        """
+        order = self._order()
+        response = self._confirm(order.order_number)
+        self.assertEqual(response.data['short_code'], order.short_code)
+
+    def test_it_says_when_where_we_know(self):
+        from django.utils import timezone
+
+        order = self._order(
+            promised_for=timezone.now() + timezone.timedelta(hours=3),
+        )
+        self.assertIsNotNone(self._confirm(order.order_number).data['promised_for'])
+
+    # ── What it withholds ──────────────────────────────────────────
+
+    def test_the_token_never_comes_back(self):
+        """
+        The short code opens the order. The token opens it and would
+        keep opening it — a confirmation page is no place for one.
+        """
+        response = self._confirm(self._order().order_number)
+        self.assertNotIn('access_token', response.data)
+
+    def test_the_customer_is_not_described(self):
+        """
+        Sequential numbers mean a stranger can reach this page. They
+        should learn nothing about whose order it is.
+        """
+        response = self._confirm(self._order().order_number)
+        body = str(response.data)
+
+        self.assertNotIn('0244600700', body)
+        self.assertNotIn('Yaa', body)
+
+    def test_nothing_about_what_was_ordered(self):
+        order = self._order()
+        order.line_items = [{'service_name': 'Flexy Banner', 'quantity': 2}]
+        order.save()
+
+        self.assertNotIn('line_items', self._confirm(order.order_number).data)
+
+    # ── Who it refuses ─────────────────────────────────────────────
+
+    def test_an_unpaid_order_is_refused(self):
+        """
+        Only a payment that happened gets confirmed. Otherwise this is
+        a way to find out which order numbers exist.
+        """
+        order = self._order(paid=False)
+        self.assertEqual(self._confirm(order.order_number).status_code, 404)
+
+    def test_a_number_nobody_has_gives_the_same_answer(self):
+        unpaid = self._confirm(self._order(paid=False).order_number)
+        missing = self._confirm('ORD-2026-99999')
+
+        self.assertEqual(unpaid.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(unpaid.data, missing.data)
+
+    def test_walking_the_numbers_is_throttled(self):
+        from django.core.cache import cache
+        cache.clear()
+
+        order = self._order()
+        codes = [
+            self._confirm(order.order_number).status_code for _ in range(14)
+        ]
+        self.assertIn(429, codes)

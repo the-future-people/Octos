@@ -1812,3 +1812,75 @@ class ShortLinkView(APIView):
             'order_number': order.order_number,
             'token': order.access_token,
         })
+
+class PaymentConfirmationView(APIView):
+    """
+    GET /api/v1/storefront/confirm/<reference>/
+
+    What somebody who has just paid is shown.
+
+    Paystack sends them back with the reference in the address, and
+    that reference is the order number. The page is built from it
+    alone — nothing from the browser, because a cart that has been
+    cleared, a tab opened on a second device, or a reload an hour
+    later would otherwise strand a customer who has already paid.
+
+    Order numbers run in sequence, so this gives away as little as it
+    can: enough to confirm the money and point at the shop, and
+    nothing a stranger walking the numbers could use. No token, no
+    phone number, no name, nothing about what was ordered.
+
+    It answers only for an order that has actually been paid. An
+    unpaid one is refused exactly as a nonexistent one is, so this
+    cannot be used to learn which numbers are real.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_find'
+
+    def get(self, request, reference):
+        order = (
+            OnlineOrder.objects
+            .select_related('branch')
+            .filter(
+                order_number=(reference or '').strip().upper(),
+                paid_at__isnull=False,
+            )
+            .first()
+        )
+
+        if order is None:
+            return Response(
+                {'detail': 'We can’t confirm a payment for that reference.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response({
+            'order_number': order.order_number,
+            'total': f'{Decimal(order.total):.2f}',
+            'is_paid': True,
+            'promised_for': order.promised_for,
+            # The same link we text. A customer holding this should
+            # not have to wait for a message to reach their own order.
+            'short_code': order.short_code,
+            'branch': _confirmation_branch(order.branch),
+        })
+
+
+def _confirmation_branch(branch):
+    """
+    Where to collect, and nothing more.
+
+    Deliberately thinner than the branch on the order itself: this
+    page can be reached by guessing a number, so it carries what a
+    shopfront sign would and no coordinates, hours or identifiers.
+    """
+    if branch is None:
+        return None
+
+    return {
+        'name': branch.name,
+        'address': branch.address,
+        'phone': branch.phone,
+    }
