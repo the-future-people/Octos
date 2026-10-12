@@ -73,11 +73,13 @@ def _order_or_404(order_number, token):
 
 
 def _serialise(order):
+    job = order.job if order.job_id else None
+
     return {
         'order_number': order.order_number,
         'status': order.status,
-        'branch': order.branch_id,
-        'line_items': order.line_items,
+        'branch': _branch_payload(order.branch),
+        'line_items': _lines_with_artwork(order),
         # All three, so the customer can see what the discount did.
         # A lower number with nothing explaining it reads as a mistake.
         'full_total': f'{Decimal(order.full_total):.2f}',
@@ -86,9 +88,122 @@ def _serialise(order):
         'total': f'{Decimal(order.total):.2f}',
         'fulfilment': order.fulfilment,
         'promised_for': order.promised_for,
+        'paid_at': order.paid_at,
         'is_paid': order.is_paid,
+
+        # Where the floor has got to. All empty until conversion — an
+        # order that nobody has started is not a job, and saying
+        # otherwise would show a customer progress that has not
+        # happened.
+        'job_number': job.job_number if job else None,
+        'work_state': job.work_state if job else None,
+        'handover_state': job.handover_state if job else None,
+        'is_halted': _is_halted(job),
+        'stage_times': _stage_times(order, job),
     }
 
+
+def _branch_payload(branch):
+    """
+    Enough to find the place and know whether to set off.
+
+    A customer looking at this wants the street, a number to ring and
+    whether anyone is there now. The coordinates are for the map; the
+    rest is for them.
+    """
+    if branch is None:
+        return None
+
+    now = timezone.localtime()
+    open_now = (
+        branch.is_active
+        and now.weekday() != 6
+        and branch.opening_time <= now.time() < branch.closing_time
+    )
+
+    return {
+        'id': branch.id,
+        'name': branch.name,
+        'address': branch.address,
+        'phone': branch.phone,
+        'latitude': str(branch.latitude) if branch.latitude else None,
+        'longitude': str(branch.longitude) if branch.longitude else None,
+        'is_open': open_now,
+        'closing_time': branch.closing_time.strftime('%-I:%M%p').lower()
+                        if branch.closing_time else None,
+    }
+
+
+def _lines_with_artwork(order):
+    """
+    The lines, each naming its own file.
+
+    An order can hold a banner and flyers at once, and a customer
+    checking what they sent needs to see which file went with which —
+    "your artwork is attached" means nothing across three items.
+    """
+    by_line = {
+        record.line_id: record
+        for record in order.files.all()
+    }
+    lines = []
+    for line in (order.line_items or []):
+        record = by_line.get(line.get('id'))
+        lines.append({
+            **line,
+            'artwork_filename': record.original_filename if record else None,
+            'artwork_verdict': record.verdict if record else None,
+        })
+    return lines
+
+
+def _is_halted(job):
+    """Whether anything is stopping it right now."""
+    if job is None:
+        return False
+    return job.halts.filter(resumed_at__isnull=True).exists()
+
+
+def _stage_times(order, job):
+    """
+    When each stage was reached.
+
+    From the job's own status log, which records every transition with
+    its time — so a customer watching sees it move rather than being
+    told it has. Paid comes from the order, since that happened before
+    the job existed.
+    """
+    times = {'paid': order.paid_at}
+
+    if job is None:
+        return times
+
+    from apps.jobs.models import JobStatusLog
+
+    # The customer's five stages, not the floor's seven. Quality check
+    # folds into finishing: naming it invites the question of what
+    # might be wrong with theirs.
+    stage_of = {
+        'RECEIVED': 'inspecting',
+        'IN_PRODUCTION': 'press',
+        'FINISHING': 'finishing',
+        'QUALITY_CHECK': 'finishing',
+        'DONE': 'ready',
+    }
+
+    moves = JobStatusLog.objects.filter(
+        job=job, axis='WORK',
+    ).order_by('transitioned_at')
+
+    for move in moves:
+        stage = stage_of.get(move.to_status)
+        # The first time it reached a stage, not the last. A job that
+        # went back for a reprint reached finishing once, as far as the
+        # customer is concerned.
+        if stage and stage not in times:
+            times[stage] = move.transitioned_at
+
+    return times
 
 class CatalogueView(APIView):
     """

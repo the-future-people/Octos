@@ -363,3 +363,181 @@ class ConversionTests(TestCase):
         job = convert(order)
 
         self.assertIsNotNone(job.estimated_ready_at)
+
+class TrackingFieldsTests(TestCase):
+    """
+    What the customer sees of their own order.
+
+    The tracking page reads one endpoint, and it has to tell an honest
+    story at every stage — before the floor has it, while it is being
+    made, and once it is done. Nothing invented and nothing missing.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.branch = Branch.objects.create(
+            name='Track Branch', code='TKB',
+            is_headquarters=False, is_regional_hq=False,
+            address='9 Track Street, Accra', phone='0302000111',
+            latitude=Decimal('5.656612'), longitude=Decimal('-0.212877'),
+            capacity_score=100, current_load=0, is_active=True,
+            opening_time=datetime.time(7, 30), closing_time=datetime.time(19, 30),
+            vat_registered=False, vat_rate=Decimal('0'),
+            nhil_rate=Decimal('0'), getfund_rate=Decimal('0'),
+        )
+        cls.service = Service.objects.create(
+            name='Track Flexy', code='TKFLEXY',
+            category='PRODUCTION', unit='PER_SQFT', is_active=True,
+        )
+        PricingRule.objects.create(
+            service=cls.service, branch=None, base_price=Decimal('3.25'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+
+    def _order(self):
+        lead = Lead.objects.create(phone='0244900100', first_name='Esi')
+        return OnlineOrder.objects.create(
+            lead=lead, branch=self.branch,
+            line_items=[{
+                'id': 'l1', 'service': self.service.id,
+                'service_name': self.service.name, 'quantity': 1,
+                'specifications': {'width_in': 96, 'height_in': 48},
+                'unit_price': '104.00', 'total': '104.00',
+            }],
+            full_total=Decimal('104.00'), total=Decimal('104.00'),
+            status=OnlineOrder.Status.PAID,
+            paid_at=timezone.now(),
+        )
+
+    def _read(self, order):
+        from rest_framework.test import APIClient
+        response = APIClient().get(
+            f'/api/v1/storefront/orders/{order.order_number}/',
+            {'token': order.access_token},
+        )
+        # The status, so a refusal says so rather than turning up later
+        # as a None that will not subscript.
+        assert response.status_code == 200, (
+            f'{response.status_code}: {response.content}'
+        )
+        return response.data
+
+    # ── Before the floor has it ────────────────────────────────────
+
+    def test_the_branch_comes_through_whole(self):
+        """
+        Enough to find the place: a name, a street, a phone and a pin.
+        """
+        data = self._read(self._order())
+        branch = data['branch']
+
+        self.assertEqual(branch['name'], 'Track Branch')
+        self.assertEqual(branch['address'], '9 Track Street, Accra')
+        self.assertEqual(branch['phone'], '0302000111')
+        self.assertEqual(float(branch['latitude']), 5.656612)
+
+    def test_the_branch_says_whether_it_is_open(self):
+        data = self._read(self._order())
+        self.assertIn('is_open', data['branch'])
+        self.assertIn('closing_time', data['branch'])
+
+    def test_there_is_no_work_state_before_there_is_work(self):
+        data = self._read(self._order())
+        self.assertIsNone(data['work_state'])
+        self.assertIsNone(data['job_number'])
+
+    def test_payment_is_recorded(self):
+        data = self._read(self._order())
+        self.assertIsNotNone(data['paid_at'])
+
+    # ── Once it is a job ───────────────────────────────────────────
+
+    def test_the_job_state_comes_through(self):
+        from apps.storefront.services.conversion import convert
+        from apps.finance.models import DailySalesSheet
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order()
+        job = convert(order)
+
+        data = self._read(order)
+        self.assertEqual(data['work_state'], 'RECEIVED')
+        self.assertEqual(data['job_number'], job.job_number)
+
+    def test_a_halted_job_says_so(self):
+        from apps.finance.models import DailySalesSheet
+        from apps.jobs.models import JobHalt
+        from apps.storefront.services.conversion import convert
+        from apps.accounts.models import CustomUser, Role
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order()
+        job = convert(order)
+
+        role, _ = Role.objects.get_or_create(
+            name='TRACK_COORD',
+            defaults={'display_name': 'Coordinator', 'scope': 'BRANCH'},
+        )
+        actor = CustomUser(
+            employee_id='TKB-1', first_name='Track', last_name='Coord',
+            email='track@test.local', employment_status='ACTIVE',
+            is_active=True, branch=self.branch, role=role,
+        )
+        actor.set_password('test-pass-123')
+        actor.save()
+
+        JobHalt.objects.create(
+            job=job, reason='MATERIALS_OUT',
+            work_state_at_halt='RECEIVED', halted_by=actor,
+        )
+
+        self.assertTrue(self._read(order)['is_halted'])
+
+    def test_the_stages_carry_their_times(self):
+        """
+        When each stage was reached, from the job's own log. A customer
+        watching should see it move rather than be told it has.
+        """
+        from apps.finance.models import DailySalesSheet
+        from apps.storefront.services.conversion import convert
+
+        DailySalesSheet.objects.create(
+            branch=self.branch, date=timezone.localdate(),
+            status=DailySalesSheet.Status.OPEN,
+        )
+
+        order = self._order()
+        convert(order)
+
+        times = self._read(order)['stage_times']
+        self.assertIn('paid', times)
+        self.assertIsNotNone(times['paid'])
+
+    # ── The artwork, per line ──────────────────────────────────────
+
+    def test_a_line_names_its_artwork(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        order = self._order()
+        OrderFile.objects.create(
+            order=order, line_id='l1',
+            file=SimpleUploadedFile('art.jpg', b'x' * 64,
+                                    content_type='image/jpeg'),
+            original_filename='art.jpg', verdict='fine',
+        )
+
+        line = self._read(order)['line_items'][0]
+        self.assertEqual(line['artwork_filename'], 'art.jpg')
+        self.assertEqual(line['artwork_verdict'], 'fine')
+
+    def test_a_line_with_no_artwork_says_nothing(self):
+        line = self._read(self._order())['line_items'][0]
+        self.assertIsNone(line.get('artwork_filename'))
