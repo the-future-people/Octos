@@ -390,7 +390,7 @@ class JobStatusEngine:
                 f"{self.job.job_number} has already been cleared."
             )
 
-        return JobVerification.objects.create(
+        verification = JobVerification.objects.create(
             job                = self.job,
             outcome            = JobVerification.Outcome.PASSED,
             note               = note,
@@ -398,6 +398,26 @@ class JobStatusEngine:
             customer_response  = customer_response,
             checked_by         = actor,
         )
+
+        # Cleared means in press. A job left at RECEIVED after clearing
+        # told the customer it was still being inspected and showed the
+        # coordinator a second "Start" to press. Moved through move_work
+        # so the status log records it: tracking builds the customer's
+        # timeline from that log, and timing learns from it.
+        #
+        # Not when it cannot be made yet. Instant work has no press stage,
+        # and a remote order cleared before its deposit waits at RECEIVED
+        # for the cashier, as it always has. Stated explicitly rather than
+        # attempted and caught, so a real failure raises instead of being
+        # skipped in silence.
+        can_start = (
+            self.job.job_type != 'INSTANT'
+            and self.job.payment_state != 'UNPAID'
+        )
+        if can_start:
+            self.move_work('IN_PRODUCTION', actor, notes='Cleared for production')
+
+        return verification
 
     @transaction.atomic
     def reject_verification(self, outcome, actor, note='',

@@ -708,13 +708,48 @@ class VerificationTests(JobsFixtureMixin, TestCase):
         job.refresh_from_db()
         self.assertEqual(job.work_state, 'IN_PRODUCTION')
 
-    def test_verified_remote_job_starts_production(self):
-        job    = self._job('WHATSAPP')
-        engine = JobStatusEngine(job)
-        engine.verify(actor=self.coordinator, note='Artwork checked, 300dpi.')
-        engine.move_work('IN_PRODUCTION', actor=self.coordinator)
+    def test_clearing_a_paid_job_puts_it_in_press(self):
+        """
+        Cleared means in press. Leaving it at RECEIVED told the customer
+        it was still being inspected and made the coordinator press Start
+        a second time.
+        """
+        job = self._job('WHATSAPP')
+        JobStatusEngine(job).verify(
+            actor=self.coordinator, note='Artwork checked, 300dpi.',
+        )
         job.refresh_from_db()
         self.assertEqual(job.work_state, 'IN_PRODUCTION')
+
+    def test_clearing_is_written_to_the_status_log(self):
+        """
+        The customer's timeline is built from the log, not the field. A
+        move that skipped the log would leave a gap in their tracking.
+        """
+        from apps.jobs.models import JobStatusLog
+
+        job = self._job('WHATSAPP')
+        JobStatusEngine(job).verify(actor=self.coordinator)
+        self.assertTrue(
+            JobStatusLog.objects.filter(
+                job=job, axis='WORK', to_status='IN_PRODUCTION',
+            ).exists()
+        )
+
+    def test_clearing_an_unpaid_job_leaves_it_for_the_cashier(self):
+        job = self._job('WHATSAPP', payment_state='UNPAID')
+        JobStatusEngine(job).verify(actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertTrue(job.is_verified)
+        self.assertEqual(job.work_state, 'RECEIVED')
+
+    def test_clearing_instant_work_leaves_it_received(self):
+        """Instant work has no press stage to move into."""
+        job = self._job('WHATSAPP', job_type='INSTANT')
+        JobStatusEngine(job).verify(actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertTrue(job.is_verified)
+        self.assertEqual(job.work_state, 'RECEIVED')
 
     def test_rejection_does_not_clear_the_job(self):
         from apps.jobs.models import JobVerification
