@@ -513,6 +513,16 @@ class JobStatusEngine:
         if axis == 'WORK' and to_state == 'DONE':
             self._deduct_inventory(actor)
 
+            # The customer is told once the move has committed, and from
+            # the worker rather than this request: a rolled-back move must
+            # not text anyone, and the coordinator's tap must not wait on
+            # mNotify. DONE is terminal on the work axis, so this fires
+            # once per job. Imported here so jobs does not load storefront
+            # at module import.
+            from apps.storefront.tasks import tell_customer_ready
+            job_id = self.job.pk
+            transaction.on_commit(lambda: tell_customer_ready.delay(job_id))
+
         if axis == 'HANDOVER' and to_state == 'HANDED_OVER':
             self.job.handed_over_at = now
             self.job.handed_over_by = actor

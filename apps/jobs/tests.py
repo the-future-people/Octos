@@ -412,11 +412,44 @@ class WorkAxisTests(JobsFixtureMixin, TestCase):
             job.refresh_from_db()
             self.assertEqual(job.work_state, state)
 
+    def test_done_queues_the_ready_text(self):
+        from unittest.mock import patch
+
+        job    = self._production_job()
+        engine = JobStatusEngine(job)
+        for state in ['IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK']:
+            engine.move_work(state, actor=self.coordinator)
+
+        with patch('apps.storefront.tasks.tell_customer_ready.delay') as queued:
+            with self.captureOnCommitCallbacks(execute=True):
+                engine.move_work('DONE', actor=self.coordinator)
+
+        queued.assert_called_once_with(job.pk)
+
+    def test_ready_text_waits_for_the_commit(self):
+        """
+        Queued on commit, not on the move. A move that rolled back must
+        never tell a customer their order is ready.
+        """
+        from unittest.mock import patch
+
+        job    = self._production_job()
+        engine = JobStatusEngine(job)
+        for state in ['IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK']:
+            engine.move_work(state, actor=self.coordinator)
+
+        with patch('apps.storefront.tasks.tell_customer_ready.delay') as queued:
+            with self.captureOnCommitCallbacks(execute=False) as pending:
+                engine.move_work('DONE', actor=self.coordinator)
+            queued.assert_not_called()
+
+        self.assertEqual(len(pending), 1)
+
     def test_cannot_skip_a_stage(self):
         job = self._production_job()
         with self.assertRaises(ValueError):
             JobStatusEngine(job).move_work('DONE', actor=self.coordinator)
-
+            
     def test_instant_job_goes_straight_to_done(self):
         job = self._production_job(job_type='INSTANT')
         JobStatusEngine(job).move_work('DONE', actor=self.coordinator)

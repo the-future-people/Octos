@@ -40,6 +40,42 @@ def convert_order(self, order_id):
     return job.job_number if job else None
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=300)
+def tell_customer_ready(self, job_id):
+    """
+    The text a customer is actually waiting for: their order is ready.
+
+    Queued on commit when the floor marks a job DONE, so a move that
+    rolls back never tells anyone anything, and the coordinator's tap
+    never waits on mNotify.
+
+    Online orders only. A walk-in has no order, no tracking link and has
+    not been asked whether it wants texts; that is a separate decision.
+
+    Retried five minutes apart. A late ready text is fine; a missing one
+    is a customer who never comes to collect.
+    """
+    from apps.storefront.models import OnlineOrder
+    from apps.storefront.services.messages import ready_text
+    from apps.storefront.services.sms import send_sms
+
+    order = (
+        OnlineOrder.objects
+        .select_related('lead')
+        .filter(job_id=job_id)
+        .first()
+    )
+    if order is None or not order.lead_id:
+        return None
+
+    try:
+        send_sms(order.lead.phone, ready_text(order))
+    except Exception as problem:
+        raise self.retry(exc=problem)
+
+    return order.order_number
+
+
 @shared_task
 def convert_stragglers():
     """
