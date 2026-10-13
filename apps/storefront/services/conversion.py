@@ -66,9 +66,16 @@ def convert(order):
             branch=order.branch,
             customer=_customer_for(order),
             daily_sheet=sheet,
-            job_type=_job_type(order),
+            # Always production. Online work is paid for before it is
+            # made, and only the production flow has a way to say
+            # "ready" — the instant flow goes straight from owing to
+            # finished, which no unmade online job can honestly be.
+            job_type=Job.PRODUCTION,
             title=_title(order),
-            status=Job.PENDING_PAYMENT,
+            # Where a cashier would have left it once the money was in.
+            # PENDING_PAYMENT here put every paid online job in the
+            # cashier's queue and held the day sheet open as a debt.
+            status=Job.PAID,
             estimated_cost=order.total,
             # Nobody. An online order has no attendant, and a fake one
             # would turn up in staff lists for years.
@@ -199,24 +206,6 @@ def _customer_for(order):
         customer_type='INDIVIDUAL',
         branch=order.branch,
     )
-
-
-def _job_type(order):
-    """
-    Production or instant, by what is actually on it.
-
-    One production line makes the whole job production: a banner and a
-    photocopy together still has to go on a press, and typing it
-    instant would put it on the wrong board.
-    """
-    from apps.jobs.models import Service
-
-    ids = [line.get('service') for line in (order.line_items or [])]
-    categories = set(
-        Service.objects.filter(pk__in=ids).values_list('category', flat=True)
-    )
-    return 'PRODUCTION' if 'PRODUCTION' in categories else 'INSTANT'
-
 
 def _title(order):
     """

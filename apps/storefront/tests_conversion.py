@@ -124,6 +124,11 @@ class ConversionTests(TestCase):
         self.assertEqual(job.payment_state, 'PAID')
         self.assertEqual(job.work_state, 'RECEIVED')
         self.assertEqual(job.handover_state, 'AWAITING_COLLECTION')
+        # The legacy field still drives the cashier queue, sheet close,
+        # EOD and monthly close. PENDING_PAYMENT here made every paid
+        # online job look like a debt.
+        self.assertEqual(job.status, Job.PAID)
+        self.assertEqual(job.job_type, Job.PRODUCTION)
 
     def test_nobody_took_it_in(self):
         """
