@@ -524,3 +524,396 @@ Guessing those numbers would have produced plausible estimates that were
 wrong in a way nobody would have caught until customers complained.
 
 When a figure can be looked up, look it up.
+
+# Lessons
+
+Rules that stop a repeat. Short and imperative. Append only; nothing here
+gets deleted because a rule stopped being fresh.
+
+---
+
+## Before debugging an import error, grep for stray imports
+
+An editor's auto-import put `from pdb import pm` at line 1 of three
+separate files. In two it shadowed a real import and broke it; in the
+third it sat above a working import of the same name, so the tests
+passed for the wrong reason.
+
+```
+Get-ChildItem apps -Recurse -Filter *.py | Select-String -Pattern "from pdb import|import pdb|breakpoint\(\)" -Encoding UTF8
+```
+
+A sweep that returns nothing is not proof — run it again after the edit
+that triggered the auto-import.
+
+---
+
+## A file that looks unsaved may have saved somewhere else
+
+A test class pasted "into tests.py" landed in `apps/jobs/tests.py`
+instead of `apps/finance/tests.py`. Searching the intended file found
+nothing, which read as a failed save. It only surfaced when a broader
+suite ran and the duplicate failed.
+
+Searching the file you expect proves absence there, not everywhere.
+Search both candidates.
+
+---
+
+## Compare hashes before refactoring a file that looks familiar
+
+`apps/finance/services/close_service.py` was byte-for-byte identical to
+`apps/finance/monthly_close_engine.py` — 1,071 lines, imported by
+nothing, sitting among real services. Editing the wrong one would have
+passed every test and changed nothing in production.
+
+```
+docker-compose exec web python -c "import hashlib; print(hashlib.md5(open('<path>','rb').read()).hexdigest())"
+```
+
+---
+
+## `manage.py check` proves nothing about a code path
+
+Faults that passed `check` and only failed when the path ran:
+
+- `quote.line_items` where the parameter was `proforma` — proforma
+  conversion had never run once
+- `self.canvas` against ReportLab's `self.canv` — the weekly PDF never
+  rendered, and a broad `except` swallowed it every week
+- `signed['variance']` referenced where `signed` was never assigned
+- `outstanding_week` missing its last two lines
+- a moved function's call site left with no import
+
+Run the path. If it can't be run, write a test that runs it.
+
+---
+
+## After moving a function, check every call site for its import
+
+Moving `_generate_weekly_pdf` out of `views.py` left the call behind
+with no import. `check` passed. It would have raised `NameError` on the
+first download, and the surrounding `except Exception` would have
+reported "PDF generation failed" with no cause.
+
+```
+Select-String -Path <file> -Pattern "<function_name>" -Encoding UTF8
+```
+
+Two lines expected: the import and the call.
+
+---
+
+## A broad `except` around generation hides the bug for months
+
+The weekly PDF raised on every render and nobody knew, because the
+caller caught everything. Where a broad `except` is unavoidable, log the
+exception with `exc_info=True` — and write a test that asserts real
+bytes come out.
+
+---
+
+## Test fixtures that compute dates can collide on one weekday only
+
+`make_sheet(days_ago)` counted calendar days then stepped back off
+Sunday. On a Monday, `days_ago=2` and `days_ago=3` both landed on the
+same Saturday: same branch, same date, unique constraint. It failed one
+day in seven, which is worse than failing always — the first instinct on
+a Monday is that you broke it.
+
+Count trading days, not calendar days, when the fixture means trading
+days.
+
+---
+
+## Knowledge written out by hand in many places will drift
+
+Payment methods were declared in about twenty files. The greys in five
+PDF builders all disagreed. Both were fixed by one source of truth:
+`apps/finance/payment_methods.py` and `apps/core/pdf/base.py`.
+
+When the same fact appears in a third file, stop and make a registry.
+
+---
+
+## An `if/elif` chain over data values drops what it does not recognise
+
+`_snapshot_totals` sorted receipts by method with `if/elif` and no
+`else`. An unrecognised method landed in no total at all — money gone
+from the books with no error raised.
+
+Every such chain needs an `else` that logs what it could not place.
+
+---
+
+## Naming fields by hand in `update_fields` defeats a registry
+
+The totals were computed from the registry and then saved with a
+hardcoded `update_fields` list, so `total_online` was calculated
+correctly and discarded. Build the list from the same source as the
+values.
+
+---
+
+## Pin behaviour with tests before a refactor, not after
+
+Every migration onto the payment registry followed the same order: write
+tests asserting what the code produces today, watch them pass, swap the
+internals, watch the same tests still pass. The numbers never moved, and
+we knew it rather than hoped it.
+
+---
+
+## A guard written for one case will refuse its opposite
+
+- Recovery assumed a stranded sheet meant the cashier never signed. Both
+  real cases were the reverse.
+- Submission assumed a week is filed on its Saturday. A week that missed
+  its Saturday could never be filed at all.
+
+Write the rule for the case you have not thought of yet, or make it
+flag rather than block.
+
+---
+
+## A warning that fires every time stops being read
+
+The sign-off wizard warned about pending jobs every single evening, so
+the warning was ticked rather than read, and a mis-click closed a day
+with twelve jobs outstanding. The weekly filing's low-stock alert lists
+seven machines every week for the same reason.
+
+If a flag fires on a normal day, it is not a flag.
+
+---
+
+## PowerShell output is not the file
+
+`Select-Object` strips blank lines and the console mangles box-drawing
+characters, so find-blocks reconstructed from console output do not
+match. Use `Select-String -Context` to read raw text, and never copy a
+Find block out of a terminal.
+
+---
+
+## Prefer a new file over a third paste into a long one
+
+A mid-file paste destroyed `MonthlyTab` entirely once. For large moves,
+extract by line range in PowerShell rather than retyping:
+
+```
+$lines = Get-Content -Encoding UTF8 <file>
+$body  = $lines[<start>..<end>]
+```
+
+Nothing retyped, nothing mistranscribed.
+
+---
+
+## Check where the data lives before debugging the code
+
+`PredictionService` logged "gave up walking the calendar" locally and
+worked correctly on Railway. The home database has no branch and no
+users, so anything needing real data cannot be reproduced there.
+
+---
+
+## Measure before building
+
+Three of the v3 prediction proposal's investigations were measured in an
+afternoon; two came back negative. Ask "if this signal worked perfectly,
+how much would it improve?" before building it.
+
+---
+
+## Two unpushed commits look exactly like a broken feature
+
+Twice a "missing feature" was working code that had never been deployed.
+`git status` on both repos before concluding anything is broken.
+
+---
+
+## A command in the Railway shell uses Railway's copy of the file
+
+Writing a management command locally and running it remotely does
+nothing until the push has deployed. This cost four separate rounds in
+one evening before anyone said it out loud.
+
+The same applies to a seed: `seed_floor` run on Railway seeds from
+Railway's `seed_floor.py`, not the one just edited on the laptop.
+
+---
+
+## Migrations run in the Dockerfile, so a bad one takes production down
+
+The container's CMD is `migrate --noinput && daphne ...`. A migration
+that exits non-zero means daphne never starts, the healthcheck fails,
+`railway.toml` restarts three times, and there is no shell to get into
+because no container is running.
+
+The deploy logs of that specific deployment are the only way in. The
+service-wide log stream shows the *old* container being stopped, which
+looks like something else entirely.
+
+---
+
+## A unique column cannot be added to a populated table with a blank default
+
+Every existing row shares the empty value and Postgres refuses to build
+the index. Three steps:
+
+1. `AddField` without the constraint — and without `db_index`
+2. `RunPython` filling every row
+3. `AlterField` adding `unique=True`
+
+`db_index=True` on step 1 makes Postgres create the same index twice and
+refuse the duplicate — which reads as a leftover index and sends you
+dropping things that were never the problem.
+
+It passes locally on a near-empty table and fails on production. Test
+schema changes against data.
+
+---
+
+## Railway scopes environment variables per service
+
+A key set on the web service is invisible to the Celery worker. Payment
+texts logged "SMS not sent (no API key)" while manual sends from the web
+shell worked perfectly — same code, same key name, different container.
+
+Use shared project-level variables.
+
+---
+
+## A setting read with `getattr(settings, 'X', '')` never fails loudly
+
+`MNOTIFY_API_KEY` was absent from `settings.py` entirely. Every SMS was
+logged instead of sent, for weeks, and nothing anywhere said so.
+
+A default that means "do nothing" is worse than a crash.
+
+---
+
+## Celery's explicit `autodiscover_tasks` list silently drops what is missing
+
+`apps.storefront` was absent, so the webhook queued `convert_order`, the
+worker found nothing registered, and the message was discarded with a
+FAILURE carrying no traceback.
+
+The comment above that list predicted this exact failure and it happened
+anyway. A bare `autodiscover_tasks()` scanning `INSTALLED_APPS` cannot
+forget an app.
+
+---
+
+## A masked field copies its mask
+
+Paystack's secret key shows as bullets until revealed. Copying it gave
+48 bullet characters, which failed as a latin-1 encoding error on an
+HTTP header — an error naming nothing about the real cause.
+
+Reveal, then copy.
+
+---
+
+## A test helper that discards the status code hides every failure
+
+`return response.data` on a 404 gives `None`, and the error surfaces
+later as "NoneType is not subscriptable" with no hint of what went
+wrong. Assert 200 inside the helper.
+
+---
+
+## Swallowing a database error inside `transaction.atomic()` rescues nothing
+
+Postgres refuses every subsequent query in that transaction, so the
+failure resurfaces somewhere more confusing. Either let it raise, or do
+the fallible work outside the block.
+
+Django's `TestCase` wraps each test in its own transaction, so "outside
+the atomic block" in application code is still inside the test's one.
+
+---
+
+## A model built around one channel encodes that channel in its required fields
+
+`Job.intake_by`, `Receipt.cashier`, `Receipt.daily_sheet` and
+`JobFile.uploaded_by` all assumed a person at a counter. An online order
+has none of them, and each surfaced one at a time as an IntegrityError
+over an hour.
+
+When adding a second channel, read the first channel's required fields
+before writing anything.
+
+---
+
+## Railway volumes attach to one service
+
+The web container's uploads are invisible to the worker, so conversion
+copied artwork that was not there. Media moved to Cloudflare R2.
+
+---
+
+## Run `npm run build` before pushing the frontend
+
+A route referencing a component with no import blanked the entire
+storefront in production. The build catches it in under a second.
+
+Three separate crashes came from a new import sitting beside the old one
+rather than replacing it: `Identifier 'X' has already been declared`.
+
+---
+
+## A paste that stops partway leaves a function with no return
+
+`_lines_with_artwork` ended at `lines = []` and returned `None`, which
+surfaced as a 200 response with a null body. The symptom was nowhere
+near the cause, and four rounds went into database archaeology first.
+
+When a function returns `None` unexpectedly, read the function before
+theorising.
+
+---
+
+## Don't move people automatically
+
+An auto-redirect on the payment confirmation page went wrong three
+different ways: stranded on reload, hung waiting for cleared storage,
+and gone before anyone could copy the link.
+
+The page is the destination.
+
+---
+
+## Don't put anything load-bearing in browser storage
+
+A cleared cart, a second device, or a reload an hour later all have to
+work. Ask the server, with something from the URL.
+
+---
+
+## Never tell someone a payment failed when it might not have
+
+They will pay again. Say it is being confirmed, and let the text catch
+up.
+
+---
+
+## A refusal should name what the person can do about it
+
+Six lines of "Madina Branch has no large format printer" tells a
+customer nothing. "SAV Sticker isn't something we can make right now —
+remove it, or call us" does.
+
+Internal detail belongs in the log, not on the screen.
+
+## 13 October 2026
+
+- Assert against model constants (`Job.Payment.SETTLED`), never string literals. A literal test pins whatever the code wrote.
+- `choices` are not enforced on `create()` or `.update()`. Check any new writer to a state field against the enum.
+- Correct data by what it is linked to (`OnlineOrder`), not by a label that may itself be wrong (`intake_channel`).
+- After a push, confirm the worker's active deploy, not just the web service's. Conversion and the ready text run in the worker.
+- Check `git log origin/main` before testing a deploy. A pasted commit block can silently not run, and a push can fail on the network.
+- Load test objects the way the views load them. Views prefetch; a fresh object hides stale-cache bugs.
+- See a regression test fail without the fix before trusting it.
+- Rebuild `$labels` before every full test run; a stale list silently skips new test files.

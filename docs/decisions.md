@@ -732,3 +732,15 @@ The new one summed stations, which overstates the wait.
 Deleted. What survived from that morning was real: `BranchStation`,
 `max_width_mm`, the floor seed, and the flexy and SAV routes that had never
 existed.
+
+
+## 13 October 2026
+
+- **Online jobs are always PRODUCTION.** Paid before they are made, and only the production flow has a ready state.
+- **The cashier has no part in online jobs.** The attendant handles collection; the cashier owns part-payments only.
+- **Clearing means in press.** Accepted cost: print timings include machine-queue wait until operators mark the real start in the operator extension.
+- **The promise is Octos's, never the customer's.** `estimated_ready_at` is the time Octos promised from floor capacity; `deadline` is a wish the branch may or may not honour and never drives lateness. Promises can be revised (machine down), but the original is kept so "was the promise kept?" stays answerable.
+- **The arrivals queue is strict.** Soonest promise first, ties to first arrival. Coordinators take what is next and cannot choose; the server enforces it. Claims lapse after 10 minutes.
+- **The quality check is the Mark ready modal.** QUALITY_CHECK stays in the backend because finishing quality is measured; the customer never sees it.
+- **The ready text goes to online orders only,** after the commit, through the worker. Walk-ins have not been asked whether they want texts.
+- **Push straight to main** until a stable end-to-end version exists; branch partitioning after that.
