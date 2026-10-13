@@ -784,6 +784,27 @@ class VerificationTests(JobsFixtureMixin, TestCase):
         self.assertTrue(job.is_verified)
         self.assertEqual(job.work_state, 'RECEIVED')
 
+    def test_clearing_works_on_a_job_loaded_as_the_views_load_it(self):
+        """
+        Every coordinator view prefetches verifications. A prefetched job
+        answers is_verified from a list taken before the clear, so the
+        move into press saw "not verified" and the whole clear rolled
+        back in production while every test here passed, because the
+        tests loaded jobs differently. This one loads it the views' way.
+        """
+        created = self._job('WHATSAPP')
+        job = (
+            Job.objects
+            .prefetch_related('line_items__service', 'halts', 'verifications')
+            .get(pk=created.pk)
+        )
+        list(job.verifications.all())  # the cache the views hold
+
+        JobStatusEngine(job).verify(actor=self.coordinator)
+
+        created.refresh_from_db()
+        self.assertEqual(created.work_state, 'IN_PRODUCTION')
+
     def test_rejection_does_not_clear_the_job(self):
         from apps.jobs.models import JobVerification
 

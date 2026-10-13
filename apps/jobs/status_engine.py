@@ -410,6 +410,15 @@ class JobStatusEngine:
         # for the cashier, as it always has. Stated explicitly rather than
         # attempted and caught, so a real failure raises instead of being
         # skipped in silence.
+        #
+        # Every coordinator view loads jobs with their verifications
+        # prefetched, and is_verified reads that cached list, which was
+        # taken before this verification existed. Without dropping it the
+        # move below sees "not verified" and refuses, and the atomic block
+        # rolls the whole clear back. Naming the relation clears only its
+        # prefetch, not the rest of the job.
+        self.job.refresh_from_db(fields=['verifications'])
+
         can_start = (
             self.job.job_type != 'INSTANT'
             and self.job.payment_state != 'UNPAID'
