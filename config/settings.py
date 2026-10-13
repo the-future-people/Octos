@@ -164,10 +164,47 @@ STATICFILES_STORAGE = 'whitenoise.storage.StaticFilesStorage'
 MEDIA_URL = '/api/v1/jobs/files/'
 MEDIA_ROOT = Path(config('MEDIA_ROOT_PATH', default=str(BASE_DIR / 'media')))
 
-STORAGES = {
-    'default': {
+# Where uploaded files actually live.
+#
+# A Railway volume mounts to one service, and conversion runs in the
+# worker — so artwork written by the web container was invisible to
+# the process that needed to copy it onto a job. Every online order
+# reached the floor without its file, and the only sign was a line in
+# a log nobody was reading.
+#
+# Object storage has no such edge: every service sees the same bucket,
+# and nothing is lost when a container is replaced.
+#
+# Local development keeps the filesystem, so a laptop needs no bucket
+# and no keys. The switch is the presence of R2_BUCKET_NAME.
+R2_BUCKET_NAME = config('R2_BUCKET_NAME', default='')
+
+if R2_BUCKET_NAME:
+    _media_storage = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'bucket_name': R2_BUCKET_NAME,
+            'endpoint_url': config('R2_ENDPOINT_URL'),
+            'access_key': config('R2_ACCESS_KEY_ID'),
+            'secret_key': config('R2_SECRET_ACCESS_KEY'),
+            # R2 has one region and rejects the usual names.
+            'region_name': 'auto',
+            # Nothing is served straight from the bucket. Customer
+            # artwork at a guessable URL is a real exposure, so every
+            # file still goes through the view that checks who is
+            # asking.
+            'default_acl': None,
+            'querystring_auth': False,
+            'file_overwrite': False,
+        },
+    }
+else:
+    _media_storage = {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',
-    },
+    }
+
+STORAGES = {
+    'default': _media_storage,
     'staticfiles': {
         'BACKEND': 'whitenoise.storage.StaticFilesStorage',
     },
