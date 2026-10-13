@@ -346,6 +346,21 @@ class Job(AuditModel):
     )
     deadline       = models.DateTimeField(null=True, blank=True)
 
+    # ── Inspection claim ──────────────────────────────────────────
+    # Who has this job open in the inspection workspace, and since when.
+    # A claim, not a state: it stops two coordinators checking the same
+    # file, and it lapses after ten minutes so a tablet left on a bench
+    # cannot hold the queue. SET_NULL because a claim is transient and
+    # must never stop a user from being removed.
+    inspecting_by    = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='jobs_inspecting',
+        null=True,
+        blank=True,
+    )
+    inspecting_since = models.DateTimeField(null=True, blank=True)
+
     # ── Routing ──────────────────────────────────────────────────
     is_routed      = models.BooleanField(default=False)
     routing_reason = models.TextField(blank=True)
