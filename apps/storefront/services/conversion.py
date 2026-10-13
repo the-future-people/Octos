@@ -85,7 +85,12 @@ def convert(order):
             # artwork yet, and the check before a machine runs is the
             # whole point of that column.
             intake_channel=Job.ONLINE,
-            payment_state='PAID',
+            # SETTLED, not PAID — PAID is not a value on this axis.
+            # choices are not enforced on create(), so the wrong word
+            # went in silently, and an attendant cannot release a job
+            # that is not SETTLED: every online customer would have
+            # been turned away at collection.
+            payment_state=Job.Payment.SETTLED,
             work_state='RECEIVED',
             handover_state='AWAITING_COLLECTION',
             deposit_percentage=100,

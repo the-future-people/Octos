@@ -121,7 +121,9 @@ class ConversionTests(TestCase):
         self._sheet()
         job = convert(self._order())
 
-        self.assertEqual(job.payment_state, 'PAID')
+        # SETTLED is the only paid-in-full value on the payment axis.
+        # This line asserted 'PAID' and pinned the bug in place.
+        self.assertEqual(job.payment_state, Job.Payment.SETTLED)
         self.assertEqual(job.work_state, 'RECEIVED')
         self.assertEqual(job.handover_state, 'AWAITING_COLLECTION')
         # The legacy field still drives the cashier queue, sheet close,
