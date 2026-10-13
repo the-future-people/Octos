@@ -26,6 +26,8 @@ urlpatterns = [
     path('<int:pk>/verify/',                coordinator_views.VerifyJobView.as_view(),         name='job-verify'),
     path('<int:pk>/verify/reject/',         coordinator_views.RejectVerificationView.as_view(), name='job-verify-reject'),
     path('<int:pk>/verify/suspend/',        coordinator_views.SuspendJobView.as_view(),        name='job-verify-suspend'),
+    path('<int:pk>/inspect/',               coordinator_views.ClaimInspectionView.as_view(),   name='job-inspect'),
+    path('<int:pk>/inspect/release/',       coordinator_views.ReleaseInspectionView.as_view(), name='job-inspect-release'),
 
     # Lifecycle axes
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),

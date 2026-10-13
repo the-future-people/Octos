@@ -62,11 +62,39 @@ def _predicted_ready(job):
         return None
 
 
+def _promise_fields(job, predicted):
+    """
+    The promise Octos made, and whether it is in danger.
+
+    Late: the promised time has passed and the work is not done. At risk:
+    not late yet, but the floor's own prediction lands after the promise.
+    A job with no promise is neither; nothing was promised to break.
+    """
+    from datetime import datetime
+    from django.utils import timezone
+    from apps.jobs.services.inspection import current_promise
+
+    promise = current_promise(job)
+    if promise is None:
+        return {'promise': None, 'late': False, 'at_risk': False}
+
+    late = timezone.now() > promise
+    at_risk = False
+    if not late and predicted and predicted.get('ready_at'):
+        at_risk = datetime.fromisoformat(predicted['ready_at']) > promise
+
+    return {'promise': promise.isoformat(), 'late': late, 'at_risk': at_risk}
+
+
 class VerificationQueueView(APIView):
     """
     GET /api/v1/jobs/coordinator/verification-queue/
 
-    Remote orders nobody at the branch has looked at yet. Oldest first — a
+    Remote orders nobody at the branch has looked at yet, in the order
+    they must be taken: soonest promise first. One is marked is_next for
+    the coordinator asking; the rest wait. See services/inspection.py.
+
+    Previously: Oldest first — a
     customer who ordered this morning has been waiting longer than one who
     ordered ten minutes ago.
     """
@@ -79,39 +107,33 @@ class VerificationQueueView(APIView):
         if err:
             return err
 
-        candidates = (
-            Job.objects
-            .filter(
-                branch=branch,
-                intake_channel__in=Job.REMOTE_CHANNELS,
-                work_state='RECEIVED',
-            )
-            .exclude(status__in=['CANCELLED', 'DRAFT'])
-            .exclude(payment_state='UNPAID')
-            .select_related('customer', 'intake_by')
-            .prefetch_related('line_items__service', 'verifications', 'halts')
-            .order_by('created_at')
+        from apps.jobs.services.inspection import (
+            arrival_queue, claim_is_live, next_up,
         )
 
-                # is_verified reads the latest verification, which is a property
-        # rather than a column, so the filter happens here.
-        #
-        # A halted job is excluded even though it is still unverified. A
-        # suspension holds a job precisely because it cannot proceed, and
-        # leaving it in the rail would put it back at the tip for someone
-        # to open a file that has already been looked at and found wanting.
-        # It belongs in the suspended list until it is resumed.
-        pending = [
-            j for j in candidates
-            if not j.is_verified
-            and not any(h.resumed_at is None for h in j.halts.all())
-        ]
+        # Which jobs wait and in what order lives in the service, so this
+        # list and the claim that opens a job can never disagree about
+        # what "next" means.
+        queue = arrival_queue(branch)
+        mine  = next_up(queue, request.user)
 
         data = JobListSerializer(
-            pending, many=True, context={'request': request}
+            queue, many=True, context={'request': request}
         ).data
-        for row, job in zip(data, pending):
-            row['predicted'] = _predicted_ready(job)
+        for row, job in zip(data, queue):
+            predicted = _predicted_ready(job)
+            row['predicted'] = predicted
+            row.update(_promise_fields(job, predicted))
+
+            held = claim_is_live(job)
+            holder = job.inspecting_by if held else None
+            row['is_next'] = mine is not None and job.pk == mine.pk
+            row['inspecting_by_name'] = (
+                (holder.full_name or holder.email) if holder else None
+            )
+            row['inspecting_is_me'] = bool(
+                holder and holder.pk == request.user.pk
+            )
 
         return Response(data)
 
@@ -133,13 +155,17 @@ class ProductionBoardView(APIView):
         if err:
             return err
 
+        from django.db.models import Q
+
         jobs = (
             Job.objects
+            .filter(branch=branch)
             .filter(
-                branch=branch,
-                work_state__in=[
+                Q(work_state__in=[
                     'RECEIVED', 'IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK',
-                ],
+                ])
+                # Done and on the shelf. Leaves the board once handed over.
+                | Q(work_state='DONE', handover_state='AWAITING_COLLECTION')
             )
             .exclude(status__in=['CANCELLED', 'DRAFT'])
             .exclude(job_type='INSTANT')
@@ -156,6 +182,7 @@ class ProductionBoardView(APIView):
         columns = {
             'RECEIVED': [], 'IN_PRODUCTION': [],
             'FINISHING': [], 'QUALITY_CHECK': [],
+            'READY': [],
         }
         halted = []
 
@@ -167,7 +194,13 @@ class ProductionBoardView(APIView):
             if job.needs_verification and not job.is_verified:
                 continue
             data = JobListSerializer(job, context={'request': request}).data
+            if job.work_state == 'DONE':
+                # On the shelf. The promise was kept or it was not, and the
+                # floor has nothing left to predict.
+                columns['READY'].append(data)
+                continue
             data['predicted'] = _predicted_ready(job)
+            data.update(_promise_fields(job, data['predicted']))
             # A halted job is shown apart rather than in its column. It is
             # not being worked on, and leaving it in place makes a column
             # look busier than the floor actually is.
@@ -216,6 +249,9 @@ class VerifyJobView(APIView):
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.jobs.services.inspection import release
+        release(job, request.user)
 
         broadcast_invalidation(branch.id, [
             'verificationQueue', 'productionBoard', 'jobs', 'job-detail',
@@ -347,6 +383,9 @@ class SuspendJobView(APIView):
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        from apps.jobs.services.inspection import release
+        release(job, request.user)
+
         broadcast_invalidation(branch.id, [
             'verificationQueue', 'suspendedJobs', 'productionBoard',
             'jobs', 'job-detail',
@@ -354,8 +393,77 @@ class SuspendJobView(APIView):
         return Response({
             'success':    True,
             'job_number': job.job_number,
-            'detail':     f'{job.job_number} suspended — {outcome.replace("_", " ").lower()}.',
+            'detail':     f'{job.job_number} suspended— {outcome.replace("_", " ").lower()}.',
         })
+
+
+class ClaimInspectionView(APIView):
+    """
+    POST /api/v1/jobs/<pk>/inspect/
+
+    Take a job into the inspection workspace, or keep the claim alive
+    while the workspace is open. Refused unless it is the coordinator's
+    next job, so the strict queue holds even against a hand-made request.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.inspection import ClaimRefused, claim
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        job = _get_job(pk, branch)
+        if not job:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if not JobStatusEngine(job)._may_move_axis('WORK', request.user):
+            return Response(
+                {'detail': 'Only a coordinator can inspect jobs.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            job = claim(pk, branch, request.user)
+        except ClaimRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_409_CONFLICT)
+
+        broadcast_invalidation(branch.id, ['verificationQueue'])
+        return Response({
+            'success':          True,
+            'job_number':       job.job_number,
+            'inspecting_since': job.inspecting_since.isoformat(),
+        })
+
+
+class ReleaseInspectionView(APIView):
+    """
+    POST /api/v1/jobs/<pk>/inspect/release/
+
+    Close the workspace without clearing or suspending. Frees only the
+    caller's own claim.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.inspection import release
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        job = _get_job(pk, branch)
+        if not job:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        release(job, request.user)
+        broadcast_invalidation(branch.id, ['verificationQueue'])
+        return Response({'success': True, 'job_number': job.job_number})
 
 
 class SuspendedJobsView(APIView):
