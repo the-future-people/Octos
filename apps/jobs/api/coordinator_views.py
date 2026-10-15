@@ -466,6 +466,64 @@ class ReleaseInspectionView(APIView):
         return Response({'success': True, 'job_number': job.job_number})
 
 
+class ChangeSpecsView(APIView):
+    """
+    POST /api/v1/jobs/<pk>/lines/<line_id>/specs/
+    Body: { changes: { field: new_value, ... }, customer_response }
+
+    Correct a line's specification during inspection, after the
+    customer agreed to it on the recorded company line. The rules live
+    in services/spec_changes.py; this only checks who is asking.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, line_id):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.spec_changes import (
+            SpecChangeRefused, change_specs,
+        )
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+
+        job = _get_job(pk, branch)
+        if not job:
+            return Response({'detail': 'Job not found.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if not JobStatusEngine(job)._may_move_axis('WORK', request.user):
+            return Response(
+                {'detail': 'Only a coordinator can change an order.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            recorded = change_specs(
+                job_id            = pk,
+                line_id           = line_id,
+                changes           = request.data.get('changes'),
+                customer_response = request.data.get('customer_response', ''),
+                actor             = request.user,
+            )
+        except SpecChangeRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(branch.id, ['job-detail', 'verificationQueue'])
+        return Response({
+            'success': True,
+            'changes': [
+                {
+                    'field':      c.field,
+                    'old_value':  c.old_value,
+                    'new_value':  c.new_value,
+                    'changed_at': c.changed_at.isoformat() if c.changed_at else None,
+                }
+                for c in recorded
+            ],
+        })
+
+
 class SuspendedJobsView(APIView):
     """
     GET /api/v1/jobs/coordinator/suspended/
