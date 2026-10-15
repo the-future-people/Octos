@@ -223,10 +223,10 @@ class JobAxisMoveView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        from apps.core.finance_scope import get_branch_scope
+        from apps.jobs.api.scope import job_branch_scope
         from apps.core.broadcast import broadcast_invalidation
 
-        scope = get_branch_scope(request.user)
+        scope = job_branch_scope(request.user)
         allowed_branch_ids = Branch.objects.filter(
             scope['branch_filter']
         ).values_list('pk', flat=True)
@@ -278,10 +278,10 @@ class JobHaltView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        from apps.core.finance_scope import get_branch_scope
+        from apps.jobs.api.scope import job_branch_scope
         from apps.core.broadcast import broadcast_invalidation
 
-        scope = get_branch_scope(request.user)
+        scope = job_branch_scope(request.user)
         allowed_branch_ids = Branch.objects.filter(
             scope['branch_filter']
         ).values_list('pk', flat=True)
@@ -329,10 +329,10 @@ class JobResumeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        from apps.core.finance_scope import get_branch_scope
+        from apps.jobs.api.scope import job_branch_scope
         from apps.core.broadcast import broadcast_invalidation
 
-        scope = get_branch_scope(request.user)
+        scope = job_branch_scope(request.user)
         allowed_branch_ids = Branch.objects.filter(
             scope['branch_filter']
         ).values_list('pk', flat=True)
@@ -360,7 +360,6 @@ class JobResumeView(APIView):
             'work_state' : job.work_state,
             'resumed_at' : halt.resumed_at.isoformat(),
         })
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cashier

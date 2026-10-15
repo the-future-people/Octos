@@ -149,3 +149,53 @@ class CoordinatorApiTests(JobsFixtureMixin, TestCase):
         )
         self.assertTrue(row['late'])
         self.assertFalse(row['at_risk'])
+
+    # ── Moving work on ───────────────────────────────────────────
+
+    def test_the_coordinator_can_move_work_on(self):
+        """
+        The finance scope does not know the coordinator, so every move
+        answered "Job not found" until jobs got their own scope.
+        """
+        job = self._job(intake_channel='WALK_IN', work_state='IN_PRODUCTION')
+
+        response = self.me.post(
+            f'/api/v1/jobs/{job.pk}/move/',
+            {'axis': 'WORK', 'to_state': 'FINISHING'}, format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        job.refresh_from_db()
+        self.assertEqual(job.work_state, 'FINISHING')
+
+    def test_the_coordinator_can_halt_and_resume(self):
+        job = self._job(intake_channel='WALK_IN', work_state='IN_PRODUCTION')
+
+        halted = self.me.post(
+            f'/api/v1/jobs/{job.pk}/halt/',
+            {'reason': 'MACHINE_BREAKDOWN'}, format='json',
+        )
+        resumed = self.me.post(f'/api/v1/jobs/{job.pk}/resume/')
+
+        # 201: a halt is a record created, not just a move.
+        self.assertEqual(halted.status_code, 201)
+        self.assertEqual(resumed.status_code, 200)
+
+    def test_the_coordinator_still_cannot_touch_money(self):
+        """
+        Seeing the branch's jobs is not the same as owning their money.
+        The engine keeps the payment axis for the cashier.
+        """
+        job = self._job(
+            intake_channel='WALK_IN', work_state='IN_PRODUCTION',
+            payment_state='DEPOSIT_PAID',
+        )
+
+        response = self.me.post(
+            f'/api/v1/jobs/{job.pk}/move/',
+            {'axis': 'PAYMENT', 'to_state': 'SETTLED'}, format='json',
+        )
+
+        self.assertNotEqual(response.status_code, 200)
+        job.refresh_from_db()
+        self.assertEqual(job.payment_state, 'DEPOSIT_PAID')
