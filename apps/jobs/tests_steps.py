@@ -266,6 +266,65 @@ class StepTests(JobsFixtureMixin, TestCase):
         with self.assertRaises(StepRefused):
             mark_done(self._print_step(job).pk, self.branch, self.coordinator)
 
+    # ── A machine going down ─────────────────────────────────────
+
+    def _down(self, machine):
+        from apps.production.services.machine_service import MachineService
+        return MachineService.mark_down(
+            Machine.objects.get(pk=machine.pk), 'MECHANICAL', self.coordinator,
+        )
+
+    def _halted(self, job):
+        return job.halts.filter(resumed_at__isnull=True).exists()
+
+    def test_a_machine_down_halts_only_the_job_on_it(self):
+        on_six = self._cleared()
+        on_ten = self._cleared()
+        self.assertEqual(self._print_step(on_ten).machine, self.ten)
+
+        self._down(self.six)
+
+        self.assertTrue(self._halted(on_six))
+        self.assertFalse(self._halted(on_ten))
+
+    def test_jobs_queued_behind_move_to_a_machine_that_fits(self):
+        Machine.objects.filter(pk=self.ten.pk).update(is_available=False)
+        self._cleared()
+        queued = self._cleared()
+        self.assertEqual(self._print_step(queued).machine, self.six)
+        Machine.objects.filter(pk=self.ten.pk).update(is_available=True)
+
+        result = self._down(self.six)
+
+        moved = self._print_step(queued)
+        self.assertEqual(moved.machine, self.ten)
+        self.assertEqual(moved.state, JobStep.State.ACTIVE)
+        self.assertFalse(self._halted(queued))
+        self.assertEqual(result['moved_count'], 1)
+
+    def test_with_nowhere_to_go_they_wait_for_it_without_halting(self):
+        Machine.objects.filter(pk=self.ten.pk).update(is_available=False)
+        self._cleared()
+        queued = self._cleared()
+
+        self._down(self.six)
+
+        waiting = self._print_step(queued)
+        self.assertEqual(waiting.machine, self.six)
+        self.assertEqual(waiting.state, JobStep.State.WAITING)
+        self.assertFalse(self._halted(queued))
+
+    def test_back_up_resumes_its_job_and_carries_on(self):
+        from apps.production.services.machine_service import MachineService
+        job = self._cleared()
+        self._down(self.six)
+        self.assertTrue(self._halted(job))
+
+        MachineService.mark_up(Machine.objects.get(pk=self.six.pk), self.coordinator)
+
+        self.assertFalse(self._halted(job))
+        self.assertEqual(self._print_step(job).state, JobStep.State.ACTIVE)
+
     def test_each_step_knows_how_long_its_work_takes(self):
         job = self._job()
         build_steps(job)
