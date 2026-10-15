@@ -114,8 +114,11 @@ def _serialise(order):
 def _stage_estimate(job):
     if job is None:
         return None
-    from apps.jobs.services.estimates import estimate
     try:
+        # Inside the try, import included: nothing about the estimate,
+        # not even the module failing to load, may cost the customer
+        # their tracking page.
+        from apps.jobs.services.estimates import estimate
         result = estimate(job)
     except Exception:
         # A failed estimate must never cost the customer their tracking page.
