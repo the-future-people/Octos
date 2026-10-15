@@ -573,3 +573,76 @@ class SuspendedJobsView(APIView):
             rows.append(data)
 
         return Response(rows)
+
+# ── The floor: machines, their line-ups, and moving work on ──────
+
+def _is_coordinator(request, branch):
+    """Only floor roles move work on."""
+    from apps.core.finance_scope import get_role_name
+    return get_role_name(request.user) in {
+        'FLOW_COORDINATOR', 'BRANCH_MANAGER', 'REGIONAL_MANAGER',
+        'BELT_MANAGER', 'SUPER_ADMIN',
+    }
+
+
+class FloorView(APIView):
+    """
+    GET /api/v1/jobs/coordinator/floor/
+
+    Every machine with its line-up, the bench, and anything unassigned.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.jobs.services.floor import floor
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        return Response(floor(branch))
+
+
+class StepDoneView(APIView):
+    """POST /api/v1/jobs/steps/<step_id>/done/"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, step_id):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.steps import StepRefused, mark_done
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        if not _is_coordinator(request, branch):
+            return Response({'detail': 'Only a coordinator can move work on.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            step = mark_done(step_id, branch, request.user)
+        except StepRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(branch.id, ['floor', 'productionBoard', 'job-detail'])
+        return Response({'success': True, 'job_number': step.job.job_number})
+
+
+class StepMoveView(APIView):
+    """POST /api/v1/jobs/steps/<step_id>/move/   Body: { machine }"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, step_id):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.steps import StepRefused, move_step
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        if not _is_coordinator(request, branch):
+            return Response({'detail': 'Only a coordinator can move work.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            step = move_step(step_id, branch, request.data.get('machine'), request.user)
+        except StepRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(branch.id, ['floor', 'productionBoard'])
+        return Response({'success': True, 'machine': step.machine.name})

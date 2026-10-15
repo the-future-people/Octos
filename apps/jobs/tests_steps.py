@@ -386,6 +386,60 @@ class StepTests(JobsFixtureMixin, TestCase):
             [5, 5, 15, 15, 60, 75, 90],
         )
 
+    # ── By hand ──────────────────────────────────────────────────
+
+    def test_cutting_by_hand_goes_to_its_bench_even_where_cutters_exist(self):
+        """
+        Like a banner at Westland: cut by hand, though the cutting station
+        has machines for other work. It must reach the bench, not wait
+        forever for a machine.
+        """
+        from apps.jobs.services.steps import mark_done
+        cut_st = Station.objects.create(code='CUT', name='Cutting', sequence=2)
+        MachineType.objects.create(code='PLOTTER', name='Plotter', station=cut_st)
+        trimmed = Service.objects.create(
+            name='Trimmed Banner', code='TSTTRM', category='PRODUCTION',
+            unit='PER_SHEET', requires_design=False,
+            requires_file_upload=False, is_active=True,
+        )
+        ServiceStation.objects.create(
+            service=trimmed, station=self.print_st, machine_type=self.large,
+            sequence=1, setup_minutes=Decimal('5'), minutes_per_unit=Decimal('10'),
+        )
+        ServiceStation.objects.create(
+            service=trimmed, station=cut_st, machine_type=None,
+            sequence=2, setup_minutes=Decimal('0'), minutes_per_unit=Decimal('2'),
+        )
+        job = self._job()
+        job.line_items.update(service=trimmed)
+        Job.objects.filter(pk=job.pk).update(work_state='RECEIVED')
+        job.refresh_from_db()
+        from apps.jobs.status_engine import JobStatusEngine
+        JobStatusEngine(job).verify(actor=self.coordinator)
+
+        cut = job.steps.get(station=cut_st)
+        self.assertTrue(cut.by_hand)
+        self.assertIsNone(cut.machine)
+
+        mark_done(self._print_step(job).pk, self.branch, self.coordinator)
+
+        self.assertEqual(job.steps.get(station=cut_st).state, JobStep.State.ACTIVE)
+
+    def test_unassigned_work_can_be_marked_done_another_way(self):
+        from apps.jobs.services.steps import mark_done
+        Machine.objects.filter(pk__in=[self.six.pk, self.ten.pk]).update(is_available=False)
+        job = self._cleared()
+        printing = self._print_step(job)
+        self.assertIsNone(printing.machine)
+        self.assertFalse(printing.by_hand)
+
+        mark_done(printing.pk, self.branch, self.coordinator)
+
+        self.assertEqual(self._print_step(job).state, JobStep.State.DONE)
+        self.assertEqual(
+            job.steps.get(station=self.lam_st).state, JobStep.State.ACTIVE,
+        )
+
     def test_each_step_knows_how_long_its_work_takes(self):
         job = self._job()
         build_steps(job)

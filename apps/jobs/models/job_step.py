@@ -5,22 +5,30 @@ from apps.core.models import AuditModel
 
 class JobStep(AuditModel):
     """
-    One station one line passes through, on one machine.
+    One station one line passes through, on one machine or by hand.
 
     A line's route (ServiceStation, in sequence) becomes its steps when the
-    job is cleared: print on the 10ft, then laminate. Each line has its
-    own, so a banner and its stickers run on different machines at once.
+    job is cleared: print on the 10ft, then cut by hand, then eyelets. Each
+    line has its own, so a banner and its stickers run on different machines
+    at once.
 
-    A machine's queue is its steps that are not done: the one ACTIVE (on
-    the machine now) first, then the WAITING ones by the job's promise.
-    There is no Start button; a step becomes ACTIVE when it reaches the
-    head of its queue, and that moment is recorded. Marking it DONE moves
-    the line to its next step and the next job up.
+    A machine's queue is its steps that are not done: the one ACTIVE (being
+    worked now) first, then the WAITING ones by the job's promise. There is
+    no Start button; a step becomes ACTIVE when it reaches the head of its
+    queue, and that moment is recorded. Marking it DONE moves the line to
+    its next step and the next job up.
+
+    by_hand is decided by the route, not the station: a route step naming
+    no machine type is done by hand at that station's bench, even where the
+    station has machines for other work. Cutting a banner is by hand though
+    the cutting station also has a plotter.
+
+    A step with no machine that is not by hand is unassigned: nothing that
+    fits was up, or the branch has no such machine. The coordinator places
+    it, or marks it done when it was done another way.
 
     The customer never sees steps. Their stage follows: every print step
     done means Finishing; every step done means ready for the check.
-
-    A step with no machine is hand finishing, at the shared bench.
 
     expected_minutes is the work itself, worked out when the step is made,
     from measured timings where Octos has them and seed figures where not.
@@ -54,7 +62,11 @@ class JobStep(AuditModel):
         related_name='job_steps',
         null=True,
         blank=True,
-        help_text='Empty for hand finishing, or where nothing fitted and the coordinator must place it.',
+        help_text='Empty for work done by hand, or where nothing fitted and the coordinator must place it.',
+    )
+    by_hand = models.BooleanField(
+        default=False,
+        help_text="Worked at the station's bench: the route names no machine type for this step.",
     )
     sequence = models.PositiveSmallIntegerField(
         help_text='Order within the line, from the route.',
@@ -97,5 +109,5 @@ class JobStep(AuditModel):
         ]
 
     def __str__(self) -> str:
-        where = self.machine.name if self.machine_id else 'bench'
+        where = self.machine.name if self.machine_id else ('bench' if self.by_hand else 'unassigned')
         return f'{self.job.job_number} — {self.station.code} on {where} ({self.state})'

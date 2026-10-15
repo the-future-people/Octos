@@ -2,7 +2,7 @@
 How long until a job's stage is done, worked out from the floor as it is
 right now.
 
-Each queue is walked from the front: the job on the machine has what is
+Each queue is walked from the front: the job being worked has what is
 left of its own work, and every job behind it adds its own. A line's later
 steps add their work after that. The customer's stage is done when its
 last line is: In press when every line has printed, Finishing when every
@@ -35,7 +35,7 @@ class StageEstimate:
     stage: str               # 'press' | 'finishing'
     minutes_left: int        # rounded up, never 0 while work remains
     ready_at: object         # aware datetime, walked through opening hours
-    running_over: bool       # something on a machine is past its time
+    running_over: bool       # something being worked is past its time
     held_up: bool            # waiting on a machine that is down, or unplaced
 
     def as_dict(self):
@@ -73,14 +73,13 @@ def _left_on_machine(step, now):
 def _finish_of_current(step, now):
     """
     Minutes until this line's current step is done: everything ahead of it
-    in its queue, then itself. A step with no machine and no bench waits
-    for the coordinator, so only its own work can be counted, and it is
-    held up.
+    in its queue, then itself. An unassigned step is in no queue, so only
+    its own work can be counted, and it is held up.
     """
-    from apps.jobs.services.steps import is_bench, queue
+    from apps.jobs.services.steps import queue
 
     branch = step.job.branch
-    if step.machine_id is None and not is_bench(step.station):
+    if step.machine_id is None and not step.by_hand:
         own, over = _left_on_machine(step, now)
         return own, over, True
 

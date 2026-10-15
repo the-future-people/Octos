@@ -3,10 +3,11 @@ A job's journey across the floor, step by step.
 
 When a job is cleared, each line's route (ServiceStation, in sequence)
 becomes its steps. Each step is given a machine: the right type, up,
-wide enough for the work, and with the least waiting on it. A station
-with no machines at all is hand finishing, at the shared bench. A step
-whose machines all failed to fit waits unassigned, for the coordinator
-to place by hand.
+wide enough for the work, and with the least waiting on it. A route step
+that names no machine type is done by hand, at that station's bench
+(cutting a banner, eyelets, packing), even where the station also has
+machines for other work. A step whose machines all failed to fit waits
+unassigned, for the coordinator to place, or to mark done another way.
 
 A queue is a machine's line-up (or the bench's): the steps that are
 their line's current step, not done. The one on the machine is ACTIVE
@@ -30,6 +31,10 @@ from apps.jobs.models import JobStep
 # machine's maximum width.
 MM_PER = {'in': 25.4, 'ft': 304.8, 'cm': 10.0, 'mm': 1.0, 'm': 1000.0}
 
+# Jobs that will never be worked. Their steps take no place in any queue
+# and add nothing to a machine's load.
+GONE = ('CANCELLED', 'VOIDED')
+
 
 # ── Sizes and machines ───────────────────────────────────────────
 
@@ -50,18 +55,13 @@ def narrow_side_mm(line):
     return None
 
 
-def is_bench(station):
-    """A station no machine belongs to is worked by hand."""
-    from apps.production.models import MachineType
-    return not MachineType.objects.filter(station=station, is_active=True).exists()
-
-
 def machine_load(machine):
     """Minutes of work not yet done on this machine."""
     minutes = (
         JobStep.objects
         .filter(machine=machine)
         .exclude(state=JobStep.State.DONE)
+        .exclude(job__status__in=GONE)
         .values_list('expected_minutes', flat=True)
     )
     return sum(float(m) for m in minutes)
@@ -122,14 +122,20 @@ def _current_only(qs):
 
 def queue(branch, machine=None, station=None):
     """
-    A machine's line-up, or the bench's when machine is None and station
-    is a bench station. The step on the machine first, then by promise.
+    A machine's line-up, or a station's bench when machine is None: the
+    steps done by hand there. The step being worked first, then by promise.
+    Unassigned steps are in neither; they wait for the coordinator.
     """
-    qs = JobStep.objects.filter(job__branch=branch).exclude(state=JobStep.State.DONE)
+    qs = (
+        JobStep.objects
+        .filter(job__branch=branch)
+        .exclude(state=JobStep.State.DONE)
+        .exclude(job__status__in=GONE)
+    )
     if machine is not None:
         qs = qs.filter(machine=machine)
     else:
-        qs = qs.filter(machine__isnull=True, station=station)
+        qs = qs.filter(machine__isnull=True, by_hand=True, station=station)
 
     return (
         _current_only(qs)
@@ -148,11 +154,10 @@ def queue(branch, machine=None, station=None):
 
 def fill(branch, machine=None, station=None):
     """
-    Put the front of a queue on the machine if nothing is on it. Unassigned
-    steps (a machine type exists, no machine was given) never start by
-    themselves: they wait for the coordinator.
+    Put the front of a queue on the machine (or bench) if nothing is on it.
+    Unassigned steps are in no queue, so they never start by themselves.
     """
-    if machine is None and (station is None or not is_bench(station)):
+    if machine is None and station is None:
         return None
 
     with transaction.atomic():
@@ -189,26 +194,25 @@ def build_steps(job):
             .order_by('sequence')
         )
         for route in routes:
+            by_hand = route.machine_type is None
             made.append(JobStep.objects.create(
                 job              = job,
                 line_item        = line,
                 station          = route.station,
-                machine          = pick_machine(job.branch, route.machine_type, line),
+                by_hand          = by_hand,
+                machine          = None if by_hand else pick_machine(job.branch, route.machine_type, line),
                 sequence         = route.sequence,
                 expected_minutes = expected_minutes(job.branch, route, line),
             ))
 
-    for machine_id, station in {(s.machine_id, s.station) for s in made}:
-        if machine_id:
-            fill(job.branch, machine=made_machine(made, machine_id))
-        else:
-            fill(job.branch, station=station)
+    machines = {s.machine_id: s.machine for s in made if s.machine_id}
+    benches  = {s.station_id: s.station for s in made if s.by_hand}
+    for machine in machines.values():
+        fill(job.branch, machine=machine)
+    for station in benches.values():
+        fill(job.branch, station=station)
 
     return made
-
-
-def made_machine(steps, machine_id):
-    return next(s.machine for s in steps if s.machine_id == machine_id)
 
 
 # ── Moving on ────────────────────────────────────────────────────
@@ -247,11 +251,14 @@ def sync_stage(job, actor):
 
 def mark_done(step_id, branch, actor):
     """
-    The job on a machine is finished there. The next job on that machine
-    moves up, this line moves to its next step, and the customer's stage
-    follows. Only the job actually on the machine can be marked done: a
-    waiting one has not been worked, and an unassigned one has nowhere it
-    was worked.
+    The job on a machine (or bench) is finished there. The next job on
+    that machine moves up, this line moves to its next step, and the
+    customer's stage follows.
+
+    Only the job actually being worked can be marked done, with one
+    exception: unassigned work, whose machine the branch does not have or
+    which nothing could take, may be marked done by the coordinator when
+    it was done another way. It must still be the line's current step.
     """
     with transaction.atomic():
         step = (
@@ -266,7 +273,17 @@ def mark_done(step_id, branch, actor):
         )
         if step is None:
             raise StepRefused('That step is not at this branch.')
-        if step.state != JobStep.State.ACTIVE:
+        unassigned = step.machine_id is None and not step.by_hand
+        if unassigned:
+            earlier_left = (
+                JobStep.objects
+                .filter(line_item=step.line_item, sequence__lt=step.sequence)
+                .exclude(state=JobStep.State.DONE)
+                .exists()
+            )
+            if earlier_left:
+                raise StepRefused('Finish the steps before this one first.')
+        elif step.state != JobStep.State.ACTIVE:
             raise StepRefused(
                 'Only the job on the machine can be marked done.'
             )
@@ -281,7 +298,8 @@ def mark_done(step_id, branch, actor):
         step.save(update_fields=['state', 'done_at', 'done_by', 'updated_at'])
 
         # The next job on this machine (or bench) moves up.
-        fill(branch, machine=step.machine, station=step.station)
+        if step.machine_id or step.by_hand:
+            fill(branch, machine=step.machine, station=step.station)
 
         # This line's next step joins its own queue, and starts if that
         # machine is free.
@@ -293,8 +311,66 @@ def mark_done(step_id, branch, actor):
             .order_by('sequence')
             .first()
         )
-        if following is not None:
+        if following is not None and (following.machine_id or following.by_hand):
             fill(branch, machine=following.machine, station=following.station)
 
         sync_stage(step.job, actor)
+        return step
+
+
+def move_step(step_id, branch, machine_id, actor):
+    """
+    Put a step on another machine. Waiting and unassigned steps can move
+    freely; the step on a machine only when that machine is down, since
+    otherwise it is physically being worked. The target must do this
+    station's work, be up, and be wide enough for the piece.
+    """
+    from apps.production.models import Machine
+
+    with transaction.atomic():
+        step = (
+            JobStep.objects
+            .select_for_update(of=('self',))
+            .select_related('machine', 'station', 'line_item')
+            .filter(pk=step_id, job__branch=branch)
+            .first()
+        )
+        if step is None:
+            raise StepRefused('That step is not at this branch.')
+        if step.state == JobStep.State.DONE:
+            raise StepRefused('That step is already done.')
+        if step.by_hand:
+            raise StepRefused('That work is done by hand, at the bench.')
+        if (step.state == JobStep.State.ACTIVE
+                and step.machine_id and step.machine.is_available):
+            raise StepRefused(
+                'That job is on the machine now. Mark it done or halt it first.'
+            )
+
+        target = (
+            Machine.objects
+            .select_related('machine_type')
+            .filter(pk=machine_id, branch=branch, is_active=True)
+            .first()
+        )
+        if target is None:
+            raise StepRefused('That machine is not at this branch.')
+        if target.machine_type.station_id != step.station_id:
+            raise StepRefused(f'{target.name} does not do this work.')
+        if not target.is_available:
+            raise StepRefused(f'{target.name} is down.')
+        need = narrow_side_mm(step.line_item)
+        if need and target.max_width_mm and target.max_width_mm < need:
+            raise StepRefused(f'This piece is too wide for {target.name}.')
+
+        was = step.machine
+        step.machine = target
+        if step.state == JobStep.State.ACTIVE:
+            step.state = JobStep.State.WAITING
+            step.reached_at = None
+        step.save(update_fields=['machine', 'state', 'reached_at', 'updated_at'])
+
+        if was is not None:
+            fill(branch, machine=was)
+        fill(branch, machine=target)
         return step
