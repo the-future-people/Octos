@@ -1873,6 +1873,23 @@ class PaymentConfirmationView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # A second road to the floor. Conversion normally runs in the
+        # worker, and on 15 Oct 2026 the worker sat deaf for six hours
+        # while a paid order waited with no job. The customer landing
+        # here is proof the money arrived, so if no job exists yet it is
+        # made now. convert() locks the order and looks again under the
+        # lock, so this and the worker can never make two. A failure
+        # here must not cost the customer their confirmation.
+        if not order.job_id:
+            import logging
+            from apps.storefront.services.conversion import convert
+            try:
+                convert(order)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    'Confirmation could not convert %s', order.order_number,
+                )
+
         return Response({
             'order_number': order.order_number,
             'total': f'{Decimal(order.total):.2f}',

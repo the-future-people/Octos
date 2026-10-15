@@ -58,10 +58,18 @@ def convert(order):
             'Cannot convert %s — no branch on the order', order.order_number,
         )
         return None
-
     sheet = _open_sheet(order.branch)
 
     with transaction.atomic():
+        # Look again under a lock. The check at the top reads the copy of
+        # the order this caller was handed; two callers converting at the
+        # same moment (the worker and a customer's confirmation page, a
+        # retry and the sweep) would both see no job there and both make
+        # one. Whoever takes the lock second finds the first one's job.
+        locked = type(order).objects.select_for_update().get(pk=order.pk)
+        if locked.job_id:
+            return locked.job
+
         job = Job.objects.create(
             branch=order.branch,
             customer=_customer_for(order),
