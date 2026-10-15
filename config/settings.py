@@ -293,6 +293,36 @@ CHANNEL_LAYERS = {
 }
 CELERY_BROKER_URL = _os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = _os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+# Railway's Redis drops idle connections. On 15 Oct 2026 the worker lost
+# its connection at 02:48 and sat alive but deaf for six hours: no task
+# ran, a paid order never became a job, and the hourly sweep that should
+# have caught it never fired either. Railway saw nothing wrong because
+# nothing crashed.
+#
+# These make a dropped connection get noticed and rebuilt: a health check
+# on the connection every 25 seconds, TCP keepalive so the socket is not
+# silently dropped, timeouts so a dead read fails instead of hanging, and
+# reconnection that never gives up.
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = None
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'health_check_interval': 25,
+    'socket_keepalive':      True,
+    'socket_timeout':        30,
+    'socket_connect_timeout': 30,
+    'retry_on_timeout':      True,
+}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'health_check_interval': 25,
+    'socket_keepalive':      True,
+    'retry_on_timeout':      True,
+}
+CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL = 25
+# A task cut off by a lost connection is put back for another worker
+# rather than left half-done.
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
 CELERY_BEAT_SCHEDULE = {
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
