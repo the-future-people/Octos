@@ -8,6 +8,7 @@ from .job_status_log import JobStatusLog
 from .proforma_invoice import ProformaInvoice
 from .job_verification import JobVerification
 from .job_spec_change import JobSpecChange
+from .job_step import JobStep
 
 __all__ = [
     'Job',
@@ -21,4 +22,5 @@ __all__ = [
     'ProformaInvoice',
     'JobVerification',
     'JobSpecChange',
+    'JobStep',
 ]
