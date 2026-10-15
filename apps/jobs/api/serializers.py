@@ -294,6 +294,26 @@ class JobDetailSerializer(serializers.ModelSerializer):
     computed_total      = serializers.SerializerMethodField()
     active_halt         = serializers.SerializerMethodField()
     allowed_axis_moves  = serializers.SerializerMethodField()
+    spec_changes        = serializers.SerializerMethodField()
+
+    def get_spec_changes(self, obj):
+        """
+        Every correction made to this order during inspection: what it
+        said, what it says now, who changed it and what the customer
+        agreed to. The workspace shows customer approval from this.
+        """
+        return [
+            {
+                'line_item':         c.line_item_id,
+                'field':             c.field,
+                'old_value':         c.old_value,
+                'new_value':         c.new_value,
+                'customer_response': c.customer_response,
+                'changed_by_name':   (c.changed_by.full_name or c.changed_by.email),
+                'changed_at':        c.changed_at.isoformat(),
+            }
+            for c in obj.spec_changes.select_related('changed_by').all()
+        ]
 
     class Meta:
         model  = Job
@@ -310,6 +330,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
             'line_items', 'computed_total',
             'payment_state', 'work_state', 'handover_state',
             'handed_over_at', 'active_halt', 'allowed_axis_moves',
+            'spec_changes',
             'created_at', 'updated_at',
         ]
 

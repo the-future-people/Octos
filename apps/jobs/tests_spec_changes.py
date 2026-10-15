@@ -79,6 +79,19 @@ class SpecChangeTests(JobsFixtureMixin, TestCase):
         self.assertEqual(change.customer_response, 'Customer agreed A3 on the call')
         self.assertEqual(change.changed_by, self.coordinator)
 
+    def test_the_job_shows_its_corrections(self):
+        """The workspace reads approval from here."""
+        self._hold()
+        self._post({'size': 'A3'}, said='Customer agreed A3 on the call')
+
+        detail = self.client.get(f'/api/v1/jobs/{self.job.pk}/').json()
+
+        self.assertEqual(len(detail['spec_changes']), 1)
+        change = detail['spec_changes'][0]
+        self.assertEqual(change['field'], 'size')
+        self.assertEqual(change['new_value'], 'A3')
+        self.assertEqual(change['customer_response'], 'Customer agreed A3 on the call')
+
     def test_a_change_to_nothing_records_nothing(self):
         self._hold()
         response = self._post({'size': 'A4'})
