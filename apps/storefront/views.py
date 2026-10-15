@@ -104,7 +104,27 @@ def _serialise(order):
         'handover_state': job.handover_state if job else None,
         'is_halted': _is_halted(job),
         'stage_times': _stage_times(order, job),
+        # How long until the stage they are in is done, from the floor as
+        # it is right now. Worked out on every look, so a delay shows the
+        # next time they check. Empty where there is nothing to estimate.
+        'stage_estimate': _stage_estimate(job),
     }
+
+
+def _stage_estimate(job):
+    if job is None:
+        return None
+    from apps.jobs.services.estimates import estimate
+    try:
+        result = estimate(job)
+    except Exception:
+        # A failed estimate must never cost the customer their tracking page.
+        import logging
+        logging.getLogger(__name__).exception(
+            'Could not estimate %s', job.job_number,
+        )
+        return None
+    return result.as_dict() if result else None
 
 
 def _branch_payload(branch):

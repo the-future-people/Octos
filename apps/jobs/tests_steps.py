@@ -325,6 +325,67 @@ class StepTests(JobsFixtureMixin, TestCase):
         self.assertFalse(self._halted(job))
         self.assertEqual(self._print_step(job).state, JobStep.State.ACTIVE)
 
+    # ── The live estimate ────────────────────────────────────────
+
+    def test_nothing_ahead_means_just_its_own_work(self):
+        from apps.jobs.services.estimates import estimate
+        job = self._cleared()
+
+        e = estimate(job)
+
+        self.assertEqual(e.stage, 'press')
+        self.assertEqual(e.minutes_left, 15)
+        self.assertFalse(e.running_over)
+
+    def test_a_job_behind_waits_for_the_one_ahead(self):
+        from apps.jobs.services.estimates import estimate
+        Machine.objects.filter(pk=self.ten.pk).update(is_available=False)
+        self._cleared()
+        behind = self._cleared()
+
+        self.assertEqual(estimate(behind).minutes_left, 30)
+
+    def test_running_over_never_counts_down_to_nothing(self):
+        from apps.jobs.services.estimates import estimate
+        job = self._cleared()
+        JobStep.objects.filter(pk=self._print_step(job).pk).update(
+            reached_at=timezone.now() - timedelta(minutes=40),
+        )
+
+        e = estimate(job)
+
+        self.assertEqual(e.minutes_left, 5)
+        self.assertTrue(e.running_over)
+
+    def test_finishing_counts_every_step_left(self):
+        from apps.jobs.services.estimates import estimate
+        from apps.jobs.services.steps import mark_done
+        job = self._cleared()
+        mark_done(self._print_step(job).pk, self.branch, self.coordinator)
+        job.refresh_from_db()
+
+        e = estimate(job)
+
+        # Laminate 7, then hand finishing 3.
+        self.assertEqual(e.stage, 'finishing')
+        self.assertEqual(e.minutes_left, 10)
+
+    def test_waiting_on_a_machine_that_is_down_is_held_up(self):
+        from apps.jobs.services.estimates import estimate
+        Machine.objects.filter(pk=self.ten.pk).update(is_available=False)
+        self._cleared()
+        behind = self._cleared()
+        self._down(self.six)
+
+        self.assertTrue(estimate(behind).held_up)
+
+    def test_rounding_is_always_up(self):
+        from apps.jobs.services.estimates import round_up
+        self.assertEqual(
+            [round_up(m) for m in (0, 0.4, 12, 15, 59, 61, 90)],
+            [5, 5, 15, 15, 60, 75, 90],
+        )
+
     def test_each_step_knows_how_long_its_work_takes(self):
         job = self._job()
         build_steps(job)
