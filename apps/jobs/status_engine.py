@@ -426,6 +426,13 @@ class JobStatusEngine:
         if can_start:
             self.move_work('IN_PRODUCTION', actor, notes='Cleared for production')
 
+            # Each line's route becomes its steps, each step is given a
+            # machine, and whatever can start does. Inside the same
+            # transaction: a job is never in press with no steps.
+            from apps.jobs.services.steps import build_steps, sync_stage
+            build_steps(self.job)
+            sync_stage(self.job, actor)
+
         return verification
 
     @transaction.atomic
