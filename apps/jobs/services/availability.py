@@ -121,3 +121,31 @@ def price_addons(service, chosen, quantity, specs):
         total += Decimal(str(quote['total']))
 
     return priced, total, None
+
+
+# ── Sheets from the customer's file ──────────────────────────────
+
+# The version printed on both sides of each sheet.
+DOUBLE_SIDED = 'Front and back'
+
+
+def pages_per_sheet(service):
+    return 2 if (service.variant_label or '').strip() == DOUBLE_SIDED else 1
+
+
+def counts_pages(service):
+    """A service priced by the sheet from a file the customer sends."""
+    return bool(service.requires_file_upload) and any(
+        f.get('key') == 'pages' for f in (service.spec_template or [])
+    )
+
+
+def sheets_for(service, page_count):
+    """
+    Sheets per copy for a file of this many pages. The customer never
+    types it: the file says how many pages it has, and the sides say how
+    many pages a sheet holds. A photo or image is one page.
+    """
+    pages = max(1, int(page_count or 1))
+    per = pages_per_sheet(service)
+    return (pages + per - 1) // per

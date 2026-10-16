@@ -247,7 +247,9 @@ class CatalogueView(APIView):
     throttle_scope = 'storefront'
 
     def get(self, request):
-        from apps.jobs.services.availability import can_make, display_price
+        from apps.jobs.services.availability import (
+            can_make, counts_pages, display_price, pages_per_sheet,
+        )
 
         def entry(s):
             return {
@@ -261,6 +263,11 @@ class CatalogueView(APIView):
                 'description': s.description,
                 'spec_template': s.spec_template,
                 'requires_file_upload': s.requires_file_upload,
+                # Priced by the sheet from the customer's file: pages are
+                # counted from the file, never typed.
+                'counts_pages': counts_pages(s),
+                'pages_per_sheet': pages_per_sheet(s),
+                'price': display_price(s),
                 # Coming soon where a price or a machine is still missing.
                 'available': can_make(s),
                 'addons': [
@@ -1562,6 +1569,14 @@ class CommitView(APIView):
             if refusal:
                 return Response({'detail': refusal},
                                 status=status.HTTP_400_BAD_REQUEST)
+
+        # Sheets per copy come from the file the customer sent, counted
+        # here after the file has been verified, never from the browser.
+        # Added after the check on purpose: the verdict was signed against
+        # what the customer chose, and the sheets are ours to work out.
+        from apps.jobs.services.availability import counts_pages, sheets_for
+        if staged is not None and counts_pages(service):
+            specs = {**specs, 'pages': sheets_for(service, staged.page_count)}
 
         # ── Make it real ──────────────────────────────────────────
         try:

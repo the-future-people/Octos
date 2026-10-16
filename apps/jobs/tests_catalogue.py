@@ -231,3 +231,30 @@ class SidesTests(CatalogueTests):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['service'], self.both.pk)
+
+
+class SheetsTests(TestCase):
+    """Sheets per copy come from the file's pages and the sides."""
+
+    def _service(self, label):
+        return SimpleNamespace(variant_label=label, requires_file_upload=True,
+                               spec_template=[{'key': 'pages'}])
+
+    def test_front_only_is_a_sheet_a_page(self):
+        from apps.jobs.services.availability import sheets_for
+        self.assertEqual(sheets_for(self._service('Front only'), 10), 10)
+
+    def test_front_and_back_is_two_pages_a_sheet_rounded_up(self):
+        from apps.jobs.services.availability import sheets_for
+        self.assertEqual(sheets_for(self._service('Front and back'), 10), 5)
+        self.assertEqual(sheets_for(self._service('Front and back'), 7), 4)
+
+    def test_an_image_is_one_page(self):
+        from apps.jobs.services.availability import sheets_for
+        self.assertEqual(sheets_for(self._service('Front only'), None), 1)
+
+    def test_only_file_priced_by_the_sheet_counts_pages(self):
+        from apps.jobs.services.availability import counts_pages
+        self.assertTrue(counts_pages(self._service('Front only')))
+        self.assertFalse(counts_pages(SimpleNamespace(
+            requires_file_upload=True, spec_template=[{'key': 'quantity'}])))
