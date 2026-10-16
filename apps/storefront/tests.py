@@ -156,7 +156,7 @@ class StorefrontAPITests(TestCase):
             name='Storefront Flexy', code='SFFLEXY',
             category='PRODUCTION', unit='PER_SQFT',
             requires_design=False, requires_file_upload=True,
-            is_active=True,
+            is_active=True, online=True,
             spec_template=[
                 {'key': 'width_in', 'label': 'Width', 'type': 'number',
                  'required': True, 'default': 72, 'min': 6, 'unit': 'in'},

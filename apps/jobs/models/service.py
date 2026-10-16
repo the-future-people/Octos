@@ -35,6 +35,20 @@ class Service(AuditModel):
     requires_design      = models.BooleanField(default=False)
     requires_file_upload = models.BooleanField(default=False)
     is_active            = models.BooleanField(default=True)
+    online               = models.BooleanField(
+        default=False,
+        help_text='Can be ordered on Print Octos. Counter-only work (photocopy, scanning) stays off.',
+    )
+    addons               = models.ManyToManyField(
+        'self',
+        symmetrical=False,
+        blank=True,
+        related_name='addon_for',
+        help_text=(
+            'Finishing a customer can add to this service: lamination, binding, '
+            'an envelope. Each is an ordinary service with its own price and route.'
+        ),
+    )
     image                = models.ImageField(
         upload_to = 'services/',
         null      = True,

@@ -46,6 +46,17 @@ class JobLineItem(AuditModel):
         on_delete=models.CASCADE,
         related_name='line_items',
     )
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        related_name='addons',
+        null=True,
+        blank=True,
+        help_text=(
+            'Set on an add-on (lamination, binding, an envelope): the piece it '
+            'belongs to. Its work joins that piece on the floor.'
+        ),
+    )
     service = models.ForeignKey(
         'jobs.Service',
         on_delete=models.PROTECT,

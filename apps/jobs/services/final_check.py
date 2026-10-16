@@ -63,6 +63,9 @@ def ordered_rows(line):
         'field': 'sides', 'label': 'Sides',
         'ordered': 'Double-sided' if line.sides == 'DOUBLE' else 'Single-sided',
     })
+    addons = [a.service.name for a in line.addons.select_related('service').order_by('position')]
+    if addons:
+        rows.append({'field': 'addons', 'label': 'Add-ons', 'ordered': ', '.join(addons)})
     return rows
 
 

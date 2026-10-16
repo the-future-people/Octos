@@ -247,7 +247,14 @@ class CatalogueView(APIView):
     throttle_scope = 'storefront'
 
     def get(self, request):
-        services = Service.objects.filter(is_active=True).order_by('category', 'name')
+        from apps.jobs.services.availability import can_make, display_price
+
+        services = (
+            Service.objects
+            .filter(is_active=True, online=True)
+            .prefetch_related('addons')
+            .order_by('category', 'name')
+        )
         return Response([
             {
                 'id': s.id,
@@ -258,6 +265,19 @@ class CatalogueView(APIView):
                 'description': s.description,
                 'spec_template': s.spec_template,
                 'requires_file_upload': s.requires_file_upload,
+                # Coming soon where a price or a machine is still missing.
+                'available': can_make(s),
+                'addons': [
+                    {
+                        'id': a.id,
+                        'name': a.name,
+                        'unit': a.unit,
+                        'description': a.description,
+                        'price': display_price(a),
+                        'available': can_make(a),
+                    }
+                    for a in s.addons.all() if a.is_active
+                ],
             }
             for s in services
         ])
@@ -376,8 +396,13 @@ class OrderDetailView(APIView):
             except (Service.DoesNotExist, ValueError, TypeError):
                 return None, None, f"Service {line.get('service')} is not available."
 
+            from apps.jobs.services.availability import can_make, price_addons
+
             quantity = int(line.get('quantity') or 1)
             specs = line.get('specifications') or {}
+
+            if not can_make(service):
+                return None, None, f'{service.name} is coming soon.'
 
             quote = quote_line(
                 service=service, branch=None,
@@ -385,6 +410,12 @@ class OrderDetailView(APIView):
             )
             if not quote.get('success'):
                 return None, None, quote.get('error', 'This line could not be priced.')
+
+            addons, addons_total, problem = price_addons(
+                service, line.get('addons') or [], quantity, specs,
+            )
+            if problem:
+                return None, None, problem
 
             priced.append({
                 # An identity that survives repricing. Position in a
@@ -404,9 +435,11 @@ class OrderDetailView(APIView):
                 'quantity': quantity,
                 'specifications': specs,
                 'unit_price': str(quote.get('unit_price') or quote['total']),
-                'total': str(quote['total']),
+                'base_total': str(quote['total']),
+                'addons': addons,
+                'total': str(Decimal(str(quote['total'])) + addons_total),
             })
-            total += Decimal(str(quote['total']))
+            total += Decimal(str(quote['total'])) + addons_total
 
         return priced, total, None
 
@@ -1523,6 +1556,7 @@ class CommitView(APIView):
                     'service': service.id,
                     'quantity': quantity,
                     'specifications': specs,
+                    'addons': request.data.get('addons') or [],
                 })
 
                 priced, total, error = OrderDetailView._price(
@@ -1720,6 +1754,12 @@ class QuoteView(APIView):
             return Response({'detail': problem},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        from apps.jobs.services.availability import can_make, price_addons
+
+        if not can_make(service):
+            return Response({'detail': f'{service.name} is coming soon.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         quote = quote_line(
             service=service, branch=None,
             specifications=specs, quantity=quantity,
@@ -1731,13 +1771,22 @@ class QuoteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        addons, addons_total, problem = price_addons(
+            service, request.data.get('addons') or [], quantity, specs,
+        )
+        if problem:
+            return Response({'detail': problem}, status=status.HTTP_400_BAD_REQUEST)
+
+        base = Decimal(str(quote['total']))
         return Response({
             'service': service.id,
             'service_name': service.name,
             'quantity': quantity,
             'specifications': specs,
             'unit_price': str(quote.get('unit_price') or quote['total']),
-            'total': str(quote['total']),
+            'base_total': str(base),
+            'addons': addons,
+            'total': str(base + addons_total),
             'minimum_applied': bool(quote.get('minimum_applied')),
         })
 

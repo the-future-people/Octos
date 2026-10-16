@@ -248,7 +248,8 @@ def _carry_lines(order, job):
     from apps.jobs.models import JobLineItem, Service
     from decimal import Decimal
 
-    for position, line in enumerate(order.line_items or []):
+    position = 0
+    for line in order.line_items or []:
         service = Service.objects.filter(pk=line.get('service')).first()
         if service is None:
             logger.error(
@@ -259,16 +260,40 @@ def _carry_lines(order, job):
 
         specs = line.get('specifications') or {}
 
-        JobLineItem.objects.create(
+        # The piece itself, at its own price: add-ons are priced apart.
+        piece = JobLineItem.objects.create(
             job=job,
             service=service,
             quantity=line.get('quantity') or 1,
             pages=specs.get('pages') or 1,
             specifications=specs,
             unit_price=Decimal(str(line.get('unit_price') or '0')),
-            line_total=Decimal(str(line.get('total') or '0')),
+            line_total=Decimal(str(line.get('base_total') or line.get('total') or '0')),
             position=position,
         )
+        position += 1
+
+        # Each add-on its own priced line, attached to the piece it finishes.
+        for extra in line.get('addons') or []:
+            addon = Service.objects.filter(pk=extra.get('service')).first()
+            if addon is None:
+                logger.error(
+                    'Add-on on %s names service %s, which is gone',
+                    order.order_number, extra.get('service'),
+                )
+                continue
+            JobLineItem.objects.create(
+                job=job,
+                service=addon,
+                parent=piece,
+                quantity=extra.get('quantity') or 1,
+                pages=1,
+                specifications={},
+                unit_price=Decimal(str(extra.get('unit_price') or '0')),
+                line_total=Decimal(str(extra.get('total') or '0')),
+                position=position,
+            )
+            position += 1
 
 
 def _carry_artwork(order, job):

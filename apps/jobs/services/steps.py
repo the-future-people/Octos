@@ -181,52 +181,57 @@ def build_steps(job):
 
     Safe to call twice: a line that already has steps is left alone. A
     line whose service has no route gets no steps, and the job is moved
-    by hand as before.
+    by hand as before. A line's add-ons join its route rather than
+    getting steps of their own.
     """
     from apps.production.models import ServiceStation
 
     made = []
-    for line in job.line_items.select_related('service'):
+    # Add-on lines (lamination on a print) have no steps of their own:
+    # their routes join their parent's, so the piece is printed, then
+    # laminated, then bound, then packed, as one piece on the floor.
+    for line in job.line_items.select_related('service').filter(parent__isnull=True):
         if line.steps.exists():
             continue
-        routes = list(
-            ServiceStation.objects
-            .filter(service=line.service)
-            .select_related('station', 'machine_type')
-            .order_by('sequence')
-        )
-        i = 0
-        while i < len(routes):
-            route = routes[i]
-            if route.machine_type is None:
-                # Consecutive hand work (trim, then eyelets) is one visit
-                # to the bench: one step, its time the sum of the parts.
-                group = [route]
-                while i + len(group) < len(routes) and routes[i + len(group)].machine_type is None:
-                    group.append(routes[i + len(group)])
-                made.append(JobStep.objects.create(
-                    job              = job,
-                    line_item        = line,
-                    station          = route.station,
-                    by_hand          = True,
-                    machine          = None,
-                    sequence         = route.sequence,
-                    expected_minutes = sum(
-                        (expected_minutes(job.branch, g, line) for g in group), Decimal('0'),
-                    ),
-                ))
-                i += len(group)
-            else:
-                made.append(JobStep.objects.create(
-                    job              = job,
-                    line_item        = line,
-                    station          = route.station,
-                    by_hand          = False,
-                    machine          = pick_machine(job.branch, route.machine_type, line),
-                    sequence         = route.sequence,
-                    expected_minutes = expected_minutes(job.branch, route, line),
-                ))
-                i += 1
+
+        parts = [
+            (route, line) for route in
+            ServiceStation.objects.filter(service=line.service).select_related('station', 'machine_type')
+        ]
+        for addon in line.addons.select_related('service'):
+            parts += [
+                (route, addon) for route in
+                ServiceStation.objects.filter(service=addon.service).select_related('station', 'machine_type')
+            ]
+        # Stations run in their own order: print, cut, laminate, bind, finish.
+        parts.sort(key=lambda p: (p[0].station.sequence, p[0].sequence))
+
+        i, position = 0, 0
+        while i < len(parts):
+            route, _ = parts[i]
+            by_hand = route.machine_type is None
+            # Consecutive hand work is one visit to the bench, and two
+            # routes at the same station are one step there.
+            group = [parts[i]]
+            while i + len(group) < len(parts):
+                nxt, _ = parts[i + len(group)]
+                if (by_hand and nxt.machine_type is None) or nxt.station_id == route.station_id:
+                    group.append(parts[i + len(group)])
+                else:
+                    break
+            position += 1
+            made.append(JobStep.objects.create(
+                job              = job,
+                line_item        = line,
+                station          = route.station,
+                by_hand          = by_hand,
+                machine          = None if by_hand else pick_machine(job.branch, route.machine_type, line),
+                sequence         = position,
+                expected_minutes = sum(
+                    (expected_minutes(job.branch, r, source) for r, source in group), Decimal('0'),
+                ),
+            ))
+            i += len(group)
 
     machines = {s.machine_id: s.machine for s in made if s.machine_id}
     for machine in machines.values():
