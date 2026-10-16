@@ -288,7 +288,9 @@ def _carry_lines(order, job):
                 parent=piece,
                 quantity=extra.get('quantity') or 1,
                 pages=1,
-                specifications={},
+                # What Octos chose for it, kept for the floor: the binder
+                # needs to know it is an 8mm ring.
+                specifications={'detail': extra['detail']} if extra.get('detail') else {},
                 unit_price=Decimal(str(extra.get('unit_price') or '0')),
                 line_total=Decimal(str(extra.get('total') or '0')),
                 position=position,

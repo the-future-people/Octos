@@ -139,9 +139,9 @@ class JobLineItemSerializer(serializers.ModelSerializer):
             'quantity', 'pages', 'sets', 'is_color',
             'paper_size', 'sides', 'specifications',
             'file_source', 'unit_price', 'line_total',
-            'label', 'position',
+            'label', 'position', 'parent',
         ]
-        read_only_fields = ['id', 'unit_price', 'line_total', 'label']
+        read_only_fields = ['id', 'unit_price', 'line_total', 'label', 'parent']
 
 
 class JobLineItemCreateSerializer(serializers.Serializer):
