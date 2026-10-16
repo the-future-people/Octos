@@ -248,7 +248,7 @@ class CatalogueView(APIView):
 
     def get(self, request):
         from apps.jobs.services.availability import (
-            can_make, counts_pages, display_price, pages_per_sheet,
+            can_make, counts_pages, display_price, is_packing, pages_per_sheet,
         )
 
         def entry(s):
@@ -278,6 +278,9 @@ class CatalogueView(APIView):
                         'description': a.description,
                         'price': display_price(a),
                         'available': can_make(a),
+                        # An envelope or bag: the customer says whether
+                        # copies share one or each gets its own.
+                        'packing': is_packing(a),
                     }
                     for a in s.addons.all() if a.is_active
                 ],

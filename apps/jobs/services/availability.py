@@ -66,10 +66,31 @@ def display_price(service):
     return f'{rule.base_price:.2f}' if rule else None
 
 
-def addon_quantity(addon, quantity, specs):
-    """Sheets for lamination (copies × sheets), copies for everything else."""
+# Packing (an envelope, a bag). Whether copies share one or each gets its
+# own is the customer's to say: five application letters going to five
+# employers want five envelopes; ten copies of a notice for one office
+# want one. Octos only suggests: one for all when a copy is a single
+# sheet, one per copy when each copy is a set of several.
+PACKING = {'ENV-PACK-A4', 'CLEAR-BAG'}
+
+
+def is_packing(addon):
+    return addon.code in PACKING
+
+
+def addon_quantity(addon, quantity, specs, per_copy=None):
+    """
+    Sheets for lamination (copies × sheets); for packing, copies or one as
+    the customer chose; copies for everything else.
+    """
     sheets = int((specs or {}).get('pages') or 1)
-    return quantity * sheets if addon.unit in SHEET_UNITS else quantity
+    if addon.unit in SHEET_UNITS:
+        return quantity * sheets
+    if is_packing(addon):
+        if per_copy is None:
+            per_copy = sheets > 1
+        return quantity if per_copy else 1
+    return quantity
 
 
 # How many 80gsm sheets a comb ring holds, smallest ring first. The
@@ -100,8 +121,9 @@ def price_addons(service, chosen, quantity, specs):
     """
     The add-ons chosen for a line, priced. Returns (priced, total, problem).
 
-    chosen holds add-on ids, or the priced add-ons already on a line (each
-    a dict with 'service'), so a cart can be re-priced as it stands.
+    chosen holds add-on ids, or dicts with 'service' (and, for packing,
+    'per_copy'), so a cart can be re-priced as it stands and a packing
+    choice survives a change of quantity.
 
     How each is counted:
       - by the sheet (lamination): sheets × copies
@@ -137,7 +159,10 @@ def price_addons(service, chosen, quantity, specs):
         if not can_make(addon):
             return None, None, f'{addon.name} is not available yet.'
 
-        count = addon_quantity(addon, quantity, specs)
+        per_copy = raw.get('per_copy') if isinstance(raw, dict) else None
+        if is_packing(addon) and per_copy is None:
+            per_copy = sheets > 1
+        count = addon_quantity(addon, quantity, specs, per_copy)
 
         # Only what chooses a tier is passed. Pages are never passed: the
         # engine multiplies by them, which is how an envelope became
@@ -153,6 +178,8 @@ def price_addons(service, chosen, quantity, specs):
                 )
             addon_specs['ring_size'] = ring
             detail = f'{ring}mm ring'
+        elif is_packing(addon) and quantity > 1:
+            detail = 'one per copy' if per_copy else 'one for all copies'
 
         quote = quote_line(service=addon, branch=None, specifications=addon_specs, quantity=count)
         if not quote.get('success'):
@@ -163,6 +190,7 @@ def price_addons(service, chosen, quantity, specs):
             'service_name': addon.name,
             'quantity':     count,
             'detail':       detail,
+            'per_copy':     bool(per_copy) if is_packing(addon) else None,
             'unit_price':   str(quote.get('unit_price') or quote['total']),
             'total':        str(quote['total']),
         })

@@ -136,6 +136,33 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
         self.assertEqual(priced[0]['quantity'], 3)
         self.assertEqual(total, Decimal('6.00'))
 
+    def test_the_customer_says_how_copies_are_packed(self):
+        envelope = Service.objects.create(
+            code='ENV-PACK-A4', name='Brown Envelope (packed)', category='INSTANT',
+            unit='PER_PIECE', is_active=True,
+        )
+        PricingRule.objects.create(service=envelope, branch=None, base_price=Decimal('2.00'), is_active=True)
+        ServiceStation.objects.create(
+            service=envelope, station=self.fin_st, machine_type=None, sequence=1,
+            setup_minutes=Decimal('0'), minutes_per_unit=Decimal('0.5'),
+        )
+        self.prints.addons.add(envelope)
+
+        def envelopes(copies, sheets, per_copy=None):
+            chosen = [envelope.pk] if per_copy is None else [{'service': envelope.pk, 'per_copy': per_copy}]
+            priced, _, problem = price_addons(self.prints, chosen, quantity=copies, specs={'pages': sheets})
+            self.assertIsNone(problem)
+            return priced[0]['quantity']
+
+        # Octos's suggestion: a one-sheet notice travels as one bundle,
+        # a six-sheet report is one envelope a set.
+        self.assertEqual(envelopes(10, 1), 1)
+        self.assertEqual(envelopes(3, 6), 3)
+        # The customer's word wins: five letters to five employers...
+        self.assertEqual(envelopes(5, 1, per_copy=True), 5)
+        # ...or three reports bundled for one office.
+        self.assertEqual(envelopes(3, 6, per_copy=False), 1)
+
     def test_lamination_is_every_sheet_of_every_copy(self):
         priced, total, _ = price_addons(self.prints, [self.lam.pk], quantity=3, specs={'pages': 6})
         self.assertEqual(priced[0]['quantity'], 18)
