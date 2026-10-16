@@ -646,3 +646,66 @@ class StepMoveView(APIView):
 
         broadcast_invalidation(branch.id, ['floor', 'productionBoard'])
         return Response({'success': True, 'machine': step.machine.name})
+
+class StepCheckView(APIView):
+    """
+    GET  /api/v1/jobs/steps/<step_id>/check/   what was ordered, row by row
+    POST /api/v1/jobs/steps/<step_id>/check/   Body: { made: {field: value}, note? }
+
+    The final check at a piece's last step. Matches: ready, and the
+    customer is told once every piece is. Differs: back to be made again.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, step_id):
+        from django.utils import timezone
+        from apps.jobs.models import JobStep
+        from apps.jobs.services.final_check import ordered_rows
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        step = (
+            JobStep.objects
+            .select_related('job__customer', 'line_item__service')
+            .filter(pk=step_id, job__branch=branch)
+            .first()
+        )
+        if step is None:
+            return Response({'detail': 'Step not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        job = step.job
+        return Response({
+            'step':          step.pk,
+            'job_number':    job.job_number,
+            'line':          step.line_item.label or step.line_item.service.name,
+            'customer_name': job.customer.full_name if job.customer_id else 'Walk-in',
+            'intake_channel': job.intake_channel,
+            'rows':          ordered_rows(step.line_item),
+            'promise':       job.estimated_ready_at.isoformat() if job.estimated_ready_at else None,
+            'now':           timezone.now().isoformat(),
+        })
+
+    def post(self, request, step_id):
+        from apps.core.broadcast import broadcast_invalidation
+        from apps.jobs.services.final_check import check
+        from apps.jobs.services.steps import StepRefused
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        if not _is_coordinator(request, branch):
+            return Response({'detail': 'Only a coordinator can check work.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        made = request.data.get('made') or {}
+        if not isinstance(made, dict):
+            return Response({'detail': 'made must be an object.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            record = check(step_id, branch, request.user, made=made,
+                           note=request.data.get('note', ''))
+        except StepRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        broadcast_invalidation(branch.id, ['floor', 'productionBoard', 'job-detail'])
+        return Response({'outcome': record.outcome, 'rows': record.rows})

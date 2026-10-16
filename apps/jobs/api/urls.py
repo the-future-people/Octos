@@ -32,6 +32,7 @@ urlpatterns = [
     path('coordinator/floor/',              coordinator_views.FloorView.as_view(),     name='coordinator-floor'),
     path('steps/<int:step_id>/done/',       coordinator_views.StepDoneView.as_view(),  name='step-done'),
     path('steps/<int:step_id>/move/',       coordinator_views.StepMoveView.as_view(),  name='step-move'),
+    path('steps/<int:step_id>/check/',      coordinator_views.StepCheckView.as_view(), name='step-check'),
 
     # Lifecycle axes
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),

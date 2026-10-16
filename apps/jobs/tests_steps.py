@@ -425,6 +425,34 @@ class StepTests(JobsFixtureMixin, TestCase):
 
         self.assertEqual(job.steps.get(station=cut_st).state, JobStep.State.ACTIVE)
 
+    def test_trimming_then_eyelets_is_one_visit_to_the_bench(self):
+        cut_st = Station.objects.create(code='CUT', name='Cutting', sequence=2)
+        trimmed = Service.objects.create(
+            name='Eyeleted Banner', code='TSTEYE', category='PRODUCTION',
+            unit='PER_SHEET', requires_design=False,
+            requires_file_upload=False, is_active=True,
+        )
+        ServiceStation.objects.create(
+            service=trimmed, station=self.print_st, machine_type=self.large,
+            sequence=1, setup_minutes=Decimal('5'), minutes_per_unit=Decimal('10'),
+        )
+        ServiceStation.objects.create(
+            service=trimmed, station=cut_st, machine_type=None,
+            sequence=2, setup_minutes=Decimal('0'), minutes_per_unit=Decimal('2'),
+        )
+        ServiceStation.objects.create(
+            service=trimmed, station=self.fin_st, machine_type=None,
+            sequence=3, setup_minutes=Decimal('0'), minutes_per_unit=Decimal('3'),
+        )
+        job = self._job()
+        job.line_items.update(service=trimmed)
+        build_steps(job)
+
+        hand = job.steps.filter(by_hand=True)
+        self.assertEqual(hand.count(), 1)
+        # Trim 2 + eyelets 3, one unit.
+        self.assertEqual(hand.get().expected_minutes, Decimal('5.0'))
+
     def test_unassigned_work_can_be_marked_done_another_way(self):
         from apps.jobs.services.steps import mark_done
         Machine.objects.filter(pk__in=[self.six.pk, self.ten.pk]).update(is_available=False)

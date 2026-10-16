@@ -1,7 +1,7 @@
 """
 The floor as the coordinator sees it: every machine with its line-up,
-a bench for each station where work is done by hand, and anything waiting
-for a machine to be chosen.
+the one bench where all hand work is done, and anything waiting for a
+machine to be chosen.
 
 Each row carries how long until that step is done, counting everything
 ahead of it, so the coordinator reads the whole line-up as time, not just
@@ -40,6 +40,10 @@ def _row(step, minutes, running_over, now):
         'running_over': running_over,
         'reached_at':   step.reached_at.isoformat() if step.reached_at else None,
         'is_halted':    job.halts.filter(resumed_at__isnull=True).exists(),
+        # Done on a line's last step is the final check, not a plain Done.
+        'is_last':      not JobStep.objects.filter(
+            line_item=step.line_item, sequence__gt=step.sequence,
+        ).exists(),
     }
 
 
@@ -52,11 +56,6 @@ def _lane(steps, now):
         total += left
         rows.append(_row(step, total, over, now))
     return rows
-
-
-def _bench_name(station):
-    name = station.name
-    return name if 'hand' in name.lower() else f'{name} bench'
 
 
 def floor(branch, now=None):
@@ -72,19 +71,21 @@ def floor(branch, now=None):
         .select_related('machine_type__station')
         .order_by('machine_type__station__sequence', 'name')
     )
-    # Heal before reading: wherever a machine or bench is free and work is
-    # waiting, the front of its queue goes on. A cancelled job dropping out,
-    # or anything else that left a gap, is closed the next time anyone looks.
+    # Heal before reading: wherever a machine or the bench is free and work
+    # is waiting, the front of its queue goes on. A cancelled job dropping
+    # out, or anything else that left a gap, is closed the next time anyone
+    # looks.
+    bench_station = (
+        Station.objects
+        .filter(pk__in=ServiceStation.objects.filter(machine_type__isnull=True).values('station_id'))
+        .order_by('sequence')
+        .first()
+    )
     for machine in machines:
         if machine.is_available:
             fill(branch, machine=machine)
-    bench_ids = set(
-        ServiceStation.objects
-        .filter(machine_type__isnull=True)
-        .values_list('station_id', flat=True)
-    )
-    for station in Station.objects.filter(pk__in=bench_ids):
-        fill(branch, station=station)
+    if bench_station is not None:
+        fill(branch, station=bench_station)
 
     for machine in machines:
         entry = {
@@ -104,29 +105,20 @@ def floor(branch, now=None):
         else:
             finishing.append(entry)
 
-    # A bench for every station some route works by hand.
-    bench_station_ids = set(
-        ServiceStation.objects
-        .filter(machine_type__isnull=True)
-        .values_list('station_id', flat=True)
-    )
-    for station in Station.objects.filter(pk__in=bench_station_ids, is_active=True).order_by('sequence'):
-        entry = {
+    # One bench for all hand work: cutting, eyelets, packing.
+    if bench_station is not None:
+        finishing.append({
             'machine': {
                 'id':           None,
-                'name':         _bench_name(station),
+                'name':         'Cutting / finishing',
                 'type':         'Bench',
-                'station':      station.code,
+                'station':      'BENCH',
                 'bench':        True,
                 'is_available': True,
                 'reason':       '',
             },
-            'queue': _lane(queue(branch, station=station), now),
-        }
-        if station.code == 'PRINT':
-            press.append(entry)
-        else:
-            finishing.append(entry)
+            'queue': _lane(queue(branch, station=bench_station), now),
+        })
 
     stranded = _current_only(
         JobStep.objects

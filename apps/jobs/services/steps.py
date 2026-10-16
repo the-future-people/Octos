@@ -4,9 +4,10 @@ A job's journey across the floor, step by step.
 When a job is cleared, each line's route (ServiceStation, in sequence)
 becomes its steps. Each step is given a machine: the right type, up,
 wide enough for the work, and with the least waiting on it. A route step
-that names no machine type is done by hand, at that station's bench
-(cutting a banner, eyelets, packing), even where the station also has
-machines for other work. A step whose machines all failed to fit waits
+that names no machine type is done by hand, at the one shared bench
+(cutting a banner, eyelets, packing), even where its station also has
+machines for other work. Consecutive by-hand steps on a line are one
+visit to the bench, so they become one step. A step whose machines all failed to fit waits
 unassigned, for the coordinator to place, or to mark done another way.
 
 A queue is a machine's line-up (or the bench's): the steps that are
@@ -122,9 +123,10 @@ def _current_only(qs):
 
 def queue(branch, machine=None, station=None):
     """
-    A machine's line-up, or a station's bench when machine is None: the
-    steps done by hand there. The step being worked first, then by promise.
-    Unassigned steps are in neither; they wait for the coordinator.
+    A machine's line-up, or the bench's when machine is None: every step
+    done by hand, whatever its station, since there is one bench. The step
+    being worked first, then by promise. Unassigned steps are in neither;
+    they wait for the coordinator.
     """
     qs = (
         JobStep.objects
@@ -135,7 +137,7 @@ def queue(branch, machine=None, station=None):
     if machine is not None:
         qs = qs.filter(machine=machine)
     else:
-        qs = qs.filter(machine__isnull=True, by_hand=True, station=station)
+        qs = qs.filter(machine__isnull=True, by_hand=True)
 
     return (
         _current_only(qs)
@@ -187,30 +189,51 @@ def build_steps(job):
     for line in job.line_items.select_related('service'):
         if line.steps.exists():
             continue
-        routes = (
+        routes = list(
             ServiceStation.objects
             .filter(service=line.service)
             .select_related('station', 'machine_type')
             .order_by('sequence')
         )
-        for route in routes:
-            by_hand = route.machine_type is None
-            made.append(JobStep.objects.create(
-                job              = job,
-                line_item        = line,
-                station          = route.station,
-                by_hand          = by_hand,
-                machine          = None if by_hand else pick_machine(job.branch, route.machine_type, line),
-                sequence         = route.sequence,
-                expected_minutes = expected_minutes(job.branch, route, line),
-            ))
+        i = 0
+        while i < len(routes):
+            route = routes[i]
+            if route.machine_type is None:
+                # Consecutive hand work (trim, then eyelets) is one visit
+                # to the bench: one step, its time the sum of the parts.
+                group = [route]
+                while i + len(group) < len(routes) and routes[i + len(group)].machine_type is None:
+                    group.append(routes[i + len(group)])
+                made.append(JobStep.objects.create(
+                    job              = job,
+                    line_item        = line,
+                    station          = route.station,
+                    by_hand          = True,
+                    machine          = None,
+                    sequence         = route.sequence,
+                    expected_minutes = sum(
+                        (expected_minutes(job.branch, g, line) for g in group), Decimal('0'),
+                    ),
+                ))
+                i += len(group)
+            else:
+                made.append(JobStep.objects.create(
+                    job              = job,
+                    line_item        = line,
+                    station          = route.station,
+                    by_hand          = False,
+                    machine          = pick_machine(job.branch, route.machine_type, line),
+                    sequence         = route.sequence,
+                    expected_minutes = expected_minutes(job.branch, route, line),
+                ))
+                i += 1
 
     machines = {s.machine_id: s.machine for s in made if s.machine_id}
-    benches  = {s.station_id: s.station for s in made if s.by_hand}
     for machine in machines.values():
         fill(job.branch, machine=machine)
-    for station in benches.values():
-        fill(job.branch, station=station)
+    by_hand = next((s for s in made if s.by_hand), None)
+    if by_hand is not None:
+        fill(job.branch, station=by_hand.station)
 
     return made
 
@@ -249,11 +272,14 @@ def sync_stage(job, actor):
         )
 
 
-def mark_done(step_id, branch, actor):
+def mark_done(step_id, branch, actor, checked=False):
     """
     The job on a machine (or bench) is finished there. The next job on
     that machine moves up, this line moves to its next step, and the
     customer's stage follows.
+
+    A line's last step is finished only through the final check (checked
+    is set by it), so no piece reaches a customer unexamined.
 
     Only the job actually being worked can be marked done, with one
     exception: unassigned work, whose machine the branch does not have or
@@ -286,6 +312,13 @@ def mark_done(step_id, branch, actor):
         elif step.state != JobStep.State.ACTIVE:
             raise StepRefused(
                 'Only the job on the machine can be marked done.'
+            )
+        is_last = not JobStep.objects.filter(
+            line_item=step.line_item, sequence__gt=step.sequence,
+        ).exists()
+        if is_last and not checked:
+            raise StepRefused(
+                'This is the last step for this piece. Use the final check.'
             )
         if any(h.resumed_at is None for h in step.job.halts.all()):
             raise StepRefused(

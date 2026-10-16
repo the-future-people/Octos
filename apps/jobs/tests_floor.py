@@ -116,7 +116,7 @@ class FloorApiTests(JobsFixtureMixin, TestCase):
         self.assertEqual(self._lane(data, 'press', '6ft')[0]['state'], 'ACTIVE')
         names = [e['machine']['name'] for e in data['finishing']]
         self.assertIn('Laminator', names)
-        self.assertIn('Hand finishing', names)
+        self.assertIn('Cutting / finishing', names)
 
     def test_a_line_up_counts_the_time_ahead(self):
         Machine.objects.filter(pk=self.ten.pk).update(is_available=False)

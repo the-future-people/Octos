@@ -9,6 +9,7 @@ from .proforma_invoice import ProformaInvoice
 from .job_verification import JobVerification
 from .job_spec_change import JobSpecChange
 from .job_step import JobStep
+from .final_check import FinalCheck
 
 __all__ = [
     'Job',
@@ -23,4 +24,5 @@ __all__ = [
     'JobVerification',
     'JobSpecChange',
     'JobStep',
+    'FinalCheck',
 ]
