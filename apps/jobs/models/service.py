@@ -49,6 +49,27 @@ class Service(AuditModel):
             'an envelope. Each is an ordinary service with its own price and route.'
         ),
     )
+    display_name         = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='The name customers see online. Blank uses the service name.',
+    )
+    variant_of           = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='variants',
+        help_text=(
+            'Another version of that service, shown online as one product: '
+            'front and back is a version of front only. Each keeps its own price.'
+        ),
+    )
+    variant_label        = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text='How this version is named on the product: Front only, Front and back.',
+    )
     image                = models.ImageField(
         upload_to = 'services/',
         null      = True,

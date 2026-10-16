@@ -182,3 +182,52 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
 
         self.assertIn('Test Lamination', rows['addons'])
         self.assertIn('Test Envelope', rows['addons'])
+
+
+class SidesTests(CatalogueTests):
+    """One product on the storefront, with the sides chosen on it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.prints.display_name = 'Test Colour Printing'
+        cls.prints.variant_label = 'Front only'
+        cls.prints.save()
+        cls.both = Service.objects.create(
+            code='T-A4COL2', name='Test A4 Colour 2-sided', category='INSTANT', unit='sheet',
+            is_active=True, online=True, requires_file_upload=False,
+            display_name='Test Colour Printing', variant_of=cls.prints,
+            variant_label='Front and back',
+        )
+        PricingRule.objects.create(service=cls.both, branch=None, base_price=Decimal('4.00'), is_active=True)
+        ServiceStation.objects.create(
+            service=cls.both, station=cls.print_st,
+            machine_type=MachineType.objects.get(code='DIGITAL_PRESS'), sequence=1,
+            setup_minutes=Decimal('1'), minutes_per_unit=Decimal('0.5'),
+        )
+
+    def test_the_pair_is_one_product_with_a_choice_of_sides(self):
+        data = APIClient().get('/api/v1/storefront/catalogue/').json()
+        codes = [s['code'] for s in data]
+
+        self.assertIn('T-A4COL', codes)
+        self.assertNotIn('T-A4COL2', codes)
+
+        product = next(s for s in data if s['code'] == 'T-A4COL')
+        self.assertEqual(product['name'], 'Test Colour Printing')
+        self.assertEqual(
+            [(v['id'], v['label']) for v in product['variants']],
+            [(self.prints.pk, 'Front only'), (self.both.pk, 'Front and back')],
+        )
+
+    def test_each_side_keeps_its_own_price(self):
+        data = APIClient().get('/api/v1/storefront/catalogue/').json()
+        product = next(s for s in data if s['code'] == 'T-A4COL')
+        both = next(v for v in product['variants'] if v['label'] == 'Front and back')
+
+        response = APIClient().post('/api/v1/storefront/quote/', {
+            'service': both['id'], 'quantity': 1, 'specifications': {'pages': 1},
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['service'], self.both.pk)

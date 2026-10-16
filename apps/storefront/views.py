@@ -249,17 +249,13 @@ class CatalogueView(APIView):
     def get(self, request):
         from apps.jobs.services.availability import can_make, display_price
 
-        services = (
-            Service.objects
-            .filter(is_active=True, online=True)
-            .prefetch_related('addons')
-            .order_by('category', 'name')
-        )
-        return Response([
-            {
+        def entry(s):
+            return {
                 'id': s.id,
                 'code': s.code,
-                'name': s.name,
+                'name': s.display_name or s.name,
+                # The service's own name, which photos are found by.
+                'base_name': s.name,
                 'category': s.category,
                 'unit': s.unit,
                 'description': s.description,
@@ -279,8 +275,30 @@ class CatalogueView(APIView):
                     for a in s.addons.all() if a.is_active
                 ],
             }
-            for s in services
-        ])
+
+        # One product per print. Its versions (front only, front and back)
+        # are services of their own, each with its own price, listed on it
+        # rather than as products beside it.
+        products = (
+            Service.objects
+            .filter(is_active=True, online=True, variant_of__isnull=True)
+            .prefetch_related('addons', 'variants__addons')
+            .order_by('category', 'name')
+        )
+        catalogue = []
+        for s in products:
+            item = entry(s)
+            versions = [s] + [
+                v for v in s.variants.all() if v.is_active and v.online
+            ]
+            item['variants'] = [
+                {**entry(v), 'label': v.variant_label or v.display_name or v.name}
+                for v in versions
+            ] if len(versions) > 1 else []
+            if item['variants']:
+                item['available'] = any(v['available'] for v in item['variants'])
+            catalogue.append(item)
+        return Response(catalogue)
 
 
 class OrderCreateView(APIView):

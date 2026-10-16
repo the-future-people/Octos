@@ -9,6 +9,11 @@ to them. --dry-run shows what would change and keeps none of it.
 
 Batch 1 (16 Oct 2026): the everyday prints online with their finishing
 add-ons, business cards by the box, flexy and SAV.
+
+Batch 2 (16 Oct 2026): one product per print, with the sides a choice
+on it. The one-sided and two-sided services stay separate, each with
+its own price, so the counter, the floor and the reports are unchanged;
+the storefront shows the pair as one product.
 """
 
 from decimal import Decimal
@@ -74,6 +79,15 @@ BUSINESS_CARDS = {
 
 PACK_ROUTE = ('FINISH', None, Decimal('0.00'), Decimal('0.500'))
 
+# (front only, front and back, the name customers see)
+SIDES = [
+    ('A4-COL-PRINT-1S', 'A4CLRP2',          'A4 Colour Printing'),
+    ('A4-BW-PRINT-1S',  'A4-BW-PRINT-2S',   'A4 Black & White Printing'),
+    ('A3-COL-PRINT',    'A3CLRP2',          'A3 Colour Printing'),
+    ('A4-FLYER',        'A4-FLYER-2-SIDED', 'A4 Flyers'),
+    ('A5-FLYER',        'A5-FLYER-2SIDED',  'A5 Flyers'),
+]
+
 
 class DryRun(Exception):
     pass
@@ -89,12 +103,13 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 self._batch_1()
+                self._batch_2()
                 if options['dry_run']:
                     raise DryRun()
         except DryRun:
             self.stdout.write(self.style.WARNING('Dry run: nothing was kept.'))
             return
-        self.stdout.write(self.style.SUCCESS('Batch 1 loaded.'))
+        self.stdout.write(self.style.SUCCESS('Batches 1 and 2 loaded.'))
 
     # ── helpers ──────────────────────────────────────────────────
     def say(self, text):
@@ -175,3 +190,20 @@ class Command(BaseCommand):
             service = Service.objects.get(code=code)
             service.addons.set(Service.objects.filter(code__in=addon_codes))
             self.say(f'{code}: add-ons {", ".join(addon_codes)}')
+
+    # ── batch 2 ──────────────────────────────────────────────────
+    def _batch_2(self):
+        from apps.jobs.models import Service
+
+        self.stdout.write('Batch 2')
+        for front, both, name in SIDES:
+            one = Service.objects.get(code=front)
+            two = Service.objects.get(code=both)
+
+            one.display_name, one.variant_of, one.variant_label = name, None, 'Front only'
+            one.save(update_fields=['display_name', 'variant_of', 'variant_label'])
+
+            two.display_name, two.variant_of, two.variant_label = name, one, 'Front and back'
+            two.save(update_fields=['display_name', 'variant_of', 'variant_label'])
+
+            self.say(f'{name}: {front} front only, {both} front and back')
