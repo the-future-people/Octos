@@ -11,7 +11,8 @@ floor's business, not the catalogue's.
 
 An add-on is an ordinary service (lamination, binding, an envelope)
 offered alongside another. It is priced by its own rule. Lamination is
-counted in sheets, everything else in copies.
+counted in sheets, everything else in copies; binding's price is the
+tier for the ring a copy needs.
 """
 
 from decimal import Decimal
@@ -66,9 +67,33 @@ def display_price(service):
 
 
 def addon_quantity(addon, quantity, specs):
-    """Sheets for lamination (copies × pages), copies for everything else."""
-    pages = int((specs or {}).get('pages') or 1)
-    return quantity * pages if addon.unit in SHEET_UNITS else quantity
+    """Sheets for lamination (copies × sheets), copies for everything else."""
+    sheets = int((specs or {}).get('pages') or 1)
+    return quantity * sheets if addon.unit in SHEET_UNITS else quantity
+
+
+# How many 80gsm sheets a comb ring holds, smallest ring first. The
+# shop's smallest ring is 8mm, so it is where the chart starts.
+RING_CAPACITY = [
+    (45, 8), (65, 10), (95, 12), (120, 14), (145, 16), (165, 19),
+    (200, 22), (240, 25), (270, 28), (300, 32), (340, 38), (425, 45), (500, 51),
+]
+
+
+def ring_size_for(sheets):
+    """The ring a copy of this many sheets needs, or None when too thick."""
+    for capacity, ring in RING_CAPACITY:
+        if sheets <= capacity:
+            return ring
+    return None
+
+
+def _conditions_of(addon):
+    """The conditions an add-on's price tiers are chosen by (ring size)."""
+    from apps.jobs.models import PricingRule
+    rule = PricingRule.objects.filter(service=addon, is_active=True).first()
+    tiers = (rule.pricing_tiers or []) if rule else []
+    return {t.get('condition') for t in tiers if isinstance(t, dict) and t.get('condition')}
 
 
 def price_addons(service, chosen, quantity, specs):
@@ -77,6 +102,13 @@ def price_addons(service, chosen, quantity, specs):
 
     chosen holds add-on ids, or the priced add-ons already on a line (each
     a dict with 'service'), so a cart can be re-priced as it stands.
+
+    How each is counted:
+      - by the sheet (lamination): sheets × copies
+      - by the copy (envelope, binding): copies, the page count never
+        multiplies it
+      - binding's price is the tier for the ring one copy needs, and the
+        ring is chosen from the sheets in a copy
     """
     from apps.jobs.pricing_engine import quote_line
 
@@ -86,6 +118,7 @@ def price_addons(service, chosen, quantity, specs):
         return None, None, 'Add-ons must be a list.'
 
     offered = {a.pk: a for a in service.addons.filter(is_active=True)}
+    sheets = int((specs or {}).get('pages') or 1)
     priced, total, seen = [], Decimal('0.00'), set()
 
     for raw in chosen:
@@ -105,8 +138,22 @@ def price_addons(service, chosen, quantity, specs):
             return None, None, f'{addon.name} is not available yet.'
 
         count = addon_quantity(addon, quantity, specs)
-        # Sheets are already counted; binding's tiers need the pages.
-        addon_specs = {} if addon.unit in SHEET_UNITS else {'pages': int((specs or {}).get('pages') or 1)}
+
+        # Only what chooses a tier is passed. Pages are never passed: the
+        # engine multiplies by them, which is how an envelope became
+        # GHS 2 × pages × copies.
+        addon_specs = {}
+        detail = None
+        if 'ring_size' in _conditions_of(addon):
+            ring = ring_size_for(sheets)
+            if ring is None:
+                return None, None, (
+                    f'{sheets} sheets is too thick to ring-bind. '
+                    f'Walk in and we will bind it another way.'
+                )
+            addon_specs['ring_size'] = ring
+            detail = f'{ring}mm ring'
+
         quote = quote_line(service=addon, branch=None, specifications=addon_specs, quantity=count)
         if not quote.get('success'):
             return None, None, quote.get('error', f'{addon.name} could not be priced.')
@@ -115,6 +162,7 @@ def price_addons(service, chosen, quantity, specs):
             'service':      addon.pk,
             'service_name': addon.name,
             'quantity':     count,
+            'detail':       detail,
             'unit_price':   str(quote.get('unit_price') or quote['total']),
             'total':        str(quote['total']),
         })

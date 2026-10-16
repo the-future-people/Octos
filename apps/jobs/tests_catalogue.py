@@ -86,6 +86,7 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
     # ── Pricing add-ons ──────────────────────────────────────────
 
     def test_lamination_counts_sheets_and_binding_counts_copies(self):
+        self._ring_tiers()
         priced, total, problem = price_addons(
             self.prints, [self.lam.pk, self.bind.pk], quantity=3, specs={'pages': 4},
         )
@@ -121,6 +122,42 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
             'service': self.shirt.pk, 'quantity': 1, 'specifications': {},
         }, format='json')
         self.assertEqual(response.status_code, 400)
+
+    def test_an_envelope_is_per_copy_whatever_the_pages(self):
+        # 3 copies of a 6-sheet document: 3 envelopes, not 18.
+        priced, total, _ = price_addons(self.prints, [self.env.pk], quantity=3, specs={'pages': 6})
+        self.assertEqual(priced[0]['quantity'], 3)
+        self.assertEqual(total, Decimal('6.00'))
+
+    def test_lamination_is_every_sheet_of_every_copy(self):
+        priced, total, _ = price_addons(self.prints, [self.lam.pk], quantity=3, specs={'pages': 6})
+        self.assertEqual(priced[0]['quantity'], 18)
+        self.assertEqual(total, Decimal('180.00'))
+
+    def _ring_tiers(self):
+        # The live A4 binding tiers.
+        PricingRule.objects.filter(service=self.bind).update(pricing_tiers=[
+            {'min': 8, 'max': 20, 'condition': 'ring_size', 'flat_price': 10.0},
+            {'min': 22, 'max': 30, 'condition': 'ring_size', 'flat_price': 15.0},
+            {'min': 32, 'max': None, 'condition': 'ring_size', 'flat_price': 20.0},
+        ])
+
+    def test_binding_picks_its_ring_from_the_sheets_and_charges_per_copy(self):
+        self._ring_tiers()
+        priced, total, _ = price_addons(self.prints, [self.bind.pk], quantity=3, specs={'pages': 6})
+        self.assertEqual(priced[0]['detail'], '8mm ring')
+        self.assertEqual(total, Decimal('30.00'))      # 3 copies × GHS 10
+
+    def test_a_thicker_copy_needs_a_bigger_ring(self):
+        self._ring_tiers()
+        priced, total, _ = price_addons(self.prints, [self.bind.pk], quantity=3, specs={'pages': 210})
+        self.assertEqual(priced[0]['detail'], '25mm ring')
+        self.assertEqual(total, Decimal('45.00'))      # 3 copies × GHS 15
+
+    def test_too_thick_to_ring_bind_is_refused(self):
+        self._ring_tiers()
+        _, _, problem = price_addons(self.prints, [self.bind.pk], quantity=1, specs={'pages': 600})
+        self.assertIn('too thick', problem)
 
     # ── From the cart to the floor ───────────────────────────────
 
