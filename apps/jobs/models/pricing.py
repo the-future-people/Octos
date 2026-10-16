@@ -103,3 +103,37 @@ class PriceOverrideLog(AuditModel):
             f"{self.job.job_number} — "
             f"GHS {self.original_price} → GHS {self.overridden_price}"
         )
+
+
+
+# ── Prices apply the moment they change ──────────────────────────
+#
+# The engine keeps each service's rule for five minutes, which saves
+# the database on a busy day. Without this, a price changed in the
+# admin would reach quotes up to five minutes late — long enough for
+# a customer to be charged the old one — and the add-ons, which read
+# the rule fresh, would disagree with the engine meanwhile.
+#
+# A change to the company-wide rule is the fallback for every branch,
+# so every branch's copy for the service is cleared, not only one.
+# Queryset .update() skips signals; anything changing prices should
+# save the rule, as the admin and seed_catalogue do.
+
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+
+
+def forget_cached_rules(service_id):
+    from django.core.cache import cache
+    from apps.organization.models import Branch
+
+    keys = [f'pricing_rule:{service_id}:company'] + [
+        f'pricing_rule:{service_id}:{pk}'
+        for pk in Branch.objects.values_list('pk', flat=True)
+    ]
+    cache.delete_many(keys)
+
+
+@receiver([post_save, post_delete], sender=PricingRule)
+def _price_changed(sender, instance, **kwargs):
+    forget_cached_rules(instance.service_id)

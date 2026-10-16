@@ -61,6 +61,13 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
         cls.shirt  = service('T-DTF', 'Test DTF Shirt', 'PER_PIECE', '50.00', cls.print_st, dtf, online=True)
         cls.prints.addons.set([cls.lam, cls.bind, cls.env, cls.bag])
 
+    def setUp(self):
+        # The engine keeps price rules in the cache, and a test's
+        # rollback restores the database but not the cache. Each test
+        # starts clean, so one test's prices never leak into the next.
+        from django.core.cache import cache
+        cache.clear()
+
     # ── Availability ─────────────────────────────────────────────
 
     def test_available_needs_a_price_and_its_machines(self):
@@ -158,6 +165,17 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
         self._ring_tiers()
         _, _, problem = price_addons(self.prints, [self.bind.pk], quantity=1, specs={'pages': 600})
         self.assertIn('too thick', problem)
+
+    def test_a_price_change_applies_at_once(self):
+        # Quote once, so the engine has the old rule cached.
+        quote_line(service=self.lam, branch=None, specifications={}, quantity=1)
+
+        rule = PricingRule.objects.get(service=self.lam)
+        rule.base_price = Decimal('12.00')
+        rule.save()
+
+        after = quote_line(service=self.lam, branch=None, specifications={}, quantity=1)
+        self.assertEqual(Decimal(str(after['total'])), Decimal('12.00'))
 
     # ── From the cart to the floor ───────────────────────────────
 
