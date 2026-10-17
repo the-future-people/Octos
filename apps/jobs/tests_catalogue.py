@@ -340,3 +340,80 @@ class SheetsTests(TestCase):
         self.assertTrue(counts_pages(self._service('Front only')))
         self.assertFalse(counts_pages(SimpleNamespace(
             requires_file_upload=True, spec_template=[{'key': 'quantity'}])))
+
+class LineMinimumTests(JobsFixtureMixin, TestCase):
+    """
+    Flexy and SAV: at least GHS 30 an order line, not a piece. Quantity
+    counts towards it, and the minimum says how many pieces it covers.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.flexy = Service.objects.create(
+            code='T-FLEXY', name='Test Flexy', category='PRODUCTION',
+            unit='PER_SQFT', is_active=True,
+        )
+        PricingRule.objects.create(
+            service=cls.flexy, branch=None, base_price=Decimal('3.25'),
+            minimum_price=Decimal('30.00'), is_active=True,
+        )
+        cls.cut = Service.objects.create(
+            code='T-SAVCUT', name='Test Cut to shape', category='PRODUCTION',
+            unit='PER_SQFT', is_active=True,
+        )
+        PricingRule.objects.create(service=cls.cut, branch=None, base_price=Decimal('3.00'), is_active=True)
+        cls.eyelets = Service.objects.create(
+            code='T-EYELETS', name='Test Eyelets', category='PRODUCTION',
+            unit='PER_PIECE', is_active=True,
+        )
+        PricingRule.objects.create(service=cls.eyelets, branch=None, base_price=Decimal('0.00'), is_active=True)
+        cls.flexy.addons.set([cls.cut, cls.eyelets])
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _quote(self, w, h, quantity):
+        return quote_line(service=self.flexy, branch=None,
+                          specifications={'width_in': w, 'height_in': h}, quantity=quantity)
+
+    def test_one_small_piece_pays_the_line_minimum(self):
+        q = self._quote(4, 4, 1)
+        self.assertEqual(Decimal(str(q['total'])), Decimal('30.00'))
+        self.assertTrue(q['minimum_applied'])
+
+    def test_three_small_pieces_are_one_minimum_not_three(self):
+        self.assertEqual(Decimal(str(self._quote(4, 4, 3)['total'])), Decimal('30.00'))
+
+    def test_the_minimum_says_how_many_pieces_it_covers(self):
+        # 4x4in is 0.111 sq ft at 3.25: 0.36 a piece, so 30 covers 83.
+        self.assertEqual(self._quote(4, 4, 1)['covers_up_to'], 83)
+
+    def test_enough_pieces_climb_past_the_minimum(self):
+        # 24x12in is 2 sq ft: 6.50 a piece. Two are 13 (minimum 30); ten are 65.
+        self.assertEqual(Decimal(str(self._quote(24, 12, 2)['total'])), Decimal('30.00'))
+        ten = self._quote(24, 12, 10)
+        self.assertEqual(Decimal(str(ten['total'])), Decimal('65.00'))
+        self.assertFalse(ten['minimum_applied'])
+
+    def test_a_large_piece_is_priced_by_area(self):
+        q = self._quote(72, 36, 1)
+        self.assertEqual(Decimal(str(q['total'])), Decimal('58.50'))
+        self.assertIsNone(q['covers_up_to'])
+
+    def test_cutting_to_shape_is_priced_by_the_piece_area(self):
+        # 12x12in is 1 sq ft; two pieces cut at 3.00 a sq ft.
+        priced, total, problem = price_addons(
+            self.flexy, [self.cut.pk], quantity=2, specs={'width_in': 12, 'height_in': 12},
+        )
+        self.assertIsNone(problem)
+        self.assertEqual(total, Decimal('6.00'))
+
+    def test_eyelets_are_free_and_offered(self):
+        priced, total, problem = price_addons(
+            self.flexy, [self.eyelets.pk], quantity=3, specs={'width_in': 72, 'height_in': 36},
+        )
+        self.assertIsNone(problem)
+        self.assertEqual(total, Decimal('0.00'))
+        self.assertTrue(can_make(self.eyelets))

@@ -57,11 +57,18 @@ def quote_line(service, branch, specifications=None, quantity=1) -> dict:
 
         total      = result['total']
         unit_price = (total / Decimal(str(quantity))).quantize(Decimal('0.01'))
-        floor      = PricingEngine(service, branch).rule.minimum_price or Decimal('0')
+        rule       = PricingEngine(service, branch).rule
+        floor      = rule.minimum_price or Decimal('0')
+        one_piece  = Decimal(str(area)) * rule.base_price
+        applied    = bool(floor and one_piece * quantity < floor)
         result.update({
             'area_sqft'      : area,
             'unit_price'     : unit_price,
-            'minimum_applied': bool(floor and unit_price <= floor),
+            'minimum_applied': applied,
+            'minimum'        : f'{floor:.2f}' if floor else None,
+            # How many pieces this size the minimum already pays for, so
+            # the customer can be offered them rather than charged for air.
+            'covers_up_to'   : int(floor // one_piece) if applied and one_piece > 0 else None,
         })
         return result
 
@@ -212,15 +219,15 @@ class PricingEngine:
         else:
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
 
-        # A floor under one piece, applied before quantity: a small
-        # banner costs the same in file prep, cutting and packing as a
-        # large one, so three small pieces are three minimums.
+        # A floor under the whole order line, not each piece. A small job
+        # costs the same to set up, run and pack however many pieces it
+        # has, so the minimum pays for the job, and more pieces of the
+        # same size fill it at no extra cost until they climb past it.
+        # (Before 17 Oct 2026 it was per piece: three small pieces were
+        # three minimums.)
         floor = self.rule.minimum_price or Decimal('0')
-        if floor > 0:
-            pieces    = Decimal(str(pages)) if pages else Decimal('1')
-            per_piece = subtotal / pieces
-            if per_piece < floor:
-                subtotal = floor * pieces
+        if floor > 0 and subtotal < floor:
+            subtotal = floor
 
         total = subtotal.quantize(Decimal('0.01'))
 

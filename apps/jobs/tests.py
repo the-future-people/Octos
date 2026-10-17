@@ -1406,14 +1406,24 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
         )
         self.assertEqual(result['total'], Decimal('10.00'))
 
-    def test_the_minimum_applies_per_piece_before_quantity(self):
-        """Three small banners are three pieces of material, not one."""
+    def test_the_minimum_applies_to_the_line_not_each_piece(self):
+        """
+        Three small banners are one job: set up, run and packed once. They
+        pay the minimum once, not three times (the rule before 17 Oct 2026).
+        Enough pieces climb past it and are priced by area.
+        """
         from apps.jobs.pricing_engine import PricingEngine, square_feet
-        result = PricingEngine.get_price(
+        three = PricingEngine.get_price(
             service=self.flexy, branch=self.branch,
             quantity=square_feet(12, 12), pages=3,
         )
-        self.assertEqual(result['total'], Decimal('30.00'))
+        self.assertEqual(three['total'], Decimal('10.00'))      # 9.75, raised to 10
+
+        four = PricingEngine.get_price(
+            service=self.flexy, branch=self.branch,
+            quantity=square_feet(12, 12), pages=4,
+        )
+        self.assertEqual(four['total'], Decimal('13.00'))       # past the minimum
 
     def test_quoting_from_a_spec(self):
         """
@@ -1447,7 +1457,10 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
         self.assertEqual(q['unit_price'], Decimal('58.50'))
 
     def test_quoting_reports_when_the_minimum_bit(self):
-        """The screen has to say why GHS 30 is not 3 sq ft of material."""
+        """
+        The screen has to say why GHS 10 is not 3 sq ft of material, and
+        how many pieces that GHS 10 already pays for.
+        """
         from apps.jobs.pricing_engine import quote_line
 
         q = quote_line(
@@ -1455,9 +1468,10 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
             specifications={'width_in': 12, 'height_in': 12},
             quantity=3,
         )
-        self.assertEqual(q['total'], Decimal('30.00'))
-        self.assertEqual(q['unit_price'], Decimal('10.00'))
+        self.assertEqual(q['total'], Decimal('10.00'))
         self.assertTrue(q['minimum_applied'])
+        self.assertEqual(q['minimum'], '10.00')
+        self.assertEqual(q['covers_up_to'], 3)                  # 10 / 3.25 a piece
 
     def test_an_area_service_without_dimensions_is_refused(self):
         """

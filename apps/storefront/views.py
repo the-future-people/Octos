@@ -1824,6 +1824,8 @@ class QuoteView(APIView):
             'addons': addons,
             'total': str(base + addons_total),
             'minimum_applied': bool(quote.get('minimum_applied')),
+            'minimum': quote.get('minimum'),
+            'covers_up_to': quote.get('covers_up_to'),
         })
 
 class FindOrderView(APIView):

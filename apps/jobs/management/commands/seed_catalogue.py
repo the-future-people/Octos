@@ -10,6 +10,14 @@ to them. --dry-run shows what would change and keeps none of it.
 Batch 1 (16 Oct 2026): the everyday prints online with their finishing
 add-ons, business cards by the box, flexy and SAV.
 
+Batch 3 (17 Oct 2026): minimums and finishing.
+  - Flexy and SAV: at least GHS 30 an order line (not a piece), any size
+    from 1in as typed.
+  - SAV cut to shape is a choice, GHS 3 a sq ft, by hand until the plotter.
+  - Flexy eyelets are a choice, free. Every banner is still trimmed.
+  - Flyers: ten or more, and always cut on the guillotine, as part of the
+    job rather than a charge.
+
 Batch 2 (16 Oct 2026): one product per print, with the sides a choice
 on it. The one-sided and two-sided services stay separate, each with
 its own price, so the counter, the floor and the reports are unchanged;
@@ -79,6 +87,34 @@ BUSINESS_CARDS = {
 
 PACK_ROUTE = ('FINISH', None, Decimal('0.00'), Decimal('0.500'))
 
+# Fewest that can be ordered.
+MIN_QUANTITY = {
+    'A4-FLYER': 10, 'A4-FLYER-2-SIDED': 10,
+    'A5-FLYER': 10, 'A5-FLYER-2SIDED': 10,
+}
+
+# Smallest side, in inches, a large-format piece may be typed at. Small
+# pieces are not refused: the line minimum covers them.
+MIN_SIDE_IN = {'FLEXY': 1, 'SAV': 1}
+
+# The least an order line costs, however few or small the pieces.
+LINE_MINIMUM = {'FLEXY': Decimal('30.00'), 'SAV': Decimal('30.00')}
+
+# Finishing chosen per order. Cutting SAV is priced by area, like the
+# print; eyelets are free, a choice so the bench knows which banners get
+# them.
+FINISHING = [
+    {'code': 'SAV-CUT', 'name': 'Cut to shape', 'unit': 'PER_SQFT', 'price': Decimal('3.00'),
+     'description': 'Each sticker cut out along its shape.',
+     'for': 'SAV', 'route': ('CUT', 'PLOTTER', Decimal('5.00'), Decimal('2.000'))},
+    {'code': 'EYELETS', 'name': 'Eyelets', 'unit': 'PER_PIECE', 'price': Decimal('0.00'),
+     'description': 'Metal eyelets in the corners, ready to hang.',
+     'for': 'FLEXY', 'route': ('FINISH', None, Decimal('0.00'), Decimal('3.000'))},
+]
+
+# Cut on the guillotine as part of the job: nobody is handed uncut flyers.
+CUT_AS_PART_OF_JOB = ['A4-FLYER', 'A4-FLYER-2-SIDED', 'A5-FLYER', 'A5-FLYER-2SIDED']
+
 # (front only, front and back, the name customers see)
 SIDES = [
     ('A4-COL-PRINT-1S', 'A4CLRP2',          'A4 Colour Printing'),
@@ -104,12 +140,13 @@ class Command(BaseCommand):
             with transaction.atomic():
                 self._batch_1()
                 self._batch_2()
+                self._batch_3()
                 if options['dry_run']:
                     raise DryRun()
         except DryRun:
             self.stdout.write(self.style.WARNING('Dry run: nothing was kept.'))
             return
-        self.stdout.write(self.style.SUCCESS('Batches 1 and 2 loaded.'))
+        self.stdout.write(self.style.SUCCESS('Batches 1 to 3 loaded.'))
 
     # ── helpers ──────────────────────────────────────────────────
     def say(self, text):
@@ -207,3 +244,81 @@ class Command(BaseCommand):
             two.save(update_fields=['display_name', 'variant_of', 'variant_label'])
 
             self.say(f'{name}: {front} front only, {both} front and back')
+
+    # ── batch 3 ──────────────────────────────────────────────────
+    def _batch_3(self):
+        from apps.jobs.models import PricingRule, Service
+        from apps.production.models import ServiceStation, Station
+
+        self.stdout.write('Batch 3')
+
+        for code, minimum in MIN_QUANTITY.items():
+            service = Service.objects.get(code=code)
+            template = [dict(f) for f in (service.spec_template or [])]
+            field = next((f for f in template if f.get('key') == 'quantity'), None)
+            if field is None:
+                field = {'key': 'quantity', 'type': 'number', 'label': 'Quantity', 'required': True}
+                template.insert(0, field)
+            if field.get('min') != minimum:
+                self.say(f'{code}: at least {minimum} (was {field.get("min") or 1})')
+            field['min'] = minimum
+            if (field.get('default') or 0) < minimum:
+                field['default'] = minimum
+            service.spec_template = template
+            service.save(update_fields=['spec_template'])
+
+        for code, smallest in MIN_SIDE_IN.items():
+            service = Service.objects.get(code=code)
+            template = [dict(f) for f in (service.spec_template or [])]
+            for f in template:
+                if f.get('key') in ('width_in', 'height_in') and f.get('min') != smallest:
+                    self.say(f'{code}: {f["key"]} from {smallest}in (was {f.get("min")}in)')
+                    f['min'] = smallest
+            service.spec_template = template
+            service.save(update_fields=['spec_template'])
+
+        for code, minimum in LINE_MINIMUM.items():
+            # Saved, not updated, so the price cache is cleared at once.
+            for rule in PricingRule.objects.filter(service__code=code, is_active=True):
+                if rule.minimum_price != minimum:
+                    self.say(f'{code}: at least {minimum} an order line (was {rule.minimum_price} a piece)')
+                    rule.minimum_price = minimum
+                    rule.save()
+
+        for spec in FINISHING:
+            addon, made = Service.objects.get_or_create(
+                code=spec['code'],
+                defaults={'name': spec['name'], 'category': 'PRODUCTION', 'unit': spec['unit'],
+                          'description': spec['description'], 'is_active': True},
+            )
+            if made:
+                self.say(f'{addon.code}: created')
+            self._rule(addon, spec['price'])
+            station, machine, setup, per_unit = spec['route']
+            if spec['code'] == 'SAV-CUT' and SAV_CUT_BY_HAND:
+                machine = None
+            self._route(addon, [(station, machine, setup, per_unit)])
+            parent = Service.objects.get(code=spec['for'])
+            parent.addons.add(addon)
+            self.say(f'{parent.code}: offers {addon.name}')
+
+        # The base routes lose what became a choice: SAV's cut, flexy's
+        # finishing bench. Flexy keeps its trim.
+        n = ServiceStation.objects.filter(service__code='SAV', station__code='CUT').delete()[0]
+        if n:
+            self.say('SAV: cutting is now a choice, not on every order')
+        n = ServiceStation.objects.filter(service__code='FLEXY', station__code='FINISH').delete()[0]
+        if n:
+            self.say('FLEXY: eyelets are now a choice; every banner is still trimmed')
+
+        cut = Station.objects.get(code='CUT')
+        for code in CUT_AS_PART_OF_JOB:
+            service = Service.objects.get(code=code)
+            routes = ServiceStation.objects.filter(service=service)
+            if not routes.filter(station=cut).exists():
+                last = max([r.sequence for r in routes] or [0])
+                ServiceStation.objects.create(
+                    service=service, station=cut, machine_type=None, sequence=last + 1,
+                    setup_minutes=Decimal('3.00'), minutes_per_unit=Decimal('0.050'),
+                )
+                self.say(f'{code}: cut on the guillotine as part of the job')

@@ -169,6 +169,13 @@ def price_addons(service, chosen, quantity, specs):
         # GHS 2 × pages × copies.
         addon_specs = {}
         detail = None
+        if (addon.unit or '').upper().replace('PER_', '') in ('SQFT', 'SQCM'):
+            # Priced by area (cutting SAV to shape): the piece's own size,
+            # once per copy.
+            addon_specs = {
+                'width_in':  (specs or {}).get('width_in'),
+                'height_in': (specs or {}).get('height_in'),
+            }
         if 'ring_size' in _conditions_of(addon):
             ring = ring_size_for(sheets)
             if ring is None:
