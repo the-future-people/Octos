@@ -369,9 +369,56 @@ class OrderDetailView(APIView):
                 for l in (order.line_items or [])
                 if l.get('id')
             }
-            priced, total, error = self._price(
-                request.data['line_items'], existing_ids,
-            )
+
+            # A line on an existing order changes only as checkout allows:
+            # its quantity and its add-on choices. The service and the
+            # specifications, page count included, are what the server
+            # already holds; the page count was counted from the file,
+            # and a number from the browser is a number anyone can edit.
+            # New items come only through commit, where the file is checked.
+            incoming = request.data['line_items']
+            if not isinstance(incoming, list):
+                return Response({'detail': 'line_items must be a list.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            stored = {l.get('id'): l for l in (order.line_items or []) if l.get('id')}
+            from apps.jobs.services.availability import counts_pages
+
+            trusted = []
+            for raw in incoming:
+                raw = raw or {}
+                if raw.get('id'):
+                    held = stored.get(raw['id'])
+                    if held is None:
+                        return Response(
+                            {'detail': 'That item is not on this order. Add new items from the product page.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    trusted.append({
+                        'id': held['id'],
+                        'service': held['service'],
+                        'specifications': held.get('specifications') or {},
+                        'quantity': raw.get('quantity', held.get('quantity')),
+                        'addons': raw.get('addons', held.get('addons') or []),
+                    })
+                    continue
+
+                # A new line. Priced and checked like any other, and its
+                # artwork judged against what it says before payment, so
+                # the customer gets what they pay for. Except a document
+                # priced by the sheet: its page count comes only from the
+                # file, counted on the product page.
+                service = Service.objects.filter(pk=raw.get('service')).first()
+                if service is not None and counts_pages(service):
+                    return Response(
+                        {'detail': (
+                            'Add documents from the product page, where we '
+                            'count their pages from your file.'
+                        )},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                trusted.append(raw)
+
+            priced, total, error = self._price(trusted, existing_ids)
             if error:
                 return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
             order.line_items = priced

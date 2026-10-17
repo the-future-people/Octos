@@ -417,3 +417,88 @@ class LineMinimumTests(JobsFixtureMixin, TestCase):
         self.assertIsNone(problem)
         self.assertEqual(total, Decimal('0.00'))
         self.assertTrue(can_make(self.eyelets))
+
+
+
+class CheckoutRepriceTests(JobsFixtureMixin, TestCase):
+    """
+    Changing an order at checkout: only quantity and add-ons. What the
+    server worked out (the page count from the file) stays the server's.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.prints = Service.objects.create(
+            code='T-CHK', name='Test Checkout Print', category='INSTANT',
+            unit='sheet', is_active=True, online=True,
+        )
+        PricingRule.objects.create(service=cls.prints, branch=None,
+                                   base_price=Decimal('2.50'), is_active=True)
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _order(self):
+        from apps.storefront.models import OnlineOrder
+        from apps.storefront.views import OrderDetailView
+        order = OnlineOrder.objects.create()
+        priced, total, problem = OrderDetailView._price([{
+            'service': self.prints.pk, 'quantity': 2,
+            'specifications': {'pages': 10},
+        }])
+        self.assertIsNone(problem)
+        order.line_items, order.total = priced, total
+        order.save()
+        return order
+
+    def _patch(self, order, lines):
+        return APIClient().patch(
+            f'/api/v1/storefront/orders/{order.order_number}/',
+            {'token': order.access_token, 'line_items': lines}, format='json',
+        )
+
+    def test_the_page_count_stays_the_servers(self):
+        order = self._order()
+        line = order.line_items[0]
+
+        # A browser claiming the 10-page document is now 1 page.
+        response = self._patch(order, [{
+            'id': line['id'], 'service': self.prints.pk, 'quantity': 3,
+            'specifications': {'pages': 1},
+        }])
+
+        self.assertEqual(response.status_code, 200, response.content)
+        kept = response.json()['line_items'][0]
+        self.assertEqual(kept['specifications']['pages'], 10)
+        self.assertEqual(kept['quantity'], 3)
+        self.assertEqual(Decimal(kept['total']), Decimal('75.00'))   # 3 x 10 x 2.50
+
+    def test_a_line_the_order_never_had_is_refused(self):
+        order = self._order()
+        response = self._patch(order, [{
+            'id': 'made-up', 'service': self.prints.pk, 'quantity': 1,
+            'specifications': {'pages': 1},
+        }])
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_document_cannot_be_added_with_a_page_count_from_the_browser(self):
+        self.prints.requires_file_upload = True
+        self.prints.spec_template = [{'key': 'pages', 'type': 'number'}]
+        self.prints.save()
+        order = self._order()
+
+        # Removing the 10-page line and adding "the same" document as 1 page.
+        response = self._patch(order, [{
+            'service': self.prints.pk, 'quantity': 3, 'specifications': {'pages': 1},
+        }])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('count their pages', response.json()['detail'])
+
+    def test_removing_a_line_still_works(self):
+        order = self._order()
+        response = self._patch(order, [])
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['line_items'], [])
