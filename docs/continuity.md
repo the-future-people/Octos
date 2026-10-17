@@ -1,8 +1,9 @@
 # Octos — where things stand
 
-Updated 13 October 2026, end of day. The storefront ran end to end on
-real money this morning; the afternoon fixed what that exposed and built
-the backend for a new coordinator portal.
+Updated 17 October 2026, afternoon. Four days of work since the last
+update: the coordinator portal rebuilt and live, the floor tracked
+machine by machine, a final check before anything reaches a customer,
+and the first three batches of the Westland catalogue loaded.
 
 Paste this at the start of a new session to pick up without
 re-explaining.
@@ -11,140 +12,137 @@ re-explaining.
 
 ## The short version
 
-A customer can order printing online, pay, and watch it being made. The
-money reaches the books, the job reaches the floor already paid, and the
-customer is texted twice: when they pay, and when their order is ready.
+A customer orders online, pays, and watches the job move: inspected,
+printed on a named machine, finished at the bench, checked against what
+was ordered, ready. Each stage tells them how long it has left. Nothing
+reaches them without a person comparing what was made with what was
+ordered.
 
-The coordinator portal is being rebuilt. The design is locked, the
-backend for it is live, and the page itself is next.
+The catalogue is being rebuilt one agreed batch at a time. Everyday
+prints, flyers, business cards, flexy and SAV are live, with finishing
+the customer chooses: lamination, binding, envelopes, cutting, eyelets.
 
-511 backend tests green.
+Close to version 1. What remains is additions and polish, not
+foundations.
 
----
-
-## What changed today
-
-**Online jobs are born paid** (`afa60b6`). Conversion wrote the legacy
-`status` as `PENDING_PAYMENT`, which put every paid online job in the
-cashier's queue, held day sheets open as debts, and counted them as owed
-in EOD, weekly and monthly close. Now `status=PAID`, `job_type=PRODUCTION`
-for every online job.
-
-**Online jobs are SETTLED** on the payment axis. Conversion wrote
-`payment_state='PAID'`, which is not a value on that axis (`UNPAID`,
-`DEPOSIT_PAID`, `SETTLED`). Choices are not enforced on `create()`, so it
-went in silently, and an attendant cannot release a job that is not
-SETTLED. Every online customer would have been turned away at collection.
-Migrations 0036 and 0037 corrected existing rows.
-
-**Clearing a job puts it in press** (`f3de464`, fixed in `9d77608`).
-`verify()` only recorded a verification, so a cleared job sat at
-RECEIVED ("Waiting") with a second Start to press, and the customer's
-tracking still said "inspecting". Now `verify()` moves a paid production
-job to IN_PRODUCTION through `move_work`, so the status log, tracking and
-timing all see it. Unpaid remote jobs and instant work stay at RECEIVED.
-The first version failed in production: views prefetch verifications, so
-`is_verified` answered from a stale list. Fixed with
-`refresh_from_db(fields=['verifications'])`.
-
-**The ready text** (`8cef6c1`). Reaching DONE queues
-`tell_customer_ready` on commit, through the worker. Online orders only.
-
-**The strict arrivals queue and inspection claims** (`5da17fb`,
-`b1808c1`). See the coordinator portal section.
-
-**Data corrected in production:** 14 online jobs settled and moved out
-of the cashier's queue (5 of them pre-dated the ONLINE channel and were
-labelled WALK_IN), 12 test jobs finished, and FP-WLB-2026-05309 cancelled
-as entered in error.
+619 backend tests green.
 
 ---
 
-## How an online order flows
+## How an online order flows now
 
-1. Customer specifies, checks artwork, pays through Paystack.
-2. The webhook verifies, records a `PaystackEvent`, marks the order paid
-   and queues `convert_order`.
-3. Conversion in the worker creates the Job: PRODUCTION, `status=PAID`,
-   `payment_state=SETTLED`, `work_state=RECEIVED`, `intake_channel=ONLINE`,
-   `estimated_ready_at` from the storefront's promise. Writes the receipt,
-   attaches to today's sheet, texts the customer.
-4. The job appears in the coordinator's arrivals queue.
-5. The coordinator takes it (claim), inspects, clears: it goes straight
-   to IN_PRODUCTION and the customer's tracking moves to press.
-6. Finishing, then quality check, then DONE: the customer gets the ready
-   text.
-7. The attendant releases it at collection (it is SETTLED, so allowed).
+1. **Storefront.** The customer picks a product (one tile per print,
+   sides chosen on it), uploads the file, chooses finishing. Pages are
+   counted from the file, never typed. The server prices everything.
+2. **Payment.** Paystack; a full-screen "Taking you to Paystack" message
+   covers the hand-off.
+3. **Conversion** (worker). Job created PAID, SETTLED, RECEIVED, ONLINE.
+   Each order line becomes a job line; each add-on becomes its own
+   priced line attached to its piece (`JobLineItem.parent`).
+4. **Arrived.** Strict queue, soonest promise first. The coordinator
+   claims the head job, inspects it in the wide modal (artwork, order,
+   specification, checks), corrects a specification with the customer's
+   say-so if needed, and clears it.
+5. **Clearing builds the steps.** Each piece's route, merged with its
+   add-ons' routes in station order, becomes `JobStep`s: print on a
+   named machine, laminate, bind, then the Cutting / finishing bench.
+   Each step goes to a machine of the right type that is up, wide
+   enough and least loaded.
+6. **In press and Finishing** show each machine as a lane: the job on
+   it, its progress, the jobs waiting with minutes until each is done.
+   Done moves a piece to its next machine.
+7. **The final check.** Done on a piece's last step opens it: ordered
+   against made. Everything matches: the piece is finished, and when
+   every piece is, the job is DONE and the customer is texted. Anything
+   differs: the piece goes back to its print step on its own machine,
+   and the estimate grows by itself.
+8. **Collection** by the attendant.
 
-The cashier has no part in online jobs.
+The customer's tracking page has `stage_estimate` available ("In press,
+about 15 minutes"), worked out fresh on every read. The tracking page
+itself does not show it yet.
 
 ---
 
-## The coordinator portal
+## What was built, 14–17 October
 
-**Design (locked, mocked and agreed):**
+**Coordinator portal** (live). Dot stepper, strict arrivals queue with
+claims, inspection modal with editable specifications (`JobSpecChange`,
+customer's words required), machine lanes for In press and Finishing,
+final check modal. PDFs preview from a fetched local copy (framing the
+backend directly was refused by the browser). Add-ons show under their
+piece, not as items of their own.
 
-- Existing frame kept: header, info strip, sidebar.
-- A named dot stepper across the top: Arrived → In press → Finishing →
-  Ready, with Held apart (dashed, off the line). The selected stage rolls
-  out into a dark pill; only its jobs show. Late and at-risk shown by dot
-  colour.
-- Arrived is a strict queue: the head job is sharp with Inspect; jobs
-  behind are blurred and faded with up-arrows; clearing slides the head
-  out toward In press and the rest glide up. Nobody chooses; they take
-  what is next.
-- Inspection is a wide modal, file-led (about 60% width): preview with
-  zoom, the order, the customer's words, promised vs floor, four checks
-  (size and resolution automatic, quantity/finishing and content ticked
-  by hand). Clear refuses until all four are ticked.
-- Mark ready opens a confirmation in the same pattern with the count
-  check. Opening it moves FINISHING → QUALITY_CHECK; confirming moves to
-  DONE. The quality check is the modal.
+**The floor** (live). `JobStep` (0040), by-hand steps (0041), one shared
+Cutting / finishing bench, machine assignment, per-machine queues that
+start the next job by themselves. A machine going down halts only its
+own job and moves its queue. Cancelled jobs leave every queue, and the
+floor fills any free machine each time it is read. The printers are
+named **6ft Large Format** and **10ft Large Format**.
 
-**Backend (live):**
+**Live estimates.** `apps/jobs/services/estimates.py`: queue time ahead
+plus the step's own work, rounded up, walked through opening hours,
+running-over and held-up flagged.
 
-- `apps/jobs/services/inspection.py` is the single source of truth:
-  `current_promise()`, `arrival_queue()` (soonest promise first, ties to
-  first arrival, unpromised last, held out), `next_up()`, `claim()`,
-  `release()`. Claims lapse after 10 minutes.
-- `Job.inspecting_by`, `Job.inspecting_since` (migration 0038).
-- `GET coordinator/verification-queue/`: each job has `is_next`,
-  `inspecting_by_name`, `inspecting_is_me`, `promise`, `late`, `at_risk`.
-- `POST jobs/<pk>/inspect/` claims or refreshes (409 if held by someone
-  else or out of turn). `POST jobs/<pk>/inspect/release/` frees your own.
-- Clearing and suspending release the claim.
-- `GET coordinator/board/` gains a `READY` column and promise flags. Old
-  keys are unchanged so the current page keeps working.
+**Final check** (0042). Ordered against made at each piece's last step,
+recorded every time, mismatch sends the piece back.
 
-**Frontend (next):** see `tasks/todo.md`, Phase 3.
+**Catalogue, batches 1–3** (`seed_catalogue`, re-runnable):
+
+- *Batch 1.* 13 services online. Business cards GHS 150 a box of 100.
+  Add-ons: A4/A3 lamination, A4/A3 ring binding, brown envelope
+  (GHS 2), clear bag (no price yet, so unavailable).
+- *Batch 2.* One product per print: A4 colour, A4 black and white, A3
+  colour, A4 flyers, A5 flyers, each with Front only / Front and back.
+- *Batch 3.* Flexy and SAV: at least GHS 30 an order line, any size
+  from 1in. SAV *Cut to shape* GHS 3 a sq ft (by hand until the
+  plotter). Flexy *Eyelets* free. Flyers ten or more, guillotine-cut as
+  part of the job.
+
+**Pricing.** The minimum is per order line, and quotes say how many
+pieces it covers. A saved price applies at once (the rule cache is
+cleared on save). Add-ons are counted by rule: lamination every sheet
+of every copy; binding per copy at the ring size its sheets need;
+packing one for all copies or one per copy, as the customer says;
+cutting by the piece's area.
+
+**Reliability.** The worker reconnects to Redis by itself, and the
+confirmation page converts a paid order the worker missed.
 
 ---
 
 ## Where the code lives
 
-**Backend**
+**Backend (`Octos-1`)**
 
-- `apps/storefront/` — views, `services/conversion.py`,
-  `services/messages.py`, `tasks.py` (`convert_order`,
-  `tell_customer_ready`), `tests_conversion.py`, `tests_ready.py`
-- `apps/jobs/status_engine.py` — `verify()`, `move_work()`, `_move_axis()`
-  (DONE queues the ready text)
-- `apps/jobs/services/inspection.py` — the queue and claims
-- `apps/jobs/api/coordinator_views.py` — queue, board, claim, release,
-  verify, suspend
-- `apps/jobs/tests_inspection.py`, `apps/jobs/tests_coordinator_api.py`
+- `apps/jobs/services/steps.py`: routes to steps, machines, queues, done, move
+- `apps/jobs/services/floor.py`: the floor payload for the lanes
+- `apps/jobs/services/estimates.py`: time left per stage
+- `apps/jobs/services/final_check.py`: ordered against made
+- `apps/jobs/services/availability.py`: can it be made, add-on pricing, sheets from a file
+- `apps/jobs/services/inspection.py`, `spec_changes.py`: arrivals and corrections
+- `apps/jobs/pricing_engine.py`: `quote_line`, the one price path
+- `apps/jobs/management/commands/seed_catalogue.py`: the agreed catalogue
+- `apps/production/services/machine_service.py`: machine down and up
+- `apps/storefront/views.py`, `services/conversion.py`
+- Tests: `tests_steps`, `tests_floor`, `tests_final_check`, `tests_catalogue`
 
-**Frontend** — `octos-web` repo: `src/components/coordinator/ProductionBoard.jsx`
-(being replaced), `src/pages/coordinator/CoordinatorPortal.jsx`,
-`src/api/coordinator.js`. Storefront is the `print-octos` repo.
+**Coordinator portal (`octos-web`)** `src/components/coordinator/`:
+`ProductionBoard`, `MachineLanes`, `InspectionModal`, `FinalCheckModal`,
+`ArrivalQueue`, `StageFlow`, `StageList`, `ReadyModal`, `shared`.
+
+**Storefront (`print-octos`)** `src/pages/`: `Landing`, `Specify`,
+`Checkout`, `Paid`, `Track`.
+
+**Master catalogue spreadsheet:** `Farhat_Westland_Catalogue_Master.xlsx`
+(91 services, availability looked up from a Machines tab). Batches are
+taken from it one agreed service at a time.
 
 ---
 
 ## Running the tests
 
-`apps` is a namespace package, so Django cannot discover from it. Build
-the labels fresh before every full run (a stale list silently skips new
-test files), and leave out `apps.inventory.tests`, which is a folder:
+`apps` is a namespace package; build the labels fresh every time:
 
     $root = (Get-Location).Path + '\'
     $labels = Get-ChildItem -Recurse -Path apps -Include test*.py,tests*.py |
@@ -152,33 +150,40 @@ test files), and leave out `apps.inventory.tests`, which is a folder:
       Where-Object { $_ -ne 'apps.inventory.tests' }
     docker-compose --env-file .env.docker exec -T web python manage.py test @labels --noinput
 
+A test run that says the test database "is being accessed by other
+users": `docker-compose --env-file .env.docker restart web`, then run
+again.
+
 ---
 
 ## What's wrong right now
 
-- **Promises only exist for online orders.** Counter jobs get no
-  `estimated_ready_at`, so they can never show as late.
-- **Print timings will drift long.** Clearing now means "in press", so
-  queue time behind a running job counts as printing until operators
-  mark the real start.
-- **The current workspace reads `deadline` as "Promised".** That is the
-  customer's wish, not Octos's promise. The new page reads
-  `estimated_ready_at`.
-- **Business cards are priced per card** — GHS 3,000 for 100.
-- **Em-dashes are mangled to `???`** in catalogue descriptions.
-- **`full_total` is never set at commit** — checkout shows "Items: GHS 0.00".
-- **`original_filename` stores the device's name** (an iPhone UUID).
-- **The first-name field on checkout** shows what was typed, not what the
-  server returned.
-- **`apps.inventory.tests`** cannot be run by label (folder without
-  `__init__.py`).
+- **Checkout can re-price a line from what the browser sends back.**
+  Changing a quantity resends each line's details, page count included,
+  and the server trusts them. It should keep the sheet count it worked
+  out from the file.
+- **Some online orders convert with no promise** (FP-WLB-2026-05399
+  showed "No promise"). No lateness, no place in promise order.
+- **The tracking page does not show the live estimate** the backend
+  already returns.
+- **Add-on-only services** (Cut to shape, Eyelets) may appear in the
+  counter's service list.
+- **Promises only exist for online orders.** Counter jobs never show as
+  late.
+- **Jobs cleared before steps existed** sit in "From before machine
+  tracking" with the old buttons until they finish.
+- **The info strip** ("On the floor", "Machines") shows dashes.
+- **Em-dashes mangled to `???`** in catalogue descriptions.
+- **`original_filename`** is the device's name.
 
 ---
 
 ## Decisions worth not relitigating
 
-Earlier ones still stand (nothing reaches the server until Continue; the
-confirmation page is the destination; nothing load-bearing in browser
-storage; `intake_by` and `cashier` empty on online work; quality check
-folds into finishing for the customer; each payment attempt gets its own
-reference; media on R2). Today's are in `docs/decisions.md`.
+All in `docs/decisions.md`. The ones most likely to be questioned:
+by-hand belongs to the step, not the station; one bench; the final check
+is the only way a last step finishes and a mismatch is never handed
+over; availability is worked out, never switched; one product per print
+with each side keeping its own price; pages come from the file; the
+minimum is per line and offers the pieces it covers; guillotine cutting
+is part of the job, SAV cutting is a choice.

@@ -744,3 +744,185 @@ existed.
 - **The quality check is the Mark ready modal.** QUALITY_CHECK stays in the backend because finishing quality is measured; the customer never sees it.
 - **The ready text goes to online orders only,** after the commit, through the worker. Walk-ins have not been asked whether they want texts.
 - **Push straight to main** until a stable end-to-end version exists; branch partitioning after that.
+
+# Decisions — 14 to 17 October 2026
+
+Append to `docs/decisions.md`.
+
+---
+
+## The coordinator portal
+
+### Clearing builds the job's steps
+
+A job's route was known in principle (`ServiceStation`) and invisible in
+practice: nothing said which machine a job was on. Clearing now turns
+each piece's route into `JobStep`s and gives each a machine. In press
+and Finishing are the machines' line-ups, not lists of jobs.
+
+### No Start button
+
+A step becomes active when it reaches the front of its machine's queue,
+and that moment is recorded. Starting is not something a person forgets
+to do; finishing is the one fact the floor reports.
+
+### A machine is chosen, not typed
+
+The right type, up, wide enough for the piece's shorter side, and least
+loaded. A job too wide for the 6ft goes to the 10ft without anyone
+deciding it. Where nothing fits, the step waits *unassigned* for the
+coordinator to place it, or to mark it done when it was done another way.
+
+### A machine going down affects only its own work
+
+The job on it halts; jobs queued behind it move to another machine that
+fits or wait for it. Halting a whole job for one line's queue would stop
+its other pieces on other machines.
+
+Before steps, a down machine halted every job passing through its
+*station*: a jammed Canon stopped the large-format printers.
+
+### By hand belongs to the step, not the station
+
+A banner is trimmed by hand though the cutting station also has a
+plotter. Deciding "by hand" from the station sent hand work to wait for
+a machine forever. The route step decides: no machine type, by hand.
+
+### One bench
+
+All hand work, cutting, eyelets, packing, goes to one Cutting /
+finishing lane. Consecutive hand steps on a piece are one visit, one
+Done, their minutes summed.
+
+### The floor heals when it is read
+
+Before showing the lanes, every free machine and the bench take the
+front of their queue. A cancelled job dropping out, or anything else
+that left a gap, closes the next time anyone looks.
+
+### The final check is the only way a piece finishes
+
+Done on a piece's last step opens the check: ordered against made,
+"made" filled from the order so only differences are typed. Every check
+is recorded (`FinalCheck`), so a later "this is not what I ordered" has
+an answer.
+
+### A mismatch is never handed over
+
+No "mark ready anyway". The piece goes back to its print step on its
+own machine (another that fits if that one is down), everything after
+it is done again, and the estimate grows by itself.
+
+### Estimates are worked out on every read, never stored
+
+Queue ahead plus the step's own work, rounded up (to 5 minutes under an
+hour, 15 above), walked through opening hours. A step past its time
+keeps a small remainder and says it is running over; it never counts
+down to zero. Stored figures go stale the moment a job runs long.
+
+### PDFs are shown from a local copy
+
+The viewer fetches the file and frames a local copy. Framing the
+backend's address directly is refused by the browser across sites, and
+a fetched copy needs no server header to change.
+
+---
+
+## The catalogue
+
+### Built in agreed batches, from a master list
+
+`seed_catalogue` holds each batch Khofi agreed, service by service, and
+is safe to re-run. The master spreadsheet holds everything still to
+agree. Nothing in the catalogue is a guess loaded in bulk.
+
+### Available is worked out, never switched
+
+A service can be made when it has a price and every machine its route
+needs exists at the branch. A clear bag without a price, a DTF shirt
+without a DTF printer: unavailable by themselves, and available the day
+the price or the machine arrives. A machine down for the afternoon does
+not count against it; that is the floor's business.
+
+### Online is a separate fact from available
+
+`Service.online` says it may be sold on the storefront. Photocopies are
+counter work and stay off. A service online but not yet available shows
+as Coming soon.
+
+### Add-ons are ordinary services
+
+Lamination is one service with one price, whether bought at the counter
+or added to a print online. An add-on becomes its own priced job line
+attached to its piece, and its route joins the piece's in station order:
+print, laminate, bind, pack. The floor, the estimates and the final
+check needed nothing new for it.
+
+### One product per print, each side its own price
+
+The storefront shows *A4 Colour Printing* with Front only / Front and
+back. Behind it the two services stay separate, with their own prices,
+so the counter, the floor and the reports did not change.
+
+### Pages come from the customer's file
+
+Nobody types a page count online. The file says how many pages it has;
+the sides say how many a sheet holds; sheets per copy follow. The
+server counts it at commit, after verifying the file, because a number
+from the browser is a number a customer can change.
+
+### How add-ons are counted
+
+- **Lamination:** every sheet of every copy.
+- **Binding:** per copy, at the ring size the copy's sheets need (comb
+  capacity chart for 80gsm, from 8mm). Too thick to ring-bind is refused.
+- **Packing:** one for all copies or one per copy. The customer says;
+  Octos suggests one for all for a single-sheet copy, one per copy for a
+  set of several sheets.
+- **Cutting to shape:** the piece's area, per copy.
+
+The page count is never passed to an add-on's price: the engine
+multiplies by it, which is how an envelope once cost GHS 2 × pages ×
+copies.
+
+### The minimum is per order line, and it offers what it covers
+
+Before 17 October, three small banners were three minimums. Now a line
+below GHS 30 pays GHS 30 once, and the page says how many pieces of
+that size the GHS 30 covers, with a button to take them. It feels like
+a deal rather than a penalty, and it applies at the counter too, since
+both price through one engine.
+
+### Sizes are taken as typed
+
+Flexy and SAV accept any size from 1in. The form used to correct 4 to
+6, showing the customer a size they never entered, while the minimum
+already covered small pieces.
+
+### Guillotine cutting is part of the job; SAV cutting is a choice
+
+Nobody is handed uncut flyers or cards, so their cut is on their route
+and in their price. Cutting SAV to shape is real extra work on the
+plotter, so it is an add-on at GHS 3 a sq ft, done by hand until the
+plotter arrives. Eyelets are free, a choice only so the bench knows
+which banners get them.
+
+### Business cards by the box
+
+GHS 150 for a box of 100, one side or both. Customers order boxes.
+
+### A saved price applies at once
+
+The engine caches rules for five minutes. Saving or deleting a rule now
+clears that service's cache for every branch, so a price change reaches
+the next quote, and add-ons never disagree with the engine meanwhile.
+
+---
+
+## The storefront
+
+### The hand-off to Paystack is never a blank screen
+
+From the swipe until Paystack's page loads, a full-screen message says
+where the customer is going, the amount, and not to press back. Those
+seconds are when people press back or pay twice.

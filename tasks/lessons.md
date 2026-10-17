@@ -917,3 +917,84 @@ Internal detail belongs in the log, not on the screen.
 - Load test objects the way the views load them. Views prefetch; a fresh object hides stale-cache bugs.
 - See a regression test fail without the fix before trusting it.
 - Rebuild `$labels` before every full test run; a stale list silently skips new test files.
+
+## 14 to 17 October 2026
+
+### Files and editing
+
+- **After a commit, read `git status` before moving on.** The `JobStep`
+  model and its migration were left out of the commit that depended on
+  them; a push would have broken the deploy. An untracked file the
+  commit needed is a broken commit.
+- **Confirm a pasted file landed in the right file.** The floor views
+  were pasted into `steps.py`, and the API file into `MachineLanes.jsx`.
+  A `Select-String` count of the class or function in each file catches
+  it before anything runs.
+- **Give whole files when an edit touches several places.** Several
+  Find/Change blocks in one file is where pastes go wrong.
+- **Two different files never share a name in one delivery.** The model
+  and the service were both `final_check.py`; the model went in both
+  places. Name them so they cannot be confused.
+- **File names must match their imports exactly, capitals included.**
+  `Finalcheckmodal.jsx` worked on Windows, which ignores case, and would
+  have failed on Vercel's Linux build. Renaming only the capitals takes
+  two steps on Windows.
+- **Watch for editor auto-imports.** VS Code added
+  `from django.template.backends import django` to a migration, and
+  `django.db...` then failed. Prefer `models.SET_NULL` over the long path.
+- **PowerShell's `-Path apps\**\*.py` does not recurse.** Use
+  `Get-ChildItem -Recurse`, or name the file.
+- **Line numbers move; search by name.** Reading "lines 1278–1385" after
+  a day of edits caught the wrong code. Find the `class` or `def` first.
+
+### Django and the database
+
+- **`select_for_update()` cannot lock the nullable side of a join.**
+  With `select_related` over a nullable foreign key, PostgreSQL refuses.
+  Use `select_for_update(of=('self',))`.
+- **Help text is part of a migration.** Rewording a field's help text
+  made Django want a new migration. After a hand-written migration, run
+  `makemigrations --check --dry-run`; it must say "No changes detected".
+- **A test's rollback restores the database, not the cache.** Prices
+  cached in one test leaked into the next. Tests that price anything
+  clear the cache in `setUp`.
+- **A cache needs invalidating where the data changes.** The pricing
+  rule cache held a changed price for five minutes; a signal on save and
+  delete clears it. Queryset `.update()` skips signals, so prices are
+  changed by saving.
+- **A new boolean with `default=False` empties whatever filters on it**
+  until data sets it. `Service.online` emptied the storefront catalogue
+  between the deploy and the seed. Plan the seed straight after.
+- **Run a data change only once the code that reads it is deployed.**
+  A GHS 30 minimum meant "per line" only under the new engine; under the
+  old one it would have been GHS 30 a piece.
+- **A test run that finds the test database "in use"** has a stuck
+  connection from an earlier run. Restart the web container.
+
+### Pricing
+
+- **Read how the engine uses a value before passing it.** Tier flat
+  prices are multiplied by `pages`, so passing a page count to an
+  envelope multiplied its price. Pass only what selects a tier.
+- **Look at the live rules before designing around them.** Binding was
+  priced by ring size, not sheet count; the tiers in production said so.
+
+### The frontend
+
+- **A fresh `[]` fallback in a hook's dependencies re-runs it forever.**
+  `service?.addons || []` made a new list each render and would have
+  re-asked for the price in a loop. Hold it with `useMemo`.
+- **A browser will not frame another site's page** that sets
+  `X-Frame-Options`. Fetch the file and frame a local copy.
+- **When the frontend and backend must change together,** push the
+  backend, wait for the deploy, push the frontend straight after, and
+  expect the old page to meet the new rules for a minute.
+- **Vercel deploys the frontend, Railway the backend.** "Is it deployed"
+  is two questions, asked in two places.
+
+### Reading the floor
+
+- **A rule written from one example breaks on the next.** "A station
+  with no machine types is a bench" held for hand finishing and broke on
+  cutting, which has machines for other work. Decide from the specific
+  route step, not the general station.
