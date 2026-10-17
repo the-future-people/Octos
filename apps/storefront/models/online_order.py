@@ -108,7 +108,9 @@ class OnlineOrder(AuditModel):
         max_length=20, choices=Fulfilment.choices, default=Fulfilment.COLLECTION,
     )
     delivery_address = models.TextField(blank=True)
-    promised_for = models.DateField(null=True, blank=True)
+    # The moment Octos promised it ready, worked out from the floor when
+    # the customer pays. A moment, not a day: "ready by 3:40 pm".
+    promised_for = models.DateTimeField(null=True, blank=True)
 
     # ── Payment ───────────────────────────────────────────────────
     # Online orders are paid in full. The 70% deposit exists because the

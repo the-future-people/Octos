@@ -103,7 +103,10 @@ def convert(order):
             handover_state='AWAITING_COLLECTION',
             deposit_percentage=100,
             amount_paid=order.total,
-            estimated_ready_at=order.promised_for,
+            # The promise the customer paid against. An order that somehow
+            # arrives without one gets one now: no online job is left with
+            # nothing to be late against.
+            estimated_ready_at=order.promised_for or promise_for(order),
             notes=f'Ordered online — {order.order_number}',
         )
 
@@ -405,3 +408,32 @@ def _tell_the_customer(order):
             'Could not text %s about %s',
             order.lead.phone, order.order_number, exc_info=True,
         )
+
+
+
+def promise_for(order, at=None):
+    """
+    When this order would be ready at its branch, from the floor as it is.
+    The prediction service's own answer: what is queued ahead, the work
+    itself, opening hours walked. None where there is no branch, or the
+    floor cannot say.
+    """
+    from apps.jobs.models import Service
+    from apps.production.services.prediction_service import PredictionService
+
+    if order.branch_id is None:
+        return None
+
+    lines = []
+    for line in order.line_items or []:
+        service = Service.objects.filter(pk=line.get('service')).first()
+        if service is None:
+            continue
+        specs = line.get('specifications') or {}
+        lines.append((service, int(line.get('quantity') or 1), int(specs.get('pages') or 1)))
+
+    try:
+        return PredictionService(order.branch).predict(lines, at=at).ready_at
+    except Exception:
+        logger.exception('Could not work out a promise for %s', order.order_number)
+        return None

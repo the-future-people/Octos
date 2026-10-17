@@ -913,6 +913,15 @@ class OrderPayView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # The promise, worked out now: the moment the customer pays is the
+        # moment it is made. A cart can sit for days, and a time worked out
+        # on Monday means nothing on Thursday.
+        from apps.storefront.services.conversion import promise_for
+        promise = promise_for(order)
+        if promise is not None:
+            order.promised_for = promise
+            order.save(update_fields=['promised_for'])
+
         result = paystack.initialise(
             # Its own reference, so backing out of one attempt does not
             # stop the next. Paystack never forgets a reference it has

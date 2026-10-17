@@ -721,6 +721,24 @@ class PaymentInitTests(TestCase):
             self.URL_FOR.format(order.order_number), payload, format='json',
         )
 
+    def test_paying_records_the_promise(self):
+        """
+        The promise is made when the customer pays, as a moment, and it
+        is what the job will be late against.
+        """
+        from unittest.mock import patch
+        from django.utils import timezone
+
+        order = self._order()
+        with patch('apps.storefront.services.paystack.initialise') as init:
+            init.return_value = {'success': True, 'authorization_url': 'https://x/y',
+                                 'reference': order.order_number}
+            self._pay(order, email='ama@example.com')
+
+        order.refresh_from_db()
+        self.assertIsNotNone(order.promised_for)
+        self.assertTrue(timezone.is_aware(order.promised_for))
+
     def test_starting_a_payment_returns_somewhere_to_send_the_customer(self):
         from unittest.mock import patch
 
