@@ -502,3 +502,26 @@ class CheckoutRepriceTests(JobsFixtureMixin, TestCase):
         response = self._patch(order, [])
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['line_items'], [])
+
+
+
+class ReadableNameTests(TestCase):
+    """A file name a person recognises."""
+
+    def _service(self):
+        return SimpleNamespace(display_name='A4 Colour Printing', name='A4 Color Printing 1-sided')
+
+    def test_a_name_the_phone_made_up_becomes_readable(self):
+        from apps.storefront.views import _readable_name
+        for made_up in ('82E1350A-A192-4FE5-AD92-0123456789AB.jpeg', 'image.jpg', 'IMAGE (2).PNG'):
+            self.assertEqual(
+                _readable_name(made_up, self._service()).rsplit('.', 1)[0],
+                'A4 Colour Printing artwork',
+            )
+
+    def test_the_customers_own_name_is_kept(self):
+        from apps.storefront.views import _readable_name
+        self.assertEqual(
+            _readable_name('Tenancy Agreement.pdf', self._service()),
+            'Tenancy Agreement.pdf',
+        )

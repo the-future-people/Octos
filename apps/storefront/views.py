@@ -230,6 +230,10 @@ def _stage_times(order, job):
         if stage and stage not in times:
             times[stage] = move.transitioned_at
 
+    # A job is born inspecting, so no move into it is ever logged. It
+    # reached that stage when it arrived on the floor.
+    times.setdefault('inspecting', job.created_at)
+
     return times
 
 class CatalogueView(APIView):
@@ -506,7 +510,15 @@ class OrderDetailView(APIView):
                     or uuid.uuid4().hex[:12]
                 ),
                 'service': service.id,
-                'service_name': service.name,
+                # What the customer ordered, in their words: the product
+                # and its side. base_name is the service's own, which
+                # photos are found by.
+                'service_name': (
+                    f'{service.display_name} · {service.variant_label}'
+                    if service.display_name and service.variant_label
+                    else (service.display_name or service.name)
+                ),
+                'base_name': service.name,
                 'quantity': quantity,
                 'specifications': specs,
                 'unit_price': str(quote.get('unit_price') or quote['total']),
@@ -1367,6 +1379,28 @@ Imports it needs at the top, alongside the others:
 """
 
 
+# Names a phone makes up rather than a person: a photo's internal code,
+# or a bare "image.jpg". The customer never chose them and nobody on the
+# floor recognises them.
+import re as _re
+_DEVICE_NAME = _re.compile(
+    r'^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    r'|image|photo|file|document)(?:\s*\(\d+\))?\.\w+$',
+    _re.IGNORECASE,
+)
+
+
+def _readable_name(name, service):
+    """
+    The customer's own file name where they gave one. Where the phone made
+    one up, a name a person recognises: "A4 Colour Printing artwork.jpeg".
+    """
+    if name and not _DEVICE_NAME.match(name.strip()):
+        return name
+    ext = name.rsplit('.', 1)[-1].lower() if name and '.' in name else 'file'
+    return f'{service.display_name or service.name} artwork.{ext}'
+
+
 class ArtworkCheckView(APIView):
     """
     POST /api/v1/storefront/check/
@@ -1426,7 +1460,7 @@ class ArtworkCheckView(APIView):
 
         upload.seek(0)
         content = upload.read()
-        name, content_type = upload.name, upload.content_type
+        name, content_type = _readable_name(upload.name, service), upload.content_type
 
         def rewound():
             return SimpleUploadedFile(name, content, content_type=content_type)
@@ -1456,7 +1490,7 @@ class ArtworkCheckView(APIView):
         payload = {
             'verdict': verdict['verdict'],
             'checks': verdict['checks'],
-            'filename': upload.name,
+            'filename': name,
             'size_kb': round(upload.size / 1024, 1),
             'width_px': found.get('width_px'),
             'height_px': found.get('height_px'),
