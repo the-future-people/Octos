@@ -23,6 +23,9 @@ def _account(lead):
     return {
         'first_name': lead.first_name,
         'phone': mask(lead.phone),
+        # The customer's own number, for their own orders: shown masked,
+        # sent in full to the signed-in app that owns it.
+        'number': lead.phone,
         'order_count': lead.order_count,
     }
 
