@@ -124,3 +124,67 @@ class AccountTests(TestCase):
         token = self._sign_in()['token']
         self.assertEqual(self._as(token).post(SIGNOUT).status_code, 200)
         self.assertEqual(self._as(token).get(ME).status_code, 401)
+
+
+class MyOrdersTests(TestCase):
+    """The signed-in customer's orders: every paid one on their number."""
+
+    def setUp(self):
+        cache.clear()
+        self.sms = patch('apps.storefront.services.sms.send_sms').start()
+        self.addCleanup(patch.stopall)
+
+    def _token(self, phone='0244999888'):
+        APIClient().post(CODE, {'phone': phone}, format='json')
+        code = re.search(r'\b(\d{6})\b', self.sms.call_args[0][1]).group(1)
+        return APIClient().post(VERIFY, {'phone': phone, 'code': code, 'first_name': 'Ama'},
+                                format='json').json()['token']
+
+    def _order(self, lead, paid=True):
+        from decimal import Decimal
+        from django.utils import timezone
+        from apps.storefront.models import OnlineOrder
+        order = OnlineOrder.objects.create(lead=lead, total=Decimal('58.50'),
+                                           full_total=Decimal('58.50'))
+        if paid:
+            order.paid_at = timezone.now()
+            order.save(update_fields=['paid_at'])
+        return order
+
+    def _orders(self, token):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'App {token}')
+        return client.get('/api/v1/storefront/account/orders/')
+
+    def test_paid_orders_on_the_number_are_listed_with_their_link(self):
+        token = self._token()
+        lead = Lead.objects.get()
+        order = self._order(lead)
+
+        data = self._orders(token).json()
+
+        self.assertEqual([o['order_number'] for o in data['active']], [order.order_number])
+        self.assertEqual(data['active'][0]['token'], order.access_token)
+        self.assertEqual(data['collected'], [])
+
+    def test_a_cart_never_paid_for_is_not_an_order(self):
+        token = self._token()
+        self._order(Lead.objects.get(), paid=False)
+        self.assertEqual(self._orders(token).json()['active'], [])
+
+    def test_the_number_written_another_way_is_the_same_customer(self):
+        website = Lead.objects.create(phone='024 499 9888', first_name='Ama')
+        order = self._order(website)
+        token = self._token('0244999888')
+
+        numbers = [o['order_number'] for o in self._orders(token).json()['active']]
+        self.assertIn(order.order_number, numbers)
+
+    def test_someone_elses_orders_never_show(self):
+        other = Lead.objects.create(phone='0201112222', first_name='Kofi')
+        self._order(other)
+        token = self._token()
+        self.assertEqual(self._orders(token).json()['active'], [])
+
+    def test_orders_need_a_signed_in_app(self):
+        self.assertEqual(APIClient().get('/api/v1/storefront/account/orders/').status_code, 401)
