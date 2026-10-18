@@ -1,0 +1,178 @@
+"""
+Accounts for the Print Octos app: a phone number, verified once by a code
+sent to it, and a session the app keeps.
+
+The number is the account. It is the Lead the website already makes, so
+orders placed on the website with the same number are already theirs.
+
+The code is six digits, lives ten minutes, and is kept only as a hash in
+the cache. Five wrong guesses kill it. A number receives at most three
+codes in fifteen minutes, so nobody can flood someone's phone or run up
+the SMS bill; the views add a limit per device on top.
+"""
+
+import hashlib
+import secrets
+
+from django.contrib.auth.hashers import check_password, make_password
+from django.core.cache import cache
+from django.db import transaction
+from django.utils import timezone
+
+CODE_TTL = 10 * 60
+MAX_GUESSES = 5
+SENDS_PER_WINDOW = 3
+SEND_WINDOW = 15 * 60
+
+
+class AccountRefused(Exception):
+    """Something the customer can fix, and the message says what."""
+
+
+# ── Phone numbers ────────────────────────────────────────────────
+
+def normalise_phone(raw):
+    """
+    One form for one number: 0XXXXXXXXX, ten digits.
+    024 499 9888, +233 24 499 9888 and 233244999888 are all 0244999888.
+    None for anything that is not a Ghanaian mobile number.
+    """
+    digits = ''.join(c for c in str(raw or '') if c.isdigit())
+    if digits.startswith('233') and len(digits) == 12:
+        digits = '0' + digits[3:]
+    elif len(digits) == 9:
+        digits = '0' + digits
+    if len(digits) != 10 or not digits.startswith('0'):
+        return None
+    return digits
+
+
+def find_lead(phone):
+    """
+    The account for this number, however the website stored it. Numbers
+    were stored much as they were typed, so they are compared normalised.
+    """
+    from apps.storefront.models import Lead
+
+    exact = Lead.objects.filter(phone=phone).first()
+    if exact:
+        return exact
+    for lead in Lead.objects.filter(phone__contains=phone[-4:]):
+        if normalise_phone(lead.phone) == phone:
+            return lead
+    return None
+
+
+# ── The code ─────────────────────────────────────────────────────
+
+def _code_key(phone):
+    return f'account:code:{phone}'
+
+
+def _sends_key(phone):
+    return f'account:sends:{phone}'
+
+
+def send_code(raw_phone):
+    """Text a fresh code to the number. Returns the normalised number."""
+    from apps.storefront.services.sms import send_sms
+
+    phone = normalise_phone(raw_phone)
+    if phone is None:
+        raise AccountRefused('Enter a Ghanaian mobile number, like 024 000 0000.')
+
+    now = timezone.now().timestamp()
+    sends = [t for t in (cache.get(_sends_key(phone)) or []) if now - t < SEND_WINDOW]
+    if len(sends) >= SENDS_PER_WINDOW:
+        raise AccountRefused(
+            'We have sent several codes to this number. Wait a few minutes and try again.'
+        )
+
+    code = f'{secrets.randbelow(1_000_000):06d}'
+    cache.set(_code_key(phone), {'hash': make_password(code), 'guesses': 0}, CODE_TTL)
+    cache.set(_sends_key(phone), sends + [now], SEND_WINDOW)
+
+    send_sms(phone, f'Your Print Octos code is {code}. It expires in 10 minutes. Never share it.')
+    return phone
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@transaction.atomic
+def verify_code(raw_phone, code, first_name='', device=''):
+    """
+    Check the code. Right: the account (made now if the number is new) and
+    a fresh session token, returned once and never stored as is.
+    """
+    from apps.storefront.models import AppSession, Lead
+
+    phone = normalise_phone(raw_phone)
+    if phone is None:
+        raise AccountRefused('Enter a Ghanaian mobile number, like 024 000 0000.')
+
+    held = cache.get(_code_key(phone))
+    if not held:
+        raise AccountRefused('That code has expired. Ask for a new one.')
+
+    if not check_password(str(code or '').strip(), held['hash']):
+        held['guesses'] += 1
+        if held['guesses'] >= MAX_GUESSES:
+            cache.delete(_code_key(phone))
+            raise AccountRefused('Too many wrong codes. Ask for a new one.')
+        cache.set(_code_key(phone), held, CODE_TTL)
+        raise AccountRefused('That code is not right. Check the message and try again.')
+
+    cache.delete(_code_key(phone))
+
+    lead = find_lead(phone)
+    if lead is None:
+        name = (first_name or '').strip()
+        if not name:
+            raise AccountRefused('Tell us your first name to finish signing up.')
+        lead = Lead.objects.create(phone=phone, first_name=name[:100])
+    elif first_name and not lead.first_name:
+        lead.first_name = first_name.strip()[:100]
+        lead.save(update_fields=['first_name'])
+
+    token = secrets.token_urlsafe(32)
+    AppSession.objects.create(
+        lead=lead, token_hash=_hash_token(token),
+        device=(device or '')[:120], last_seen_at=timezone.now(),
+    )
+    return lead, token
+
+
+# ── Sessions ─────────────────────────────────────────────────────
+
+def session_for(token):
+    """The active session for a token, or None."""
+    from apps.storefront.models import AppSession
+
+    if not token:
+        return None
+    session = (
+        AppSession.objects
+        .select_related('lead')
+        .filter(token_hash=_hash_token(token), revoked_at__isnull=True)
+        .first()
+    )
+    if session is None:
+        return None
+    # Kept roughly current without a write on every request.
+    now = timezone.now()
+    if not session.last_seen_at or (now - session.last_seen_at).total_seconds() > 3600:
+        session.last_seen_at = now
+        session.save(update_fields=['last_seen_at'])
+    return session
+
+
+def sign_out(session):
+    session.revoked_at = timezone.now()
+    session.save(update_fields=['revoked_at'])
+
+
+def mask(phone):
+    """0244999888 shown as 024 ••• 9888."""
+    return f'{phone[:3]} ••• {phone[-4:]}' if phone and len(phone) >= 7 else phone

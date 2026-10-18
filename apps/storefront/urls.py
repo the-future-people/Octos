@@ -1,12 +1,16 @@
 from django.urls import path
 
 from . import views
-
+from apps.storefront import account_views
 # Order matters. `orders/<str:order_number>/` matches anything that
 # starts with an order number, so every more specific route has to come
 # before it or it never runs.
 urlpatterns = [
     path('catalogue/', views.CatalogueView.as_view(), name='storefront-catalogue'),
+    path('account/code/', account_views.AccountCodeView.as_view(), name='storefront-account-code'),
+    path('account/verify/', account_views.AccountVerifyView.as_view(), name='storefront-account-verify'),
+    path('account/me/', account_views.AccountMeView.as_view(), name='storefront-account-me'),
+    path('account/signout/', account_views.AccountSignOutView.as_view(), name='storefront-account-signout'),
     path('orders/', views.OrderCreateView.as_view(), name='storefront-order-create'),
     path('webhook/paystack/', views.PaystackWebhookView.as_view(), name='storefront-paystack-webhook'),
 

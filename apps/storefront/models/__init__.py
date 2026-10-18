@@ -4,8 +4,9 @@ from .online_order import OnlineOrder
 from .order_file import OrderFile
 from .paystack_event import PaystackEvent
 from .staged_upload import StagedUpload
+from .app_session import AppSession
 
 __all__ = [
     'CommitRecord', 'Lead', 'OnlineOrder', 'OrderFile',
-    'PaystackEvent', 'StagedUpload',
+    'PaystackEvent', 'StagedUpload', 'AppSession'
 ]
