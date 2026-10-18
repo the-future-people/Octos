@@ -412,4 +412,8 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:5180',
     'http://127.0.0.1:5180',
     'https://print-octos.vercel.app',
+    # The Print Octos app. Its pages are served from inside the phone,
+    # under these addresses: Android's, then iPhone's.
+    'https://localhost',
+    'capacitor://localhost',
 ]
