@@ -214,11 +214,28 @@ def _stage(order):
     return _STAGE.get(job.work_state, 'paid')
 
 
+def _detail(line):
+    """A short line about the piece: 3ft × 6ft, 100 copies, 2 boxes."""
+    specs = line.get('specifications') or {}
+    quantity = int(line.get('quantity') or 1)
+    w, h = specs.get('width_in'), specs.get('height_in')
+    if w and h:
+        def size(inches):
+            inches = float(inches)
+            return f'{inches / 12:g}ft' if inches % 12 == 0 else f'{inches:g}in'
+        piece = f'{size(w)} × {size(h)}'
+        return piece if quantity == 1 else f'{piece} · {quantity} pieces'
+    name = (line.get('base_name') or line.get('service_name') or '').lower()
+    if 'card' in name:
+        return f'{quantity} box' if quantity == 1 else f'{quantity} boxes'
+    return f'{quantity} copy' if quantity == 1 else f'{quantity} copies'
+
+
 def orders_for(lead):
     """
     The customer's paid orders, newest first: active ones with their stage
-    and time left, collected ones with when. Cancelled work is left out;
-    carts never paid for are not orders.
+    and time left, collected ones with when, cancelled ones kept apart.
+    Carts never paid for are not orders.
     """
     from apps.jobs.models import JobStatusLog
     from apps.jobs.services.estimates import estimate
@@ -231,27 +248,43 @@ def orders_for(lead):
         .order_by('-paid_at')
     )
 
-    active, collected = [], []
+    active, collected, cancelled = [], [], []
     for order in orders:
         job = order.job
-        if job is not None and job.status in ('CANCELLED', 'VOIDED'):
-            continue
-
         lines = order.line_items or []
-        first = lines[0].get('service_name', 'Order') if lines else 'Order'
+        first = lines[0] if lines else {}
+        name = first.get('service_name', 'Order')
         item = {
             'order_number': order.order_number,
             # Their own order: the link that opens its tracking page.
             'token': order.access_token,
-            'summary': first if len(lines) <= 1 else f'{first} and {len(lines) - 1} more',
+            'summary': name if len(lines) <= 1 else f'{name} and {len(lines) - 1} more',
+            # The service's own name, which badges and photos are found by.
+            'base_name': first.get('base_name') or name,
+            'detail': _detail(first) if first else '',
             'total': f'{order.total:.2f}',
             'paid_at': order.paid_at.isoformat(),
             'branch': order.branch.name if order.branch_id else None,
             'promised_for': order.promised_for.isoformat() if order.promised_for else None,
             'stage': _stage(order),
+            # Every line with its add-ons and prices, so the list can open
+            # an order in place without asking again.
+            'lines': [{
+                'name': line.get('service_name', ''),
+                'detail': _detail(line),
+                'total': str(line.get('total') or ''),
+                'addons': [{
+                    'name': addon.get('service_name', ''),
+                    'detail': addon.get('detail', ''),
+                    'total': str(addon.get('total') or '0'),
+                } for addon in (line.get('addons') or [])],
+            } for line in lines],
         }
 
-        if item['stage'] == 'collected':
+        if job is not None and job.status in ('CANCELLED', 'VOIDED'):
+            item['stage'] = 'cancelled'
+            cancelled.append(item)
+        elif item['stage'] == 'collected':
             at = (
                 JobStatusLog.objects
                 .filter(job=job, to_status='HANDED_OVER')
@@ -262,6 +295,15 @@ def orders_for(lead):
             item['collected_at'] = (at or job.updated_at).isoformat()
             collected.append(item)
         else:
+            if item['stage'] == 'ready':
+                done = (
+                    JobStatusLog.objects
+                    .filter(job=job, to_status='DONE')
+                    .order_by('transitioned_at')
+                    .values_list('transitioned_at', flat=True)
+                    .first()
+                )
+                item['ready_since'] = (done or job.updated_at).isoformat()
             try:
                 found = estimate(job) if job is not None else None
             except Exception:
@@ -269,4 +311,4 @@ def orders_for(lead):
             item['estimate'] = found.as_dict() if found else None
             active.append(item)
 
-    return {'active': active, 'collected': collected}
+    return {'active': active, 'collected': collected, 'cancelled': cancelled}

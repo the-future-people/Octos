@@ -196,3 +196,15 @@ class MyOrdersTests(TestCase):
 
     def test_orders_need_a_signed_in_app(self):
         self.assertEqual(APIClient().get('/api/v1/storefront/account/orders/').status_code, 401)
+
+
+    def test_each_order_says_its_size_or_quantity(self):
+        from apps.storefront.services.accounts import _detail
+        self.assertEqual(_detail({'quantity': 1, 'specifications': {'width_in': 36, 'height_in': 72}}), '3ft × 6ft')
+        self.assertEqual(_detail({'quantity': 3, 'specifications': {'width_in': 12, 'height_in': 18}}), '1ft × 18in · 3 pieces')
+        self.assertEqual(_detail({'quantity': 100, 'service_name': 'A4 Colour Printing', 'specifications': {}}), '100 copies')
+        self.assertEqual(_detail({'quantity': 2, 'base_name': 'Business Cards', 'specifications': {}}), '2 boxes')
+
+    def test_the_list_has_a_place_for_cancelled_orders(self):
+        token = self._token()
+        self.assertIn('cancelled', self._orders(token).json())
