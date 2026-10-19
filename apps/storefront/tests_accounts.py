@@ -125,6 +125,14 @@ class AccountTests(TestCase):
         self.assertEqual(self._as(token).post(SIGNOUT).status_code, 200)
         self.assertEqual(self._as(token).get(ME).status_code, 401)
 
+    def test_a_customer_can_change_their_first_name(self):
+        token = self._sign_in()['token']
+        response = self._as(token).patch(ME, {'first_name': 'Jimmy'}, format='json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['first_name'], 'Jimmy')
+        self.assertTrue(response.json()['member_since'])
+        self.assertEqual(self._as(token).patch(ME, {'first_name': '  '}, format='json').status_code, 400)
+
 
 class MyOrdersTests(TestCase):
     """The signed-in customer's orders: every paid one on their number."""

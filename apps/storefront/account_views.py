@@ -27,6 +27,7 @@ def _account(lead):
         # sent in full to the signed-in app that owns it.
         'number': lead.phone,
         'order_count': lead.order_count,
+        'member_since': lead.created_at.isoformat(),
     }
 
 
@@ -84,6 +85,18 @@ class AccountMeView(_SignedIn):
         session = self.session(request)
         if session is None:
             return self.refused()
+        return Response(_account(session.lead))
+
+    def patch(self, request):
+        """Their first name, as they want it written. The number is the account and does not change here."""
+        session = self.session(request)
+        if session is None:
+            return self.refused()
+        name = (request.data.get('first_name') or '').strip()
+        if not name:
+            return Response({'detail': 'Tell us your first name.'}, status=status.HTTP_400_BAD_REQUEST)
+        session.lead.first_name = name[:100]
+        session.lead.save(update_fields=['first_name'])
         return Response(_account(session.lead))
 
 

@@ -18,6 +18,7 @@ the specification, through the same function the counter uses.
 from apps.jobs.services.file_metadata import extract, measure
 from decimal import Decimal
 import random
+from apps.storefront.account_views import _SignedIn
 from apps.storefront.models import Lead, OnlineOrder, OrderFile, PaystackEvent
 from apps.storefront.services.sms import send_sms
 from django.shortcuts import get_object_or_404
