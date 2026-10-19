@@ -69,7 +69,14 @@ def tell_customer_ready(self, job_id):
         return None
 
     try:
-        send_sms(order.lead.phone, ready_text(order))
+        # The app first; an SMS only if no phone of theirs was reached.
+        from apps.storefront.services.notify import tell
+        branch = order.branch.name if order.branch_id else 'the branch'
+        tell(
+            order, 'ready', 'Ready to collect',
+            f'Your order {order.order_number} is ready at {branch}.',
+            sms_text=ready_text(order), text_with=send_sms,
+        )
     except Exception as problem:
         raise self.retry(exc=problem)
 

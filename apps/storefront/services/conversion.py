@@ -402,7 +402,13 @@ def _tell_the_customer(order):
     from apps.storefront.services.messages import payment_text
 
     try:
-        send_sms(order.lead.phone, payment_text(order))
+        # The app first; an SMS only if no phone of theirs was reached.
+        from apps.storefront.services.notify import ready_phrase, tell
+        tell(
+            order, 'paid', 'Payment received',
+            f'{order.order_number}: we’re on it. {ready_phrase(order)}'.strip(),
+            sms_text=payment_text(order), text_with=send_sms,
+        )
     except Exception:
         logger.error(
             'Could not text %s about %s',

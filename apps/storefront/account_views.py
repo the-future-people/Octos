@@ -199,3 +199,69 @@ def orders_for(lead):
 
     return {'active': active, 'collected': collected}
 
+class AccountDeviceView(_SignedIn):
+    """POST account/device/ { token, platform }: where to push for this phone."""
+
+    def post(self, request):
+        from django.utils import timezone
+        from apps.storefront.models import DeviceToken
+        session = self.session(request)
+        if session is None:
+            return self.refused()
+        token = (request.data.get('token') or '').strip()
+        if not token:
+            return Response({'detail': 'No device token.'}, status=status.HTTP_400_BAD_REQUEST)
+        DeviceToken.objects.update_or_create(
+            token=token[:255],
+            defaults={
+                'session': session,
+                'platform': (request.data.get('platform') or '')[:10],
+                'last_seen_at': timezone.now(),
+            },
+        )
+        return Response({'registered': True})
+
+
+class AccountNotificationsView(_SignedIn):
+    """GET account/notifications/: the inbox, newest first, with the unread count."""
+
+    def get(self, request):
+        from apps.storefront.models import AppNotification
+        from apps.storefront.services.accounts import leads_for
+        session = self.session(request)
+        if session is None:
+            return self.refused()
+        notes = (
+            AppNotification.objects
+            .filter(lead__in=leads_for(session.lead))
+            .select_related('order')[:50]
+        )
+        return Response({
+            'unread': sum(1 for n in notes if n.read_at is None),
+            'items': [{
+                'id': n.id,
+                'kind': n.kind,
+                'title': n.title,
+                'body': n.body,
+                'at': n.created_at.isoformat(),
+                'read': n.read_at is not None,
+                'order_number': n.order.order_number if n.order_id else None,
+                'token': n.order.access_token if n.order_id else None,
+            } for n in notes],
+        })
+
+
+class AccountNotificationsReadView(_SignedIn):
+    """POST account/notifications/read/: everything in the inbox marked read."""
+
+    def post(self, request):
+        from django.utils import timezone
+        from apps.storefront.models import AppNotification
+        from apps.storefront.services.accounts import leads_for
+        session = self.session(request)
+        if session is None:
+            return self.refused()
+        AppNotification.objects.filter(
+            lead__in=leads_for(session.lead), read_at__isnull=True,
+        ).update(read_at=timezone.now())
+        return Response({'read': True})
