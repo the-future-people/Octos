@@ -33,9 +33,10 @@ STAGE_WORDS = {
     'QUALITY_CHECK': 'Final check',
 }
 
-# Not collected within this long, and it leaves the board: the shelf
-# keeps it, the screen does not need to.
-WINDOW = timedelta(days=3)
+# A ready order stays on the board until it is collected, up to this
+# long; after that it is for staff to chase, not the screen to show.
+# Jobs still being made show however old: a stuck job is worth seeing.
+READY_FOR = timedelta(days=14)
 
 
 def _first_services(job_ids):
@@ -66,7 +67,7 @@ class BoardView(APIView):
 
         now = timezone.now()
         jobs = list(
-            Job.objects.filter(branch__code__iexact=branch_code, created_at__gte=now - WINDOW)
+            Job.objects.filter(branch__code__iexact=branch_code)
             .exclude(handover_state='HANDED_OVER')
             .exclude(status__in=['CANCELLED', 'VOIDED', 'VOID'])
             .order_by('created_at')
@@ -84,6 +85,8 @@ class BoardView(APIView):
                 services[job.pk] = first.get('service_name', '')
             item = {'number': number, 'service': services.get(job.pk, '')}
             if job.work_state == 'DONE':
+                if job.updated_at < now - READY_FOR:
+                    continue
                 item['since'] = job.updated_at.isoformat()
                 ready.append(item)
             else:
