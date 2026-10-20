@@ -23,6 +23,18 @@ from .serializers import (
 # Jobs
 # ─────────────────────────────────────────────────────────────────────────────
 
+from django.conf import settings as _settings
+
+def _managers_set_company_prices(role):
+    """
+    While there is one branch, its manager sets the company's prices. When
+    Octos goes multi-branch, set MANAGERS_SET_COMPANY_PRICES = False and
+    only a Super Admin can.
+    """
+    return (getattr(_settings, 'MANAGERS_SET_COMPANY_PRICES', True)
+            and role in ('BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER'))
+
+
 class JobListView(generics.ListAPIView):
     serializer_class   = JobListSerializer
     permission_classes = [IsAuthenticated]
@@ -42,7 +54,9 @@ class JobListView(generics.ListAPIView):
         job_type     = self.request.query_params.get('job_type')
         status_param = self.request.query_params.get('status')
 
-        if branch_id:
+        if self.request.query_params.get('company'):
+            qs = qs.filter(branch__isnull=True)
+        elif branch_id:
             qs = qs.filter(branch_id=branch_id)
         if job_type:
             qs = qs.filter(job_type=job_type)
@@ -649,13 +663,18 @@ class ServiceCreateView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        branch = getattr(request.user, 'branch', None)
-        service = create_service(
-            user              = request.user,
-            branch            = branch,
-            validated_data    = serializer.validated_data,
-            raw_mappings_json = request.data.get('consumable_mappings'),
-        )
+        # Prices are company-wide: a new service's price is the company's,
+        # never one branch's.
+        try:
+            service = create_service(
+                user              = request.user,
+                branch            = None,
+                validated_data    = serializer.validated_data,
+                raw_mappings_json = request.data.get('consumable_mappings'),
+            )
+        except (ValueError, PermissionError) as err:
+            # "Already exists", "invalid price": said plainly, not a crash.
+            return Response({'detail': str(err)}, status=status.HTTP_400_BAD_REQUEST)
 
         # Bust the services list cache so new service is immediately visible
         from django.core.cache import cache
@@ -668,12 +687,16 @@ class ServiceCreateView(APIView):
 class PricingRuleListView(generics.ListAPIView):
     serializer_class   = PricingRuleSerializer
     permission_classes = [IsAuthenticated]
+    # The catalogue needs every price at once, not a first page of them.
+    pagination_class   = None
 
     def get_queryset(self):
         qs         = PricingRule.objects.select_related('service', 'branch').filter(is_active=True)
         branch_id  = self.request.query_params.get('branch')
         service_id = self.request.query_params.get('service')
-        if branch_id:
+        if self.request.query_params.get('company'):
+            qs = qs.filter(branch__isnull=True)
+        elif branch_id:
             qs = qs.filter(branch_id=branch_id)
         if service_id:
             qs = qs.filter(service_id=service_id)
@@ -702,8 +725,8 @@ class PricingRuleDetailView(APIView):
         except PricingRule.DoesNotExist:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Company-wide default rules (branch=None) are Super Admin only
-        if rule.branch_id is None and role != 'SUPER_ADMIN':
+        # Company-wide prices: Super Admin, and managers while that is allowed.
+        if rule.branch_id is None and role != 'SUPER_ADMIN' and not _managers_set_company_prices(role):
             return Response(
                 {'detail': 'Only a Super Admin can modify company-wide default pricing.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -747,12 +770,24 @@ class PricingRuleCreateView(APIView):
 
         target_branch_id = request.data.get('branch')
 
-        # Company-wide default rules (branch=None) are Super Admin only
-        if target_branch_id in (None, '', 'null') and role != 'SUPER_ADMIN':
+        company = target_branch_id in (None, '', 'null')
+        if company and role != 'SUPER_ADMIN' and not _managers_set_company_prices(role):
             return Response(
-                {'detail': 'Only a Super Admin can create company-wide default pricing.'},
+                {'detail': 'Only a Super Admin can set company-wide prices.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        # One company price per service: setting it again updates it rather
+        # than leaving two active prices that disagree.
+        if company:
+            existing = PricingRule.objects.filter(
+                service_id=request.data.get('service'), branch__isnull=True, is_active=True,
+            ).first()
+            if existing:
+                existing.base_price = Decimal(str(request.data['base_price']))
+                existing.color_multiplier = Decimal(str(request.data.get('color_multiplier', '1.00')))
+                existing.save(update_fields=['base_price', 'color_multiplier', 'updated_at'])
+                return Response(PricingRuleSerializer(existing).data)
 
         if target_branch_id not in (None, '', 'null'):
             scope = get_branch_scope(request.user)

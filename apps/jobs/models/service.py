@@ -143,3 +143,17 @@ class Service(AuditModel):
 
     def __str__(self):
         return f"{self.name} ({self.category})"
+
+# Any change to a service (a new photo, a description, a price unit,
+# switching it on or off) shows straight away, not after the list's
+# half-hour cache runs out.
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+
+
+@receiver([post_save, post_delete], sender=Service)
+def _forget_service_lists(**kwargs):
+    from django.core.cache import cache
+    cache.delete_many(
+        ['services:list:__all__'] + [f'services:list:{c}' for c in ('INSTANT', 'PRODUCTION', 'DESIGN')]
+    )
