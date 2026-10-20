@@ -539,6 +539,12 @@ class JobStatusEngine:
             job_id = self.job.pk
             transaction.on_commit(lambda: tell_customer_ready.delay(job_id))
 
+        # Every move nudges the customer's app to refresh, silently, after
+        # the move is saved. Counter jobs have no app; the task finds that.
+        from apps.storefront.tasks import nudge_app
+        nudged_job = self.job.pk
+        transaction.on_commit(lambda: nudge_app.delay(nudged_job))
+
         if axis == 'HANDOVER' and to_state == 'HANDED_OVER':
             self.job.handed_over_at = now
             self.job.handed_over_by = actor

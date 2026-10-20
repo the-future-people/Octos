@@ -443,7 +443,15 @@ class WorkAxisTests(JobsFixtureMixin, TestCase):
                 engine.move_work('DONE', actor=self.coordinator)
             queued.assert_not_called()
 
-        self.assertEqual(len(pending), 1)
+        # Two things wait for the commit: the ready text, and the silent
+        # nudge that refreshes the customer's app. Each for this job, once.
+        self.assertEqual(len(pending), 2)
+        with patch('apps.storefront.tasks.tell_customer_ready.delay') as ready, \
+             patch('apps.storefront.tasks.nudge_app.delay') as nudge:
+            for callback in pending:
+                callback()
+        ready.assert_called_once_with(job.pk)
+        nudge.assert_called_once_with(job.pk)
 
     def test_cannot_skip_a_stage(self):
         job = self._production_job()

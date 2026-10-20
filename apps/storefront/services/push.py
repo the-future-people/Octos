@@ -79,3 +79,34 @@ def send(token, title, body, data=None):
         raise TokenGone()
     logger.warning('Push refused (%s): %s', response.status_code, response.text[:300])
     return False
+
+
+
+def nudge(token, data):
+    """
+    A silent message: data only, no title or body, so nothing shows on
+    the phone. An open app hears it and refreshes. Raises TokenGone like
+    send() when the phone has gone.
+    """
+    creds = _creds()
+    if creds is None:
+        return False
+    try:
+        response = requests.post(
+            f'https://fcm.googleapis.com/v1/projects/{creds.project_id}/messages:send',
+            json={'message': {
+                'token': token,
+                'data': {k: str(v) for k, v in (data or {}).items()},
+                'android': {'priority': 'HIGH'},
+            }},
+            headers={'Authorization': f'Bearer {creds.token}'},
+            timeout=10,
+        )
+    except requests.RequestException:
+        logger.exception('Nudge to a phone failed to send')
+        return False
+    if response.status_code == 200:
+        return True
+    if response.status_code in (400, 404) and 'UNREGISTERED' in response.text:
+        raise TokenGone()
+    return False

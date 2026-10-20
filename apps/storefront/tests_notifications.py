@@ -108,3 +108,23 @@ class NotifyTests(TestCase):
 
     def test_the_inbox_needs_a_signed_in_app(self):
         self.assertEqual(APIClient().get('/api/v1/storefront/account/notifications/').status_code, 401)
+
+    def test_a_nudge_is_silent(self):
+        """No title, no body: only data, so nothing shows on the phone."""
+        from apps.storefront.services import push
+        creds = type('Creds', (), {'project_id': 'p', 'token': 't'})()
+        with patch.object(push, '_creds', return_value=creds), \
+             patch('apps.storefront.services.push.requests.post') as post:
+            post.return_value.status_code = 200
+            push.nudge('phone-9', {'kind': 'nudge', 'order': 'ORD-1'})
+        message = post.call_args.kwargs['json']['message']
+        self.assertNotIn('notification', message)
+        self.assertEqual(message['data'], {'kind': 'nudge', 'order': 'ORD-1'})
+
+    def test_a_job_with_no_online_order_nudges_nobody(self):
+        """Counter jobs have no app to nudge."""
+        from apps.storefront.tasks import nudge_app
+        with patch('apps.storefront.services.push.configured', return_value=True), \
+             patch('apps.storefront.services.push.nudge') as nudge:
+            nudge_app(999999)
+        nudge.assert_not_called()
