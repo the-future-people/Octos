@@ -274,6 +274,9 @@ class CatalogueView(APIView):
                 # counted from the file, never typed.
                 'counts_pages': counts_pages(s),
                 'pages_per_sheet': pages_per_sheet(s),
+                # The service's own photo, from the public catalogue bucket:
+                # the website and the app show it ahead of their built-in ones.
+                'image_url': s.image.url if s.image else None,
                 'price': display_price(s),
                 # Coming soon where a price or a machine is still missing.
                 'available': can_make(s),
