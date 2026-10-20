@@ -1,5 +1,5 @@
 from django.urls import path
-
+from apps.storefront import board_views
 from . import views
 from apps.storefront import account_views
 from apps.storefront import route_views
@@ -38,4 +38,5 @@ urlpatterns = [
     path('route/', route_views.RouteView.as_view(), name='route'),
     path('collect/',           collect_views.CollectLookupView.as_view(),   name='collect-lookup'),
     path('collect/hand-over/', collect_views.CollectHandOverView.as_view(), name='collect-hand-over'),
+    path('board/<str:branch_code>/', board_views.BoardView.as_view(), name='board'),
 ]
