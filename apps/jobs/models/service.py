@@ -1,6 +1,6 @@
 from django.db import models
 from apps.core.models import AuditModel
-
+from apps.jobs.storage import catalogue_storage
 
 class Service(AuditModel):
     """
@@ -71,6 +71,8 @@ class Service(AuditModel):
         help_text='How this version is named on the product: Front only, Front and back.',
     )
     image                = models.ImageField(
+        # The public catalogue bucket: a photo any browser can load.
+        storage=catalogue_storage,
         upload_to = 'services/',
         null      = True,
         blank     = True,
