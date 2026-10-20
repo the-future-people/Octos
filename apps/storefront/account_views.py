@@ -236,7 +236,31 @@ class AccountDeviceView(_SignedIn):
 
 
 class AccountNotificationsView(_SignedIn):
-    """GET account/notifications/: the inbox, newest first, with the unread count."""
+    """
+    GET account/notifications/: the inbox, newest first, with the unread
+    count. Each message about an order carries that order's product (name,
+    detail, add-ons), what was paid and how, so the app can show it as one
+    card per order without asking again.
+    """
+
+    @staticmethod
+    def _order(order):
+        from apps.storefront.services.accounts import _detail
+        lines = order.line_items or []
+        first = lines[0] if lines else {}
+        return {
+            'order_number': order.order_number,
+            'token': order.access_token,
+            'product': {
+                'name': first.get('service_name', ''),
+                'base_name': first.get('base_name') or first.get('service_name', ''),
+                'detail': _detail(first) if first else '',
+                'addons': [a.get('service_name', '') for a in (first.get('addons') or [])],
+                'more': max(0, len(lines) - 1),
+            } if first else None,
+            'total': f'{order.total:.2f}',
+            'payment_channel': getattr(order, 'payment_channel', '') or '',
+        }
 
     def get(self, request):
         from apps.storefront.models import AppNotification
@@ -249,18 +273,24 @@ class AccountNotificationsView(_SignedIn):
             .filter(lead__in=leads_for(session.lead))
             .select_related('order')[:50]
         )
-        return Response({
-            'unread': sum(1 for n in notes if n.read_at is None),
-            'items': [{
+        items = []
+        for n in notes:
+            item = {
                 'id': n.id,
                 'kind': n.kind,
                 'title': n.title,
                 'body': n.body,
                 'at': n.created_at.isoformat(),
                 'read': n.read_at is not None,
-                'order_number': n.order.order_number if n.order_id else None,
-                'token': n.order.access_token if n.order_id else None,
-            } for n in notes],
+                'order_number': None,
+                'token': None,
+            }
+            if n.order_id:
+                item.update(self._order(n.order))
+            items.append(item)
+        return Response({
+            'unread': sum(1 for n in notes if n.read_at is None),
+            'items': items,
         })
 
 
