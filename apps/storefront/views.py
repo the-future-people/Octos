@@ -89,6 +89,8 @@ def _serialise(order):
         'total': f'{Decimal(order.total):.2f}',
         'fulfilment': order.fulfilment,
         'promised_for': order.promised_for,
+        # The collection PIN: only to whoever holds the order's token, only while it waits to be collected.
+        'collection_pin': order.collection_pin if (order.job_id and order.job.work_state == 'DONE' and order.job.handover_state != 'HANDED_OVER') else None,
         'paid_at': order.paid_at,
         'is_paid': order.is_paid,
         # So the confirmation page can show the customer the same link

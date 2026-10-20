@@ -111,6 +111,10 @@ class OnlineOrder(AuditModel):
     # The moment Octos promised it ready, worked out from the floor when
     # the customer pays. A moment, not a day: "ready by 3:40 pm".
     promised_for = models.DateTimeField(null=True, blank=True)
+    # Proves the person at the counter is the customer, or someone they
+    # sent. Made when the order turns ready; never shown in public.
+    collection_pin = models.CharField(max_length=4, blank=True)
+    collected_by_name = models.CharField(max_length=100, blank=True)
 
     # ── Payment ───────────────────────────────────────────────────
     # Online orders are paid in full. The 70% deposit exists because the

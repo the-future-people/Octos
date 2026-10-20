@@ -71,6 +71,8 @@ def tell_customer_ready(self, job_id):
     try:
         # The app first; an SMS only if no phone of theirs was reached.
         from apps.storefront.services.notify import tell
+        from apps.storefront.services.collection import ensure_pin
+        ensure_pin(order)
         branch = order.branch.name if order.branch_id else 'the branch'
         tell(
             order, 'ready', 'Ready to collect',

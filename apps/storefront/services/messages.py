@@ -63,7 +63,7 @@ def ready_text(order):
     """
     where = _branch_name(order) or 'the shop'
     return _fit(
-        f'Your order is ready. {order.order_number} — collect at {where}. '
+        f'Your order is ready. {order.order_number} — collect at {where}, PIN {order.collection_pin}. '
         f'{STOREFRONT}/t/{order.short_code}',
         order,
     )

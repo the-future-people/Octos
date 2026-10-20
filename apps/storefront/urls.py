@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 from apps.storefront import account_views
 from apps.storefront import route_views
+from apps.storefront import collect_views
 # Order matters. `orders/<str:order_number>/` matches anything that
 # starts with an order number, so every more specific route has to come
 # before it or it never runs.
@@ -35,4 +36,6 @@ urlpatterns = [
     path('t/<str:code>/', views.ShortLinkView.as_view(), name='storefront-short-link'),
     path('confirm/<str:reference>/', views.PaymentConfirmationView.as_view(), name='storefront-confirm-payment'),
     path('route/', route_views.RouteView.as_view(), name='route'),
+    path('collect/',           collect_views.CollectLookupView.as_view(),   name='collect-lookup'),
+    path('collect/hand-over/', collect_views.CollectHandOverView.as_view(), name='collect-hand-over'),
 ]
