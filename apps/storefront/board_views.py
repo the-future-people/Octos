@@ -4,13 +4,12 @@ The waiting-area board: what is being made, and what is ready.
 GET board/<branch_code>/?key=…
 
 For a TV in the shop, open to anyone with the key, so the screen needs
-no staff login. It shows short numbers and nothing else: no names, no
-phone numbers, no PINs. Online orders show the last three digits of
-their order number (036); counter jobs show C- and the last three of
-theirs (C-441), so the two never clash.
+no staff login. Each job shows its full number (as on the customer's
+receipt or SMS), the service, and when it will be or has been ready.
+Never a name, a phone number, a PIN or anything from the job's own
+contents: what someone ordered is shown at the level of the service only.
 
-The key is BOARD_KEY in Railway's settings. Without it the board is
-switched off.
+The key is BOARD_KEY in Railway's settings. Without it the board is off.
 """
 
 import secrets
@@ -25,22 +24,29 @@ from rest_framework.views import APIView
 
 # The customer's words for where a job is on the floor.
 STAGE_WORDS = {
-    'PENDING': 'in the queue',
-    'QUEUED': 'in the queue',
-    'INSPECTING': 'being checked',
-    'IN_PRODUCTION': 'printing',
-    'PRINTING': 'printing',
-    'FINISHING': 'finishing',
-    'QUALITY_CHECK': 'final check',
+    'PENDING': 'In queue',
+    'QUEUED': 'In queue',
+    'INSPECTING': 'Checking',
+    'IN_PRODUCTION': 'Printing',
+    'PRINTING': 'Printing',
+    'FINISHING': 'Finishing',
+    'QUALITY_CHECK': 'Final check',
 }
 
-# A job not collected within this long drops off the board: the shelf
+# Not collected within this long, and it leaves the board: the shelf
 # keeps it, the screen does not need to.
 WINDOW = timedelta(days=3)
 
 
-def _digits(text):
-    return ''.join(ch for ch in str(text or '') if ch.isdigit())
+def _first_services(job_ids):
+    """The first item's service on each job: what the board calls it."""
+    from apps.jobs.models import JobLineItem
+    names = {}
+    for line in (JobLineItem.objects.filter(job_id__in=job_ids, parent__isnull=True)
+                 .select_related('service').order_by('id')):
+        if line.job_id not in names and line.service_id:
+            names[line.job_id] = getattr(line.service, 'display_name', '') or line.service.name
+    return names
 
 
 class BoardView(APIView):
@@ -65,29 +71,30 @@ class BoardView(APIView):
             .exclude(status__in=['CANCELLED', 'VOIDED', 'VOID'])
             .order_by('created_at')
         )
-        online = {
-            o.job_id: o
-            for o in OnlineOrder.objects.filter(job_id__in=[j.pk for j in jobs])
-        }
+        ids = [j.pk for j in jobs]
+        online = {o.job_id: o for o in OnlineOrder.objects.filter(job_id__in=ids)}
+        services = _first_services(ids)
 
         making, ready = [], []
         for job in jobs:
             order = online.get(job.pk)
-            short = (_digits(order.order_number)[-3:] if order
-                     else 'C-' + _digits(getattr(job, 'job_number', '') or job.pk)[-3:])
+            number = order.order_number if order else (getattr(job, 'job_number', '') or str(job.pk))
+            if order and not services.get(job.pk):
+                first = (order.line_items or [{}])[0]
+                services[job.pk] = first.get('service_name', '')
+            item = {'number': number, 'service': services.get(job.pk, '')}
             if job.work_state == 'DONE':
-                ready.append({'n': short, 'since': job.updated_at.isoformat()})
+                item['since'] = job.updated_at.isoformat()
+                ready.append(item)
             else:
-                making.append({
-                    'n': short,
-                    'stage': STAGE_WORDS.get(job.work_state, 'in the queue'),
-                    'ready_about': order.promised_for.isoformat() if order and order.promised_for else None,
-                })
+                item['stage'] = STAGE_WORDS.get(job.work_state, 'In queue')
+                item['ready_about'] = order.promised_for.isoformat() if order and order.promised_for else None
+                making.append(item)
 
         ready.sort(key=lambda r: r['since'], reverse=True)
         return Response({
             'branch': branch_code.upper(),
             'now': now.isoformat(),
-            'making': making[:12],
-            'ready': ready[:24],
+            'making': making[:60],
+            'ready': ready[:60],
         })
