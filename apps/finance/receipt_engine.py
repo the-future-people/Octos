@@ -323,6 +323,29 @@ class ReceiptEngine:
             '',
         ]
 
+        # ── Floor work: when it will be ready, and where to follow it ──
+        # Only production and design that have joined the line. The PIN
+        # is never printed: paper is left on counters; it goes to the
+        # customer's phone when the job is ready.
+        if job.job_type in ('PRODUCTION', 'DESIGN') and job.estimated_ready_at:
+            from django.utils import timezone
+            from apps.storefront.models import OnlineOrder
+            from apps.storefront.services.messages import STOREFRONT
+            at = timezone.localtime(job.estimated_ready_at)
+            day = 'TODAY' if at.date() == timezone.localdate() else at.strftime('%a %d %b').upper()
+            lines.append(SEP)
+            lines.append(row('READY ABOUT', f"{at.strftime('%I:%M %p').lstrip('0')} {day}"))
+            if job.balance_due:
+                lines.append(row('BALANCE ON COLLECTION', f"GHS {float(job.balance_due):,.2f}"))
+            order = OnlineOrder.objects.filter(job=job).only('short_code').first()
+            if order and order.short_code:
+                link = f"{STOREFRONT}/t/{order.short_code}".replace('https://', '')
+                lines.append('Follow it:')
+                lines.append(f"  {link[:W - 2]}")
+            lines += [
+                'Your collection PIN will be sent to',
+                'your phone when it is ready.',
+            ]
         return '\n'.join(lines)
 
     def _format_whatsapp_message(self, receipt) -> str:
