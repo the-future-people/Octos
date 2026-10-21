@@ -124,15 +124,14 @@ def change_specs(job_id, line_id, changes, customer_response, actor):
         line.specifications = specs
         line.save(update_fields=[*sorted(touched), 'updated_at'])
         JobSpecChange.objects.bulk_create(recorded)
-            # The customer changed the job (a corrected size, a fixed file): the
+
+        # The customer changed the job (a corrected size, a fixed file): the
         # clock starts again from their change. Not the shop's delay, so no
         # apology and no mark against the promise score. After the change is
         # saved, so the new estimate reads the job as it now is.
-        if recorded and job.estimated_ready_at:
-            from django.db import transaction
-            from apps.jobs.models import Job
+        if job.estimated_ready_at:
             from apps.jobs.services.lateness import restart_for_customer
             changed_id = job.pk
             transaction.on_commit(lambda: restart_for_customer(Job.objects.get(pk=changed_id)))
-            
+
         return recorded
