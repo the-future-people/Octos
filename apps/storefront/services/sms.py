@@ -32,13 +32,20 @@ def send_sms(phone, message):
         logger.info('SMS not sent (no API key) — to %s: %s', phone, message)
         return False
 
+    # Only a real number is sent to: a message to a broken one is paid
+    # for and reaches nobody.
+    number = _normalise(phone)
+    if not number:
+        logger.warning('SMS not sent: %r is not a real phone number', phone)
+        return False
+
     try:
         import requests
         response = requests.post(
             'https://api.mnotify.com/api/sms/quick',
             params={'key': api_key},
             json={
-                'recipient': [_normalise(phone)],
+                'recipient': [number],
                 'sender': sender,
                 'message': message,
                 'is_schedule': False,
@@ -61,10 +68,11 @@ def send_sms(phone, message):
 
 def _normalise(phone):
     """
-    0244111222 becomes 233244111222. Ghanaian numbers are given with a
-    leading zero and sent with a country code.
+    The number as mNotify wants it: international, digits only
+    (233244111222, 15145828114). None for a number that is not real,
+    which is then not sent: a message to a broken number is paid for and
+    reaches nobody.
     """
-    digits = ''.join(c for c in str(phone) if c.isdigit())
-    if digits.startswith('233'):
-        return digits
-    return '233' + digits.lstrip('0')
+    from apps.core.phones import to_international
+    number = to_international(phone)
+    return number[1:] if number else None

@@ -33,18 +33,17 @@ class AccountRefused(Exception):
 
 def normalise_phone(raw):
     """
-    One form for one number: 0XXXXXXXXX, ten digits.
-    024 499 9888, +233 24 499 9888 and 233244999888 are all 0244999888.
-    None for anything that is not a Ghanaian mobile number.
+    One form for one number: the international form, through the one
+    phone rule for all of Octos. 024 499 9888, +233 24 499 9888 and
+    233244999888 are all +233244999888; a number from abroad is kept as
+    its own country's, so a foreign customer can order and sign in.
+    None for anything that is not a real number.
+
+    Numbers already stored as 0XXXXXXXXX still match, because every
+    comparison here converts both sides.
     """
-    digits = ''.join(c for c in str(raw or '') if c.isdigit())
-    if digits.startswith('233') and len(digits) == 12:
-        digits = '0' + digits[3:]
-    elif len(digits) == 9:
-        digits = '0' + digits
-    if len(digits) != 10 or not digits.startswith('0'):
-        return None
-    return digits
+    from apps.core.phones import to_international
+    return to_international(raw)
 
 
 def find_lead(phone):
@@ -174,8 +173,17 @@ def sign_out(session):
 
 
 def mask(phone):
-    """0244999888 shown as 024 ••• 9888."""
-    return f'{phone[:3]} ••• {phone[-4:]}' if phone and len(phone) >= 7 else phone
+    """
+    A number shown without giving it away: 024 ••• 9888 for Ghana, and
+    the country code for anywhere else (+1 ••• 8114). Built from how the
+    number is displayed, so it reads the way people know their own number.
+    """
+    from apps.core.phones import display, to_international
+    number = to_international(phone) or str(phone or '')
+    shown = display(number)
+    digits = ''.join(c for c in number if c.isdigit())
+    head = shown.split(' ')[0] if ' ' in shown else shown[:3]
+    return f'{head} ••• {digits[-4:]}'
 
 # ── My orders ────────────────────────────────────────────────────
 

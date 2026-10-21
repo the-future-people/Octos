@@ -110,7 +110,10 @@ def _lead_for(job):
         return None
     first = (getattr(customer, 'first_name', '') or (getattr(customer, 'full_name', '') or '').split(' ')[0]
              or 'Customer')
-    lead, _ = Lead.objects.get_or_create(phone=phone, defaults={'first_name': first, 'customer': customer})
+    # However this number was stored before (0244... or +233...), the same
+    # person's lead is found, never a second one made.
+    from apps.storefront.services.accounts import find_lead
+    lead = find_lead(phone) or Lead.objects.create(phone=phone, first_name=first, customer=customer)
     if lead.customer_id is None:
         lead.customer = customer
         lead.save(update_fields=['customer'])

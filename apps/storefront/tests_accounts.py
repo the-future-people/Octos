@@ -46,7 +46,7 @@ class AccountTests(TestCase):
 
     def test_one_number_however_it_is_written(self):
         for raw in ('0244999888', '024 499 9888', '+233 24 499 9888', '233244999888', '244999888'):
-            self.assertEqual(normalise_phone(raw), '0244999888', raw)
+            self.assertEqual(normalise_phone(raw), '+233244999888', raw)
         self.assertIsNone(normalise_phone('12345'))
 
     def test_a_website_customer_signs_in_to_the_same_account(self):
@@ -60,7 +60,7 @@ class AccountTests(TestCase):
         data = self._sign_in()
         self.assertTrue(data['token'])
         self.assertEqual(data['account']['first_name'], 'Ama')
-        self.assertEqual(Lead.objects.get().phone, '0244999888')
+        self.assertEqual(Lead.objects.get().phone, '+233244999888')
 
     def test_a_new_number_needs_a_first_name(self):
         code = self._code()
