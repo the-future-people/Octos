@@ -91,6 +91,11 @@ def _serialise(order):
         'promised_for': order.promised_for,
         # The collection PIN: only to whoever holds the order's token, only while it waits to be collected.
         'collection_pin': order.collection_pin if (order.job_id and order.job.work_state == 'DONE' and order.job.handover_state != 'HANDED_OVER') else None,
+                # When Octos moved the promise: the time first promised, so the
+        # customer sees the change honestly ("was 3:40 pm").
+        'first_promise': (order.job.first_promise_at.isoformat()
+                          if order.job_id and order.job.first_promise_at
+                          and order.job.first_promise_at != order.promised_for else None),
         'paid_at': order.paid_at,
         'is_paid': order.is_paid,
         # So the confirmation page can show the customer the same link

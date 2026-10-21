@@ -11,8 +11,9 @@ as order.
 from datetime import timedelta
 
 from django.utils import timezone
+from vine import promise
 
-from apps.jobs.models import JobStep
+from apps.jobs.models import JobStep, job
 
 
 def _row(step, minutes, running_over, now):
@@ -21,7 +22,7 @@ def _row(step, minutes, running_over, now):
     job = step.job
     promise = job.estimated_ready_at
     done_by = now + timedelta(minutes=minutes)
-    late = bool(promise and now > promise)
+    late = job.promise_state == 'LATE' or bool(promise and now > promise)
 
     return {
         'step':         step.pk,
@@ -35,7 +36,10 @@ def _row(step, minutes, running_over, now):
         'intake_channel': job.intake_channel,
         'promise':      promise.isoformat() if promise else None,
         'late':         late,
-        'at_risk':      bool(promise and not late and done_by > promise),
+        'at_risk':      job.promise_state == 'AT_RISK' and not late,
+        # The promise as first made, when Octos has since moved it.
+        'first_promise': (job.first_promise_at.isoformat()
+                        if job.first_promise_at and job.first_promise_at != promise else None),
         'minutes_until_done': round_up(minutes),
         'running_over': running_over,
         'reached_at':   step.reached_at.isoformat() if step.reached_at else None,
