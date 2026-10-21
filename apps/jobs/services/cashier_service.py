@@ -36,6 +36,7 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     if payment_method == 'CREDIT':
         result = _handle_full_credit(job, validated_data, actor, notes)
         _join_the_line(job, actor)
+        _add_promise(result, job)
         return result
 
     # ── Floor work needs 70% up front ─────────────────────────────────
@@ -123,6 +124,7 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
 
     # ── Floor work joins the line: promise, order record, message ─────
     _join_the_line(job, actor)
+    _add_promise(result, job)
 
     # ── Issue receipt ─────────────────────────────────────────────────
     _issue_receipt(job, validated_data, actor, payment_method, split_legs, amount_paid, result)
@@ -153,6 +155,23 @@ def _join_the_line(job, actor):
         join_the_line(job, actor)
     except Exception:
         logger.exception('Counter job %s could not join the line', job.job_number)
+
+
+def _add_promise(result, job):
+    """
+    The promise and the tracking link, for the receipt. Only for floor
+    work that has joined the line; an instant job has neither.
+    """
+    try:
+        from apps.storefront.models import OnlineOrder
+        from apps.storefront.services.messages import STOREFRONT
+        if job.estimated_ready_at:
+            result['ready_at'] = job.estimated_ready_at.isoformat()
+        order = OnlineOrder.objects.filter(job=job).only('short_code').first()
+        if order and order.short_code:
+            result['track_url'] = f'{STOREFRONT}/t/{order.short_code}'
+    except Exception:
+        logger.exception('Could not add the promise to the receipt for %s', job.job_number)
         
 def _apply_payment_axes(job, actor):
     """
