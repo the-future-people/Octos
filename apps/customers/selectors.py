@@ -2,7 +2,7 @@
 from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
 from django.db.models.functions import Greatest
 from django.contrib.postgres.search import TrigramSimilarity
-
+from apps.core.phones import lookup_forms
 from apps.customers.models import CustomerProfile, CustomerEditLog
 from apps.customers.utils import normalise_phone, phone_variants
 from apps.finance.models import CreditAccount
@@ -70,9 +70,13 @@ def search_customers(*, query: str, limit: int = 10) -> QuerySet:
     # Phone path — if query looks like a phone number, do normalised exact match
     digits = ''.join(c for c in query if c.isdigit())
     if len(digits) >= 6:
-        variants = phone_variants(query)
+        # Every form the number may have been stored in, Ghanaian or not,
+        # and on either of the customer's numbers. The old variants only
+        # knew Ghanaian shapes and only looked at the first number, so a
+        # foreign customer was saved but could not be found.
+        variants = lookup_forms(query)
         phone_qs = CustomerProfile.objects.filter(
-            phone__in=variants
+            Q(phone__in=variants) | Q(secondary_phone__in=variants)
         ).select_related('preferred_branch')
         if phone_qs.exists():
             return phone_qs
