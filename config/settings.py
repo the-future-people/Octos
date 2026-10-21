@@ -328,6 +328,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.open_sheets',
         'schedule': crontab(hour=5, minute=0),
     },
+        'check-promises-every-5min': {
+        'task': 'apps.jobs.tasks.check_promises',
+        'schedule': crontab(minute='*/5'),
+    },
+    
     'close-sheets-every-15min': {
         'task': 'apps.finance.tasks.close_sheets',
         'schedule': crontab(minute='*/15'),

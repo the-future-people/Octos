@@ -314,6 +314,17 @@ class Job(AuditModel):
         blank=True,
         help_text='Minutes',
     )
+
+    # The promise as first made. Never moved except when the customer
+    # changes the job; the score (kept or broken) is against this one.
+    first_promise_at = models.DateTimeField(null=True, blank=True)
+    # ON_TRACK, AT_RISK, LATE while it runs; KEPT or BROKEN once ready.
+    promise_state = models.CharField(max_length=10, blank=True, default='')
+    # When the customer was last told about this promise, so they are
+    # not told again within two hours.
+    promise_told_at = models.DateTimeField(null=True, blank=True)
+
+
     estimated_ready_at = models.DateTimeField(
         null=True, blank=True,
         help_text=(

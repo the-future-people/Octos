@@ -119,3 +119,27 @@ def remind_open_proformas():
 
     logger.info('remind_open_proformas: sent %s reminder(s)', sent)
     return sent
+
+@shared_task(ignore_result=True)
+def check_promises():
+    """Every 5 minutes: every job with a promise that is not yet ready."""
+    from apps.jobs.models import Job
+    from apps.jobs.services.lateness import check
+    jobs = (Job.objects.filter(estimated_ready_at__isnull=False)
+            .exclude(work_state='DONE').exclude(handover_state='HANDED_OVER')
+            .exclude(status__in=['CANCELLED', 'DRAFT']))
+    for job in jobs.iterator():
+        try:
+            check(job)
+        except Exception:
+            logger.exception('Promise check failed for %s', job.job_number)
+
+
+@shared_task(ignore_result=True)
+def check_promise(job_id):
+    """Straight after a stage move: this one job."""
+    from apps.jobs.models import Job
+    from apps.jobs.services.lateness import check
+    job = Job.objects.filter(pk=job_id).first()
+    if job is not None:
+        check(job)

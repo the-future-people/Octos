@@ -538,12 +538,18 @@ class JobStatusEngine:
             from apps.storefront.tasks import tell_customer_ready
             job_id = self.job.pk
             transaction.on_commit(lambda: tell_customer_ready.delay(job_id))
+            # Ready: was the promise kept? Scored against the first one.
+            from apps.jobs.services.lateness import record_outcome
+            record_outcome(self.job)
 
         # Every move nudges the customer's app to refresh, silently, after
         # the move is saved. Counter jobs have no app; the task finds that.
         from apps.storefront.tasks import nudge_app
+        from apps.jobs.tasks import check_promise
         nudged_job = self.job.pk
         transaction.on_commit(lambda: nudge_app.delay(nudged_job))
+        # And look at its promise again, now the floor has changed.
+        transaction.on_commit(lambda: check_promise.delay(nudged_job))
 
         if axis == 'HANDOVER' and to_state == 'HANDED_OVER':
             self.job.handed_over_at = now

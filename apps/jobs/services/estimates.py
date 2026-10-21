@@ -178,3 +178,52 @@ def estimate(job, now=None):
         running_over = any_over,
         held_up      = any_held,
     )
+
+def job_ready_at(job, now=None):
+    """
+    When the whole job will be ready: every remaining step, not only the
+    current stage's. The same pieces as estimate() (time left on the
+    machine, the steps after it, opening hours walked), so there is
+    still one way of estimating. A job with no steps yet (waiting for
+    inspection) is asked of the prediction service, as its first promise
+    was. None where nothing can be said.
+    """
+    from apps.production.services.prediction_service import PredictionService
+
+    now = now or timezone.now()
+    service = PredictionService(job.branch)
+
+    if job.work_state in ('IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK'):
+        steps = list(
+            JobStep.objects.filter(job=job)
+            .select_related('job__branch', 'machine', 'station', 'line_item')
+            .order_by('line_item_id', 'sequence')
+        )
+        if steps:
+            by_line = {}
+            for s in steps:
+                by_line.setdefault(s.line_item_id, []).append(s)
+            finish = 0.0
+            for line_steps in by_line.values():
+                remaining = [s for s in line_steps if s.state != JobStep.State.DONE]
+                if not remaining:
+                    continue
+                t, _over, _held = _finish_of_current(remaining[0], now)
+                for later in remaining[1:]:
+                    t += float(later.expected_minutes)
+                finish = max(finish, t)
+            if finish <= 0:
+                return now   # only the final check is left
+            start = service._next_working_moment(timezone.localtime(now))
+            return service._add_working_minutes(start, finish)
+
+    lines = []
+    for item in job.line_items.filter(parent__isnull=True).select_related('service'):
+        if item.service_id:
+            lines.append((item.service, int(item.quantity or 1), int(getattr(item, 'pages', 1) or 1)))
+    if not lines:
+        return None
+    try:
+        return service.predict(lines, at=now).ready_at
+    except Exception:
+        return None

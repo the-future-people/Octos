@@ -10,6 +10,7 @@ from .job_verification import JobVerification
 from .job_spec_change import JobSpecChange
 from .job_step import JobStep
 from .final_check import FinalCheck
+from apps.jobs.models.promise_revision import PromiseRevision
 
 __all__ = [
     'Job',
@@ -25,4 +26,5 @@ __all__ = [
     'JobSpecChange',
     'JobStep',
     'FinalCheck',
+    'PromiseRevision',
 ]
