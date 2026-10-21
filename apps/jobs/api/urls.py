@@ -4,12 +4,14 @@ from . import proforma_views
 from . import coordinator_views
 from . import file_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
+from apps.jobs.api import promise_views
 
 urlpatterns = [
     # Jobs CRUD
     path('',        views.JobListView.as_view(),   name='job-list'),
     path('create/', views.JobCreateView.as_view(), name='job-create'),
     path('<int:pk>/', views.JobDetailView.as_view(), name='job-detail'),
+    path('promise/', promise_views.PromiseView.as_view(), name='counter-promise'),
 
     # Job actions
     path('<int:pk>/transition/', views.JobTransitionView.as_view(),  name='job-transition'),
