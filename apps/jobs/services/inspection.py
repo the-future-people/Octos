@@ -12,8 +12,10 @@ workspace, so two coordinators never check the same file. It lapses
 after ten minutes without a refresh, because a tablet left on a bench
 must not hold the queue; the workspace refreshes it while open.
 """
-
+from decimal import Decimal
+from django.db.models import F, Q
 from datetime import timedelta
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import F
@@ -60,10 +62,18 @@ def arrival_queue(branch):
     """
     candidates = (
         Job.objects
+        .filter(branch=branch, work_state='RECEIVED')
         .filter(
-            branch=branch,
-            intake_channel__in=Job.REMOTE_CHANNELS,
-            work_state='RECEIVED',
+            # Remote work, as before, and production or design taken at
+            # the counter once it has paid enough (70%, or on credit).
+            # The payment is read directly, so a job never waits on a
+            # promise to be seen.
+            Q(intake_channel__in=Job.REMOTE_CHANNELS)
+            | (
+                Q(job_type__in=['PRODUCTION', 'DESIGN'])
+                & (Q(payment_method='CREDIT')
+                   | Q(amount_paid__gte=F('estimated_cost') * Decimal('0.70')))
+            )
         )
         .exclude(status__in=['CANCELLED', 'DRAFT'])
         .exclude(payment_state='UNPAID')

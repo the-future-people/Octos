@@ -31,8 +31,23 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     split_legs     = validated_data.get('split_legs', [])
 
     # ── Full credit payment (Mr. Doodoo flow) ─────────────────────────
+    # A credit account is its own guarantee: floor work joins the line
+    # with nothing up front.
     if payment_method == 'CREDIT':
-        return _handle_full_credit(job, validated_data, actor, notes)
+        result = _handle_full_credit(job, validated_data, actor, notes)
+        _join_the_line(job, actor)
+        return result
+
+    # ── Floor work needs 70% up front ─────────────────────────────────
+    # Production and design are made after the customer leaves, so at
+    # least 70% is paid before anything is made. Full payment is asked
+    # for first; 70% is the floor, never below it.
+    if job.job_type in ('PRODUCTION', 'DESIGN') and Decimal(str(deposit_pct)) < 70:
+        from apps.jobs.services.counter_intake import minimum_due
+        raise ValueError(
+            f'Production and design jobs need at least 70% up front '
+            f'(GHS {minimum_due(job):.2f} of GHS {(job.estimated_cost or 0):.2f}).'
+        )
 
     # ── Calculate amount paid ─────────────────────────────────────────
     if job.estimated_cost:
@@ -106,6 +121,9 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     # ── Lifecycle axes ────────────────────────────────────────────────
     _apply_payment_axes(job, actor)
 
+    # ── Floor work joins the line: promise, order record, message ─────
+    _join_the_line(job, actor)
+
     # ── Issue receipt ─────────────────────────────────────────────────
     _issue_receipt(job, validated_data, actor, payment_method, split_legs, amount_paid, result)
 
@@ -124,6 +142,18 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     return result
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+def _join_the_line(job, actor):
+    """
+    A production or design job that has paid enough joins the floor's
+    line. Never allowed to fail the payment itself: the money is taken
+    and the receipt issued whatever happens here; a problem is logged.
+    """
+    try:
+        from apps.jobs.services.counter_intake import join_the_line
+        join_the_line(job, actor)
+    except Exception:
+        logger.exception('Counter job %s could not join the line', job.job_number)
+        
 def _apply_payment_axes(job, actor):
     """
     Writes the lifecycle axes after a payment lands.
