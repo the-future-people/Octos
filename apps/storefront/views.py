@@ -282,6 +282,8 @@ class CatalogueView(APIView):
                 # The service's own photo, from the public catalogue bucket:
                 # the website and the app show it ahead of their built-in ones.
                 'image_url': s.image.url if s.image else None,
+                # Its black-and-white counterpart, for a page set switched to B&W.
+                'bw_counterpart': s.bw_counterpart_id,
                 'price': display_price(s),
                 # Coming soon where a price or a machine is still missing.
                 'available': can_make(s),
@@ -1680,7 +1682,19 @@ class CommitView(APIView):
         # what the customer chose, and the sheets are ours to work out.
         from apps.jobs.services.availability import counts_pages, sheets_for
         if staged is not None and counts_pages(service):
-            specs = {**specs, 'pages': sheets_for(service, staged.page_count)}
+            # A page set prints only its own pages: chosen in the app, checked
+            # here against the file itself, so a customer cannot choose two
+            # pages and have all twelve printed.
+            selection = specs.get('page_selection')
+            if selection:
+                from apps.storefront.services.page_sets import SelectionRefused, format_selection, parse_selection
+                try:
+                    chosen = parse_selection(selection, staged.page_count or 1)
+                except SelectionRefused as refused:
+                    return Response({'detail': str(refused)}, status=status.HTTP_400_BAD_REQUEST)
+                specs = {**specs, 'page_selection': format_selection(chosen), 'pages': sheets_for(service, len(chosen))}
+            else:
+                specs = {**specs, 'pages': sheets_for(service, staged.page_count)}
 
         # ── Make it real ──────────────────────────────────────────
         try:

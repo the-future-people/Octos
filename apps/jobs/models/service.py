@@ -54,6 +54,11 @@ class Service(AuditModel):
         blank=True,
         help_text='The name customers see online. Blank uses the service name.',
     )
+    # The same work in black and white, for a colour service: a page set
+    # switched to black and white is priced as this. Set by pair_colours.
+    bw_counterpart = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
     variant_of           = models.ForeignKey(
         'self',
         on_delete=models.SET_NULL,
