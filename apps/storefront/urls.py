@@ -4,6 +4,7 @@ from . import views
 from apps.storefront import account_views
 from apps.storefront import route_views
 from apps.storefront import collect_views
+from apps.storefront import batch_commit
 # Order matters. `orders/<str:order_number>/` matches anything that
 # starts with an order number, so every more specific route has to come
 # before it or it never runs.
@@ -39,4 +40,5 @@ urlpatterns = [
     path('collect/',           collect_views.CollectLookupView.as_view(),   name='collect-lookup'),
     path('collect/hand-over/', collect_views.CollectHandOverView.as_view(), name='collect-hand-over'),
     path('board/<str:branch_code>/', board_views.BoardView.as_view(), name='board'),
+    path('commit/batch/', batch_commit.BatchCommitView.as_view(), name='storefront-commit-batch'),
 ]
