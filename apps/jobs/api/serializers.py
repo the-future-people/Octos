@@ -441,7 +441,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
         model  = Job
         fields = [
             'job_type', 'priority', 'branch',
-            'customer', 'description', 'specifications',
+            'customer', 'ordered_by', 'description', 'specifications',
             'intake_channel', 'deadline', 'notes',
             # single-service
             'service', 'quantity', 'pages', 'is_color',
@@ -458,6 +458,14 @@ class JobCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        # Who placed it, when that isn't who it is for: a person, never a
+        # business. The same person twice is just the customer.
+        who = attrs.get('ordered_by')
+        if who is not None:
+            if who.customer_type != 'INDIVIDUAL':
+                raise serializers.ValidationError({'ordered_by': 'The person who ordered must be an individual.'})
+            if attrs.get('customer') and who.pk == attrs['customer'].pk:
+                attrs['ordered_by'] = None
         from django.utils import timezone
         from apps.finance.sheet_engine import SheetEngine
 
