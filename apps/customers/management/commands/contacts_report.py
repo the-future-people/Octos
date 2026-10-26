@@ -132,11 +132,16 @@ class Command(BaseCommand):
             lonely_leads = [x for x in lead_rows if x[1].customer_id not in cust_ids]
             if len(cust_ids) == 1 and lead_rows and not lonely_leads:
                 continue
-            names = {first_word(n) for _, _, n, _ in rows if first_word(n)}
+            # The shared name rule: titles aside, any order, a first name
+            # agreeing with a full one.
+            from itertools import combinations
+            from apps.customers.identity import names_agree
+            all_names = [n for _, _, n, _ in rows]
+            agree = all(names_agree(a, b) for a, b in combinations(all_names, 2))
             line = f'{e164}: ' + '; '.join(f'{who} #{r.pk} {n!r} ({which})' for who, r, n, which in rows)
-            if len(cust_ids) == 1 and lonely_leads and len(names) <= 1:
+            if len(cust_ids) == 1 and lonely_leads and agree:
                 unlinked.append(line)
-            elif len(names) <= 1:
+            elif agree:
                 same_name.append(line)
             else:
                 shared.append(line)
