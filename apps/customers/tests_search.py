@@ -84,3 +84,11 @@ class SearchByNameTests(TestCase):
 
     def test_a_name_slightly_misspelt(self):
         self.assertIn(self.ama.pk, found('Mensa'))
+
+class DisplayTests(TestCase):
+
+    def test_the_portal_shows_numbers_the_familiar_way(self):
+        from apps.customers.api.serializers import CustomerListSerializer, CustomerSerializer
+        c = CustomerProfile.objects.create(first_name='Ama', phone='+233244123456', customer_type='INDIVIDUAL')
+        self.assertEqual(CustomerSerializer(c).data['phone'], '024 412 3456')
+        self.assertEqual(CustomerListSerializer(c).data['phone'], '024 412 3456')

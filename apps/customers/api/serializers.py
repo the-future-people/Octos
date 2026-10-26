@@ -26,7 +26,7 @@ class PhoneDisplayMixin:
         return data
 
     
-class CustomerSerializer(serializers.ModelSerializer, PhoneDisplayMixin):
+class CustomerSerializer(PhoneDisplayMixin, serializers.ModelSerializer):
     full_name        = serializers.CharField(read_only=True)
     display_name     = serializers.CharField(read_only=True)
     titled_name      = serializers.CharField(read_only=True)
@@ -38,6 +38,16 @@ class CustomerSerializer(serializers.ModelSerializer, PhoneDisplayMixin):
     affiliation_name = serializers.CharField(
         source='affiliation.display_name', read_only=True
     )
+        # The businesses and institutions this person is linked to now: what
+    # New Job offers as "For: ...".
+    links = serializers.SerializerMethodField()
+
+    def get_links(self, obj):
+        return [
+            {'organisation': m.organisation_id, 'name': m.organisation.display_name,
+             'role': m.role, 'named': m.named}
+            for m in obj.memberships.filter(ended_at__isnull=True).select_related('organisation')
+        ]
 
     class Meta:
         model  = CustomerProfile
@@ -75,6 +85,16 @@ class CustomerListSerializer(PhoneDisplayMixin, serializers.ModelSerializer):
     affiliation_name = serializers.CharField(
         source='affiliation.display_name', read_only=True
     )
+        # The businesses and institutions this person is linked to now: what
+    # New Job offers as "For: ...".
+    links = serializers.SerializerMethodField()
+
+    def get_links(self, obj):
+        return [
+            {'organisation': m.organisation_id, 'name': m.organisation.display_name,
+             'role': m.role, 'named': m.named}
+            for m in obj.memberships.filter(ended_at__isnull=True).select_related('organisation')
+        ]
 
     class Meta:
         model  = CustomerProfile
