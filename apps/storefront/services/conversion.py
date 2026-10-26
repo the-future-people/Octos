@@ -72,7 +72,7 @@ def convert(order):
 
         job = Job.objects.create(
             branch=order.branch,
-            customer=_customer_for(order),
+            customer=_customer_and_link(order),
             daily_sheet=sheet,
             # Always production. Online work is paid for before it is
             # made, and only the production flow has a way to say
@@ -208,7 +208,18 @@ def _customer_for(order):
 
     lead = order.lead
 
-    existing = CustomerProfile.objects.filter(phone=lead.phone).first()
+    # The lead's own customer first; then anyone with this number, on
+    # either of their numbers, however it was stored. An exact match
+    # missed customers stored as 0244... once leads were +233..., and
+    # made a second record of the same person.
+    existing = lead.customer if lead.customer_id else None
+    if existing is None:
+        from django.db.models import Q
+        from apps.core.phones import lookup_forms
+        forms = lookup_forms(lead.phone)
+        existing = (CustomerProfile.objects
+                    .filter(Q(phone__in=forms) | Q(secondary_phone__in=forms))
+                    .order_by('created_at').first())
     if existing is not None:
         return existing
 
@@ -443,3 +454,17 @@ def promise_for(order, at=None):
     except Exception:
         logger.exception('Could not work out a promise for %s', order.order_number)
         return None
+
+
+
+def _customer_and_link(order):
+    """
+    The order's customer, and the lead linked to it, so the person's
+    online and counter histories are one from the first order on.
+    """
+    customer = _customer_for(order)
+    lead = getattr(order, 'lead', None)
+    if customer is not None and lead is not None and lead.customer_id is None:
+        lead.customer = customer
+        lead.save(update_fields=['customer'])
+    return customer
