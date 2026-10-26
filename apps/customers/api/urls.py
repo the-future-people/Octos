@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-
+from apps.customers.api import links
 urlpatterns = [
     # ── Customer ──────────────────────────────────────────────
     path('', views.CustomerListView.as_view(), name='customer-list'),
@@ -18,4 +18,7 @@ urlpatterns = [
     path('credit/<int:pk>/suspend/', views.CreditAccountSuspendView.as_view(), name='credit-suspend'),
     path('credit/<int:pk>/settle/', views.CreditSettleView.as_view(), name='credit-settle'),
     path('credit/<int:pk>/payments/', views.CreditPaymentHistoryView.as_view(), name='credit-payments'),
+    path('<int:pk>/links/', links.CustomerLinksView.as_view(), name='customer-links'),
+    path('links/<int:pk>/', links.LinkView.as_view(), name='customer-link'),
+    path('links/<int:pk>/end/', links.LinkEndView.as_view(), name='customer-link-end'),
 ]
