@@ -214,6 +214,13 @@ class Job(AuditModel):
         blank=True,
         related_name='jobs',
     )
+    # Who placed the order, when that isn't the customer it is for: the
+    # rep at the counter for a business's job. The customer is who it is
+    # for: who pays, whose receipt. Blank when they are the same.
+    ordered_by = models.ForeignKey(
+        'customers.CustomerProfile', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='jobs_ordered',
+    )
 
     # ── Job details ──────────────────────────────────────────────
     title          = models.CharField(max_length=255)
