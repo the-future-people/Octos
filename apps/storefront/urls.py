@@ -17,6 +17,7 @@ urlpatterns = [
     path('account/me/', account_views.AccountMeView.as_view(), name='storefront-account-me'),
     path('account/signout/', account_views.AccountSignOutView.as_view(), name='storefront-account-signout'),
     path('account/orders/',  account_views.AccountOrdersView.as_view(),  name='account-orders'),
+    path('account/register/', account_views.AccountRegisterView.as_view(), name='storefront-account-register'),
     path('account/device/',              account_views.AccountDeviceView.as_view(),            name='account-device'),
     path('account/notifications/',       account_views.AccountNotificationsView.as_view(),     name='account-notifications'),
     path('account/notifications/read/',  account_views.AccountNotificationsReadView.as_view(), name='account-notifications-read'),

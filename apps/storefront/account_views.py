@@ -20,14 +20,19 @@ from apps.storefront.services.accounts import (
 
 
 def _account(lead):
+    from apps.storefront.account_profile import profile_for
+    profile = profile_for(lead)
     return {
-        'first_name': lead.first_name,
+        'first_name': profile.get('first_name') or lead.first_name,
         'phone': mask(lead.phone),
         # The customer's own number, for their own orders: shown masked,
         # sent in full to the signed-in app that owns it.
         'number': lead.phone,
         'order_count': lead.order_count,
         'member_since': lead.created_at.isoformat(),
+        # Who they are to the shop, and whether the short registration
+        # is still needed.
+        'profile': profile,
     }
 
 
@@ -97,6 +102,9 @@ class AccountMeView(_SignedIn):
             return Response({'detail': 'Tell us your first name.'}, status=status.HTTP_400_BAD_REQUEST)
         session.lead.first_name = name[:100]
         session.lead.save(update_fields=['first_name'])
+        if session.lead.customer_id:
+            session.lead.customer.first_name = name[:100]
+            session.lead.customer.save(update_fields=['first_name'])
         return Response(_account(session.lead))
 
 
@@ -308,3 +316,12 @@ class AccountNotificationsReadView(_SignedIn):
             lead__in=leads_for(session.lead), read_at__isnull=True,
         ).update(read_at=timezone.now())
         return Response({'read': True})
+
+
+
+class AccountRegisterView(_SignedIn):
+    """POST account/register/: the short registration, personal or business."""
+
+    def post(self, request):
+        from apps.storefront.account_profile import register_view
+        return register_view(self, request)
