@@ -8,7 +8,25 @@ from apps.finance.models import CreditAccount, CreditPayment
 
 # ── Customer serializers ──────────────────────────────────────────────────────
 
-class CustomerSerializer(serializers.ModelSerializer):
+from apps.core.phones import display as _display_phone
+
+
+class PhoneDisplayMixin:
+    """
+    Numbers are stored in international form; people read them the way
+    they know them: 024 412 3456 at home, +1 514-582-8114 from abroad.
+    Only how they are shown changes. Whatever is typed is still saved in
+    the one stored form.
+    """
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        for field in ('phone', 'secondary_phone'):
+            if data.get(field):
+                data[field] = _display_phone(data[field])
+        return data
+
+    
+class CustomerSerializer(serializers.ModelSerializer, PhoneDisplayMixin):
     full_name        = serializers.CharField(read_only=True)
     display_name     = serializers.CharField(read_only=True)
     titled_name      = serializers.CharField(read_only=True)
@@ -45,7 +63,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         return result['total'] or 0
 
 
-class CustomerListSerializer(serializers.ModelSerializer):
+class CustomerListSerializer(PhoneDisplayMixin, serializers.ModelSerializer):
     """Lightweight serializer for lists and dropdowns."""
     full_name    = serializers.CharField(read_only=True)
     display_name = serializers.CharField(read_only=True)

@@ -230,7 +230,8 @@ class ReceiptEngine:
         # line, so printing the same name twice adds nothing.
         if receipt.company_name and receipt.company_name != receipt.customer_name:
             lines.append(row('Company:', receipt.company_name))
-        lines.append(row('Phone:', receipt.customer_phone or '—'))
+        from apps.core.phones import display as _display_phone
+        lines.append(row('Phone:', _display_phone(receipt.customer_phone) if receipt.customer_phone else '—'))
         lines.append(SEP)
 
         # ── Job details ───────────────────────────────────────────────
