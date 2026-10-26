@@ -42,7 +42,7 @@ def find_pairs():
     for c in CustomerProfile.objects.all().order_by('created_at', 'pk'):
         for n in _numbers(c):
             by_number[n].append(c)
-    pairs, seen = [], set()
+    pairs, seen, companies = [], set(), []
     for number, people in by_number.items():
         if len(people) < 2:
             continue
@@ -52,7 +52,14 @@ def find_pairs():
             if key in seen or not names_agree(keep.full_name, other.full_name):
                 continue
             seen.add(key)
+            # Only records of the same kind. A business account shows its
+            # representative's name, so a person and their company agree
+            # by name and are still two customers: flagged, never merged.
+            if (keep.customer_type or 'INDIVIDUAL') != (other.customer_type or 'INDIVIDUAL'):
+                companies.append((keep, other, number))
+                continue
             pairs.append((keep, other, number))
+    find_pairs.companies = companies
     return pairs
 
 
@@ -142,6 +149,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, apply=False, **options):
         pairs = find_pairs()
+        for keep, other, number in getattr(find_pairs, 'companies', []):
+            self.stdout.write(f'  possibly a person and their company, left as two: #{keep.pk} {keep.full_name!r} '
+                              f'({keep.customer_type}) and #{other.pk} {other.full_name!r} ({other.customer_type}), on {number}')
         if not pairs:
             self.stdout.write('Nothing to merge.')
             return
