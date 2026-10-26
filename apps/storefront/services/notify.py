@@ -14,15 +14,46 @@ logger = logging.getLogger(__name__)
 
 
 def tell(order, kind, title, body, sms_text=None, text_with=None):
-    """Store, push, and text only if the push reached nobody. Returns the notification."""
-    from apps.storefront.models import AppNotification, DeviceToken
-    from apps.storefront.services import push
+    """
+    Store, push, and text only if the push reached nobody. Returns the
+    notification for the order's own person.
+
+    A business's or institution's job tells two people: the organisation's
+    number, and the person who ordered it. An office line is often out of
+    reach when nobody is at the desk, so the person who stood at the
+    counter hears too, by the same rules.
+    """
     from apps.storefront.services.accounts import leads_for
-    from apps.storefront.services.sms import send_sms
 
     lead = order.lead
     if lead is None:
         return None
+
+    recipients = [lead]
+    job = getattr(order, 'job', None) if getattr(order, 'job_id', None) else None
+    person = getattr(job, 'ordered_by', None) if job is not None else None
+    if person is not None and person.phone:
+        from apps.storefront.models import Lead
+        from apps.storefront.services.accounts import find_lead
+        other = find_lead(person.phone) or Lead.objects.create(
+            phone=person.phone, first_name=person.first_name or '', customer=person,
+        )
+        if other.pk not in {l.pk for l in leads_for(lead)}:
+            recipients.append(other)
+
+    first = None
+    for who in recipients:
+        note = _tell_one(order, who, kind, title, body, sms_text, text_with)
+        first = first or note
+    return first
+
+
+def _tell_one(order, lead, kind, title, body, sms_text, text_with):
+    """One person: store, push to their devices, text if no push arrived."""
+    from apps.storefront.models import AppNotification, DeviceToken
+    from apps.storefront.services import push
+    from apps.storefront.services.accounts import leads_for
+    from apps.storefront.services.sms import send_sms
 
     note = AppNotification.objects.create(
         lead=lead, order=order, kind=kind, title=title, body=body,
@@ -52,8 +83,6 @@ def tell(order, kind, title, body, sms_text=None, text_with=None):
 
     note.save(update_fields=['pushed', 'texted'])
     return note
-
-
 
 def ready_phrase(order):
     """'ready about 3:40 pm today' from the promise, or nothing."""

@@ -88,6 +88,15 @@ class ReceiptEngine:
         # ── Customer snapshot ─────────────────────────────────────────
         customer_name, phone = self._snapshot_customer(job, customer_phone)
 
+        # A business's or institution's job: the receipt is the
+        # organisation's alone, with its name and number. Never the person
+        # who ordered it, nor the rep the record was opened with.
+        org = getattr(job, 'customer', None)
+        if org is not None and org.customer_type in ('BUSINESS', 'INSTITUTION'):
+            customer_name = org.company_name or customer_name
+            phone = org.phone or phone
+            company_name = ''   # the name above is the company: not twice
+
         # ── VAT calculation ───────────────────────────────────────────
         subtotal, vat_amount, nhil_amount, getfund_amount = self._calc_vat(
             amount_paid
@@ -231,6 +240,9 @@ class ReceiptEngine:
         if receipt.company_name and receipt.company_name != receipt.customer_name:
             lines.append(row('Company:', receipt.company_name))
         from apps.core.phones import display as _display_phone
+        org = receipt.job.customer if receipt.job_id else None
+        if org is not None and org.customer_type in ('BUSINESS', 'INSTITUTION') and org.address:
+            lines.append(row('Address:', org.address[:32]))
         lines.append(row('Phone:', _display_phone(receipt.customer_phone) if receipt.customer_phone else '—'))
         lines.append(SEP)
 
