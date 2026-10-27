@@ -113,16 +113,6 @@ class CustomUser(AbstractBaseUser, AuditModel):
     download_pin     = models.CharField(max_length=128, blank=True, null=True)
     download_pin_set = models.BooleanField(default=False)
 
-    # ── Operator PIN ─────────────────────────────────────────
-    # Unlocks a machine computer. Hashed, set by the person themselves,
-    # and separate from the download PIN so neither opens the other.
-    # Failures are counted so a colleague can't guess it at a shared
-    # machine; the service decides when that locks it.
-    operator_pin              = models.CharField(max_length=128, blank=True, null=True)
-    operator_pin_set          = models.BooleanField(default=False)
-    operator_pin_failures     = models.PositiveSmallIntegerField(default=0)
-    operator_pin_locked_until = models.DateTimeField(null=True, blank=True)
-
     objects = CustomUserManager()
 
     USERNAME_FIELD  = 'email'
@@ -157,23 +147,6 @@ class CustomUser(AbstractBaseUser, AuditModel):
         if not self.download_pin:
             return False
         return check_password(str(raw_pin), self.download_pin)
-
-    def set_operator_pin(self, raw_pin):
-        """Hash and store the operator PIN, clearing any lock."""
-        self.operator_pin              = make_password(str(raw_pin))
-        self.operator_pin_set          = True
-        self.operator_pin_failures     = 0
-        self.operator_pin_locked_until = None
-        self.save(update_fields=[
-            'operator_pin', 'operator_pin_set',
-            'operator_pin_failures', 'operator_pin_locked_until',
-        ])
-
-    def verify_operator_pin(self, raw_pin):
-        """Check a raw PIN against the stored hash. Counting and locking are the service's."""
-        if not self.operator_pin:
-            return False
-        return check_password(str(raw_pin), self.operator_pin)
 
     def has_perm(self, perm, obj=None):
         return self.is_superuser
