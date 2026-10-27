@@ -173,3 +173,24 @@ class OperatorStepTests(JobsFixtureMixin, TestCase):
         self.assertEqual(record.outcome, 'PASSED')
         bench.refresh_from_db()
         self.assertEqual(bench.state, JobStep.State.DONE)
+
+    def test_a_sent_back_piece_returns_clean_and_waits_for_start(self):
+        from apps.jobs.services.final_check import _send_back
+        job = self._job(quantity=2)
+        build_steps(job)
+        start_step(self._print(job).pk, self.branch, self.operator)
+        mark_done(self._print(job).pk, self.branch, self.operator, made=2, spoilt=1)
+
+        _send_back(job.steps.get(station=self.fin_st), self.branch)
+
+        step = self._print(job)
+        self.assertEqual(step.state, JobStep.State.WAITING)
+        self.assertIsNone(step.started_at)
+        self.assertIsNone(step.started_by)
+        self.assertIsNone(step.quantity_made)
+        self.assertIsNone(step.quantity_spoilt)
+        # Back at the front of a staffed machine: recorded, waiting for Start.
+        self.assertIsNotNone(step.reached_at)
+
+        start_step(step.pk, self.branch, self.operator)
+        self.assertEqual(self._print(job).state, JobStep.State.ACTIVE)

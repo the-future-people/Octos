@@ -136,7 +136,17 @@ def _send_back(step, branch):
         s.reached_at = None
         s.done_at = None
         s.done_by = None
-        s.save(update_fields=['machine', 'state', 'reached_at', 'done_at', 'done_by', 'updated_at'])
+        # The reprint is a fresh attempt: its own Start, its own counts.
+        # The first attempt's numbers stay in the FinalCheck record.
+        s.started_at = None
+        s.started_by = None
+        s.quantity_made = None
+        s.quantity_spoilt = None
+        s.save(update_fields=[
+            'machine', 'state', 'reached_at', 'done_at', 'done_by',
+            'started_at', 'started_by', 'quantity_made', 'quantity_spoilt',
+            'updated_at',
+        ])
 
     from apps.production.models import Machine
     for machine in Machine.objects.filter(pk__in=to_fill):
