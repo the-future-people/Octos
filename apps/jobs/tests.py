@@ -1242,6 +1242,100 @@ class DeriveJobTypeTests(JobsFixtureMixin, TestCase):
         self.assertEqual(job.job_type, 'INSTANT')
 
 
+@patch('apps.jobs.services.availability.can_make', return_value=True)
+@patch('apps.finance.sheet_engine.SheetEngine.get_branch_lock_status',
+       return_value={'can_create_jobs': True, 'lock_reason': ''})
+class CounterFinishingCreateTests(JobsFixtureMixin, TestCase):
+    """
+    A counter production job with finishing. The add-on is priced by the
+    server, saved as its own line under the piece it finishes, and counted
+    in the job's total. One attempt is one job, however many times it posts.
+    """
+
+    URL = '/api/v1/jobs/create/'
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.jobs.models import PricingRule
+        super().setUpTestData()
+        cls.banner = Service.objects.create(
+            name='Finishing Banner', code='FINBAN',
+            category='PRODUCTION', unit='PER_PIECE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+        cls.eyelets = Service.objects.create(
+            name='Finishing Eyelets', code='FINEYE',
+            category='PRODUCTION', unit='PER_PIECE',
+            requires_design=False, requires_file_upload=False,
+            is_active=True,
+        )
+        cls.banner.addons.add(cls.eyelets)
+        PricingRule.objects.create(
+            service=cls.banner, branch=cls.branch,
+            base_price=Decimal('50.00'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+        # Add-ons are priced company-wide, as at Farhat: quote_line looks
+        # for the rule with no branch, so a branch rule is never found.
+        PricingRule.objects.create(
+            service=cls.eyelets, branch=None,
+            base_price=Decimal('5.00'),
+            color_multiplier=Decimal('1.00'), is_active=True,
+        )
+
+    def _post(self, key):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.bm)
+        return client.post(self.URL, {
+            'branch': self.branch.pk,
+            'deposit_percentage': 70,
+            'idempotency_key': key,
+            'line_items': [{
+                'service': self.banner.pk,
+                'pages': 1, 'sets': 2,
+                'addons': [self.eyelets.pk],
+            }],
+        }, format='json')
+
+    def test_finishing_is_saved_as_a_priced_line_under_its_piece(self, _lock, _can_make):
+        from apps.jobs.models import JobLineItem
+        resp = self._post('test-finishing-001')
+        self.assertEqual(resp.status_code, 201, resp.data)
+        # The write-only add-ons never echo back; this field once caused a 500.
+        self.assertNotIn('addons', resp.data)
+
+        job = Job.objects.get(intake_by=self.bm)
+        self.assertEqual(job.job_type, 'PRODUCTION')
+
+        piece = JobLineItem.objects.get(job=job, parent__isnull=True)
+        extra = JobLineItem.objects.get(job=job, parent=piece)
+        self.assertEqual(piece.service_id, self.banner.pk)
+        self.assertEqual(extra.service_id, self.eyelets.pk)
+        # Counted by the copy: two sets, two lots of eyelets.
+        self.assertEqual(extra.quantity, 2)
+        self.assertGreater(extra.line_total, 0)
+        self.assertEqual(extra.line_total, extra.unit_price * extra.quantity)
+
+        lines_total = sum(l.line_total for l in JobLineItem.objects.filter(job=job))
+        self.assertAlmostEqual(float(job.estimated_cost), float(lines_total), places=2)
+
+    def test_the_same_key_twice_makes_one_job(self, _lock, _can_make):
+        from apps.jobs.models import JobRequestKey
+        first = self._post('test-finishing-002')
+        second = self._post('test-finishing-002')
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertLess(second.status_code, 300, second.data)
+        self.assertEqual(Job.objects.filter(intake_by=self.bm).count(), 1)
+        self.assertEqual(JobRequestKey.objects.filter(key='test-finishing-002').count(), 1)
+
+    def test_a_new_key_is_a_new_job(self, _lock, _can_make):
+        self.assertEqual(self._post('test-finishing-003').status_code, 201)
+        self.assertEqual(self._post('test-finishing-004').status_code, 201)
+        self.assertEqual(Job.objects.filter(intake_by=self.bm).count(), 2)
+
+
 class CashierQueueSplitTests(JobsFixtureMixin, TestCase):
     """
     The cashier's queue splits by job type, and the server decides the
