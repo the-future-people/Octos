@@ -47,6 +47,10 @@ RULES = [
 
 def photo_for(name):
     n = (name or '').lower()
+    # Envelopes and scanning have sizes in their names but are not prints:
+    # better no photo than a picture of something else.
+    if any(w in n for w in ('envelop', 'env-', 'scan')):
+        return None
     for words, photo in RULES:
         if any(w in n for w in words):
             return photo
