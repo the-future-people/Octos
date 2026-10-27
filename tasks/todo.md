@@ -58,3 +58,39 @@ Updated 17 October 2026.
 - [ ] `PaymentTextTests.test_it_fits_in_one_message` has no body
 - [ ] `apps.inventory.tests` needs `__init__.py` to run by label
 - [ ] `original_filename` stores the device's name
+
+## Done (18–20 October 2026)
+- [x] App redesign: Home, Categories, product page, Cart, Orders (groups, History chain), Order details, Account, Notifications
+- [x] Notifications grouped by order, with product and payment
+- [x] Silent nudges on every stage move; refresh on resume; watch by moment
+- [x] In-app directions (map, route, turn banner, by car / on foot)
+- [x] Collection at the counter: PIN, QR, attendant Collect, hand over, Collected flowing back
+- [x] Service photos in the public R2 bucket; storefront and app prefer them
+- [x] BM catalogue: company prices read (all pages) and set; services list refreshes on any change; duplicates answer plainly
+- [x] Mangled dashes in descriptions mended
+
+## Next
+- [ ] Waiting-area board (TV): Being made / Ready to collect, short numbers only
+- [ ] Google Play: developer account, signed release build, listing, 14-day closed test with 12+ testers
+- [ ] Buy printoctos.com (privacy policy, store listings, images.printoctos.com for photos)
+- [ ] Apple developer account (iPhone app via TestFlight), when ready
+
+## Tidy-ups
+- [ ] Clock-dependent tests that fail on Sundays and evenings: pin the dates
+- [ ] Rebuild the local web and worker images (`docker-compose build web worker`) so google-auth is baked in
+- [ ] Clear Bag has no price
+- [ ] Review the envelope services (four of them) and Photo Printing vs Photo Printing (Full Photo)
+- [ ] Photos for envelopes and scanning
+- [ ] The View button on a customer's own file (needs a short-lived private link)
+- [ ] Shelf location when marking an order ready (optional)
+- [ ] `promised_for` sometimes empty on converted orders (05399)
+
+## 27 Oct 2026 — counter New Job (finishing, files, one job per attempt)
+
+- Paste tests and the commit separately. If any step is red, stop: don't commit.
+- Put the mixin first: `class X(Mixin, Base)`, never `class X(Base, Mixin)`.
+- A field declared on a serializer must also be listed in `fields`.
+- If an input-only serializer field has the same name as a model field, make it `write_only=True` (`addons` on JobLineItem caused a 500).
+- When a file has been replaced several times, check for something only the newest copy contains, and check the file name (NewJob vs NewCustomer).
+- In a React component, define each part before anything that uses it.
+- Names alone can't tell a person from their company. Compare the record kind too, and keep merges undoable.

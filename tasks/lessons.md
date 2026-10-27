@@ -998,3 +998,37 @@ Internal detail belongs in the log, not on the screen.
   with no machine types is a bench" held for hand finishing and broke on
   cutting, which has machines for other work. Decide from the specific
   route step, not the general station.
+
+  ## 18–20 October 2026
+
+### Testing
+- **Name test files, never folders.** `apps` is a namespace package, so `manage.py test apps.jobs` fails with "expected str … not NoneType". Build the labels from the files (the `$labels` loop) and pass those.
+- **A test that counts queued on-commit callbacks breaks when a new callback joins.** When adding one (the silent nudge), make the test check each callback by name rather than raising the number.
+- **Pasted test methods need their 4-space indent.** An unindented `def` leaves the class and gives "unindent does not match any outer indentation level". Show lines with `[ ]` brackets and `→` for tabs to see it.
+
+### Windows, OneDrive, PowerShell
+- **OneDrive placeholders hide folders from recursive searches** (mode `l`, e.g. `dar--l`). Go into the folder directly rather than searching from above.
+- **The Desktop lives in OneDrive** (`OneDrive\Desktop`); `$HOME\Desktop` does not exist. Save scratch files in the project and delete them before committing.
+- **`mkdir` with braces is literal in PowerShell**: `{api,components}` makes a folder with that name. Remove with `Remove-Item -LiteralPath … -Recurse`.
+- **`git add` with one missing path adds nothing at all**, so the commit and push that follow are empty. Check `git status` after adding.
+
+### Where a change shows
+- **The preview shows this machine; the website shows GitHub; the phone shows the last APK.** A change reaches the website when pushed, and the phone when the APK is rebuilt and reinstalled.
+- **The app preview needs `?app`**, remembered in localStorage until `?web`. `npx vite --mode app` talks to Railway; plain `npx vite` to local Docker.
+
+### Server
+- **A cached list must be cleared whenever its source changes**, not only on create. The services list was cached 30 minutes and only creating a service cleared it, so photos and descriptions seemed to "need time to sync". A post_save/post_delete signal on Service now clears it.
+- **Paged responses must be followed to the end.** The BM catalogue read only page one of prices (20), so every later service looked unpriced. Lists a screen needs whole: `pagination_class = None`, and the front end follows `next` anyway.
+- **Company-wide prices are read with `?company=1`.** Reading by branch found nothing once branch prices were removed, and setting a branch price silently overrode the company one.
+- **A service function that raises ValueError needs its view to catch it**, or a duplicate name is a 500 and the form says only "Failed".
+- **R2 API keys are scoped per bucket.** A new bucket needs adding to the token, or every request is a 403 (HeadObject: Forbidden).
+- **Catalogue photos are public; customer files are private.** Never serve a catalogue photo through MEDIA_URL (it checks who is asking); never put customer artwork in the public bucket.
+- **Photos straight from a generator or phone are 2–6 MB.** Convert to ~1200×800 JPG (about 150 KB) before they go anywhere near the app or a bucket.
+
+### App behaviour
+- **Watch by moment, not by stage.** A ready order is the one being collected right now, so it is checked every 3 seconds; one being made every 15; a collected one not at all.
+- **Silent nudges keep screens current.** Every stage move sends a data-only push after commit; the app also refreshes when it comes back to the front, because a nudge sent while it was in the background is not heard.
+- Run a suite by its module (`apps.jobs.tests`), not its app (`apps.jobs`): `apps` has no `__init__.py`, so discovery crashes before any test runs.
+- Read `git status` before committing, not just run it. An untracked file under `apps/` means that feature isn't in production, however green the tests are.
+- Run a suite by its module (`apps.jobs.tests`), not its app (`apps.jobs`): `apps` has no `__init__.py`, so discovery crashes before any test runs.
+- Read `git status` before committing, not just run it. An untracked file under `apps/` means that feature isn't in production, however green the tests are.

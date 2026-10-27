@@ -187,3 +187,30 @@ over; availability is worked out, never switched; one product per print
 with each side keeping its own price; pages come from the file; the
 minimum is per line and offers the pieces it covers; guillotine cutting
 is part of the job, SAV cutting is a choice.
+
+## State as of 20 October 2026
+
+### The full cycle works end to end
+Order → pay → made → ready → collected, proven on a real Android phone and the counter.
+
+1. **Order and pay** in the app or on the website (Paystack). "Payment received" arrives as a push to the app, an SMS otherwise.
+2. **Made.** Every stage move on the coordinator board sends a **silent nudge** (`nudge_app`, queued on commit from `JobStatusEngine._move_axis`). An open app refreshes within seconds; Order details also checks every 15 s while the order moves.
+3. **Ready.** "Ready to collect" arrives with a **collection PIN** (4 digits, made by `ensure_pin` when the order turns ready, carried in the ready SMS and shown in the app as a pass with a QR). The PIN is never shown in public.
+4. **Collected.** At the counter, staff portal → Attendant → **Collect**: phone number + PIN, or **Scan** the app's QR (`PO:<order>:<pin>`). A checklist of each line and add-on must be ticked before **Hand over**, which moves the job through `move_handover('HANDED_OVER')`, records who and when, and stores the collector's name if someone else came. The customer gets "Collected, thank you". A wrong PIN and an unknown number give the same answer.
+5. The app then counts down 10 s (with Stay here), folds the order away, and moves on to Orders if others are active, otherwise to Categories.
+
+### Where things live
+- **Collection:** `apps/storefront/services/collection.py`, `collect_views.py` (`storefront/collect/`, `collect/hand-over/`), migration 0015; portal `src/components/attendant/AttendantCollect.jsx` (uses `jsqr`); app pass in `Track.jsx` (`react-qr-code`).
+- **Nudges:** `services/push.py` `nudge()`, `tasks.py` `nudge_app`; app `PushBridge.jsx` (refresh on nudge and on resume).
+- **Directions:** in-app map (`Directions.jsx`, Leaflet + `@capacitor/geolocation`), routes from OpenRouteService through `storefront/route/` with the key in Railway (`ORS_API_KEY`), cached 10 min. Map tiles are OpenStreetMap's for now; move to a tile service as traffic grows.
+- **Notifications:** one card per order (`Notifications.jsx`), each message carrying its order's product, detail, add-ons and payment; the bell counts orders with news.
+
+### Storage
+- **`octos-media` (private):** customers' files, served through a view that checks who is asking.
+- **`octos-catalogue` (public):** service photos. `Service.image` saves there through `apps/jobs/storage.py` (`R2_PUBLIC_BUCKET`, `R2_PUBLIC_URL`, currently the r2.dev address; switch to a custom domain such as images.printoctos.com when the domain exists). `manage.py catalogue_photos` gives services their photos from `catalogue_photos/` by name.
+- The catalogue API carries `image_url`; the website and app prefer it over their built-in photos, so a new photo shows everywhere without an app update.
+
+### Prices
+- **Company-wide only**; no branch prices remain (checked 20 Oct).
+- **The BM may set company prices while there is one branch** (`MANAGERS_SET_COMPANY_PRICES`, default True). Set it False when Octos goes multi-branch, and only a Super Admin can.
+- Setting a company price again updates it rather than creating a second one.
