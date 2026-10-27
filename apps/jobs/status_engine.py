@@ -475,8 +475,9 @@ class JobStatusEngine:
         field      = AXIS_FIELD[axis]
         from_state = getattr(self.job, field)
 
-        # Guard: role owns this axis
-        if not self._may_move_axis(axis, actor):
+        # Guard: role owns this axis, or this is the one move an operator makes
+        if not (self._may_move_axis(axis, actor)
+                or self._operator_may_move(axis, from_state, to_state, actor)):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot move the "
                 f"{axis.lower()} state of {self.job.job_number}."
@@ -695,6 +696,24 @@ class JobStatusEngine:
         if role in AXIS_OVERRIDE_ROLES:
             return True
         return role in AXIS_OWNERS.get(axis, set())
+
+    def _operator_may_move(self, axis, from_state, to_state, actor):
+        """
+        The one move an operator makes: printing is finished, so the job
+        goes to Finishing. Allowed by assignment, not role, since whoever
+        runs a machine may be an attendant one month and a technician the
+        next. Only someone currently assigned to a machine this job has a
+        step on, and only this move.
+        """
+        if (axis, from_state, to_state) != ('WORK', 'IN_PRODUCTION', 'FINISHING'):
+            return False
+        if actor is None or not getattr(actor, 'is_active', False):
+            return False
+        from apps.production.models import MachineOperator
+        return MachineOperator.objects.filter(
+            operator=actor, active_until__isnull=True,
+            machine__job_steps__job=self.job,
+        ).exists()
 
     @classmethod
     def _is_branch_manager(cls, actor):

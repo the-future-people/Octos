@@ -13,10 +13,14 @@ class JobStep(AuditModel):
     at once.
 
     A machine's queue is its steps that are not done: the one ACTIVE (being
-    worked now) first, then the WAITING ones by the job's promise. There is
-    no Start button; a step becomes ACTIVE when it reaches the head of its
-    queue, and that moment is recorded. Marking it DONE moves the line to
-    its next step and the next job up.
+    worked now) first, then the WAITING ones by slack, the least first.
+    Slack is the job's promise less the work still left on the line.
+    reached_at records when a step came to the front. On a machine with no
+    operator assigned it goes straight on, as before. On a staffed machine
+    it waits there for the operator's Start, which is when the work really
+    began (started_at). Marking it DONE moves the line to its next step and
+    the next job up. Every line ends at the bench, so an operator's Done
+    always frees the machine and the final check happens at finishing.
 
     by_hand is decided by the route, not the station: a route step naming
     no machine type is done by hand at that station's bench, even where the
@@ -92,6 +96,21 @@ class JobStep(AuditModel):
         null=True,
         blank=True,
     )
+
+    # The operator's Start on a staffed machine: when the work really
+    # began, as opposed to when the step reached the front (reached_at).
+    started_at = models.DateTimeField(null=True, blank=True)
+    started_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='job_steps_started',
+        null=True,
+        blank=True,
+    )
+    # What the operator reported at Done. Spoilt pieces are waste until
+    # the coordinator confirms them for a reprint.
+    quantity_made   = models.PositiveIntegerField(null=True, blank=True)
+    quantity_spoilt = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta(AuditModel.Meta):
         ordering = ['line_item_id', 'sequence']

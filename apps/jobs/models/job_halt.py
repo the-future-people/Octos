@@ -25,6 +25,10 @@ class JobHalt(AuditModel):
         CUSTOMER_PAUSE    = 'CUSTOMER_PAUSE',    'Customer requested pause'
         AWAITING_CUSTOMER = 'AWAITING_CUSTOMER', 'Awaiting customer decision'
         QUALITY_FAILURE   = 'QUALITY_FAILURE',   'Quality failure'
+        # The work can't start: the file is wrong (resolution, size,
+        # missing page). Not a quality failure, which is about the made
+        # piece. Only this job stops; the machine carries on.
+        FILE_FAULT        = 'FILE_FAULT',        'File fault'
         OTHER             = 'OTHER',             'Other'
 
     job = models.ForeignKey(

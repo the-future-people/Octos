@@ -4,5 +4,6 @@ from . machine import Machine
 from .service_station import ServiceStation
 from .station_timing import StationTiming
 from .branch_station import BranchStation
+from .machine_operator import MachineOperator
 
-__all__ = ['Station', 'MachineType', 'Machine', 'ServiceStation', 'StationTiming', 'BranchStation']
+__all__ = ['Station', 'MachineType', 'Machine', 'ServiceStation', 'StationTiming', 'BranchStation', 'MachineOperator']

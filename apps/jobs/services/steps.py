@@ -12,9 +12,15 @@ unassigned, for the coordinator to place, or to mark done another way.
 
 A queue is a machine's line-up (or the bench's): the steps that are
 their line's current step, not done. The one on the machine is ACTIVE
-and stays at the front; the rest wait by the job's promise, soonest
-first. There is no Start button. A step becomes ACTIVE when it reaches
-the front, and that moment is recorded.
+and stays at the front; the rest wait by slack, the least first: the
+job's promise less the work still left on the line. On a machine with
+no operator, the front goes on by itself when the machine is free, as
+it always has. On a staffed machine it waits for the operator's Start,
+and only the moment it reached the front is recorded until then.
+
+Every line ends at the bench. Where a route ends on a machine, a step
+at hand finishing is added, so an operator's Done never closes a line
+and the final check happens at finishing.
 
 A line's later steps are not in any queue yet. A banner is not waiting
 at the laminator while it is still printing.
@@ -23,7 +29,11 @@ at the laminator while it is still printing.
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Case, Exists, F, IntegerField, OuterRef, Value, When
+from django.db.models import (
+    Case, DecimalField, Exists, ExpressionWrapper, F, IntegerField,
+    OuterRef, Subquery, Sum, Value, When,
+)
+from django.db.models.functions import Coalesce, Extract
 from django.utils import timezone
 
 from apps.jobs.models import JobStep
@@ -111,6 +121,16 @@ def expected_minutes(branch, route, line):
 
 # ── Queues ───────────────────────────────────────────────────────
 
+def is_staffed(machine):
+    """A machine with at least one current operator. Its work starts only on their Start."""
+    if machine is None:
+        return False
+    from apps.production.models import MachineOperator
+    return MachineOperator.objects.filter(
+        machine=machine, active_until__isnull=True, operator__is_active=True,
+    ).exists()
+
+
 def _current_only(qs):
     """Steps that are their line's current one: nothing earlier left undone."""
     earlier = (
@@ -139,16 +159,38 @@ def queue(branch, machine=None, station=None):
     else:
         qs = qs.filter(machine__isnull=True, by_hand=True)
 
+    # Minutes of work left on the line from this step on. Slack is the
+    # promise less this, less now; now is the same for every job, so
+    # ordering by (promise - work left) is ordering by slack.
+    left = (
+        JobStep.objects
+        .filter(line_item=OuterRef('line_item'), sequence__gte=OuterRef('sequence'))
+        .exclude(state=JobStep.State.DONE)
+        .values('line_item')
+        .annotate(total=Sum('expected_minutes'))
+        .values('total')
+    )
     return (
         _current_only(qs)
         .select_related('job', 'line_item', 'station', 'machine')
-        .annotate(on_machine=Case(
-            When(state=JobStep.State.ACTIVE, then=Value(0)),
-            default=Value(1), output_field=IntegerField(),
+        .annotate(
+            on_machine=Case(
+                When(state=JobStep.State.ACTIVE, then=Value(0)),
+                default=Value(1), output_field=IntegerField(),
+            ),
+            minutes_left=Coalesce(
+                Subquery(left, output_field=DecimalField(max_digits=10, decimal_places=1)),
+                Value(Decimal('0')),
+                output_field=DecimalField(max_digits=10, decimal_places=1),
+            ),
+        )
+        .annotate(start_by=ExpressionWrapper(
+            Extract('job__estimated_ready_at', 'epoch') - F('minutes_left') * Value(60),
+            output_field=DecimalField(max_digits=16, decimal_places=1),
         ))
         .order_by(
             'on_machine',
-            F('job__estimated_ready_at').asc(nulls_last=True),
+            F('start_by').asc(nulls_last=True),
             'job__created_at', 'pk',
         )
     )
@@ -167,6 +209,13 @@ def fill(branch, machine=None, station=None):
         if not line_up or line_up[0].state == JobStep.State.ACTIVE:
             return None
         head = line_up[0]
+        # On a staffed machine the front waits for the operator's Start;
+        # only the moment it came to the front is recorded.
+        if is_staffed(machine):
+            if head.reached_at is None:
+                head.reached_at = timezone.now()
+                head.save(update_fields=['reached_at', 'updated_at'])
+            return None
         head.state = JobStep.State.ACTIVE
         head.reached_at = timezone.now()
         head.save(update_fields=['state', 'reached_at', 'updated_at'])
@@ -184,8 +233,11 @@ def build_steps(job):
     by hand as before. A line's add-ons join its route rather than
     getting steps of their own.
     """
-    from apps.production.models import ServiceStation
+    from apps.production.models import ServiceStation, Station
 
+    # Every line ends at the bench, so an operator's Done never closes a
+    # line and the final check happens at finishing.
+    finish = Station.objects.filter(code=Station.Code.FINISH, is_active=True).first()
     made = []
     # Add-on lines (lamination on a print) have no steps of their own:
     # their routes join their parent's, so the piece is printed, then
@@ -233,6 +285,20 @@ def build_steps(job):
             ))
             i += len(group)
 
+        mine = [s for s in made if s.line_item_id == line.pk]
+        if (finish is not None and mine and not mine[-1].by_hand
+                and not any(s.station_id == finish.pk for s in mine)):
+            position += 1
+            made.append(JobStep.objects.create(
+                job              = job,
+                line_item        = line,
+                station          = finish,
+                by_hand          = True,
+                machine          = None,
+                sequence         = position,
+                expected_minutes = Decimal('0'),
+            ))
+
     machines = {s.machine_id: s.machine for s in made if s.machine_id}
     for machine in machines.values():
         fill(job.branch, machine=machine)
@@ -247,6 +313,62 @@ def build_steps(job):
 
 class StepRefused(Exception):
     """The step cannot be moved on, and the message says why."""
+
+
+def start_step(step_id, branch, actor):
+    """
+    The operator's Start on a staffed machine: when the work really began.
+    Only the front of the queue, only by someone assigned to the machine,
+    and only when nothing else is on it. The machine's row is locked first
+    so two Starts on one machine cannot both succeed.
+    """
+    from apps.jobs.models import Job
+    from apps.production.models import Machine
+
+    with transaction.atomic():
+        step = (
+            JobStep.objects
+            .select_related('job')
+            .filter(pk=step_id, job__branch=branch)
+            .first()
+        )
+        if step is None:
+            raise StepRefused('That step is not at this branch.')
+        if step.machine_id is None:
+            raise StepRefused('Only work on a machine is started here.')
+
+        machine = Machine.objects.select_for_update().get(pk=step.machine_id)
+        step = JobStep.objects.select_for_update(of=('self',)).select_related('job').get(pk=step.pk)
+
+        if not is_staffed(machine):
+            raise StepRefused(f'{machine.name} has no operator. Its work starts by itself.')
+        if not machine.operator_assignments.filter(operator=actor, active_until__isnull=True).exists():
+            raise StepRefused(f'You are not assigned to {machine.name}.')
+        if not machine.is_usable:
+            raise StepRefused(f'{machine.name} is down.')
+        if step.state == JobStep.State.ACTIVE:
+            raise StepRefused('That job has already started.')
+        if step.state == JobStep.State.DONE:
+            raise StepRefused('That job is already done.')
+        if any(h.resumed_at is None for h in step.job.halts.all()):
+            raise StepRefused(f'{step.job.job_number} is halted. Resume it first.')
+
+        line_up = list(queue(branch, machine=machine))
+        if line_up and line_up[0].state == JobStep.State.ACTIVE:
+            raise StepRefused(
+                f'{line_up[0].job.job_number} is still on {machine.name}. Mark it done first.'
+            )
+        if not line_up or line_up[0].pk != step.pk:
+            raise StepRefused('Only the job at the front of the queue can start.')
+
+        now = timezone.now()
+        step.state      = JobStep.State.ACTIVE
+        step.started_at = now
+        step.started_by = actor
+        step.reached_at = step.reached_at or now
+        step.save(update_fields=['state', 'started_at', 'started_by', 'reached_at', 'updated_at'])
+        Job.objects.filter(pk=step.job_id, work_started_at__isnull=True).update(work_started_at=now)
+        return step
 
 
 def sync_stage(job, actor):
@@ -277,7 +399,7 @@ def sync_stage(job, actor):
         )
 
 
-def mark_done(step_id, branch, actor, checked=False):
+def mark_done(step_id, branch, actor, checked=False, made=None, spoilt=None):
     """
     The job on a machine (or bench) is finished there. The next job on
     that machine moves up, this line moves to its next step, and the
@@ -333,7 +455,14 @@ def mark_done(step_id, branch, actor, checked=False):
         step.state   = JobStep.State.DONE
         step.done_at = timezone.now()
         step.done_by = actor
-        step.save(update_fields=['state', 'done_at', 'done_by', 'updated_at'])
+        fields = ['state', 'done_at', 'done_by', 'updated_at']
+        if made is not None:
+            step.quantity_made = made
+            fields.append('quantity_made')
+        if spoilt is not None:
+            step.quantity_spoilt = spoilt
+            fields.append('quantity_spoilt')
+        step.save(update_fields=fields)
 
         # The next job on this machine (or bench) moves up.
         if step.machine_id or step.by_hand:
