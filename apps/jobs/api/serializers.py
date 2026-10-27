@@ -169,6 +169,8 @@ class JobLineItemCreateSerializer(serializers.Serializer):
     output_mode    = serializers.CharField(required=False, allow_null=True, default=None)
     ring_size      = serializers.IntegerField(required=False, allow_null=True, default=None)
     delivery       = serializers.CharField(required=False, allow_null=True, default=None)
+    # The artwork checked at the counter, the same check the app uses.
+    artwork_token  = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -517,9 +519,32 @@ class JobCreateSerializer(serializers.ModelSerializer):
         if line_items_data:
             total        = 0
             priced_items = []
+            staged_files = []   # each line's checked file, or None
 
             for item_data in line_items_data:
                 svc   = item_data['service']
+
+                # The artwork checked at the counter: the file that passed is
+                # the file attached, and a document's pages come from it,
+                # never typed. Taken out of the line's data before the line
+                # is made.
+                token = item_data.pop('artwork_token', '') or ''
+                staged = None
+                if token:
+                    from apps.jobs.services.counter_artwork import read
+                    from apps.jobs.services.availability import counts_pages, sheets_for
+                    staged = read(token, svc, item_data.get('specifications'))
+                    if counts_pages(svc):
+                        sheets = sheets_for(svc, staged.page_count)
+                        item_data['pages'] = sheets
+                        # The spec's pages win over the column when a line is
+                        # saved (_reconcile_pages): the file's count goes in both.
+                        specs = dict(item_data.get('specifications') or {})
+                        if 'pages' in specs:
+                            specs['pages'] = str(sheets)
+                            item_data['specifications'] = specs
+                    item_data['file_source'] = JobLineItem.UPLOAD
+                staged_files.append(staged)
                 pg    = item_data.get('pages', 1)
                 sets  = item_data.get('sets', 1)
                 color = item_data.get('is_color', False)
@@ -647,6 +672,11 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 line_total = pricing['total'],
                 position   = 0,
             )
+
+        # The counter's files onto the job and their lines.
+        if line_items_data:
+            from apps.jobs.services.counter_artwork import attach
+            attach(job, staged_files, self.context['request'].user)
 
         return job
 

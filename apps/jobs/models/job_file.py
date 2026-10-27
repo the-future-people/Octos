@@ -30,6 +30,12 @@ class JobFile(AuditModel):
         on_delete=models.CASCADE,
         related_name='files'
     )
+    # Which line this file is for: the operator prints the banner's file,
+    # not the business cards'. Blank for files that belong to the whole job.
+    line_item = models.ForeignKey(
+        'jobs.JobLineItem', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='files',
+    )
     file = models.FileField(upload_to='jobs/%Y/%m/%d/')
     file_type = models.CharField(max_length=20, choices=FILE_TYPE_CHOICES, default=ORIGINAL)
     uploaded_by = models.ForeignKey(

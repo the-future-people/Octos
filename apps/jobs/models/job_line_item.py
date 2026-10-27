@@ -21,8 +21,10 @@ class JobLineItem(AuditModel):
     USB      = 'USB'
     TYPING   = 'TYPING'
     NA       = 'NA'
+    UPLOAD   = 'UPLOAD'
 
     FILE_SOURCE_CHOICES = [
+        (UPLOAD,   'Uploaded to Octos'),
         (HARDCOPY, 'Walk-in Hardcopy'),
         (WHATSAPP, 'WhatsApp'),
         (EMAIL,    'Email'),
@@ -45,6 +47,12 @@ class JobLineItem(AuditModel):
         'jobs.Job',
         on_delete=models.CASCADE,
         related_name='line_items',
+    )
+        # Which line this file is for: the operator prints the banner's file,
+    # not the business cards'. Blank for files that belong to the whole job.
+    line_item = models.ForeignKey(
+        'jobs.JobLineItem', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='files',
     )
     parent = models.ForeignKey(
         'self',
