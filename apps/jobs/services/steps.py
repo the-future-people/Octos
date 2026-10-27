@@ -148,11 +148,18 @@ def queue(branch, machine=None, station=None):
     being worked first, then by promise. Unassigned steps are in neither;
     they wait for the coordinator.
     """
+    from apps.jobs.models import JobHalt
+    stopped = JobHalt.objects.filter(job=OuterRef('job'), resumed_at__isnull=True)
     qs = (
         JobStep.objects
         .filter(job__branch=branch)
         .exclude(state=JobStep.State.DONE)
         .exclude(job__status__in=GONE)
+        # A halted job waits aside and keeps no place in the line-up until
+        # it is resumed. One already on the machine stays, so a machine is
+        # never given a second job while the first is stopped on it.
+        .annotate(halted=Exists(stopped))
+        .exclude(halted=True, state=JobStep.State.WAITING)
     )
     if machine is not None:
         qs = qs.filter(machine=machine)
@@ -369,6 +376,72 @@ def start_step(step_id, branch, actor):
         step.save(update_fields=['state', 'started_at', 'started_by', 'reached_at', 'updated_at'])
         Job.objects.filter(pk=step.job_id, work_started_at__isnull=True).update(work_started_at=now)
         return step
+
+
+# What the operator can report, and the halt reason each becomes.
+PROBLEMS = {
+    'MACHINE_DOWN': 'MACHINE_BREAKDOWN',
+    'FILE_FAULT':   'FILE_FAULT',
+    'MATERIAL_OUT': 'MATERIALS_OUT',
+}
+
+
+def report_problem(step_id, branch, actor, kind, note=''):
+    """
+    The operator's Problem, on the job running on their machine.
+
+    Machine down takes the machine out: the running job halts, and what
+    was queued moves to another machine that fits or waits for this one.
+    A file fault or material out stops this job only: it comes off the
+    machine and is halted for the coordinator, and the next job comes
+    forward. (Setting aside every job that needs a missing material waits
+    until Octos knows what each job uses.)
+    """
+    from apps.jobs.status_engine import JobStatusEngine
+    from apps.production.services.machine_service import MachineService
+
+    reason = PROBLEMS.get(kind)
+    if reason is None:
+        raise StepRefused('Choose what happened: machine down, file fault or material out.')
+
+    with transaction.atomic():
+        step = (
+            JobStep.objects
+            .select_for_update(of=('self',))
+            .select_related('job', 'machine')
+            .filter(pk=step_id, job__branch=branch)
+            .first()
+        )
+        if step is None:
+            raise StepRefused('That step is not at this branch.')
+        if step.machine_id is None or not step.machine.operator_assignments.filter(
+                operator=actor, active_until__isnull=True).exists():
+            raise StepRefused('That job is not on your machine.')
+        if step.state != JobStep.State.ACTIVE:
+            raise StepRefused('Report a problem on the job that is running.')
+
+        if kind == 'MACHINE_DOWN':
+            try:
+                result = MachineService.mark_down(
+                    step.machine, note or 'Machine breakdown', actor, note,
+                )
+            except (PermissionError, ValueError) as e:
+                raise StepRefused(str(e))
+            return {'kind': kind, **result}
+
+        # This job comes off; the machine carries on.
+        step.state      = JobStep.State.WAITING
+        step.started_at = None
+        step.started_by = None
+        step.reached_at = None
+        step.save(update_fields=['state', 'started_at', 'started_by', 'reached_at', 'updated_at'])
+        try:
+            JobStatusEngine(step.job).halt(reason=reason, actor=actor, note=note)
+        except (PermissionError, ValueError) as e:
+            raise StepRefused(str(e))
+
+        fill(branch, machine=step.machine)
+        return {'kind': kind, 'job_number': step.job.job_number, 'machine': step.machine.name}
 
 
 def sync_stage(job, actor):

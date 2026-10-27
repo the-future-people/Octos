@@ -55,7 +55,15 @@ class MachineService:
         from apps.jobs.status_engine import JobStatusEngine
         from apps.production.models import ServiceStation
 
-        if not cls._may_change_state(actor):
+        # An operator may report their own machine down. Bringing it back
+        # up stays with those who can change machine state (mark_up).
+        operates = (
+            actor is not None and getattr(actor, 'is_active', False)
+            and machine.operator_assignments.filter(
+                operator=actor, active_until__isnull=True,
+            ).exists()
+        )
+        if not (cls._may_change_state(actor) or operates):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot change machine state."
             )

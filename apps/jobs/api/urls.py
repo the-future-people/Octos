@@ -4,6 +4,7 @@ from apps.jobs.api.addon_views import AddonQuoteView
 from . import views
 from . import proforma_views
 from . import coordinator_views
+from . import operator_views
 from . import file_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 from apps.jobs.api import promise_views
@@ -38,6 +39,13 @@ urlpatterns = [
     path('steps/<int:step_id>/done/',       coordinator_views.StepDoneView.as_view(),  name='step-done'),
     path('steps/<int:step_id>/move/',       coordinator_views.StepMoveView.as_view(),  name='step-move'),
     path('steps/<int:step_id>/check/',      coordinator_views.StepCheckView.as_view(), name='step-check'),
+
+    # Operator: the machine screen
+    path('operator/queue/',                   operator_views.OperatorQueueView.as_view(),  name='operator-queue'),
+    path('operator/steps/<int:step_id>/start/', operator_views.OperatorStartView.as_view(), name='operator-start'),
+    path('operator/steps/<int:step_id>/done/',  operator_views.OperatorDoneView.as_view(),  name='operator-done'),
+    path('operator/steps/<int:step_id>/problem/', operator_views.OperatorProblemView.as_view(), name='operator-problem'),
+    path('operator/unlock/',                  operator_views.OperatorUnlockView.as_view(), name='operator-unlock'),
 
     # Lifecycle axes
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),

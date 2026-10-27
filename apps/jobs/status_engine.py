@@ -307,7 +307,11 @@ class JobStatusEngine:
         """
         from apps.jobs.models import JobHalt
 
-        if not self._may_move_axis('WORK', actor):
+        # An assigned operator may stop a job on their machine for what
+        # they can see from there: the machine, the file, the material.
+        operator_reason = reason in ('MACHINE_BREAKDOWN', 'FILE_FAULT', 'MATERIALS_OUT')
+        if not (self._may_move_axis('WORK', actor)
+                or (operator_reason and self._operates_this_job(actor))):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot halt "
                 f"{self.job.job_number}."
@@ -707,6 +711,10 @@ class JobStatusEngine:
         """
         if (axis, from_state, to_state) != ('WORK', 'IN_PRODUCTION', 'FINISHING'):
             return False
+        return self._operates_this_job(actor)
+
+    def _operates_this_job(self, actor):
+        """Currently assigned to a machine this job has a step on."""
         if actor is None or not getattr(actor, 'is_active', False):
             return False
         from apps.production.models import MachineOperator
