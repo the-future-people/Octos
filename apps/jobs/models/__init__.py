@@ -2,6 +2,7 @@ from .job import Job
 from .job_halt import JobHalt
 from .job_file import JobFile
 from .job_line_item import JobLineItem
+from .job_request_key import JobRequestKey
 from .service import Service
 from .pricing import PricingRule, PriceOverrideLog
 from .job_status_log import JobStatusLog
