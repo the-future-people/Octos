@@ -184,7 +184,7 @@ class JobLineItemCreateSerializer(serializers.Serializer):
     artwork_token  = serializers.CharField(required=False, allow_blank=True, write_only=True)
     # The finishing chosen at the counter: add-on ids, or dicts with
     # 'service' and, for packing, 'per_copy'. Priced by the server.
-    addons         = serializers.ListField(required=False, default=list)
+    addons         = serializers.ListField(required=False, default=list, write_only=True)
 
 
 # ─────────────────────────────────────────────────────────────
