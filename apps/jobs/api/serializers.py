@@ -18,6 +18,17 @@ class ServiceSerializer(serializers.ModelSerializer):
             'id', 'name', 'code', 'category', 'unit',
             'description', 'requires_design', 'requires_file_upload',
             'is_active', 'spec_template', 'smart_defaults', 'image',
+            'addons',
+        ]
+
+    # The finishing this service offers, for the counter's tick-boxes.
+    addons = serializers.SerializerMethodField()
+
+    def get_addons(self, obj):
+        from apps.jobs.services.availability import can_make, is_packing
+        return [
+            {'id': a.pk, 'name': a.name, 'unit': a.unit, 'packing': is_packing(a)}
+            for a in obj.addons.filter(is_active=True) if can_make(a)
         ]
 
 
@@ -171,6 +182,9 @@ class JobLineItemCreateSerializer(serializers.Serializer):
     delivery       = serializers.CharField(required=False, allow_null=True, default=None)
     # The artwork checked at the counter, the same check the app uses.
     artwork_token  = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    # The finishing chosen at the counter: add-on ids, or dicts with
+    # 'service' and, for packing, 'per_copy'. Priced by the server.
+    addons         = serializers.ListField(required=False, default=list)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -520,6 +534,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
             total        = 0
             priced_items = []
             staged_files = []   # each line's checked file, or None
+            addon_lines  = []   # each line's priced finishing
 
             for item_data in line_items_data:
                 svc   = item_data['service']
@@ -577,6 +592,19 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 unit_price = float(pricing.get('base_price', pricing.get('total', 0)))
                 line_total = float(pricing['total'])
                 total     += line_total
+
+                # Its finishing, priced by the app's own rules: lamination
+                # by the sheet, binding by the copy, an envelope one per
+                # copy or one for all. Never trusted from the screen.
+                from apps.jobs.services.availability import price_addons
+                chosen = item_data.pop('addons', None) or []
+                extras, extras_total, problem = price_addons(
+                    svc, chosen, sets, {**(item_data.get('specifications') or {}), 'pages': pg},
+                )
+                if problem:
+                    raise serializers.ValidationError(problem)
+                total += float(extras_total)
+                addon_lines.append(extras)
 
                 priced_items.append({
                     **{k: v for k, v in item_data.items()
@@ -649,9 +677,21 @@ class JobCreateSerializer(serializers.ModelSerializer):
 
         # ── Create line items ─────────────────────────────────
         if priced_items:
+            from decimal import Decimal
             for i, item_data in enumerate(priced_items):
                 item_data['position'] = item_data.get('position', i)
-                JobLineItem.objects.create(job=job, **item_data)
+                piece = JobLineItem.objects.create(job=job, **item_data)
+                # Each finishing its own priced line, attached to the piece
+                # it finishes: the same shape an online order converts to.
+                for extra in (addon_lines[i] if i < len(addon_lines) else []):
+                    JobLineItem.objects.create(
+                        job=job, service_id=extra['service'], parent=piece,
+                        quantity=extra['quantity'] or 1, pages=1,
+                        specifications={'detail': extra['detail']} if extra.get('detail') else {},
+                        unit_price=Decimal(str(extra['unit_price'])),
+                        line_total=Decimal(str(extra['total'])),
+                        position=item_data['position'],
+                    )
 
         elif service:
             # Single-service — create one line item for consistency

@@ -1,10 +1,13 @@
 from django.urls import path
+
+from apps.jobs.api.addon_views import AddonQuoteView
 from . import views
 from . import proforma_views
 from . import coordinator_views
 from . import file_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 from apps.jobs.api import promise_views
+
 
 urlpatterns = [
     # Jobs CRUD
@@ -16,8 +19,8 @@ urlpatterns = [
     # Job actions
     path('<int:pk>/transition/', views.JobTransitionView.as_view(),  name='job-transition'),
     path('<int:pk>/files/',      views.JobFileUploadView.as_view(),  name='job-file-upload'),
-
-        # Files. MEDIA_URL points here, so file.url resolves to this view
+    path('addons/quote/', AddonQuoteView.as_view(), name='addon-quote'),
+    # Files. MEDIA_URL points here, so file.url resolves to this view
     # rather than to a path served straight off disk.
     path('files/<int:pk>/', file_views.JobFileDownloadView.as_view(), name='job-file'),
 
