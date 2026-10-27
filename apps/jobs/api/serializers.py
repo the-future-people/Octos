@@ -452,6 +452,8 @@ class JobCreateSerializer(serializers.ModelSerializer):
     is_color = serializers.BooleanField(write_only=True, default=False, required=False)
 
     deposit_percentage = serializers.ChoiceField(choices=[70, 100], default=100)
+    # One per attempt at the counter: the same key twice is the same job.
+    idempotency_key = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=64)
 
     class Meta:
         model  = Job
@@ -464,6 +466,8 @@ class JobCreateSerializer(serializers.ModelSerializer):
             # multi-line
             'line_items',
             'deposit_percentage',
+            'idempotency_key',
+            'post_closing_reason',
         ]
         extra_kwargs = {
             'branch': {'required': False},
@@ -516,12 +520,38 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 'ATTENDANT':      'ATTENDANT',
             }.get(getattr(request.user.role, 'name', ''), 'ATTENDANT')
         lock = SheetEngine(branch).get_branch_lock_status(role_name=role_name)
-        if not lock['can_create_jobs']:
+
+        # Recorded after closing, with a reason: the Branch Manager only,
+        # and only once the branch really is closed. The job is otherwise
+        # made exactly as any other: files, finishing, who it is for.
+        late = (attrs.get('post_closing_reason') or '').strip()
+        if late:
+            if role_name != 'BRANCH_MANAGER':
+                raise serializers.ValidationError('Only a Branch Manager can record a job after closing.')
+            try:
+                from apps.hr.shift_engine import ShiftEngine as HRShiftEngine
+                schedule = HRShiftEngine(branch).get_role_schedule('BRANCH_MANAGER')
+                still_open = schedule.get('can_create_jobs') and not schedule.get('is_post_closing')
+            except Exception:
+                still_open = False   # as before: if the schedule can't be read, allow it
+            if still_open:
+                raise serializers.ValidationError('The branch is still open. Record it as a normal job.')
+            attrs['post_closing_reason'] = late
+        elif not lock['can_create_jobs']:
             raise serializers.ValidationError(lock['lock_reason'])
 
         return attrs
 
     def create(self, validated_data):
+        # The same attempt twice is the same job: the second press, or a
+        # retry after an error shown once the job was already made.
+        key = (validated_data.pop('idempotency_key', '') or '').strip()
+        if key:
+            from apps.jobs.models import JobRequestKey
+            done = JobRequestKey.objects.filter(key=key).select_related('job').first()
+            if done is not None:
+                return done.job
+
         line_items_data = validated_data.pop('line_items', None)
         service         = validated_data.pop('service', None)
         quantity        = validated_data.pop('quantity', 1)
@@ -666,6 +696,22 @@ class JobCreateSerializer(serializers.ModelSerializer):
             )
         validated_data['daily_sheet'] = sheet
 
+        # After closing: logged with the Branch Manager and the reason for
+        # HQ. With a cashier still on duty it waits for payment as usual;
+        # with none, it is held, off the sheet, until the morning handover.
+        if validated_data.get('post_closing_reason'):
+            from django.utils import timezone as _tz
+            from apps.finance.models import CashierFloat
+            validated_data['post_closing'] = True
+            validated_data['post_closing_approved_by'] = self.context['request'].user
+            cashier_on = CashierFloat.objects.filter(
+                daily_sheet__branch=branch, daily_sheet__date=_tz.localdate(),
+                is_signed_off=False, morning_acknowledged=True,
+            ).exists()
+            if not cashier_on:
+                validated_data['status'] = Job.INTAKE_HELD
+                validated_data['daily_sheet'] = None
+
         # ── Intake user ───────────────────────────────────────
         validated_data['intake_by'] = self.context['request'].user
 
@@ -712,6 +758,11 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 line_total = pricing['total'],
                 position   = 0,
             )
+
+        # This attempt's key, remembered with the job it made.
+        if key:
+            from apps.jobs.models import JobRequestKey
+            JobRequestKey.objects.get_or_create(key=key, defaults={'job': job})
 
         # The counter's files onto the job and their lines.
         if line_items_data:
