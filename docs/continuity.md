@@ -214,3 +214,16 @@ Order → pay → made → ready → collected, proven on a real Android phone a
 - **Company-wide only**; no branch prices remain (checked 20 Oct).
 - **The BM may set company prices while there is one branch** (`MANAGERS_SET_COMPANY_PRICES`, default True). Set it False when Octos goes multi-branch, and only a Super Admin can.
 - Setting a company price again updates it rather than creating a second one.
+
+## Operator portal — where it stands (28 Oct 2026)
+
+Live in code, unused on the floor: no operator is assigned on production.
+**Do not assign operators on production until the floor is ready.** A staffed machine waits for Start.
+
+- Backend: MachineOperator (production 0006); JobStep started_at/by, quantity_made/spoilt (jobs 0050); FILE_FAULT (0051); slack queue; start_step; report_problem; bench ending; operator API (queue, start, done, problem, unlock, files). Tests: apps/jobs/tests_operator.py (24).
+- Frontend: /operator in octos-web: OperatorTopbar, OperatorPortal, src/api/operator.js.
+- Local test account: operator@test.local / operator-test-123, assigned to the 6ft (local DB only).
+- Note: 2c8180f also carries the operator API (its own commit was skipped).
+
+Next: an Operator role (lands on /operator, no other portal), registering MachineOperator in admin, a hand test on real data, then Phase 2 (spoilage confirmation and reprints).
+Local setup: the docker-compose `frontend` service holds 5173 and serves stale code. Remove it or put it behind a profile.

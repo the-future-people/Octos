@@ -1032,3 +1032,7 @@ Internal detail belongs in the log, not on the screen.
 - Read `git status` before committing, not just run it. An untracked file under `apps/` means that feature isn't in production, however green the tests are.
 - Run a suite by its module (`apps.jobs.tests`), not its app (`apps.jobs`): `apps` has no `__init__.py`, so discovery crashes before any test runs.
 - Read `git status` before committing, not just run it. An untracked file under `apps/` means that feature isn't in production, however green the tests are.
+- `apps.jobs.tests` runs only `tests.py`. The jobs suite is several modules (`tests_steps`, `tests_final_check`, `tests_coordinator_api`, `tests_catalogue`); run them all by name.
+- `CustomUser` is not Django's stock user: use `full_name`, not `get_full_name()`. Copy how existing code names a user before writing a new reference.
+- Before importing a helper, find where it's defined (`def name`), not where it's used: a function-level import makes a name look available in a module that doesn't export it.
+- PowerShell formats a whole paste with the first command's table columns, so later results can show as blank rows. Use `ForEach-Object { $_.FullName }` or run commands one at a time when outputs differ.

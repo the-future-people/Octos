@@ -926,3 +926,13 @@ the next quote, and add-ons never disagree with the engine meanwhile.
 From the swipe until Paystack's page loads, a full-screen message says
 where the customer is going, the amount, and not to press back. Those
 seconds are when people press back or pay twice.
+
+## 27–28 Oct 2026 — Operator portal, Phase 1
+
+- **Start is the operator's.** On a machine with a current MachineOperator, the front of the queue waits for Start; started_at is when work really began, reached_at when it came to the front. Unstaffed machines and the bench still start by themselves. This supersedes the JobStep docstring's "there is no Start button", and lets each machine switch over the day someone is assigned, with no flag or big-bang release.
+- **Queues order by slack, not promise.** Slack = promise − work left on the line (− now, which is the same for all). A big job promised later can rightly come before a small one promised sooner.
+- **Every line ends at the bench.** Where a route ends on a machine, build_steps adds a FINISH step. An operator's Done therefore always frees the machine, and the final check happens at finishing, unchanged.
+- **Operator permissions come from the assignment, not the role.** An assigned operator may move work In production → Finishing, halt for machine down / file fault / material out, and report their own machine down. Nothing else. Bringing a machine back up stays with the coordinator.
+- **Password, not PIN.** Operators unlock with their own account password: no second secret, no separate lockout, one reset path. The screen locks on the Lock button, at end of shift, or after 30 minutes idle, never between Start and Done.
+- **Problem has three kinds.** Machine down stops the station (MachineService.mark_down). File fault and material out take one job off and halt it; the machine carries on. Material out sets aside only that job until Phase 4 knows what each job uses.
+- **Halted jobs keep no place in a queue** unless already on the machine, so a stopped job never blocks the next, and a machine is never given a second job while one is stopped on it.
