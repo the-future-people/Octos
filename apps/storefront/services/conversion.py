@@ -465,6 +465,18 @@ def _customer_and_link(order):
     customer = _customer_for(order)
     lead = getattr(order, 'lead', None)
     if customer is not None and lead is not None and lead.customer_id is None:
-        lead.customer = customer
-        lead.save(update_fields=['customer'])
+        # One lead per customer. Where an earlier lead already holds this
+        # customer, this is the same person arriving under a second lead:
+        # the job still goes to the customer, and the two leads are left
+        # for a contacts merge. A duplicate lead must never cost someone
+        # their order, which is what a failed link here did.
+        held = type(lead).objects.filter(customer=customer).exclude(pk=lead.pk).first()
+        if held is None:
+            lead.customer = customer
+            lead.save(update_fields=['customer'])
+        else:
+            logger.warning(
+                'Lead %s is the same customer as lead %s (customer %s); left unlinked for a merge.',
+                lead.pk, held.pk, customer.pk,
+            )
     return customer

@@ -99,6 +99,27 @@ class ConversionTests(TestCase):
 
     # ── A job on the board ─────────────────────────────────────────
 
+    def test_a_customer_already_held_by_another_lead_still_gets_the_job(self):
+        """
+        28 Oct 2026: a returning customer came in under a second lead, and
+        linking it to a customer another lead already held broke the
+        one-lead-per-customer rule. The whole conversion rolled back: paid,
+        and no job. The job must still go to the customer.
+        """
+        from apps.storefront.services.conversion import _customer_for, convert
+
+        self._sheet()
+        order = self._order(phone='0244800100')
+        customer = _customer_for(order)
+        Lead.objects.create(phone='+233244800199', first_name='Abena', customer=customer)
+
+        job = convert(order)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.customer_id, customer.pk)
+        order.lead.refresh_from_db()
+        self.assertIsNone(order.lead.customer_id)
+
     def test_a_paid_order_becomes_a_job(self):
         from apps.storefront.services.conversion import convert
 
