@@ -187,6 +187,15 @@ ROLES = [
         ],
     },
     {
+        # Runs machines. No permissions of its own: what an operator may
+        # do at a machine comes from their MachineOperator assignment.
+        # The role only sends them to /operator and keeps them out of
+        # every other portal.
+        'name': 'OPERATOR',
+        'display_name': 'Operator',
+        'permissions': [],
+    },
+    {
         'name': 'DESIGNER',
         'display_name': 'Designer',
         'permissions': [
