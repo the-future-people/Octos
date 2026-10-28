@@ -343,7 +343,8 @@ class IdentityTests(TestCase):
         self.assertFalse(response.data['code_required'])
 
         order = OnlineOrder.objects.get(order_number=created['order_number'])
-        self.assertEqual(order.lead.phone, '0244111222')
+        # Stored in the one form, however it was typed.
+        self.assertEqual(order.lead.phone, '+233244111222')
         self.assertEqual(order.lead.first_name, 'Ama')
 
     def test_identifying_needs_the_orders_token(self):

@@ -53,11 +53,18 @@ def find_lead(phone):
     """
     from apps.storefront.models import Lead
 
-    exact = Lead.objects.filter(phone=phone).first()
+    # Compare like with like: the number as typed (0556244194) must find
+    # the lead stored in the one form (+233556244194). Comparing the raw
+    # input made a second lead for a returning customer.
+    target = normalise_phone(phone) or (phone or '').strip()
+    if not target:
+        return None
+
+    exact = Lead.objects.filter(phone=target).first()
     if exact:
         return exact
-    for lead in Lead.objects.filter(phone__contains=phone[-4:]):
-        if normalise_phone(lead.phone) == phone:
+    for lead in Lead.objects.filter(phone__contains=target[-4:]):
+        if normalise_phone(lead.phone) == target:
             return lead
     return None
 

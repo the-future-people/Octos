@@ -581,7 +581,18 @@ class OrderIdentifyView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        lead = Lead.objects.filter(phone=phone).first()
+        # One form for one number: 0556244194 as typed is +233556244194 as
+        # stored. Looking up the raw number missed returning customers,
+        # made them a second lead, and skipped their code check.
+        from apps.storefront.services.accounts import find_lead, normalise_phone
+        normal = normalise_phone(phone)
+        if not normal:
+            return Response(
+                {'detail': "That doesn't look like a phone number."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        phone = normal
+        lead = find_lead(phone)
 
         if lead and lead.has_code:
             given = (request.data.get('code') or '').strip()
