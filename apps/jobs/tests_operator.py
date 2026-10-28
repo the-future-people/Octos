@@ -340,3 +340,27 @@ class OperatorStepTests(JobsFixtureMixin, TestCase):
         )
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(self._open_halt(first).reason, 'FILE_FAULT')
+
+    def test_api_files_reach_the_card_print_file_first(self):
+        from apps.jobs.models import JobFile
+        job = self._job()
+        other = self._job(promise_in_hours=9)
+        build_steps(job)
+        build_steps(other)
+        line = job.line_items.get()
+
+        JobFile.objects.create(job=job, line_item=line, file='jobs/t/crest_original.pdf', file_type='ORIGINAL')
+        JobFile.objects.create(job=job, line_item=line, file='jobs/t/crest_final.pdf', file_type='FINAL')
+        JobFile.objects.create(job=job, line_item=None, file='jobs/t/brand_guide.pdf', file_type='REFERENCE')
+        JobFile.objects.create(job=other, line_item=other.line_items.get(),
+                               file='jobs/t/someone_else.pdf', file_type='FINAL')
+
+        resp = self._client(self.operator).get('/api/v1/jobs/operator/queue/')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        files = resp.data['machines'][0]['next']['files']
+
+        self.assertEqual([f['name'] for f in files],
+                         ['crest_final.pdf', 'crest_original.pdf', 'brand_guide.pdf'])
+        for f in files:
+            self.assertTrue(f['url'].startswith(f"/api/v1/jobs/files/{f['id']}/?t="))
+        self.assertNotIn('someone_else.pdf', str(resp.data['machines'][0]['next']))

@@ -47,6 +47,29 @@ def _is_reprint(step):
     ).exists()
 
 
+# The file to print first, then what is only there to look at.
+FILE_ORDER = {'FINAL': 0, 'ORIGINAL': 1, 'REFERENCE': 2, 'SAMPLE': 3}
+
+
+def _files(step):
+    """This line's files and the job's own, print file first, with signed links."""
+    import os
+    from django.db.models import Q
+    from apps.jobs.models import JobFile
+    from .file_views import sign_file_id
+
+    files = JobFile.objects.filter(
+        Q(line_item_id=step.line_item_id) | Q(job_id=step.job_id, line_item__isnull=True),
+    )
+    rows = [{
+        'id':   f.pk,
+        'name': os.path.basename(f.file.name),
+        'type': f.file_type,
+        'url':  f'/api/v1/jobs/files/{f.pk}/?t={sign_file_id(f.pk)}',
+    } for f in files]
+    return sorted(rows, key=lambda r: (FILE_ORDER.get(r['type'], 9), r['id']))
+
+
 def _row(step, now):
     """One piece of work as the operator sees it. No prices, no customer contact."""
     job, line = step.job, step.line_item
@@ -71,6 +94,7 @@ def _row(step, now):
         'machine':        {'id': step.machine_id, 'name': step.machine.name if step.machine_id else None},
         'started_at':     step.started_at.isoformat() if step.started_at else None,
         'is_reprint':     _is_reprint(step),
+        'files':          _files(step),
     }
 
 
