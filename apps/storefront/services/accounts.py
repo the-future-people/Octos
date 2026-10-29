@@ -98,7 +98,8 @@ def send_code(raw_phone):
     cache.set(_code_key(phone), {'hash': make_password(code), 'guesses': 0}, CODE_TTL)
     cache.set(_sends_key(phone), sends + [now], SEND_WINDOW)
 
-    send_sms(phone, f'Your Print Octos code is {code}. It expires in 10 minutes. Never share it.')
+    from apps.storefront.services.messages import code_text
+    send_sms(phone, code_text(code))
     return phone
 
 

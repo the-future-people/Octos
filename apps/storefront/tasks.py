@@ -49,8 +49,10 @@ def tell_customer_ready(self, job_id):
     rolls back never tells anyone anything, and the coordinator's tap
     never waits on mNotify.
 
-    Online orders only. A walk-in has no order, no tracking link and has
-    not been asked whether it wants texts; that is a separate decision.
+    Any job with an order behind it: online orders, and counter production
+    and design jobs, which get one when first paid enough (join_the_line).
+    Instant walk-in jobs have none, and are collected while the customer
+    waits, so they are never told.
 
     Retried five minutes apart. A late ready text is fine; a missing one
     is a customer who never comes to collect.

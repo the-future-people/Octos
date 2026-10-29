@@ -62,7 +62,8 @@ class ReadyTextTests(TestCase):
         phone, message = sent.call_args[0][:2]
         self.assertEqual(phone, '0244700911')
         self.assertIn('ready', message.lower())
-        self.assertIn(order.order_number, message)
+        short = order.order_number.rsplit('-', 1)[-1].lstrip('0')
+        self.assertIn(f'ref {short}', message)
 
     def test_a_job_with_no_online_order_texts_nobody(self):
         from apps.storefront.tasks import tell_customer_ready

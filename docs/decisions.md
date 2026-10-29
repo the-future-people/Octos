@@ -936,3 +936,13 @@ seconds are when people press back or pay twice.
 - **Password, not PIN.** Operators unlock with their own account password: no second secret, no separate lockout, one reset path. The screen locks on the Lock button, at end of shift, or after 30 minutes idle, never between Start and Done.
 - **Problem has three kinds.** Machine down stops the station (MachineService.mark_down). File fault and material out take one job off and halt it; the machine carries on. Material out sets aside only that job until Phase 4 knows what each job uses.
 - **Halted jobs keep no place in a queue** unless already on the machine, so a stopped job never blocks the next, and a machine is never given a second job while one is stopped on it.
+## 30 Oct 2026 — Intake inspection redesign
+
+- **One question, one screen:** can this file be printed as ordered? Nothing appears twice; no money; no tick-box ritual.
+- **Ordered vs file table**, computed by Octos: Size, Bleed, Resolution (at the ordered size), Quantity (pages and sets), Edges. Each row shows what was ordered or is needed beside what the file measures; a tick or an amber warning, never the word "OK". Rows for finishing or a customer note appear only when present.
+- **Print rules are data, on each product:** bleed, safe margin, minimum dpi, eyelet spacing. Trade defaults to start (sheet work 3 mm / 5 mm / 300 dpi; plotter stickers 2 / 3 / 300; banners 0 / 25 mm / 100; DTF and textile 0 / 2 / 300), edited as Farhat learns its papers and printers. Part of the catalogue rebuild.
+- **Print quality score**, 0–100%, with bands (Good 80+, Acceptable 60+, Poor) and always with its reasons and their cost: resolution, sharpness (catches enlarged photos), compression damage, colours out of print range. Weights to be tuned from final-check failures and complaints. **A Poor score warns; it never blocks Clear.** The customer decides about their own photo.
+- **Mismatches bring their own ways out:** scale to the ordered size (only when the shape matches, leaving a note for the operator) or hold and ask the customer. Never "change the order to the file's size": a bigger print costs more than was paid.
+- **Two signed human checks:** Text (names, dates, numbers, spelling) and Edges (with the margins overlay: safe area, cut, eyelets). Each records who and when.
+- **Clear comes alive** when every computed row is fine or settled and both checks are signed. Until then the button counts what's left ("Clear · 3 checks left"), and pressing it says what's missing.
+- **Hold and contact are one action**, with a drafted message to the customer.

@@ -653,7 +653,10 @@ class PaymentTextTests(TestCase):
         text = payment_text(order)
 
         self.assertIn('92.44', text)
-        self.assertIn(order.order_number, text)
+        # The short reference a customer can read out, not the full number.
+        short = order.order_number.rsplit('-', 1)[-1].lstrip('0')
+        self.assertIn(f'ref {short}', text)
+        self.assertNotIn(order.order_number, text)
 
     def test_it_says_where_to_collect(self):
         """
@@ -706,7 +709,8 @@ class PaymentTextTests(TestCase):
         self.assertTrue(sent.called)
         phone, message = sent.call_args[0][:2]
         self.assertEqual(phone, '0244700900')
-        self.assertIn(order.order_number, message)
+        short = order.order_number.rsplit('-', 1)[-1].lstrip('0')
+        self.assertIn(f'ref {short}', message)
 
     def test_an_order_with_nobody_on_it_texts_nobody(self):
         from unittest.mock import patch

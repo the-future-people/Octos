@@ -683,6 +683,19 @@ class JobCreateSerializer(serializers.ModelSerializer):
         except ValueError as e:
             raise serializers.ValidationError(str(e))
 
+        # Production work is collected later, and the ready text is what
+        # brings the customer back. Without a phone number they never hear.
+        if validated_data['job_type'] == 'PRODUCTION':
+            customer = validated_data.get('customer')
+            person = validated_data.get('ordered_by')
+            if not ((customer and customer.phone) or (person and person.phone)):
+                raise serializers.ValidationError({
+                    'customer': (
+                        "Production work needs the customer's name and phone, "
+                        "so we can text them when it's ready. Register them first."
+                    ),
+                })
+
         # ── Status ────────────────────────────────────────────
         validated_data['status'] = Job.PENDING_PAYMENT
 

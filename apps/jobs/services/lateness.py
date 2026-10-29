@@ -33,6 +33,8 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.storefront.services.messages import late_text
+
 logger = logging.getLogger(__name__)
 
 SLIP = timedelta(minutes=15)          # smaller wobbles are not worth an alarm
@@ -176,7 +178,7 @@ def check(job, now=None):
             when = _when(job.estimated_ready_at)
             tell(order, 'revised', 'New time',
                  f'Sorry: {job.job_number} is running behind. New time: about {when}.',
-                 sms_text=f'Farhat: sorry, {job.job_number} is running behind. New time: about {when}.')
+                 sms_text=late_text(order, when))
             job.promise_told_at = now
             fields.append('promise_told_at')
 
@@ -227,5 +229,5 @@ def restart_for_customer(job, now=None):
             when = _when(fresh)
             tell(order, 'revised', 'New time',
                  f'Thanks for the change to {job.job_number}. New time: about {when}.',
-                 sms_text=f'Farhat: thanks for the change to {job.job_number}. New time: about {when}.')
+                 sms_text=late_text(order, when))
     return fresh

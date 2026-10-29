@@ -134,6 +134,7 @@ def join_the_line(job, actor=None):
     time a production or design job has paid enough.
     """
     from apps.storefront.models import OnlineOrder
+    from apps.storefront.services.messages import counter_paid_text
     from apps.storefront.services.notify import tell
 
     if job.job_type not in FLOOR_WORK:
@@ -172,6 +173,6 @@ def join_the_line(job, actor=None):
         tell(
             order, 'paid', 'Order received',
             f'{job.job_number}: we are on it. {ready}{owing}',
-            sms_text=f'Farhat: {job.job_number} received. {ready}{owing}',
+            sms_text=counter_paid_text(order, balance),
         )
     return order
