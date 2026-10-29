@@ -111,6 +111,10 @@ class JobStep(AuditModel):
     # the coordinator confirms them for a reprint.
     quantity_made   = models.PositiveIntegerField(null=True, blank=True)
     quantity_spoilt = models.PositiveIntegerField(null=True, blank=True)
+    # On a staffed machine Done is the operator's. When someone else has
+    # to close it (the operator left with it running), why, in their
+    # words; done_by then names them, not the operator.
+    done_override = models.CharField(max_length=200, blank=True, default='')
 
     class Meta(AuditModel.Meta):
         ordering = ['line_item_id', 'sequence']

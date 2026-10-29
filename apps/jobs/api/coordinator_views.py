@@ -603,7 +603,7 @@ class FloorView(APIView):
 
 
 class StepDoneView(APIView):
-    """POST /api/v1/jobs/steps/<step_id>/done/"""
+    """POST /api/v1/jobs/steps/<step_id>/done/   Body: { override } (a reason; needed on a staffed machine)"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, step_id):
@@ -617,7 +617,10 @@ class StepDoneView(APIView):
             return Response({'detail': 'Only a coordinator can move work on.'},
                             status=status.HTTP_403_FORBIDDEN)
         try:
-            step = mark_done(step_id, branch, request.user)
+            # On a staffed machine the service refuses without a reason:
+            # Done is the operator's, and an override is signed and kept.
+            step = mark_done(step_id, branch, request.user,
+                             override=request.data.get('override') or '')
         except StepRefused as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 

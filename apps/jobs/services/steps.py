@@ -472,7 +472,7 @@ def sync_stage(job, actor):
         )
 
 
-def mark_done(step_id, branch, actor, checked=False, made=None, spoilt=None):
+def mark_done(step_id, branch, actor, checked=False, made=None, spoilt=None, override=''):
     """
     The job on a machine (or bench) is finished there. The next job on
     that machine moves up, this line moves to its next step, and the
@@ -513,6 +513,23 @@ def mark_done(step_id, branch, actor, checked=False, made=None, spoilt=None):
             raise StepRefused(
                 'Only the job on the machine can be marked done.'
             )
+
+        # On a staffed machine Done is the operator's. Anyone else needs a
+        # reason, kept on the step, and is named as having closed it.
+        override = (override or '').strip()[:200]
+        if step.machine_id and is_staffed(step.machine):
+            current = step.machine.operator_assignments.filter(active_until__isnull=True)
+            if current.filter(operator=actor).exists():
+                override = ''
+            elif not override:
+                names = [n for n in current.values_list('operator__first_name', flat=True) if n]
+                who = ' and '.join(names) or 'Its operator'
+                raise StepRefused(
+                    f'{who} runs {step.machine.name}; Done is theirs. '
+                    'Give a reason to close it yourself.'
+                )
+        else:
+            override = ''
         is_last = not JobStep.objects.filter(
             line_item=step.line_item, sequence__gt=step.sequence,
         ).exists()
@@ -529,6 +546,9 @@ def mark_done(step_id, branch, actor, checked=False, made=None, spoilt=None):
         step.done_at = timezone.now()
         step.done_by = actor
         fields = ['state', 'done_at', 'done_by', 'updated_at']
+        if override:
+            step.done_override = override
+            fields.append('done_override')
         if made is not None:
             step.quantity_made = made
             fields.append('quantity_made')

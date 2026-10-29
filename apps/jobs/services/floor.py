@@ -43,6 +43,9 @@ def _row(step, minutes, running_over, now):
         'minutes_until_done': round_up(minutes),
         'running_over': running_over,
         'reached_at':   step.reached_at.isoformat() if step.reached_at else None,
+        # The operator's Start: when the work really began, and by whom.
+        'started_at':   step.started_at.isoformat() if step.started_at else None,
+        'started_by':   (step.started_by.full_name or step.started_by.email) if step.started_by_id else None,
         'is_halted':    job.halts.filter(resumed_at__isnull=True).exists(),
         # Done on a line's last step is the final check, not a plain Done.
         'is_last':      not JobStep.objects.filter(
@@ -101,6 +104,14 @@ def floor(branch, now=None):
                 'bench':        False,
                 'is_available': machine.is_available,
                 'reason':       machine.unavailable_reason,
+                # Who runs it. On a staffed machine Done is theirs, and the
+                # board shows it rather than offering the button.
+                'operators':    [
+                    a.operator.full_name or a.operator.email
+                    for a in machine.operator_assignments
+                    .filter(active_until__isnull=True, operator__is_active=True)
+                    .select_related('operator')
+                ],
             },
             'queue': _lane(queue(branch, machine=machine), now),
         }
@@ -120,6 +131,7 @@ def floor(branch, now=None):
                 'bench':        True,
                 'is_available': True,
                 'reason':       '',
+                'operators':    [],
             },
             'queue': _lane(queue(branch, station=bench_station), now),
         })

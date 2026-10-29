@@ -364,3 +364,53 @@ class OperatorStepTests(JobsFixtureMixin, TestCase):
         for f in files:
             self.assertTrue(f['url'].startswith(f"/api/v1/jobs/files/{f['id']}/?t="))
         self.assertNotIn('someone_else.pdf', str(resp.data['machines'][0]['next']))
+
+    # ── Done on a staffed machine is the operator's ──────────────
+
+    def _started(self):
+        job = self._job()
+        build_steps(job)
+        start_step(self._print(job).pk, self.branch, self.operator)
+        return job
+
+    def test_someone_else_cannot_close_a_staffed_machines_job_without_a_reason(self):
+        job = self._started()
+        with self.assertRaises(StepRefused) as ctx:
+            mark_done(self._print(job).pk, self.branch, self.coordinator)
+        self.assertIn('Done is theirs', str(ctx.exception))
+        self.assertEqual(self._print(job).state, JobStep.State.ACTIVE)
+
+    def test_a_coordinator_can_override_with_a_reason_and_it_is_kept(self):
+        job = self._started()
+        mark_done(self._print(job).pk, self.branch, self.coordinator,
+                  override='Operator went home; banner is printed')
+        step = self._print(job)
+        self.assertEqual(step.state, JobStep.State.DONE)
+        self.assertEqual(step.done_by, self.coordinator)
+        self.assertEqual(step.done_override, 'Operator went home; banner is printed')
+
+    def test_the_operators_own_done_keeps_no_override(self):
+        job = self._started()
+        mark_done(self._print(job).pk, self.branch, self.operator, override='stray text')
+        self.assertEqual(self._print(job).done_override, '')
+
+    def test_a_reprint_clears_the_override(self):
+        from apps.jobs.services.final_check import _send_back
+        job = self._started()
+        mark_done(self._print(job).pk, self.branch, self.coordinator, override='Operator left')
+        _send_back(job.steps.get(station=self.fin_st), self.branch)
+        self.assertEqual(self._print(job).done_override, '')
+
+    @patch('apps.core.broadcast.broadcast_invalidation')
+    def test_api_coordinator_done_needs_a_reason_on_a_staffed_machine(self, _broadcast):
+        job = self._started()
+        client = self._client(self.coordinator)
+        url = f'/api/v1/jobs/steps/{self._print(job).pk}/done/'
+
+        refused = client.post(url, {}, format='json')
+        self.assertEqual(refused.status_code, 400, refused.data)
+        self.assertIn('Done is theirs', refused.data['detail'])
+
+        allowed = client.post(url, {'override': 'Operator went home'}, format='json')
+        self.assertEqual(allowed.status_code, 200, allowed.data)
+        self.assertEqual(self._print(job).done_override, 'Operator went home')
