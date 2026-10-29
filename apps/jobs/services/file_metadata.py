@@ -217,6 +217,16 @@ def _pdf_images(page, page_width_pt, page_height_pt):
 def _measure_raster(job_file):
     from PIL import Image
 
+    # Pillow refuses anything over ~179 million pixels, even just to read
+    # the header, to guard against images that would decode into gigabytes.
+    # Nothing here decodes pixels: size, mode and dpi come from the header.
+    # A 10 × 6 ft banner at 150 dpi is ~194 million pixels, so the default
+    # turned real large-format work into "could not be read". A billion
+    # pixels keeps a backstop for anything truly absurd.
+    # If quality scoring later decodes pixels, it must use img.draft() or
+    # a reduced copy, never the full image.
+    Image.MAX_IMAGE_PIXELS = 1_000_000_000
+
     with job_file.file.open('rb') as handle:
         with Image.open(handle) as img:
             width_px, height_px = img.size

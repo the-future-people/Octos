@@ -1008,6 +1008,30 @@ It needs these imports at the top, alongside the ones already there:
 # A hard ceiling, refused before anything is read. Print artwork is
 # large, and this is generous for one file — but not a door left open.
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
+# Staff at the counter have the file in the shop already, and large-format
+# artwork runs big. Until big files go straight to R2, this is their ceiling.
+STAFF_UPLOAD_BYTES = 300 * 1024 * 1024
+
+
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+
+class _StaffIfSignedIn(JWTAuthentication):
+    """
+    Recognises staff by their sign-in on an otherwise public view. Anyone
+    without a valid staff token carries on as a visitor rather than being
+    refused, so customers' uploads are untouched.
+    """
+    def authenticate(self, request):
+        try:
+            return super().authenticate(request)
+        except Exception:
+            return None
+
+
+def _is_staff(request):
+    user = getattr(request, 'user', None)
+    return bool(user and user.is_authenticated and user.is_active)
 
 
 class OrderFileView(APIView):
@@ -1445,7 +1469,9 @@ class ArtworkCheckView(APIView):
     leaves no order, no line and no record.
     """
     permission_classes = [AllowAny]
-    authentication_classes = []
+    # Staff at the counter are recognised by their sign-in and get the
+    # counter's limit; everyone else is a visitor, exactly as before.
+    authentication_classes = [_StaffIfSignedIn]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'storefront'
     parser_classes = [MultiPartParser]
@@ -1456,9 +1482,12 @@ class ArtworkCheckView(APIView):
             return Response({'detail': 'No file was sent.'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        if upload.size > MAX_UPLOAD_BYTES:
+        staff = _is_staff(request)
+        if upload.size > (STAFF_UPLOAD_BYTES if staff else MAX_UPLOAD_BYTES):
             return Response(
                 {'detail': (
+                    'That file is over 300 MB. Export a smaller copy at print size (JPEG or PDF).'
+                    if staff else
                     'That file is too large to send over the web. Bring it '
                     'to the branch on a flash drive, or send a smaller export.'
                 )},
