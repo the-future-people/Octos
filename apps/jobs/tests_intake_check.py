@@ -110,6 +110,24 @@ class IntakeCheckTests(JobsFixtureMixin, TestCase):
         self.assertTrue(piece['file']['url'].startswith(f"/api/v1/jobs/files/{piece['file']['id']}/?t="))
         self.assertEqual(resp.data['job']['job_number'], job.job_number)
 
+    def test_counter_production_work_can_be_cleared(self):
+        """30 Oct 2026: shown for inspection, then refused as 'needs no verification'."""
+        from apps.jobs.status_engine import JobStatusEngine
+        job, _ = self._job(self.banner, {'width_in': '6', 'height_in': '6'})
+        Job.objects.filter(pk=job.pk).update(intake_channel='WALK_IN', work_state='RECEIVED')
+        job.refresh_from_db()
+        JobStatusEngine(job).verify(actor=self.coordinator)
+        job.refresh_from_db()
+        self.assertTrue(job.is_verified)
+
+    def test_counter_instant_work_still_needs_no_verification(self):
+        from apps.jobs.status_engine import JobStatusEngine
+        job, _ = self._job(self.banner, {'width_in': '6', 'height_in': '6'})
+        Job.objects.filter(pk=job.pk).update(intake_channel='WALK_IN', job_type='INSTANT')
+        job.refresh_from_db()
+        with self.assertRaises(ValueError):
+            JobStatusEngine(job).verify(actor=self.coordinator)
+
     def test_api_clear_is_refused_until_settled_and_signed(self):
         job, _ = self._job(self.banner, {'width_in': '6', 'height_in': '6'})
         resp = self._client().post(f'/api/v1/jobs/{job.pk}/verify/', {}, format='json')

@@ -921,8 +921,13 @@ class VerificationTests(JobsFixtureMixin, TestCase):
         with self.assertRaises(PermissionError):
             JobStatusEngine(job).verify(actor=self.attendant)
 
-    def test_verifying_a_walk_in_is_refused(self):
+    def test_verifying_a_walk_in_instant_job_is_refused(self):
+        # Instant counter work is done in front of the customer. Counter
+        # production and design are inspected since 21 Oct 2026, so this
+        # guards the instant case only.
         job = self._job('WALK_IN')
+        Job.objects.filter(pk=job.pk).update(job_type='INSTANT')
+        job.refresh_from_db()
         with self.assertRaises(ValueError):
             JobStatusEngine(job).verify(actor=self.coordinator)
 

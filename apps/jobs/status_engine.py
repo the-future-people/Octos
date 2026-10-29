@@ -383,12 +383,18 @@ class JobStatusEngine:
                 f"{self.job.job_number}."
             )
 
-        if not self.job.needs_verification:
+        # Remote orders, and since 21 Oct 2026 counter production and design
+        # work: it leaves with the customer gone, so it is inspected like an
+        # online order (the arrivals queue shows exactly these). Instant
+        # counter work is still done in front of the customer and refused.
+        # Deliberately not widened in needs_verification itself: that would
+        # hide unverified counter jobs already on the floor from the board.
+        counter_floor_work = self.job.job_type in ('PRODUCTION', 'DESIGN')
+        if not (self.job.needs_verification or counter_floor_work):
             raise ValueError(
                 f"{self.job.job_number} came in at the counter and needs "
                 f"no verification."
             )
-
         if self.job.is_verified:
             raise ValueError(
                 f"{self.job.job_number} has already been cleared."
