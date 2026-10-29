@@ -115,7 +115,9 @@ class CoordinatorApiTests(JobsFixtureMixin, TestCase):
         first = self._job()
         self.me.post(inspect(first.pk))
 
-        self.assertEqual(self.me.post(verify(first.pk)).status_code, 200)
+        # Clearing now needs the two signed checks, as the new modal sends.
+        cleared = self.me.post(verify(first.pk), {'signed_checks': ['TEXT', 'EDGES']}, format='json')
+        self.assertEqual(cleared.status_code, 200, cleared.data)
         first.refresh_from_db()
         self.assertIsNone(first.inspecting_by)
         self.assertEqual(first.work_state, 'IN_PRODUCTION')

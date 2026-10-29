@@ -40,6 +40,12 @@ class JobVerification(AuditModel):
         max_length=20,
         choices=Outcome.choices,
     )
+    # The two checks only a person can make, signed at Clear by checked_by:
+    # ["TEXT", "EDGES"]. And how each amber row was settled, by piece and
+    # row: {"9378:SIZE": "SCALE"}. Kept so a complaint weeks later can be
+    # traced to what was checked, by whom, and what was agreed.
+    signed_checks = models.JSONField(default=list, blank=True)
+    settlements   = models.JSONField(default=dict, blank=True)
     note = models.TextField(
         blank=True,
         help_text=(

@@ -219,6 +219,46 @@ class ProductionBoardView(APIView):
         })
 
 
+class IntakeCheckView(APIView):
+    """
+    GET /api/v1/jobs/<pk>/intake-check/
+    Can this be printed as ordered? Every piece, ordered vs file, row by
+    row, with the checks a person signs. What the inspection modal shows.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.jobs.api.file_views import sign_file_id
+        from apps.jobs.services.intake_check import compare
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        if not _is_coordinator(request, branch):
+            return Response({'detail': 'Only a coordinator can inspect.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        job = _get_job(pk, branch)
+        if not job:
+            return Response({'detail': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = compare(job)
+        for piece in data['pieces']:
+            if piece['file']:
+                fid = piece['file']['id']
+                piece['file']['url'] = f'/api/v1/jobs/files/{fid}/?t={sign_file_id(fid)}'
+
+        data['job'] = {
+            'id':           job.pk,
+            'job_number':   job.job_number,
+            'customer':     job.customer.full_name if job.customer_id else 'Walk-in',
+            'channel':      job.intake_channel,
+            'arrived_at':   job.created_at.isoformat(),
+            'ready_by':     job.estimated_ready_at.isoformat() if job.estimated_ready_at else None,
+            'customer_note': '',
+        }
+        return Response(data)
+
+
 class VerifyJobView(APIView):
     """
     POST /api/v1/jobs/<pk>/verify/
@@ -238,13 +278,41 @@ class VerifyJobView(APIView):
             return Response({'detail': 'Job not found.'},
                             status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            verification = JobStatusEngine(job).verify(
-                actor              = request.user,
-                note               = request.data.get('note', ''),
-                customer_contacted = bool(request.data.get('customer_contacted')),
-                customer_response  = request.data.get('customer_response', ''),
+        from django.db import transaction
+        from apps.jobs.services.intake_check import gate, operator_notes
+
+        # Nothing clears until every amber row is settled and both checks
+        # only a person can make are signed. The server decides, not the
+        # screen: an old tab or a direct call gets the same answer.
+        signed = [s for s in (request.data.get('signed_checks') or []) if isinstance(s, str)]
+        settled = request.data.get('settlements') or {}
+        if not isinstance(settled, dict):
+            settled = {}
+        missing = gate(job, signed, settled)
+        if missing:
+            return Response(
+                {'detail': 'First ' + ', '.join(missing) + '.', 'missing': missing},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+        for_the_floor = operator_notes(job, settled)
+
+        try:
+            with transaction.atomic():
+                verification = JobStatusEngine(job).verify(
+                    actor              = request.user,
+                    note               = request.data.get('note', ''),
+                    customer_contacted = bool(request.data.get('customer_contacted')),
+                    customer_response  = request.data.get('customer_response', ''),
+                )
+                if verification is not None and hasattr(verification, 'signed_checks'):
+                    verification.signed_checks = signed
+                    verification.settlements = settled
+                    verification.save(update_fields=['signed_checks', 'settlements'])
+                # "Print at 6 × 6 in": what intake agreed reaches the operator's card.
+                if for_the_floor:
+                    job.refresh_from_db(fields=['notes'])
+                    job.notes = '\n'.join(p for p in [job.notes or '', *for_the_floor] if p)
+                    job.save(update_fields=['notes', 'updated_at'])
         except PermissionError as e:
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as e:

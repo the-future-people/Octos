@@ -169,12 +169,13 @@ def compare(job):
             if f.colour_mode:
                 rows.append(_row('COLOUR', 'Colour', '—', f.colour_mode, 'ok'))
 
-            # Pages
+            # Pages: an image is always one page; a PDF says how many it has
             pages = int(line.pages or 1)
-            if f.page_count:
-                ok = f.page_count == pages
-                rows.append(_row('QUANTITY', 'Pages', f'{pages} × {line.quantity or 1}', f'{f.page_count} page'
-                                 + ('' if f.page_count == 1 else 's'), 'ok' if ok else 'warn',
+            file_pages = f.page_count or (1 if (f.content_type or '').startswith('image/') else None)
+            if file_pages:
+                ok = file_pages == pages
+                rows.append(_row('QUANTITY', 'Pages', f'{pages} × {line.quantity or 1}', f'{file_pages} page'
+                                 + ('' if file_pages == 1 else 's'), 'ok' if ok else 'warn',
                                  '' if ok else "The file's pages don't match the order.", () if ok else ('CHECKED',)))
 
             # Edges: measured later; for now a person checks with the overlay
@@ -187,6 +188,7 @@ def compare(job):
             'quantity':  line.quantity or 1,
             'finishing': addons,
             'rules':     rules,
+            'ordered_mm': [round(size[0], 1), round(size[1], 1)] if size else None,
             'file':      None if f is None else {
                 'id': f.pk, 'name': (f.original_filename or f.file.name.rsplit('/', 1)[-1]),
                 'size_bytes': f.size_bytes, 'content_type': f.content_type,
