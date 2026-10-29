@@ -352,6 +352,57 @@ class CreditEngineRegressionTests(JobsFixtureMixin, TestCase):
         self.assertEqual(job.payment_method, 'CREDIT')
         self.assertEqual(result['payment_method'], 'CREDIT')
 
+    def test_paying_a_production_job_puts_it_on_the_floor_not_complete(self):
+        """30 Oct 2026: paying a production job tried to finish it, and was refused."""
+        from apps.jobs.services.cashier_service import confirm_payment
+        from apps.storefront.models import OnlineOrder
+
+        job = Job.objects.create(
+            branch=self.branch, job_type='PRODUCTION', status=Job.PENDING_PAYMENT,
+            title='Production pay test', intake_by=self.bm, customer=self.customer,
+            estimated_cost=Decimal('60.00'), daily_sheet=self.sheet,
+        )
+        confirm_payment(
+            job=job,
+            validated_data={'deposit_percentage': 100, 'payment_method': 'CASH',
+                            'cash_tendered': Decimal('60.00')},
+            actor=self.cashier,
+        )
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, Job.PAID)
+        self.assertEqual(job.amount_paid, Decimal('60.00'))
+        self.assertNotEqual(job.work_state, 'DONE')
+        self.assertNotEqual(job.handover_state, 'HANDED_OVER')
+        # On the floor: it joined the line, with an order record for its texts.
+        self.assertTrue(OnlineOrder.objects.filter(job=job).exists())
+
+    def test_a_refused_payment_writes_nothing(self):
+        """A step that refuses must leave no 'paid' amount behind."""
+        from unittest.mock import patch
+        from apps.finance.models import Receipt
+        from apps.jobs.services.cashier_service import confirm_payment
+
+        job = Job.objects.create(
+            branch=self.branch, job_type='INSTANT', status=Job.PENDING_PAYMENT,
+            title='Refused pay test', intake_by=self.bm,
+            estimated_cost=Decimal('60.00'), daily_sheet=self.sheet,
+        )
+        with patch('apps.jobs.status_engine.JobStatusEngine.advance',
+                   side_effect=ValueError('Cannot transition')):
+            with self.assertRaises(ValueError):
+                confirm_payment(
+                    job=job,
+                    validated_data={'deposit_percentage': 100, 'payment_method': 'CASH',
+                                    'cash_tendered': Decimal('60.00')},
+                    actor=self.cashier,
+                )
+
+        job.refresh_from_db()
+        self.assertIn(job.amount_paid, (None, Decimal('0.00')))
+        self.assertEqual(job.status, Job.PENDING_PAYMENT)
+        self.assertFalse(Receipt.objects.filter(job=job).exists())
+
     def test_partial_credit_payment_now_succeeds(self):
         from apps.jobs.services.cashier_service import confirm_payment
 
@@ -1271,6 +1322,15 @@ class CounterFinishingCreateTests(JobsFixtureMixin, TestCase):
             is_active=True,
         )
         cls.banner.addons.add(cls.eyelets)
+        # Production work needs a customer with a phone: the ready text.
+        cls.customer = CustomerProfile.objects.create(
+            phone='0209441873', affiliation_active=True,
+            customer_type=CustomerProfile.INDIVIDUAL,
+            visit_count=0, total_spend=Decimal('0'),
+            tier=CustomerProfile.REGULAR, confidence_score=0,
+            is_priority=False, is_walkin=False,
+            first_name='Finishing', last_name='Customer',
+        )
         PricingRule.objects.create(
             service=cls.banner, branch=cls.branch,
             base_price=Decimal('50.00'),
@@ -1290,6 +1350,7 @@ class CounterFinishingCreateTests(JobsFixtureMixin, TestCase):
         client.force_authenticate(user=self.bm)
         return client.post(self.URL, {
             'branch': self.branch.pk,
+            'customer': self.customer.pk,
             'deposit_percentage': 70,
             'idempotency_key': key,
             'line_items': [{
@@ -1334,6 +1395,36 @@ class CounterFinishingCreateTests(JobsFixtureMixin, TestCase):
         self.assertEqual(self._post('test-finishing-003').status_code, 201)
         self.assertEqual(self._post('test-finishing-004').status_code, 201)
         self.assertEqual(Job.objects.filter(intake_by=self.bm).count(), 2)
+
+    def test_production_without_a_customer_is_refused(self, _lock, _can_make):
+        """Collected later, so it needs someone to text when it's ready."""
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.bm)
+        resp = client.post(self.URL, {
+            'branch': self.branch.pk,
+            'deposit_percentage': 70,
+            'idempotency_key': 'test-finishing-005',
+            'line_items': [{'service': self.banner.pk, 'pages': 1, 'sets': 1}],
+        }, format='json')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn('customer', resp.data)
+        self.assertFalse(Job.objects.filter(intake_by=self.bm).exists())
+
+    def test_production_without_a_customer_is_refused(self, _lock, _can_make):
+        """Collected later, so it needs someone to text when it's ready."""
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=self.bm)
+        resp = client.post(self.URL, {
+            'branch': self.branch.pk,
+            'deposit_percentage': 70,
+            'idempotency_key': 'test-finishing-005',
+            'line_items': [{'service': self.banner.pk, 'pages': 1, 'sets': 1}],
+        }, format='json')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn('customer', resp.data)
+        self.assertFalse(Job.objects.filter(intake_by=self.bm).exists())
 
 
 class CashierQueueSplitTests(JobsFixtureMixin, TestCase):

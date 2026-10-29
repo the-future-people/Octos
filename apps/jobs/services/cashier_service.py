@@ -6,7 +6,7 @@ confirm_payment() is the single entry point for the cashier payment flow:
   1. Calculate amount paid from deposit percentage
   2. Validate split legs sum
   3. Persist payment fields on job
-  4. Advance FSM to COMPLETE
+  4. Advance FSM: COMPLETE for instant work, PAID for production and design
   5. Issue receipt (with PaymentLeg records for SPLIT)
   6. Handle partial credit if supplied
 
@@ -16,11 +16,18 @@ Raises ValueError on validation failures (caller returns 400).
 
 import logging
 from decimal import Decimal
+
+from django.db import transaction
+
 from apps.core.broadcast import broadcast_invalidation
 
 logger = logging.getLogger(__name__)
 
 
+# One payment is one transaction: if any step refuses (a status the job
+# cannot take, a wallet cap, a receipt), nothing is written. On 30 Oct
+# 2026 a refused move left a job reading "paid" with no receipt.
+@transaction.atomic
 def confirm_payment(job, validated_data: dict, actor) -> dict:
     from apps.jobs.status_engine import JobStatusEngine
     from apps.jobs.models import Job
@@ -107,9 +114,13 @@ def confirm_payment(job, validated_data: dict, actor) -> dict:
     ])
 
     # ── Advance FSM to COMPLETE ───────────────────────────────────────
+    # Instant work is done while the customer waits, so paying finishes it.
+    # Production and design are made after the customer leaves: paying puts
+    # them on the floor (PAID), and collection completes them.
+    to_status = Job.COMPLETE if job.job_type == 'INSTANT' else Job.PAID
     result = JobStatusEngine.advance(
         job       = job,
-        to_status = Job.COMPLETE,
+        to_status = to_status,
         actor     = actor,
         notes     = notes or f"Payment confirmed: {deposit_pct}% deposit",
     )
@@ -312,7 +323,7 @@ def _handle_full_credit(job, validated_data, actor, notes):
     # Advance FSM to COMPLETE
     result = JobStatusEngine.advance(
         job       = job,
-        to_status = Job.COMPLETE,
+        to_status = Job.COMPLETE if job.job_type == 'INSTANT' else Job.PAID,
         actor     = actor,
         notes     = notes or f"Full credit — GHS {credit_amount} charged to {credit_account.customer.full_name}",
     )
