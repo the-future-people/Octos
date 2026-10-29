@@ -70,6 +70,35 @@ def _files(step):
     return sorted(rows, key=lambda r: (FILE_ORDER.get(r['type'], 9), r['id']))
 
 
+SIZE_UNITS = ('in', 'ft', 'cm', 'mm', 'm')
+
+
+def _num(value):
+    try:
+        return f'{float(value):g}'
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _size(line):
+    """'72 × 36 in' for anything measured in width and height, else None."""
+    specs = line.specifications or {}
+    for unit in SIZE_UNITS:
+        w, h = specs.get(f'width_{unit}'), specs.get(f'height_{unit}')
+        if w not in (None, '') and h not in (None, ''):
+            return f'{_num(w)} × {_num(h)} {unit}'
+    return None
+
+
+def _instructions(job):
+    """What a person wrote for this job, without conversion's own 'Ordered online' line."""
+    kept = [
+        line.strip() for line in (job.notes or '').splitlines()
+        if line.strip() and not line.strip().lower().startswith('ordered online')
+    ]
+    return '\n'.join(kept)
+
+
 def _row(step, now):
     """One piece of work as the operator sees it. No prices, no customer contact."""
     job, line = step.job, step.line_item
@@ -84,10 +113,16 @@ def _row(step, now):
         'title':          line.service.name,
         'quantity':       line.quantity,
         'pages':          line.pages,
-        'is_color':       getattr(line, 'is_color', None),
-        'paper_size':     getattr(line, 'paper_size', None),
-        'specifications': line.specifications or {},
-        'instructions':   job.notes or '',
+        # A measured piece has a size; its paper and colour fields are only
+        # defaults nobody chose, so they are left out rather than shown.
+        'size':           _size(line),
+        'is_color':       None if _size(line) else getattr(line, 'is_color', None),
+        'paper_size':     None if _size(line) else getattr(line, 'paper_size', None),
+        'specifications': {
+            k: v for k, v in (line.specifications or {}).items()
+            if not k.startswith(('width_', 'height_'))
+        },
+        'instructions':   _instructions(job),
         'ready_at':       job.estimated_ready_at.isoformat() if job.estimated_ready_at else None,
         'slack_minutes':  slack,
         'minutes_left':   left,

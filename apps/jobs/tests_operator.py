@@ -414,3 +414,18 @@ class OperatorStepTests(JobsFixtureMixin, TestCase):
         allowed = client.post(url, {'override': 'Operator went home'}, format='json')
         self.assertEqual(allowed.status_code, 200, allowed.data)
         self.assertEqual(self._print(job).done_override, 'Operator went home')
+
+    def test_api_a_measured_piece_shows_its_size_not_paper_defaults(self):
+        job = self._job()
+        line = job.line_items.get()
+        line.specifications = {'width_in': '72', 'height_in': '36'}
+        line.save(update_fields=['specifications'])
+        Job.objects.filter(pk=job.pk).update(notes='Ordered online — ORD-2026-00043\nWhite underbase please')
+        build_steps(job)
+
+        row = self._client(self.operator).get('/api/v1/jobs/operator/queue/').data['machines'][0]['next']
+        self.assertEqual(row['size'], '72 × 36 in')
+        self.assertIsNone(row['paper_size'])
+        self.assertIsNone(row['is_color'])
+        self.assertNotIn('width_in', row['specifications'])
+        self.assertEqual(row['instructions'], 'White underbase please')
