@@ -2019,7 +2019,8 @@ class FileCheckTests(JobsFixtureMixin, TestCase):
             metadata_state=JobFile.MEASURED, content_type='application/pdf',
             pdf_images=[
                 {'dpi': 600, 'meaningful': True},
-                {'dpi': 40,  'meaningful': True},
+                # Below the banner band's refuse line (30 dpi since 31 Oct).
+                {'dpi': 20,  'meaningful': True},
             ],
             page_count=1, width_mm=1828.8, height_mm=914.4,
             ordered_width_in=72, ordered_height_in=36,
