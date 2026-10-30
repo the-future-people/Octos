@@ -38,6 +38,10 @@ ACCEPTED_TYPES = {
 
 # (largest ordered edge in inches, fine at, refuse below)
 # Under the fine figure but at or above the refuse figure is a warning.
+# 31 Oct 2026: the refuse figures were too high. A 21 x 15 in poster at
+# 72 dpi was refused at the counter, though it prints acceptably from a
+# few feet. Refuse now means unprintable; everything between that and
+# fine warns, and the warning is recorded.
 RESOLUTION_BANDS = (
     # 250 rather than the traditional 300: the difference is not visible
     # on a card, and a warning that fires on good artwork stops being

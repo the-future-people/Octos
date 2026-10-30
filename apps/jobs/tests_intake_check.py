@@ -110,6 +110,25 @@ class IntakeCheckTests(JobsFixtureMixin, TestCase):
         self.assertTrue(piece['file']['url'].startswith(f"/api/v1/jobs/files/{piece['file']['id']}/?t="))
         self.assertEqual(resp.data['job']['job_number'], job.job_number)
 
+    def test_a_letter_document_ordered_as_a4_can_be_fitted(self):
+        """31 Oct 2026: a Word CV in Letter size was left with only Hold."""
+        printing = Service.objects.create(
+            name='A4 B&W Printing', code='ICDOC', category='PRODUCTION', unit='PER_PAGE',
+            requires_design=False, requires_file_upload=True, is_active=True,
+        )
+        job, _ = self._job(printing, paper='A4', file_mm=(215.9, 279.4), file_px=None or (0, 0))
+        rows = self._rows(job)
+        self.assertEqual(rows['SIZE']['fixes'], ['FIT'])
+        self.assertEqual(rows['BLEED']['status'], 'ok')
+
+    def test_a_72_dpi_poster_warns_and_can_be_checked_by_eye(self):
+        """31 Oct 2026: a 21 x 15 in poster at 72 dpi was refused outright."""
+        job, _ = self._job(self.banner, {'width_in': '21', 'height_in': '15'},
+                           file_mm=(533.4, 381.0), file_px=(1491, 1055))
+        row = self._rows(job)['RESOLUTION']
+        self.assertEqual(row['status'], 'warn')
+        self.assertEqual(row['fixes'], ['CHECKED'])
+
     def test_counter_production_work_can_be_cleared(self):
         """30 Oct 2026: shown for inspection, then refused as 'needs no verification'."""
         from apps.jobs.status_engine import JobStatusEngine

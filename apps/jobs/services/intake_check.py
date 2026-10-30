@@ -26,6 +26,7 @@ AREA_UNITS = ('SQFT', 'SQM', 'SQIN', 'AREA')
 # What a coordinator may settle a row with. Holding is an action, not a settlement.
 SETTLEMENTS = {
     'SCALE':    'Print at the ordered size',
+    'FIT':      'Fit to the ordered paper (small margins)',
     'NO_BLEED': 'Print without bleed',
     'CHECKED':  'Checked by eye',
 }
@@ -47,6 +48,11 @@ def rules_for(service):
         return {'kind': 'sticker', 'bleed_mm': 2, 'safe_mm': 3, 'min_dpi': 300}
     if 'dtf' in name or 'transfer' in name or 'shirt' in name or 'textile' in name:
         return {'kind': 'transfer', 'bleed_mm': 0, 'safe_mm': 2, 'min_dpi': 300}
+    # Documents (printing, photocopies, CVs) have white margins: no bleed.
+    if (unit in ('PAGE', 'COPY')
+            or any(w in name for w in ('printing', 'photocopy', 'document', 'scan')))\
+            and not any(w in name for w in ('card', 'flyer', 'poster', 'brochure')):
+        return {'kind': 'document', 'bleed_mm': 0, 'safe_mm': 5, 'min_dpi': 150}
     return {'kind': 'sheet', 'bleed_mm': 3, 'safe_mm': 5, 'min_dpi': 300}
 
 
@@ -133,13 +139,19 @@ def compare(job):
                 if exact or with_bleed:
                     rows.append(_row('SIZE', 'Size', olabel, file_label, 'ok'))
                 else:
-                    same_shape = abs((fa / fb) - (oa / ob)) <= 0.02
+                    drift = abs((fa / fb) - (oa / ob)) / (oa / ob)
                     bigger = fa > oa
-                    rows.append(_row(
-                        'SIZE', 'Size', olabel, file_label, 'warn',
-                        f"The file is {'bigger' if bigger else 'smaller'} than the order.",
-                        ('SCALE',) if same_shape else (),
-                    ))
+                    if drift <= 0.02:
+                        fixes = ('SCALE',)
+                        note = f"The file is {'bigger' if bigger else 'smaller'} than the order."
+                    elif drift <= 0.12:
+                        # Letter for A4, say: close enough to fit with small margins.
+                        fixes = ('FIT',)
+                        note = 'Nearly the same shape: it can be fitted with small margins.'
+                    else:
+                        fixes = ()
+                        note = 'A different shape from the order: ask the customer which they meant.'
+                    rows.append(_row('SIZE', 'Size', olabel, file_label, 'warn', note, fixes))
 
                 if bleed:
                     if with_bleed:
@@ -150,20 +162,27 @@ def compare(job):
                 else:
                     rows.append(_row('BLEED', 'Bleed', 'None needed', '—', 'ok'))
 
-            # Resolution at the ordered size
+            # Resolution at the ordered size, judged by the same bands as the
+            # upload check (file_checks), so the two can never disagree.
+            dpi = None
             if size and measured and f.width_px and f.height_px:
                 pa, pb = sorted((f.width_px, f.height_px))
                 dpi = int(min(pa / (size[0] / MM_PER['in']), pb / (size[1] / MM_PER['in'])))
-                ok = dpi >= rules['min_dpi']
-                rows.append(_row('RESOLUTION', 'Resolution', f"At least {rules['min_dpi']} dpi",
-                                 f'{dpi:,} dpi', 'ok' if ok else 'warn',
-                                 '' if ok else 'It may print soft or blocky at this size.', () if ok else ('CHECKED',)))
             elif size and measured and f.dpi:
                 dpi = int(f.dpi * (fb / size[1]))
-                ok = dpi >= rules['min_dpi']
-                rows.append(_row('RESOLUTION', 'Resolution', f"At least {rules['min_dpi']} dpi",
-                                 f'{dpi:,} dpi', 'ok' if ok else 'warn',
-                                 '' if ok else 'It may print soft or blocky at this size.', () if ok else ('CHECKED',)))
+            if dpi is not None:
+                from apps.jobs.services.file_checks import _band
+                fine_at, refuse_below = _band(size[0] / MM_PER['in'], size[1] / MM_PER['in'])
+                if dpi >= fine_at:
+                    rows.append(_row('RESOLUTION', 'Resolution', f'At least {fine_at} dpi', f'{dpi:,} dpi', 'ok'))
+                else:
+                    soft = dpi >= refuse_below
+                    rows.append(_row(
+                        'RESOLUTION', 'Resolution', f'At least {fine_at} dpi', f'{dpi:,} dpi', 'warn',
+                        'It will print softer than usual; fine from a distance.' if soft
+                        else 'Very low: it will look blurred. Check by eye, or ask for a larger file.',
+                        ('CHECKED',),
+                    ))
 
             # Colour, as information
             if f.colour_mode:
@@ -221,6 +240,8 @@ def operator_notes(job, settled):
         size = next((r for r in piece['rows'] if r['key'] == 'SIZE'), None)
         if (settled or {}).get(f"{piece['line']}:SIZE") == 'SCALE' and size:
             lines.append(f"{piece['product']}: print at {size['ordered']} (file is {size['file']}, scale it).")
+        if (settled or {}).get(f"{piece['line']}:SIZE") == 'FIT' and size:
+            lines.append(f"{piece['product']}: fit to {size['ordered']} with small margins (file is {size['file']}).")
         if (settled or {}).get(f"{piece['line']}:BLEED") == 'NO_BLEED':
             lines.append(f"{piece['product']}: print without bleed, as agreed at intake.")
     return lines
