@@ -46,9 +46,9 @@ RESOLUTION_BANDS = (
     # 250 rather than the traditional 300: the difference is not visible
     # on a card, and a warning that fires on good artwork stops being
     # read. The refuse figures are where print quality genuinely suffers.
-    (12,    250, 150),   # cards, stickers, photographs — held at arm's length
-    (36,    150, 100),   # posters, large prints — read from a few feet
-    (None,   72,  50),   # banners, backdrops — read from across a room
+    (12,    250, 120),   # cards, stickers, photographs — held at arm's length
+    (36,    150,  60),   # posters, large prints — read from a few feet
+    (None,   72,  30),   # banners, backdrops — read from across a room
 )
 
 # A file whose shape differs from the order by more than this is
