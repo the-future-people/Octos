@@ -127,6 +127,22 @@ def check_file(
     if checks[0]['verdict'] == REFUSE:
         return {'verdict': REFUSE, 'checks': checks}
 
+    # A file attached before any size was typed was judged as a business
+    # card (the smallest band), so a 21 x 15 in poster at 72 dpi was
+    # refused at the counter. With no size ordered yet, judge the file at
+    # its own physical size.
+    if not (ordered_width_in and ordered_height_in) and width_mm and height_mm:
+        ordered_width_in = float(width_mm) / 25.4
+        ordered_height_in = float(height_mm) / 25.4
+
+    # A file attached before any size was typed was judged as a business
+    # card (the smallest band), so a 21 x 15 in poster at 72 dpi was
+    # refused at the counter. With no size ordered yet, judge the file at
+    # its own physical size.
+    if not (ordered_width_in and ordered_height_in) and width_mm and height_mm:
+        ordered_width_in = float(width_mm) / 25.4
+        ordered_height_in = float(height_mm) / 25.4
+
     fine_at, refuse_below = _band(ordered_width_in, ordered_height_in)
 
     # ── 2. Resolution at the size ordered ──────────────────────────

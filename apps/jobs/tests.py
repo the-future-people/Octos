@@ -2013,6 +2013,16 @@ class FileCheckTests(JobsFixtureMixin, TestCase):
         )
         self.assertEqual(result['verdict'], 'fine')
 
+    def test_with_no_size_ordered_a_file_is_judged_at_its_own_size(self):
+        """31 Oct 2026: a 21 x 15 in poster attached before the size was typed was judged as a card."""
+        from apps.jobs.models import JobFile
+        result = self._check(
+            metadata_state=JobFile.MEASURED, content_type='application/pdf',
+            pdf_images=[{'dpi': 72, 'meaningful': True}],
+            page_count=1, width_mm=525.98, height_mm=372.18,
+        )
+        self.assertEqual(result['verdict'], 'warn')
+
     def test_a_pdf_is_judged_on_its_worst_meaningful_image(self):
         from apps.jobs.models import JobFile
         result = self._check(
