@@ -25,8 +25,25 @@ from . import periods
 GRACE = timedelta(minutes=10)
 
 ON_TIME, LATE, ABSENT, LEAVE, OFF, NOT_YET = 'on', 'late', 'absent', 'leave', 'off', 'not_yet'
+UNTRACKED = 'untracked'
 LABEL = {ON_TIME: 'On time', LATE: 'Late', ABSENT: 'Absent', LEAVE: 'On leave',
-         OFF: 'Day off', NOT_YET: 'Not in yet'}
+         OFF: 'Day off', NOT_YET: 'Not in yet', UNTRACKED: 'Not tracked'}
+
+# A branch whose people have no clock-in at all in this many days is not
+# clocking in yet. Its attendance is shown as not tracked, never as
+# everyone absent.
+TRACKING_WINDOW_DAYS = 30
+
+
+def tracked_branches(branch_ids) -> set:
+    from apps.accounts.models import CustomUser, RFIDAccessLog
+    since = timezone.now() - timedelta(days=TRACKING_WINDOW_DAYS)
+    by_log = set(RFIDAccessLog.objects.filter(branch_id__in=branch_ids, action='CLOCK_IN',
+                                              timestamp__gte=since)
+                 .values_list('branch_id', flat=True))
+    by_user = set(CustomUser.objects.filter(branch_id__in=branch_ids, last_clock_in__gte=since)
+                  .values_list('branch_id', flat=True))
+    return by_log | by_user
 
 
 def staff(branch_ids):
@@ -87,6 +104,8 @@ class Ledger:
             d = timezone.localtime(s.started_at).date()
             self.session[s.user_id].setdefault(d, s.started_at)
 
+        self.tracked = tracked_branches({u.branch_id for u in self.users if u.branch_id})
+
         today = timezone.localdate()
         for u in self.users:
             if u.last_clock_in and timezone.localtime(u.last_clock_in).date() == today:
@@ -111,6 +130,8 @@ class Ledger:
         start_t = self.expected_start(user, day)
         if emp and emp.status == 'ON_LEAVE' and day == timezone.localdate():
             return LEAVE, clocked, start_t
+        if user.branch_id not in self.tracked:
+            return UNTRACKED, clocked, start_t
         if start_t is None:
             return (ON_TIME if clocked else OFF), clocked, None
         due = timezone.make_aware(datetime.combine(day, start_t)) + GRACE
@@ -167,7 +188,10 @@ def today_counts(rows):
         c[r['status']] += 1
     present = c[ON_TIME] + c[LATE]
     return {'present': present, 'total': len(rows), 'late': c[LATE], 'absent': c[ABSENT],
-            'leave': c[LEAVE], 'not_yet': c[NOT_YET], 'off': c[OFF]}
+            'leave': c[LEAVE], 'not_yet': c[NOT_YET], 'off': c[OFF],
+            'untracked': c[UNTRACKED],
+            'signed_in': sum(1 for r in rows if r['signed_in']),
+            'tracking': c[UNTRACKED] < len(rows) or not rows}
 
 
 def lens(scope, day) -> dict:

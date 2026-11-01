@@ -121,8 +121,19 @@ class EyeTests(TestCase):
 
         data = self.get('people', scope=f'branch:{self.a.pk}', day=day.isoformat()).data
         status = {p['id']: p['status'] for p in data['people']}
+        self.assertTrue(data['today']['tracking'])
         self.assertEqual(status[late_u.pk], 'late')
         self.assertEqual(status[abs_u.pk], 'absent')
+
+    def test_a_branch_not_clocking_in_is_not_tracked_not_absent(self):
+        day = timezone.localdate() - timedelta(days=1)
+        u, e = self._employee('noclock@eye.test', 'EYE-NC')
+        EmployeeShift.objects.create(employee=e, branch=self.a, day_of_week=day.weekday(),
+                                     start_time=time(8, 0), end_time=time(17, 0))
+        data = self.get('people', scope=f'branch:{self.a.pk}', day=day.isoformat()).data
+        self.assertEqual({p['id']: p['status'] for p in data['people']}[u.pk], 'untracked')
+        self.assertFalse(data['today']['tracking'])
+        self.assertFalse([a for a in data['alerts'] if a['kind'] == 'absent'])
 
     def test_leave_is_never_absence(self):
         u, e = self._employee('leave@eye.test', 'EYE-LV')
