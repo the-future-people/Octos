@@ -2,8 +2,13 @@
 Customers: who they are, how much they spend, how they order, and which
 ones need attention.
 
-A customer belongs to the branch where they were first recorded. Gone
-quiet means a customer in the top tenth by spend whose last job is
+A customer belongs to the branch where they were first recorded. Many
+are recorded with no branch at all (the website and the app come before
+any branch), so a customer with no branch belongs to the branches of
+their jobs. The whole company counts everyone; customers with no branch
+and no jobs yet are counted there and named, so the total always adds up.
+
+Gone quiet means a customer in the top tenth by spend whose last job is
 older than twice their usual gap between jobs.
 """
 
@@ -17,9 +22,21 @@ from . import periods
 NODE_LIMIT = 40
 
 
-def customers(branch_ids):
+def customers(scope):
     from apps.customers.models import CustomerProfile
-    return CustomerProfile.objects.filter(branch_id__in=branch_ids, is_walkin=False)
+    if scope.kind == 'company':
+        return CustomerProfile.objects.all()
+    ids = (CustomerProfile.objects
+           .filter(Q(branch_id__in=scope.branch_ids)
+                   | Q(branch__isnull=True, jobs__branch_id__in=scope.branch_ids))
+           .values_list('id', flat=True).distinct())
+    return CustomerProfile.objects.filter(id__in=ids)
+
+
+def unplaced():
+    """No branch on the record and no job anywhere yet."""
+    from apps.customers.models import CustomerProfile
+    return CustomerProfile.objects.filter(branch__isnull=True, jobs__isnull=True).count()
 
 
 def app_customer_ids(customer_ids) -> set:
@@ -41,7 +58,7 @@ def gone_quiet(c, last, first, jobs, now):
 def lens(scope, first_day, last_day) -> dict:
     from apps.finance.models import CreditAccount
 
-    qs = customers(scope.branch_ids)
+    qs = customers(scope)
     now = timezone.now()
     start, end = periods.bounds(first_day, last_day)
 
@@ -86,6 +103,7 @@ def lens(scope, first_day, last_day) -> dict:
     return {
         'customers': nodes,
         'total': qs.count(),
+        'not_tied_to_a_branch': unplaced() if scope.kind == 'company' else None,
         'people': qs.filter(customer_type='INDIVIDUAL').count(),
         'businesses': qs.exclude(customer_type='INDIVIDUAL').count(),
         'new': new, 'returning': returning,

@@ -99,6 +99,21 @@ class EyeTests(TestCase):
         money = self.get('money', scope=f'branch:{self.a.pk}', period='month').data
         self.assertEqual(money['profit']['state'], 'NOT_TRACKED')
 
+    def test_every_customer_is_counted(self):
+        """1 Nov 2026: 263 of 408 customers had no branch and the Eye showed 145."""
+        from apps.customers.models import CustomerProfile
+        from apps.jobs.models import Job
+        CustomerProfile.objects.create(phone='0240000001', first_name='Has', branch=self.a)
+        online = CustomerProfile.objects.create(phone='0240000002', first_name='Online')
+        CustomerProfile.objects.create(phone='0240000003', first_name='Signed up')
+        Job.objects.create(branch=self.a, job_type='PRODUCTION', title='Banner', customer=online,
+                           intake_channel='ONLINE', status='PAID')
+        company = self.get('customers').data
+        self.assertEqual(company['total'], CustomerProfile.objects.count())
+        self.assertEqual(company['not_tied_to_a_branch'], 1)
+        branch = self.get('customers', scope=f'branch:{self.a.pk}').data
+        self.assertEqual(branch['total'], 2)   # its own, plus the online customer whose job is here
+
     # ── Attendance ───────────────────────────────────────────
 
     def _employee(self, email, emp_id):
