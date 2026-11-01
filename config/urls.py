@@ -47,6 +47,9 @@ urlpatterns = [
     # a banner has no account.
     path('api/v1/storefront/',    include('apps.storefront.urls')),
 
+    # The owner's view of the whole business. Owner-only, read-only.
+    path('api/v1/eye/',           include('apps.eye.api.urls')),
+
     # Portals
     path('',        home_view,    name='home'),
     path('careers/', careers_view, name='careers'),
