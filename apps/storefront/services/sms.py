@@ -58,6 +58,19 @@ def send_sms(phone, message):
                 phone, response.status_code, response.text[:200],
             )
             return False
+        # mNotify answers 200 even when it refuses a message: the verdict
+        # is in the body. Until 2 Nov 2026 this returned True on a refusal,
+        # and every text failed without a trace.
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if str(body.get('status', '')).lower() != 'success':
+            logger.warning(
+                'SMS not accepted for %s: code %s, %s',
+                phone, body.get('code'), (body.get('message') or response.text)[:200],
+            )
+            return False
         return True
     except Exception:
         # Deliberately broad. Nothing a message provider does should
