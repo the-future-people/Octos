@@ -13,10 +13,12 @@ out.
 
 import logging
 
+from apps.customers.api.links import _log
+
 logger = logging.getLogger(__name__)
 
 
-def send_sms(phone, message):
+def send_sms(phone, message, kind=''):
     """
     Returns True if the provider accepted it, False otherwise. The
     caller carries on either way.
@@ -57,6 +59,8 @@ def send_sms(phone, message):
                 'SMS refused for %s: %s %s',
                 phone, response.status_code, response.text[:200],
             )
+            _log(number, message, sender, kind, False,
+                 {'code': response.status_code, 'message': response.text[:200]})
             return False
         # mNotify answers 200 even when it refuses a message: the verdict
         # is in the body. Until 2 Nov 2026 this returned True on a refusal,
@@ -65,18 +69,35 @@ def send_sms(phone, message):
             body = response.json()
         except ValueError:
             body = {}
-        if str(body.get('status', '')).lower() != 'success':
+        accepted = str(body.get('status', '')).lower() == 'success'
+        if not accepted:
             logger.warning(
                 'SMS not accepted for %s: code %s, %s',
                 phone, body.get('code'), (body.get('message') or response.text)[:200],
             )
-            return False
-        return True
+        _log(number, message, sender, kind, accepted, body)
+        return accepted
     except Exception:
         # Deliberately broad. Nothing a message provider does should
         # take down an order.
         logger.warning('SMS failed for %s', phone, exc_info=True)
         return False
+
+
+def _log(number, message, sender, kind, accepted, body):
+    """Every text, kept, with what the provider said. Never breaks a send."""
+    try:
+        from apps.storefront.models import TextMessage
+        summary = body.get('summary') or {}
+        TextMessage.objects.create(
+            phone=number, kind=kind or '', body=message, sender=sender or '',
+            accepted=accepted, provider_ref=str(summary.get('_id') or ''),
+            provider_code=str(body.get('code') or ''),
+            provider_message=str(body.get('message') or '')[:200],
+            credits=summary.get('credit_used') or 0,
+        )
+    except Exception:
+        logger.warning('Text log failed for %s', number, exc_info=True)
 
 
 def _normalise(phone):

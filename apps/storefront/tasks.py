@@ -157,3 +157,14 @@ def nudge_app(job_id):
             device.delete()
         except Exception:
             log.exception('Could not nudge a phone about %s', order.order_number)
+
+
+
+from celery import shared_task as _shared_task
+
+
+@_shared_task(ignore_result=True)
+def send_welcome(customer_id):
+    """The welcome for a newly registered customer. Once per number, ever."""
+    from apps.storefront.services.welcome import welcome
+    welcome(customer_id)
