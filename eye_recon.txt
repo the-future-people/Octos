@@ -1,0 +1,4053 @@
+﻿
+
+===== apps\organization\models\belt.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class Belt(AuditModel):
+    """
+    Represents one of the three geographic belts:
+    Southern, Middle, or Northern.
+    """
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=10, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+===== apps\organization\models\region.py =====
+from django.db import models
+from apps.core.models import AuditModel
+from .belt import Belt
+
+
+class Region(AuditModel):
+    """
+    Represents a region within a belt.
+    e.g. Greater Accra within the Southern Belt.
+    """
+    belt = models.ForeignKey(
+        Belt,
+        on_delete=models.PROTECT,
+        related_name='regions'
+    )
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=10, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+        unique_together = [['belt', 'name']]
+
+    def __str__(self):
+        return f"{self.name} â€” {self.belt.name}"
+
+===== apps\organization\models\branch.py =====
+from django.db import models
+from django.utils import timezone
+from apps.core.models import AuditModel
+from .region import Region
+
+
+class Branch(AuditModel):
+    """
+    Represents a physical branch location.
+    HQ is a branch with is_headquarters=True.
+    Regional HQs have is_regional_hq=True.
+    """
+
+    region = models.ForeignKey(
+        Region,
+        on_delete=models.PROTECT,
+        related_name='branches',
+        null=True,
+        blank=True,  # null for HQ
+    )
+    name            = models.CharField(max_length=150)
+    code            = models.CharField(max_length=20, unique=True)
+    is_headquarters = models.BooleanField(default=False)
+    is_regional_hq  = models.BooleanField(default=False)
+    address         = models.TextField()
+    phone           = models.CharField(max_length=20, blank=True)
+    whatsapp_number = models.CharField(max_length=20, blank=True)
+    email           = models.EmailField(blank=True)
+    capacity_score  = models.PositiveIntegerField(default=100)
+    current_load    = models.PositiveIntegerField(default=0)
+    is_active       = models.BooleanField(default=True)
+    services        = models.ManyToManyField(
+        'jobs.Service',
+        blank=True,
+        related_name='branches',
+        help_text='Services offered at this branch',
+    )
+
+    # â”€â”€ Operating hours â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    opening_time    = models.TimeField(
+        default=timezone.datetime.strptime('08:00', '%H:%M').time(),
+        help_text='Branch opening time â€” default 08:00',
+    )
+    closing_time    = models.TimeField(
+        default=timezone.datetime.strptime('19:30', '%H:%M').time(),
+        help_text='Branch closing time â€” default 19:30',
+    )
+
+    # â”€â”€ Location coordinates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    latitude  = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True,
+        help_text='Branch latitude â€” used for weather forecasting',
+    )
+    longitude = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True,
+        help_text='Branch longitude â€” used for weather forecasting',
+    )
+
+    # â”€â”€ VAT (future-proofed â€” 0 until GRA registered) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    vat_registered  = models.BooleanField(
+        default=False,
+        help_text='Flip to True when branch is GRA VAT registered',
+    )
+    vat_number      = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='GRA VAT registration number',
+    )
+    vat_rate        = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='VAT rate â€” 0.00 until registered, then 15.00',
+    )
+    nhil_rate       = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='NHIL levy rate â€” 0.00 until registered, then 2.50',
+    )
+    getfund_rate    = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='GetFund levy rate â€” 0.00 until registered, then 2.50',
+    )
+
+    class Meta:
+        ordering        = ['name']
+        verbose_name_plural = 'Branches'
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def load_percentage(self) -> float:
+        if self.capacity_score == 0:
+            return 0
+        return round((self.current_load / self.capacity_score) * 100, 1)
+
+    @property
+    def is_available(self) -> bool:
+        return self.load_percentage < 85
+
+    @property
+    def total_tax_rate(self) -> float:
+        """Combined VAT + NHIL + GetFund rate."""
+        return float(self.vat_rate) + float(self.nhil_rate) + float(self.getfund_rate)
+
+===== apps\accounts\models\user.py =====
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+from django.contrib.auth.hashers import make_password, check_password
+from apps.core.models import AuditModel
+
+
+class CustomUserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('Email is required')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        return self.create_user(email, password, **extra_fields)
+
+
+class CustomUser(AbstractBaseUser, AuditModel):
+    """
+    The central user model for all Octos staff.
+    Operational staff (BM, cashier, attendant) have branch set.
+    Regional Managers have region set, branch null.
+    Belt Managers and above have both null.
+
+    employment_status tracks the operational state of the employee,
+    separate from is_active (which controls login access entirely).
+
+      SHADOW   â€” pre-start-date, read-only portal access granted
+      ACTIVE   â€” full access, normal operations
+      INACTIVE â€” departed or suspended; is_active should also be False
+    """
+
+    # â”€â”€ Employment status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    SHADOW   = 'SHADOW'
+    ACTIVE   = 'ACTIVE'
+    INACTIVE = 'INACTIVE'
+
+    EMPLOYMENT_STATUS_CHOICES = [
+        (SHADOW,   'Shadow'),
+        (ACTIVE,   'Active'),
+        (INACTIVE, 'Inactive'),
+    ]
+
+    employee_id = models.CharField(max_length=20, unique=True, blank=True)
+    first_name  = models.CharField(max_length=100)
+    last_name   = models.CharField(max_length=100)
+    email       = models.EmailField(unique=True)
+    phone       = models.CharField(max_length=20, blank=True)
+    photo       = models.ImageField(upload_to='employees/', null=True, blank=True)
+
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='user_accounts',
+        null=True, blank=True,
+    )
+    region = models.ForeignKey(
+        'organization.Region',
+        on_delete=models.PROTECT,
+        related_name='user_accounts',
+        null=True, blank=True,
+    )
+    belt = models.ForeignKey(
+        'organization.Belt',
+        on_delete=models.PROTECT,
+        related_name='user_accounts',
+        null=True, blank=True,
+    )
+    role = models.ForeignKey(
+        'accounts.Role',
+        on_delete=models.PROTECT,
+        related_name='users',
+        null=True, blank=True,
+    )
+
+    employment_status = models.CharField(
+        max_length=10,
+        choices=EMPLOYMENT_STATUS_CHOICES,
+        default=ACTIVE,
+        help_text=(
+            'Operational state of the employee. '
+            'SHADOW = read-only pre-start access. '
+            'ACTIVE = full access. '
+            'INACTIVE = departed or suspended.'
+        ),
+    )
+
+    is_active      = models.BooleanField(default=True)
+    is_staff       = models.BooleanField(default=False)
+    is_superuser   = models.BooleanField(default=False)
+    is_clocked_in  = models.BooleanField(default=False)
+    last_clock_in  = models.DateTimeField(null=True, blank=True)
+    approved_at    = models.DateTimeField(null=True, blank=True)
+    must_change_password = models.BooleanField(default=False)
+
+    # â”€â”€ Business ownership â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_business_owner = models.BooleanField(
+        default=False,
+        help_text=(
+            'True only for the business owner/CEO. Gates sensitive features '
+            'like investor statement generation. Deliberately separate from '
+            'is_staff/is_superuser which are Django admin flags.'
+        ),
+    )
+
+    # â”€â”€ Download PIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Stored as a hashed 4-digit PIN â€” never plain text
+    download_pin     = models.CharField(max_length=128, blank=True, null=True)
+    download_pin_set = models.BooleanField(default=False)
+
+    objects = CustomUserManager()
+
+    USERNAME_FIELD  = 'email'
+    REQUIRED_FIELDS = ['first_name', 'last_name']
+
+    class Meta:
+        ordering = ['first_name', 'last_name']
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} ({self.employee_id})"
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"
+
+    @property
+    def is_approved(self):
+        return self.approved_at is not None
+
+    @property
+    def is_shadow(self):
+        return self.employment_status == self.SHADOW
+
+    def set_download_pin(self, raw_pin):
+        """Hash and store the 4-digit PIN."""
+        self.download_pin     = make_password(str(raw_pin))
+        self.download_pin_set = True
+        self.save(update_fields=['download_pin', 'download_pin_set'])
+
+    def verify_download_pin(self, raw_pin):
+        """Check a raw PIN against the stored hash."""
+        if not self.download_pin:
+            return False
+        return check_password(str(raw_pin), self.download_pin)
+
+    def has_perm(self, perm, obj=None):
+        return self.is_superuser
+
+    def has_module_perms(self, app_label):
+        return self.is_superuser
+
+===== apps\accounts\models\rfid.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class RFIDAccessLog(AuditModel):
+    """
+    Logs every physical RFID/NFC card scan at any branch entrance.
+    Every entry and exit is recorded against the employee and branch.
+    """
+    ACTION_CHOICES = [
+        ('CLOCK_IN', 'Clock In'),
+        ('CLOCK_OUT', 'Clock Out'),
+        ('DENIED', 'Access Denied'),
+    ]
+
+    employee = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='rfid_logs'
+    )
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='rfid_logs'
+    )
+    card_uid = models.CharField(max_length=100)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.employee.full_name} â€” {self.action} at {self.branch.name}"
+
+===== apps\analytics\models\session.py =====
+from django.db import models
+
+
+class UserSession(models.Model):
+    """
+    Tracks a single portal session for a user.
+    Created on portal load (via JS heartbeat on first API call).
+    Closed on logout, browser close, or session timeout.
+
+    Idle periods and critical-action visibility events are counted
+    here as aggregates â€” the raw events live in AuditEvent.
+
+    Design rules:
+    - One open session per user at a time (ended_at=None)
+    - last_seen_at updated by frontend heartbeat every 60s
+    - Session considered timed out if last_seen_at > 15min ago
+    - active_duration = total_duration - idle_duration
+    """
+
+    PORTAL_ATTENDANT        = 'ATTENDANT'
+    PORTAL_CASHIER          = 'CASHIER'
+    PORTAL_BRANCH_MANAGER   = 'BRANCH_MANAGER'
+    PORTAL_REGIONAL_MANAGER = 'REGIONAL_MANAGER'
+    PORTAL_FINANCE          = 'FINANCE'
+    PORTAL_BELT_MANAGER     = 'BELT_MANAGER'
+
+    PORTAL_CHOICES = [
+        (PORTAL_ATTENDANT,        'Attendant Portal'),
+        (PORTAL_CASHIER,          'Cashier Portal'),
+        (PORTAL_BRANCH_MANAGER,   'Branch Manager Portal'),
+        (PORTAL_REGIONAL_MANAGER, 'Regional Manager Portal'),
+        (PORTAL_FINANCE,          'Finance Portal'),
+        (PORTAL_BELT_MANAGER,     'Belt Manager Portal'),
+    ]
+
+    # â”€â”€ Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    user   = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.CASCADE,
+        related_name = 'portal_sessions',
+    )
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete    = models.SET_NULL,
+        null         = True,
+        blank        = True,
+        related_name = 'portal_sessions',
+        help_text    = 'Null for HQ-level users (Finance, Belt Manager)',
+    )
+    portal = models.CharField(
+        max_length = 20,
+        choices    = PORTAL_CHOICES,
+        db_index   = True,
+    )
+
+    # â”€â”€ Timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    started_at   = models.DateTimeField(db_index=True)
+    ended_at     = models.DateTimeField(
+        null      = True,
+        blank     = True,
+        help_text = 'Null means session is still active',
+    )
+    last_seen_at = models.DateTimeField(
+        help_text = 'Updated by frontend heartbeat every 60s',
+    )
+
+    # â”€â”€ Duration breakdown (seconds) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    total_duration_seconds  = models.PositiveIntegerField(default=0)
+    active_duration_seconds = models.PositiveIntegerField(default=0)
+    idle_duration_seconds   = models.PositiveIntegerField(default=0)
+
+    # â”€â”€ Anomaly signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    idle_count = models.PositiveSmallIntegerField(
+        default   = 0,
+        help_text = 'Number of idle periods > IDLE_THRESHOLD (default 5 min)',
+    )
+    critical_action_switches = models.PositiveSmallIntegerField(
+        default   = 0,
+        help_text = (
+            'Tab/app switches detected during critical actions '
+            '(payment confirmation, EOD sign-off). '
+            'These are the high-signal events â€” not all tab switches.'
+        ),
+    )
+
+    # â”€â”€ Network context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+
+    # â”€â”€ Risk assessment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_anomalous  = models.BooleanField(
+        default   = False,
+        db_index  = True,
+        help_text = 'Set by daily_risk_engine if session pattern is unusual',
+    )
+    anomaly_notes = models.TextField(
+        blank     = True,
+        help_text = 'Human-readable explanation of what triggered is_anomalous',
+    )
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes  = [
+            models.Index(fields=['user', 'started_at']),
+            models.Index(fields=['branch', 'started_at']),
+            models.Index(fields=['portal', 'started_at']),
+            models.Index(fields=['is_anomalous', 'started_at']),
+        ]
+        verbose_name        = 'User Session'
+        verbose_name_plural = 'User Sessions'
+
+    def __str__(self):
+        status = 'active' if not self.ended_at else 'closed'
+        return (
+            f"{self.user.full_name} â€” {self.portal} "
+            f"[{self.started_at.strftime('%Y-%m-%d %H:%M')}] ({status})"
+        )
+
+    @property
+    def is_active(self):
+        return self.ended_at is None
+
+    @property
+    def duration_minutes(self):
+        if not self.total_duration_seconds:
+            return 0
+        return round(self.total_duration_seconds / 60, 1)
+
+    @property
+    def active_minutes(self):
+        if not self.active_duration_seconds:
+            return 0
+        return round(self.active_duration_seconds / 60, 1)
+
+===== apps\hr\models\employee.py =====
+from django.db import models
+from django.utils import timezone
+from apps.core.models import AuditModel
+
+
+class Employee(AuditModel):
+    """
+    Central employee record. Created automatically by the onboarding engine.
+    Every employee has a portal login (CustomUser) and is assigned to a branch.
+    """
+
+    # Pay Frequency
+    MONTHLY = 'MONTHLY'
+    BI_WEEKLY = 'BI_WEEKLY'
+    WEEKLY = 'WEEKLY'
+
+    PAY_FREQUENCY_CHOICES = [
+        (MONTHLY, 'Monthly'),
+        (BI_WEEKLY, 'Bi-Weekly'),
+        (WEEKLY, 'Weekly'),
+    ]
+
+    # Employment Type
+    FULL_TIME = 'FULL_TIME'
+    PART_TIME = 'PART_TIME'
+    CONTRACT = 'CONTRACT'
+
+    EMPLOYMENT_TYPE_CHOICES = [
+        (FULL_TIME, 'Full Time'),
+        (PART_TIME, 'Part Time'),
+        (CONTRACT, 'Contract'),
+    ]
+
+    # Status
+    ACTIVE = 'ACTIVE'
+    SUSPENDED = 'SUSPENDED'
+    TERMINATED = 'TERMINATED'
+    ON_LEAVE = 'ON_LEAVE'
+
+    STATUS_CHOICES = [
+        (ACTIVE, 'Active'),
+        (SUSPENDED, 'Suspended'),
+        (TERMINATED, 'Terminated'),
+        (ON_LEAVE, 'On Leave'),
+    ]
+
+    # Core links
+    user = models.OneToOneField(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='employee_profile'
+    )
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='employees'
+    )
+    role = models.ForeignKey(
+        'accounts.Role',
+        on_delete=models.PROTECT,
+        related_name='employees'
+    )
+
+    # Identity
+    employee_number = models.CharField(max_length=30, unique=True, blank=True)
+    national_id = models.CharField(max_length=50, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    address = models.TextField(blank=True)
+    emergency_contact_name = models.CharField(max_length=150, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, blank=True)
+    profile_photo = models.ImageField(upload_to='employees/photos/', null=True, blank=True)
+
+    # Employment details
+    employment_type = models.CharField(
+        max_length=20,
+        choices=EMPLOYMENT_TYPE_CHOICES,
+        default=FULL_TIME
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=ACTIVE)
+    date_joined = models.DateField(default=timezone.now)
+    date_terminated = models.DateField(null=True, blank=True)
+
+    # Payroll
+    base_salary = models.DecimalField(max_digits=10, decimal_places=2)
+    pay_frequency = models.CharField(
+        max_length=20,
+        choices=PAY_FREQUENCY_CHOICES,
+        default=MONTHLY
+    )
+    bank_name = models.CharField(max_length=100, blank=True)
+    bank_account_number = models.CharField(max_length=50, blank=True)
+    mobile_money_number = models.CharField(max_length=20, blank=True)
+
+    # RFID
+    rfid_tag = models.CharField(max_length=100, unique=True, null=True, blank=True)
+
+    # Onboarding
+    onboarded_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='onboarded_employees'
+    )
+    onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['branch', 'role', 'user__first_name']
+
+    def __str__(self):
+        return f"{self.employee_number} â€” {self.full_name} ({self.branch.name})"
+
+    def save(self, *args, **kwargs):
+        if not self.employee_number:
+            self.employee_number = self._generate_employee_number()
+        super().save(*args, **kwargs)
+
+    def _generate_employee_number(self):
+        from django.utils import timezone
+        year = timezone.now().year
+        branch_code = self.branch.code if self.branch else 'GEN'
+        last = Employee.objects.filter(
+            branch=self.branch,
+        ).count() + 1
+        return f"FP-{branch_code}-{year}-{str(last).zfill(4)}"
+
+    @property
+    def full_name(self):
+        return self.user.full_name
+
+    @property
+    def is_active(self):
+        return self.status == self.ACTIVE
+
+===== apps\hr\models\scheduling.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class EmployeeShift(AuditModel):
+    """
+    Base recurring shift schedule for an employee.
+    Defines what days and hours an employee normally works.
+    """
+
+    MON = 0
+    TUE = 1
+    WED = 2
+    THU = 3
+    FRI = 4
+    SAT = 5
+    SUN = 6
+
+    DAY_CHOICES = [
+        (MON, 'Monday'),
+        (TUE, 'Tuesday'),
+        (WED, 'Wednesday'),
+        (THU, 'Thursday'),
+        (FRI, 'Friday'),
+        (SAT, 'Saturday'),
+        (SUN, 'Sunday'),
+    ]
+
+    employee   = models.ForeignKey(
+        'hr.Employee',
+        on_delete=models.CASCADE,
+        related_name='shifts',
+    )
+    branch     = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.CASCADE,
+        related_name='shifts',
+    )
+    day_of_week  = models.IntegerField(choices=DAY_CHOICES)
+    start_time   = models.TimeField()
+    end_time     = models.TimeField()
+    is_active    = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['employee', 'day_of_week', 'start_time']
+        unique_together = ['employee', 'day_of_week']
+
+    def __str__(self):
+        return (
+            f"{self.employee.full_name} â€” "
+            f"{self.get_day_of_week_display()} "
+            f"{self.start_time.strftime('%H:%M')}â€“{self.end_time.strftime('%H:%M')}"
+        )
+
+
+class ShiftOverride(AuditModel):
+    """
+    A one-off override for a specific date that supersedes the base EmployeeShift.
+    Created automatically when a ShiftSwap is approved, or manually by BM.
+    """
+
+    SWAP     = 'SWAP'
+    OVERTIME = 'OVERTIME'
+    COVER    = 'COVER'
+    ABSENCE  = 'ABSENCE'
+
+    OVERRIDE_TYPE_CHOICES = [
+        (SWAP,     'Swap'),
+        (OVERTIME, 'Overtime'),
+        (COVER,    'Cover'),
+        (ABSENCE,  'Absence'),
+    ]
+
+    employee        = models.ForeignKey(
+        'hr.Employee',
+        on_delete=models.CASCADE,
+        related_name='shift_overrides',
+    )
+    date            = models.DateField()
+    original_shift  = models.ForeignKey(
+        EmployeeShift,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='overrides',
+    )
+    override_type   = models.CharField(max_length=20, choices=OVERRIDE_TYPE_CHOICES)
+    override_start  = models.TimeField(null=True, blank=True)
+    override_end    = models.TimeField(null=True, blank=True)
+    swap_ref        = models.ForeignKey(
+        'hr.EmployeeShiftSwap',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='overrides',
+    )
+    notes           = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['date', 'employee']
+        unique_together = ['employee', 'date', 'override_type']
+
+    def __str__(self):
+        return (
+            f"{self.employee.full_name} â€” "
+            f"{self.date} [{self.override_type}]"
+        )
+
+
+class EmployeeShiftSwap(AuditModel):
+    """
+    A formal shift swap request between two employees.
+    Both employees must agree, then BM must approve.
+    Compensation (payback shift) is mandatory â€” no one-way swaps.
+    """
+
+    PENDING   = 'PENDING'
+    ACCEPTED  = 'ACCEPTED'
+    REJECTED  = 'REJECTED'
+    APPROVED  = 'APPROVED'
+    DECLINED  = 'DECLINED'
+    CANCELLED = 'CANCELLED'
+
+    STATUS_CHOICES = [
+        (PENDING,   'Pending Acceptance'),
+        (ACCEPTED,  'Accepted â€” Awaiting BM Approval'),
+        (REJECTED,  'Rejected by Peer'),
+        (APPROVED,  'Approved'),
+        (DECLINED,  'Declined by Manager'),
+        (CANCELLED, 'Cancelled'),
+    ]
+
+    initiated_by  = models.ForeignKey(
+        'hr.Employee',
+        on_delete=models.PROTECT,
+        related_name='swaps_initiated',
+    )
+    accepted_by   = models.ForeignKey(
+        'hr.Employee',
+        on_delete=models.PROTECT,
+        related_name='swaps_accepted',
+    )
+    approved_by   = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='swaps_approved',
+    )
+
+    status        = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=PENDING,
+    )
+    reason        = models.TextField()
+    bm_notes      = models.TextField(blank=True)
+
+    initiator_date  = models.DateField()
+    initiator_shift = models.ForeignKey(
+        EmployeeShift,
+        on_delete=models.PROTECT,
+        related_name='swaps_as_initiator',
+    )
+
+    cover_date    = models.DateField()
+    cover_shift   = models.ForeignKey(
+        EmployeeShift,
+        on_delete=models.PROTECT,
+        related_name='swaps_as_cover',
+    )
+
+    compensation_date  = models.DateField()
+    compensation_shift = models.ForeignKey(
+        EmployeeShift,
+        on_delete=models.PROTECT,
+        related_name='swaps_as_compensation',
+    )
+
+    accepted_at   = models.DateTimeField(null=True, blank=True)
+    approved_at   = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return (
+            f"Swap: {self.initiated_by.full_name} â†” {self.accepted_by.full_name} "
+            f"[{self.initiator_date}] â€” {self.status}"
+        )
+
+    def approve(self, approved_by):
+        from django.utils import timezone
+
+        self.status      = self.APPROVED
+        self.approved_by = approved_by
+        self.approved_at = timezone.now()
+        self.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
+
+        ShiftOverride.objects.get_or_create(
+            employee       = self.initiated_by,
+            date           = self.initiator_date,
+            override_type  = ShiftOverride.ABSENCE,
+            defaults=dict(
+                original_shift = self.initiator_shift,
+                swap_ref       = self,
+                notes          = f"Swapped with {self.accepted_by.full_name}",
+            ),
+        )
+
+        ShiftOverride.objects.get_or_create(
+            employee       = self.accepted_by,
+            date           = self.cover_date,
+            override_type  = ShiftOverride.SWAP,
+            defaults=dict(
+                original_shift = self.cover_shift,
+                override_start = self.initiator_shift.start_time,
+                override_end   = self.initiator_shift.end_time,
+                swap_ref       = self,
+                notes          = f"Covering {self.initiated_by.full_name}",
+            ),
+        )
+
+        ShiftOverride.objects.get_or_create(
+            employee       = self.initiated_by,
+            date           = self.compensation_date,
+            override_type  = ShiftOverride.SWAP,
+            defaults=dict(
+                original_shift = self.compensation_shift,
+                override_start = self.compensation_shift.start_time,
+                override_end   = self.compensation_shift.end_time,
+                swap_ref       = self,
+                notes          = f"Compensation for {self.accepted_by.full_name}",
+            ),
+        )
+
+        ShiftOverride.objects.get_or_create(
+            employee       = self.accepted_by,
+            date           = self.compensation_date,
+            override_type  = ShiftOverride.ABSENCE,
+            defaults=dict(
+                original_shift = self.compensation_shift,
+                swap_ref       = self,
+                notes          = f"A ({self.initiated_by.full_name}) compensating",
+            ),
+        )
+
+
+class BranchShift(AuditModel):
+    """
+    Branch-level shift template defining operational windows.
+    Set by HQ during branch creation or configuration.
+    Drives all closing logic â€” no hardcoded times anywhere.
+
+    Examples:
+      WLB Main Shift     â€” Monâ€“Fri 07:30â€“19:30
+      WLB Saturday Shift â€” Sat    08:30â€“19:30
+    """
+
+    FULL_DAY  = 'FULL_DAY'
+    MORNING   = 'MORNING'
+    AFTERNOON = 'AFTERNOON'
+
+    SHIFT_TYPE_CHOICES = [
+        (FULL_DAY,  'Full Day'),
+        (MORNING,   'Morning'),
+        (AFTERNOON, 'Afternoon'),
+    ]
+
+    branch      = models.ForeignKey(
+        'organization.Branch',
+        on_delete    = models.CASCADE,
+        related_name = 'branch_shifts',
+    )
+    name        = models.CharField(max_length=100)
+    shift_type  = models.CharField(
+        max_length = 12,
+        choices    = SHIFT_TYPE_CHOICES,
+        default    = FULL_DAY,
+    )
+    days        = models.CharField(
+        max_length = 20,
+        help_text  = 'Comma-separated day integers e.g. "0,1,2,3,4" for Monâ€“Fri',
+    )
+    start_time  = models.TimeField()
+    end_time    = models.TimeField()
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        ordering        = ['branch', 'name']
+        unique_together = ['branch', 'name']
+        verbose_name        = 'Branch Shift'
+        verbose_name_plural = 'Branch Shifts'
+
+    def __str__(self):
+        return (
+            f"{self.branch.code} â€” {self.name} "
+            f"({self.start_time.strftime('%H:%M')}â€“{self.end_time.strftime('%H:%M')})"
+        )
+
+    @property
+    def day_list(self):
+        """Returns list of day integers e.g. [0, 1, 2, 3, 4]"""
+        return [int(d) for d in self.days.split(',') if d.strip().isdigit()]
+
+    def applies_today(self):
+        """True if this shift runs today."""
+        from django.utils import timezone
+        return timezone.localdate().weekday() in self.day_list
+
+
+class ShiftRoleConfig(AuditModel):
+    """
+    Per-role timing configuration within a BranchShift.
+
+    role_start_time / role_end_time:
+      When set, override BranchShift.start_time / end_time for this role.
+      This allows different roles to have different hours within the same
+      branch shift â€” e.g. BM arrives earlier and leaves later than attendants.
+      Leave blank to inherit from the parent BranchShift.
+
+    Buffer times (minutes after effective end_time):
+      job_lock_buffer   â€” when job creation stops for this role
+      signoff_buffer    â€” when portal forces sign-off prompt for this role
+      autoclose_buffer  â€” when system auto-closes sheet (BM only)
+
+    Example for WLB Main Shift:
+      BRANCH_MANAGER â€” start=07:30, end=20:00, job_lock=60, signoff=60, autoclose=60
+      CASHIER        â€” start=08:00, end=19:30, job_lock=45, signoff=45, autoclose=None
+      ATTENDANT      â€” start=08:00, end=19:00, job_lock=0,  signoff=30, autoclose=None
+    """
+
+    ATTENDANT      = 'ATTENDANT'
+    CASHIER        = 'CASHIER'
+    BRANCH_MANAGER = 'BRANCH_MANAGER'
+
+    ROLE_CHOICES = [
+        (ATTENDANT,      'Attendant'),
+        (CASHIER,        'Cashier'),
+        (BRANCH_MANAGER, 'Branch Manager'),
+    ]
+
+    shift              = models.ForeignKey(
+        BranchShift,
+        on_delete    = models.CASCADE,
+        related_name = 'role_configs',
+    )
+    role_name          = models.CharField(max_length=20, choices=ROLE_CHOICES)
+
+    # â”€â”€ Role-specific times (override parent shift when set) â”€â”€
+    role_start_time    = models.TimeField(
+        null      = True,
+        blank     = True,
+        help_text = (
+            'Role-specific shift start time. '
+            'Overrides BranchShift.start_time when set. '
+            'Leave blank to inherit from parent shift.'
+        ),
+    )
+    role_end_time      = models.TimeField(
+        null      = True,
+        blank     = True,
+        help_text = (
+            'Role-specific shift end time. '
+            'Overrides BranchShift.end_time when set. '
+            'Leave blank to inherit from parent shift.'
+        ),
+    )
+
+    # â”€â”€ Buffer times (minutes after effective end_time) â”€â”€â”€â”€â”€â”€â”€
+    job_lock_buffer    = models.PositiveIntegerField(
+        default   = 0,
+        help_text = 'Minutes after shift end when job creation locks for this role',
+    )
+    signoff_buffer     = models.PositiveIntegerField(
+        default   = 0,
+        help_text = 'Minutes after shift end when portal forces sign-off',
+    )
+    autoclose_buffer   = models.PositiveIntegerField(
+        null      = True,
+        blank     = True,
+        help_text = 'Minutes after shift end for auto-close (BM only â€” leave blank for others)',
+    )
+
+    class Meta:
+        ordering        = ['shift', 'role_name']
+        unique_together = ['shift', 'role_name']
+        verbose_name        = 'Shift Role Config'
+        verbose_name_plural = 'Shift Role Configs'
+
+    def __str__(self):
+        return f"{self.shift} â€” {self.role_name}"
+
+    @property
+    def effective_start_time(self):
+        """Role start time, falling back to parent shift start."""
+        return self.role_start_time or self.shift.start_time
+
+    @property
+    def effective_end_time(self):
+        """Role end time, falling back to parent shift end."""
+        return self.role_end_time or self.shift.end_time
+
+===== apps\finance\models\receipt.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class Receipt(AuditModel):
+    """
+    Auto-generated on every payment confirmation.
+
+    Each receipt has its own sequential number per branch per year.
+    Format: RCP-{BRANCH_CODE}-{YEAR}-{SEQUENCE}
+    Example: RCP-NTB-2026-00001
+
+    Two formats are generated:
+    - Digital: sent via WhatsApp/SMS to customer
+    - Thermal: formatted for 80mm POS receipt printer
+
+    Receipts are immutable once issued â€” no edits ever.
+    VAT fields are present but zero until branch is GRA registered.
+    """
+
+    class DeliveryStatus(models.TextChoices):
+        PENDING   = 'PENDING',   'Pending'
+        SENT      = 'SENT',      'Sent'
+        FAILED    = 'FAILED',    'Failed'
+        PRINTED   = 'PRINTED',   'Printed'
+
+    class PaymentMethod(models.TextChoices):
+        CASH   = 'CASH',   'Cash'
+        MOMO   = 'MOMO',   'Mobile Money'
+        POS    = 'POS',    'POS'
+        CREDIT = 'CREDIT', 'Credit Account'
+        ONLINE = 'ONLINE', 'Paid Online'
+
+    class ReceiptType(models.TextChoices):
+        JOB_PAYMENT        = 'JOB_PAYMENT',        'Job Payment'
+        CREDIT_SETTLEMENT  = 'CREDIT_SETTLEMENT',  'Credit Settlement'
+
+    job           = models.ForeignKey(
+        'jobs.Job',
+        on_delete=models.PROTECT,
+        related_name='receipts',
+        null=True,
+        blank=True,
+    )
+    receipt_type  = models.CharField(
+        max_length=20,
+        choices=ReceiptType.choices,
+        default=ReceiptType.JOB_PAYMENT,
+    )
+    daily_sheet   = models.ForeignKey(
+        'finance.DailySalesSheet',
+        on_delete=models.PROTECT,
+        related_name='receipts',
+        null=True, blank=True,
+        help_text=(
+            'The sheet this money lands on. Empty while the branch is '
+            'shut: a payment at midnight on a Sunday is real, but it '
+            'cannot land on a sheet that does not exist and must never '
+            'land on one a manager has already signed off. The next '
+            'sheet to open picks it up.'
+        ),
+    )
+    cashier       = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='receipts_issued',
+        null=True, blank=True,
+        help_text=(
+            'Who took the money. Empty for an online payment â€” Paystack '
+            'collected it and no one at the branch counted anything. A '
+            'name invented to fill this would be a lie on a document the '
+            'customer keeps.'
+        ),
+    )
+
+    # â”€â”€ Receipt number â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    receipt_number  = models.CharField(
+        max_length=30,
+        unique=True,
+        editable=False,
+    )
+    sequence        = models.PositiveIntegerField(
+        editable=False,
+        help_text='Auto-incremented sequence per branch per year',
+    )
+
+    # â”€â”€ Payment details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    payment_method    = models.CharField(
+        max_length=10,
+        choices=PaymentMethod.choices,
+    )
+    amount_paid       = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+    )
+    balance_due       = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+    momo_reference    = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='MoMo transaction reference â€” mandatory for MoMo payments',
+    )
+    pos_approval_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='POS approval code â€” mandatory for POS payments',
+    )
+
+    # â”€â”€ Customer details (snapshot at time of issue) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    customer_name     = models.CharField(max_length=150, blank=True)
+    customer_phone    = models.CharField(max_length=20, blank=True)
+    company_name      = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text='Company or sender name â€” shown on receipt when provided',
+    )
+
+    # â”€â”€ VAT (future-proofed, zero until GRA registered) â”€â”€â”€â”€â”€â”€â”€
+    subtotal          = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+    vat_rate          = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='VAT rate at time of issue â€” 0 until GRA registered',
+    )
+    vat_amount        = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+    nhil_amount       = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='NHIL levy â€” 0 until GRA registered',
+    )
+    getfund_amount    = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='GetFund levy â€” 0 until GRA registered',
+    )
+
+    # â”€â”€ Delivery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    whatsapp_status   = models.CharField(
+        max_length=10,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.PENDING,
+    )
+    whatsapp_sent_at  = models.DateTimeField(null=True, blank=True)
+    print_status      = models.CharField(
+        max_length=10,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.PENDING,
+    )
+    printed_at        = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Immutability guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_void           = models.BooleanField(
+        default=False,
+        help_text='True only if job was voided â€” receipt retained for audit',
+    )
+
+    class Meta:
+        ordering            = ['-created_at']
+        verbose_name        = 'Receipt'
+        verbose_name_plural = 'Receipts'
+        indexes = [
+            models.Index(fields=['daily_sheet', 'is_void'],      name='receipt_sheet_void_idx'),
+            models.Index(fields=['cashier', 'daily_sheet'],      name='receipt_cashier_sheet_idx'),
+            models.Index(fields=['daily_sheet', 'payment_method'], name='receipt_sheet_method_idx'),
+            models.Index(fields=['created_at'],                  name='receipt_created_idx'),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.receipt_number} â€” GHS {self.amount_paid}"
+
+    @property
+    def is_fully_paid(self) -> bool:
+        return self.balance_due == 0
+
+    @classmethod
+    def generate_receipt_number(cls, branch_code: str, year: int) -> tuple[str, int]:
+        """
+        Generate the next sequential receipt number for a branch and year.
+        Returns a tuple of (receipt_number, sequence).
+        Called inside a transaction to avoid race conditions.
+        """
+        last = (
+            cls.objects
+            .filter(
+                receipt_number__startswith=f"RCP-{branch_code}-{year}-"
+            )
+            .order_by('-sequence')
+            .first()
+        )
+        sequence       = (last.sequence + 1) if last else 1
+        receipt_number = f"RCP-{branch_code}-{year}-{sequence:05d}"
+        return receipt_number, sequence
+
+===== apps\finance\models\payment_leg.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class PaymentLeg(AuditModel):
+    """
+    Represents a single payment leg within a split payment.
+    A job can have at most 2 legs â€” e.g. MoMo + Cash.
+
+    Rules:
+    - All legs for a job must sum exactly to the job's amount_paid
+    - MoMo legs require a reference number (11 digits)
+    - POS legs require an approval code
+    - Cash legs have no reference requirement
+    - Immutable once created â€” no edits ever
+    """
+
+    class Method(models.TextChoices):
+        CASH = 'CASH', 'Cash'
+        MOMO = 'MOMO', 'Mobile Money'
+        POS  = 'POS',  'POS'
+
+    job     = models.ForeignKey(
+        'jobs.Job',
+        on_delete    = models.PROTECT,
+        related_name = 'payment_legs',
+    )
+    receipt = models.ForeignKey(
+        'finance.Receipt',
+        on_delete    = models.PROTECT,
+        related_name = 'payment_legs',
+        null         = True,
+        blank        = True,
+    )
+    payment_method    = models.CharField(max_length=10, choices=Method.choices)
+    amount            = models.DecimalField(max_digits=10, decimal_places=2)
+    momo_reference    = models.CharField(max_length=20, blank=True)
+    pos_approval_code = models.CharField(max_length=50, blank=True)
+    sequence          = models.PositiveSmallIntegerField(
+        default=1,
+        help_text='1 for first leg, 2 for second leg',
+    )
+
+    class Meta:
+        ordering        = ['job', 'sequence']
+        verbose_name        = 'Payment Leg'
+        verbose_name_plural = 'Payment Legs'
+
+    def __str__(self):
+        return f"{self.job.job_number} â€” Leg {self.sequence}: {self.payment_method} GHS {self.amount}"
+
+===== apps\finance\models\daily_sales_sheet.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class DailySalesSheet(AuditModel):
+    """
+    Represents a single day's operations at a branch.
+    One sheet per branch per day â€” auto-opened at 5am,
+    auto-closed at 8:30pm after staged warnings.
+
+    Revenue figures are computed live during the day
+    and frozen at close. Numbers are never manually adjusted â€”
+    BM can only add notes.
+    """
+
+    class Status(models.TextChoices):
+        OPEN        = 'OPEN',        'Open'
+        CLOSED      = 'CLOSED',      'Closed'
+        AUTO_CLOSED = 'AUTO_CLOSED', 'Auto Closed'
+
+    branch      = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='daily_sheets',
+    )
+    date        = models.DateField()
+    status      = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.OPEN,
+    )
+
+    # â”€â”€ Opening â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    opened_by   = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='sheets_opened',
+        null=True, blank=True,   # null when auto-opened by system
+    )
+    opened_at   = models.DateTimeField(auto_now_add=True)
+
+    # â”€â”€ Closing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    closed_by   = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='sheets_closed',
+        null=True, blank=True,
+    )
+    closed_at   = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Stranded sheet recovery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # A sheet that could not be closed on its own day (outage, system
+    # failure, oversight) strands every subsequent day, because the next
+    # day's float is only staged during close. These fields record the
+    # backdated reconciliation that unwinds that.
+    class RecoveryReason(models.TextChoices):
+        POWER_OUTAGE    = 'POWER_OUTAGE',    'Power outage'
+        SYSTEM_DOWN     = 'SYSTEM_DOWN',     'System unavailable'
+        NETWORK_FAILURE = 'NETWORK_FAILURE', 'Network failure'
+        NOT_CLOSED      = 'NOT_CLOSED',      'Not closed at end of day'
+        OTHER           = 'OTHER',           'Other'
+
+    recovery_reason = models.CharField(
+        max_length = 20,
+        choices    = RecoveryReason.choices,
+        blank      = True,
+        help_text  = 'Why this sheet could not be closed on its own day',
+    )
+    recovered_at = models.DateTimeField(null=True, blank=True)
+    recovered_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        null         = True,
+        blank        = True,
+        related_name = 'sheets_recovered',
+        help_text    = 'Who keyed the recovery entry â€” not necessarily who counted the cash',
+    )
+    recovery_notes = models.TextField(
+        blank     = True,
+        help_text = 'Mandatory explanation recorded at recovery',
+    )
+
+    # â”€â”€ Public holiday marker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_public_holiday    = models.BooleanField(default=False)
+    public_holiday_name  = models.CharField(max_length=100, blank=True)
+
+    # â”€â”€ Frozen totals (computed at close, never edited) â”€â”€â”€â”€â”€â”€â”€
+    total_jobs_created   = models.PositiveIntegerField(default=0)
+    total_fresh_revenue  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_deposits       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_balances       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_cash           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_momo           = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_pos            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_online         = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Paid through Print Octos â€” earned by the branch, never in its till',
+    )
+    total_payment_fees   = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text=(
+            'What the payment provider took. total_online is the gross, '
+            'so the day still reconciles against the bank.'
+        ),
+    )
+    total_credit_issued   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_credit_settled  = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_refunds        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_damages        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_petty_cash_out = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    net_cash_in_till     = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # â”€â”€ VAT (future-proofed, 0 until GRA registered) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    vat_collected        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # â”€â”€ Sheet number (branch-scoped, cumulative) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    sheet_number         = models.CharField(max_length=20, blank=True, default='')
+
+    # â”€â”€ Notes (BM only, no number adjustments) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    notes                = models.TextField(blank=True)
+
+    # â”€â”€ Disruption tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    class DisruptionReason(models.TextChoices):
+        POWER_OUTAGE       = 'POWER_OUTAGE',       'Power Outage'
+        FLOODING           = 'FLOODING',           'Flooding'
+        SECURITY_INCIDENT  = 'SECURITY_INCIDENT',  'Security Incident'
+        FORCE_MAJEURE      = 'FORCE_MAJEURE',       'Force Majeure'
+        OTHER              = 'OTHER',              'Other'
+
+    class DisruptionStatus(models.TextChoices):
+        PENDING_REVIEW = 'PENDING_REVIEW', 'Pending Review'
+        APPROVED       = 'APPROVED',       'Approved'
+        REJECTED       = 'REJECTED',       'Rejected'
+
+    disruption_reason      = models.CharField(
+        max_length=20,
+        choices=DisruptionReason.choices,
+        null=True, blank=True,
+    )
+    disruption_evidence    = models.TextField(
+        blank=True,
+        help_text='URL, ECG reference, news link, or other provable evidence',
+    )
+    disruption_notes       = models.TextField(blank=True)
+    disruption_status      = models.CharField(
+        max_length=15,
+        choices=DisruptionStatus.choices,
+        null=True, blank=True,
+    )
+    disruption_submitted_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='disruptions_submitted',
+        null=True, blank=True,
+    )
+    disruption_submitted_at = models.DateTimeField(null=True, blank=True)
+    disruption_reviewed_by  = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='disruptions_reviewed',
+        null=True, blank=True,
+    )
+    disruption_reviewed_at      = models.DateTimeField(null=True, blank=True)
+    disruption_rejection_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering             = ['-date']
+        unique_together      = [['branch', 'date']]
+        verbose_name         = 'Daily Sales Sheet'
+        verbose_name_plural  = 'Daily Sales Sheets'
+        indexes = [
+            models.Index(fields=['branch', 'date'],   name='sheet_branch_date_idx'),
+            models.Index(fields=['branch', 'status'], name='sheet_branch_status_idx'),
+            models.Index(fields=['status'],           name='sheet_status_idx'),
+        ]
+        indexes = [
+            models.Index(fields=['branch', 'date'],   name='sheet_branch_date_idx'),
+            models.Index(fields=['branch', 'status'], name='sheet_branch_status_idx'),
+            models.Index(fields=['status'],           name='sheet_status_idx'),
+        ]
+
+    def __str__(self):
+        ref = self.sheet_number or str(self.pk)
+        return f"{ref} â€” {self.date} [{self.status}]"
+
+    @property
+    def is_open(self):
+        return self.status == self.Status.OPEN
+
+    @property
+    def total_collected(self):
+        """
+        Money actually received â€” excludes credit issued, which is owed.
+        Reads the registry so a new payment method is counted the day it
+        is added, rather than being left out of every total that builds
+        on this one.
+        """
+        from apps.finance import payment_methods as pm
+        from decimal import Decimal
+
+        collected = sum(
+            (getattr(self, m.sheet_field, None) or Decimal('0')
+             for m in pm.METHODS if m.collected and m.sheet_field),
+            Decimal('0'),
+        )
+        return collected + self.total_credit_settled
+
+    @property
+    def is_disrupted(self):
+        """True if this day was a legitimate non-operating day."""
+        return bool(self.disruption_reason)
+
+    @property
+    def disruption_approved(self):
+        """True only if the disruption has been reviewed and approved by the owner."""
+        return self.disruption_status == self.DisruptionStatus.APPROVED
+
+===== apps\finance\models\credit_account.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class CreditAccount(AuditModel):
+    """
+    A credit facility extended to a trusted customer â€”
+    either an individual or an organisation (school, church, corporate).
+
+    Credit limit is set and approved by a Belt Manager.
+    The BM can recommend but cannot approve their own branch accounts.
+
+    Rules:
+    - System blocks job completion on credit if customer is at or over limit
+    - BM can request a temporary override â€” Belt Manager approves
+    - Account is suspended automatically if payment terms are breached
+    - All credit issued and settlements are tracked separately on the daily sheet
+    """
+
+    class AccountType(models.TextChoices):
+        INDIVIDUAL   = 'INDIVIDUAL',   'Individual'
+        ORGANISATION = 'ORGANISATION', 'Organisation'
+
+    class Status(models.TextChoices):
+        PENDING   = 'PENDING',   'Pending Approval'
+        ACTIVE    = 'ACTIVE',    'Active'
+        SUSPENDED = 'SUSPENDED', 'Suspended'
+        CLOSED    = 'CLOSED',    'Closed'
+
+    customer        = models.OneToOneField(
+        'customers.CustomerProfile',
+        on_delete=models.PROTECT,
+        related_name='credit_account',
+    )
+    branch          = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='credit_accounts',
+        null=True,
+        blank=True,
+    )
+    account_type    = models.CharField(
+        max_length=15,
+        choices=AccountType.choices,
+        default=AccountType.INDIVIDUAL,
+    )
+    status          = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
+    # â”€â”€ Credit terms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    credit_limit      = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text='Maximum outstanding balance allowed',
+    )
+    current_balance   = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='Running total of unpaid credit issued',
+    )
+    payment_terms     = models.PositiveIntegerField(
+        default=30,
+        help_text='Number of days customer has to settle balance',
+    )
+
+    # â”€â”€ Organisation details (if applicable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    organisation_name    = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text='School, church or company name',
+    )
+    contact_person       = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='Primary contact at the organisation',
+    )
+    contact_phone        = models.CharField(
+        max_length=20,
+        blank=True,
+    )
+
+    # â”€â”€ Approval â€” Belt Manager only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    nominated_by      = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='credit_accounts_nominated',
+        null=True,
+        blank=True,
+        help_text='Branch Manager who nominated this account',
+    )
+    nominated_at      = models.DateTimeField(null=True, blank=True)
+    approved_by       = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='credit_accounts_approved',
+        null=True,
+        blank=True,
+        help_text='Belt Manager who approved this account',
+    )
+    approved_at       = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Suspension â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    suspended_at      = models.DateTimeField(null=True, blank=True)
+    suspension_reason = models.TextField(blank=True)
+    suspended_by      = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='credit_accounts_suspended',
+        null=True,
+        blank=True,
+    )
+
+    # â”€â”€ Notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    notes             = models.TextField(blank=True)
+
+    class Meta:
+        ordering        = ['-created_at']
+        verbose_name        = 'Credit Account'
+        verbose_name_plural = 'Credit Accounts'
+
+    def __str__(self) -> str:
+        name = self.organisation_name or self.customer.full_name
+        return f"{name} â€” limit: GHS {self.credit_limit} â€” balance: GHS {self.current_balance}"
+
+    @property
+    def available_credit(self) -> float:
+        """Remaining credit the customer can use."""
+        return float(self.credit_limit) - float(self.current_balance)
+
+    @property
+    def is_over_limit(self) -> bool:
+        return float(self.current_balance) >= float(self.credit_limit)
+
+    @property
+    def utilisation_pct(self) -> float:
+        if not self.credit_limit:
+            return 0
+        return round((float(self.current_balance) / float(self.credit_limit)) * 100, 1)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.Status.ACTIVE
+
+===== apps\jobs\models\job.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class Job(AuditModel):
+    """
+    The central model for all work done at Farhat Printing Press.
+    Every job â€” instant, production or design â€” lives here.
+    """
+
+    # â”€â”€ Job Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    INSTANT    = 'INSTANT'
+    PRODUCTION = 'PRODUCTION'
+    DESIGN     = 'DESIGN'
+
+    JOB_TYPE_CHOICES = [
+        (INSTANT,    'Instant'),
+        (PRODUCTION, 'Production'),
+        (DESIGN,     'Design'),
+    ]
+
+    # â”€â”€ Job Statuses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Shared
+    DRAFT             = 'DRAFT'
+    PENDING_PAYMENT   = 'PENDING_PAYMENT'
+    PAID              = 'PAID'
+    IN_PROGRESS       = 'IN_PROGRESS'
+    COMPLETE          = 'COMPLETE'
+    CANCELLED         = 'CANCELLED'
+    VOIDED            = 'VOIDED'
+
+    # Production + Design
+    CONFIRMED         = 'CONFIRMED'
+    READY             = 'READY'
+    OUT_FOR_DELIVERY  = 'OUT_FOR_DELIVERY'
+    HALTED            = 'HALTED'
+
+    # Design only
+    SAMPLE_SENT        = 'SAMPLE_SENT'
+    REVISION_REQUESTED = 'REVISION_REQUESTED'
+    DESIGN_APPROVED    = 'DESIGN_APPROVED'
+
+    # â”€â”€ After-hours (BM post-closing, awaiting cashier handover) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    INTAKE_HELD        = 'INTAKE_HELD'
+
+    # â”€â”€ Deprecated (kept for DB integrity, not used in new transitions) â”€â”€
+    BRIEFED            = 'BRIEFED'
+    DESIGN_IN_PROGRESS = 'DESIGN_IN_PROGRESS'
+    QUEUED             = 'QUEUED'
+    READY_FOR_PAYMENT  = 'READY_FOR_PAYMENT'
+
+    # â”€â”€ Lifecycle axes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Three independent facts that the single `status` field cannot express
+    # together: where the money is, where the physical work is, and whether
+    # the customer has it. A job can be part-paid, still in production and
+    # awaiting collection â€” one value cannot say that.
+    #
+    # `status` is retained and kept in sync while readers are migrated across.
+
+    class Payment(models.TextChoices):
+        UNPAID       = 'UNPAID',       'Unpaid'
+        DEPOSIT_PAID = 'DEPOSIT_PAID', 'Deposit paid'
+        SETTLED      = 'SETTLED',      'Settled'
+
+    class Work(models.TextChoices):
+        RECEIVED      = 'RECEIVED',      'Received'
+        IN_PRODUCTION = 'IN_PRODUCTION', 'In production'
+        FINISHING     = 'FINISHING',     'Finishing'
+        QUALITY_CHECK = 'QUALITY_CHECK', 'Quality check'
+        DONE          = 'DONE',          'Done'
+
+    class Handover(models.TextChoices):
+        AWAITING_COLLECTION = 'AWAITING_COLLECTION', 'Awaiting collection'
+        OUT_FOR_DELIVERY    = 'OUT_FOR_DELIVERY',    'Out for delivery'
+        HANDED_OVER         = 'HANDED_OVER',         'Handed over'
+
+    STATUS_CHOICES = [
+        # Active statuses
+        (DRAFT,              'Draft'),
+        (PENDING_PAYMENT,    'Pending Payment'),
+        (PAID,               'Paid'),
+        (CONFIRMED,          'Confirmed'),
+        (IN_PROGRESS,        'In Progress'),
+        (READY,              'Ready'),
+        (OUT_FOR_DELIVERY,   'Out for Delivery'),
+        (COMPLETE,           'Complete'),
+        (CANCELLED,          'Cancelled'),
+        (VOIDED,             'Voided'),
+        (HALTED,             'Halted'),
+        (INTAKE_HELD,        'Intake Held'),
+        (SAMPLE_SENT,        'Sample Sent'),
+        (REVISION_REQUESTED, 'Revision Requested'),
+        (DESIGN_APPROVED,    'Design Approved'),
+        # Deprecated â€” retained for existing data only
+        ('BRIEFED',            'Briefed (Deprecated)'),
+        ('DESIGN_IN_PROGRESS', 'Design In Progress (Deprecated)'),
+        ('QUEUED',             'Queued (Deprecated)'),
+        ('READY_FOR_PAYMENT',  'Ready for Payment (Deprecated)'),
+    ]
+
+    # â”€â”€ Deposit Choices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    DEPOSIT_70  = 70
+    DEPOSIT_100 = 100
+
+    DEPOSIT_CHOICES = [
+        (DEPOSIT_70,  '70% Deposit'),
+        (DEPOSIT_100, '100% (Full Payment)'),
+    ]
+
+    # â”€â”€ Intake Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    WALK_IN  = 'WALK_IN'
+    WHATSAPP = 'WHATSAPP'
+    EMAIL    = 'EMAIL'
+    PHONE    = 'PHONE'
+    PROFORMA = 'PROFORMA'
+    ONLINE   = 'ONLINE'
+    CHANNEL_CHOICES = [
+        (WALK_IN,  'Walk-in'),
+        (WHATSAPP, 'WhatsApp'),
+        (EMAIL,    'Email'),
+        (PHONE,    'Phone'),
+        (PROFORMA, 'Accepted proforma'),
+        (ONLINE,   'Ordered online'),
+    ]
+
+    # â”€â”€ Priority â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    NORMAL = 'NORMAL'
+    HIGH   = 'HIGH'
+    URGENT = 'URGENT'
+
+    PRIORITY_CHOICES = [
+        (NORMAL, 'Normal'),
+        (HIGH,   'High'),
+        (URGENT, 'Urgent'),
+    ]
+
+    # â”€â”€ Payment Methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    CASH   = 'CASH'
+    MOMO   = 'MOMO'
+    POS    = 'POS'
+    CREDIT = 'CREDIT'
+    WALLET = 'WALLET'
+    ONLINE = 'ONLINE'
+
+    PAYMENT_METHOD_CHOICES = [
+        (CASH,   'Cash'),
+        (MOMO,   'Mobile Money'),
+        (POS,    'POS'),
+        (CREDIT, 'Credit Account'),
+        (WALLET, 'Wallet Credit'),
+        (ONLINE, 'Online Payment'),
+    ]
+
+    # â”€â”€ Core fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    job_number = models.CharField(max_length=30, unique=True, blank=True)
+    job_type   = models.CharField(max_length=20, choices=JOB_TYPE_CHOICES)
+    status     = models.CharField(max_length=30, choices=STATUS_CHOICES, default=DRAFT)
+
+    # Owned by the cashier â€” the only point at which money enters.
+    payment_state = models.CharField(
+        max_length = 20,
+        choices    = Payment.choices,
+        default    = Payment.UNPAID,
+        db_index   = True,
+    )
+    # Owned by the flow coordinator, who never meets a customer.
+    # Instant jobs use only RECEIVED and DONE.
+    work_state = models.CharField(
+        max_length = 20,
+        choices    = Work.choices,
+        default    = Work.RECEIVED,
+        db_index   = True,
+    )
+    # Owned by the attendant, the only customer-facing surface.
+    # An attendant can never release a job that is not SETTLED, unless the
+    # balance has been placed on a credit account by the cashier.
+    handover_state = models.CharField(
+        max_length = 20,
+        choices    = Handover.choices,
+        default    = Handover.AWAITING_COLLECTION,
+        db_index   = True,
+    )
+    handed_over_at = models.DateTimeField(null=True, blank=True)
+    handed_over_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.SET_NULL,
+        null         = True,
+        blank        = True,
+        related_name = 'jobs_handed_over',
+    )
+    priority   = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default=NORMAL)
+
+    # â”€â”€ Branches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='jobs',
+        help_text='Originating branch â€” owns the customer relationship',
+    )
+    assigned_to = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='assigned_jobs',
+        null=True,
+        blank=True,
+        help_text='Executing branch if routed',
+    )
+
+    # â”€â”€ Customer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    customer = models.ForeignKey(
+        'customers.CustomerProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='jobs',
+    )
+    # Who placed the order, when that isn't the customer it is for: the
+    # rep at the counter for a business's job. The customer is who it is
+    # for: who pays, whose receipt. Blank when they are the same.
+    ordered_by = models.ForeignKey(
+        'customers.CustomerProfile', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='jobs_ordered',
+    )
+
+    # â”€â”€ Job details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    title          = models.CharField(max_length=255)
+    description    = models.TextField(blank=True)
+    specifications = models.JSONField(default=dict, blank=True)
+
+    # â”€â”€ Intake â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    intake_channel = models.CharField(
+        max_length=20,
+        choices=CHANNEL_CHOICES,
+        default=WALK_IN,
+    )
+    intake_by      = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='jobs_created',
+        null=True,
+        blank=True,
+    )
+
+    # â”€â”€ Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    payment_method = models.CharField(
+        max_length=10,
+        choices=PAYMENT_METHOD_CHOICES,
+        blank=True,
+        default='',
+        help_text='Set by cashier at payment confirmation',
+    )
+    deposit_percentage = models.PositiveSmallIntegerField(
+        choices=DEPOSIT_CHOICES,
+        default=DEPOSIT_100,
+        help_text='Percentage of estimated cost collected at payment',
+    )
+    amount_paid = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Actual amount paid by customer â€” set by cashier on confirmation',
+    )
+    momo_reference = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='MoMo transaction reference â€” mandatory for MoMo payments',
+    )
+    pos_approval_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='POS terminal approval code â€” mandatory for POS payments',
+    )
+
+    # â”€â”€ Daily sheet linkage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    daily_sheet = models.ForeignKey(
+        'finance.DailySalesSheet',
+        on_delete=models.PROTECT,
+        related_name='jobs',
+        null=True,
+        blank=True,
+        help_text='The daily sheet this job belongs to â€” set on creation',
+    )
+
+    # â”€â”€ Proforma linkage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    proforma = models.ForeignKey(
+        'jobs.ProformaInvoice',
+        on_delete=models.SET_NULL,
+        related_name='converted_jobs',
+        null=True,
+        blank=True,
+        help_text='Proforma invoice this job was created from, if any',
+    )
+
+    # â”€â”€ Void â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    void_reason = models.TextField(
+        blank=True,
+        help_text='Mandatory explanation if job is voided â€” BM authorised only',
+    )
+    voided_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='jobs_voided',
+        null=True,
+        blank=True,
+    )
+    voided_at = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Cancellation damages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    cancellation_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='10% of full job value â€” applied when cancelled after IN_PROGRESS',
+    )
+
+    # â”€â”€ Timing & cost â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    estimated_time = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Minutes',
+    )
+
+    # The promise as first made. Never moved except when the customer
+    # changes the job; the score (kept or broken) is against this one.
+    first_promise_at = models.DateTimeField(null=True, blank=True)
+    # ON_TRACK, AT_RISK, LATE while it runs; KEPT or BROKEN once ready.
+    promise_state = models.CharField(max_length=10, blank=True, default='')
+    # When the customer was last told about this promise, so they are
+    # not told again within two hours.
+    promise_told_at = models.DateTimeField(null=True, blank=True)
+
+
+    estimated_ready_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            'When the floor said this would be done, frozen at the moment '
+            'it was promised. Not recomputed: the question worth answering '
+            'later is whether the promise was kept, and a figure that '
+            'moves with the queue can never be wrong.'
+        ),
+    )
+    work_started_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            'When someone actually began. An estimate missed because the '
+            'job sat in a queue for a day is a different failure from one '
+            'missed because the work took longer than thought, and without '
+            'this the two cannot be told apart.'
+        ),
+    )
+    estimated_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    final_cost     = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    deadline       = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Inspection claim â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Who has this job open in the inspection workspace, and since when.
+    # A claim, not a state: it stops two coordinators checking the same
+    # file, and it lapses after ten minutes so a tablet left on a bench
+    # cannot hold the queue. SET_NULL because a claim is transient and
+    # must never stop a user from being removed.
+    inspecting_by    = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='jobs_inspecting',
+        null=True,
+        blank=True,
+    )
+    inspecting_since = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_routed      = models.BooleanField(default=False)
+    routing_reason = models.TextField(blank=True)
+
+    # â”€â”€ Carry forward â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    carried_forward = models.BooleanField(
+        default=False,
+        help_text='True if this job was unpaid at sheet close and carried to next day.',
+    )
+
+    # â”€â”€ Notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Draft â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    draft_expires_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Auto-set to created_at + 3 days for DRAFT jobs. Null for all other statuses.',
+    )
+    abandoned_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set when a draft expires or is manually discarded.',
+    )
+    # â”€â”€ Cash handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    cash_tendered = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Amount of cash given by customer',
+    )
+    change_given = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Change returned to customer',
+    )
+
+    # â”€â”€ Post-closing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    post_closing = models.BooleanField(
+        default   = False,
+        help_text = 'True if job was created after branch closing time â€” BM only.',
+    )
+    post_closing_reason = models.TextField(
+        blank     = True,
+        help_text = 'Mandatory reason for post-closing job â€” entered by BM.',
+    )
+    post_closing_approved_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'post_closing_jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'BM who approved this post-closing job.',
+    )
+
+    # â”€â”€ Handover dispute (INTAKE_HELD jobs only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Mirrors CashierFloat.physical_confirm_disputed â€” same pattern,
+    # same escalation path to Regional Manager.
+    handover_disputed = models.BooleanField(
+        default   = False,
+        help_text = 'True if the cashier reported not receiving cash from the BM for this job.',
+    )
+    handover_disputed_at = models.DateTimeField(null=True, blank=True)
+    handover_disputed_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'handover_disputes_raised',
+        null         = True,
+        blank        = True,
+        help_text    = 'Cashier who raised the dispute.',
+    )
+    handover_resolved_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set when the cashier affirms receipt (with or without a prior dispute).',
+    )
+    handover_resolved_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'handover_resolutions',
+        null         = True,
+        blank        = True,
+        help_text    = 'Cashier who confirmed the handover.',
+    )
+
+    # â”€â”€ Voided (DEPRECATED â€” never wired into JobStatusEngine, business
+    # rules for this were never finalized; CANCELLED covers the standard
+    # case. Do not build against this field without a fresh design
+    # discussion â€” see void_reason/voided_by/voided_at below.) â”€â”€â”€â”€â”€â”€â”€â”€
+
+   # â”€â”€ Credit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    credit_account = models.ForeignKey(
+        'finance.CreditAccount',
+        on_delete    = models.PROTECT,
+        related_name = 'jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'Credit account used if payment method is CREDIT.',
+    )
+    partial_credit_amount = models.DecimalField(
+        max_digits   = 10,
+        decimal_places = 2,
+        null         = True,
+        blank        = True,
+        help_text    = 'Amount added to credit account for partial credit payments.',
+    )
+    partial_credit_account = models.ForeignKey(
+        'finance.CreditAccount',
+        on_delete    = models.PROTECT,
+        related_name = 'partial_credit_jobs',
+        null         = True,
+        blank        = True,
+        help_text    = 'Credit account charged for the unpaid portion.',
+    )
+
+    # â”€â”€ Notes â”€â”€
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'daily_sheet'], name='job_branch_sheet_idx'),
+            models.Index(fields=['branch', 'status'],      name='job_branch_status_idx'),
+            models.Index(fields=['daily_sheet', 'status'], name='job_sheet_status_idx'),
+            models.Index(fields=['branch', 'intake_by'],   name='job_branch_intake_idx'),
+            models.Index(fields=['branch', 'created_at'],  name='job_branch_created_idx'),
+            models.Index(fields=['daily_sheet', 'status', 'job_type'], name='job_sheet_status_type_idx'),
+            models.Index(fields=['status'],                name='job_status_idx'),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.job_number} â€” {self.title}"
+
+    def save(self, *args, **kwargs) -> None:
+        if not self.job_number:
+            self.job_number = self._generate_job_number()
+        super().save(*args, **kwargs)
+
+    def _generate_job_number(self) -> str:
+        from django.utils import timezone
+        from django.db.models import Max
+        year        = timezone.now().year
+        branch_code = self.branch.code if self.branch else 'GEN'
+        prefix      = f"FP-{branch_code}-{year}-"
+        last = Job.objects.filter(
+            branch=self.branch,
+            job_number__startswith=prefix,
+        ).aggregate(Max('job_number'))['job_number__max']
+        if last:
+            last_num = int(last.split('-')[-1])
+        else:
+            last_num = 0
+        return f"{prefix}{str(last_num + 1).zfill(5)}"
+
+    # â”€â”€ Convenience properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    @property
+    def is_instant(self) -> bool:
+        return self.job_type == self.INSTANT
+
+    @property
+    def is_production(self) -> bool:
+        return self.job_type == self.PRODUCTION
+
+    @property
+    def is_design(self) -> bool:
+        return self.job_type == self.DESIGN
+
+    # â”€â”€ Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    # Channels where nobody is standing at the counter and nobody at the
+    # branch has yet looked at what was sent. A walk-in needs no
+    # verification â€” anything unclear is asked on the spot.
+    #
+    # PROFORMA is deliberately absent. A quote is built line by line by a
+    # manager, agreed with the customer and converted deliberately; that is
+    # more scrutiny than a verification, not less.
+    # Work that arrived without anyone at the counter seeing it. The
+    # coordinator checks these before they go anywhere near a machine:
+    # nobody has looked at the artwork, confirmed the size against what
+    # the customer meant, or asked the question a person at the desk
+    # would have asked.
+    #
+    # An online order is the most remote of all â€” the customer never
+    # spoke to anybody.
+    REMOTE_CHANNELS = {'WHATSAPP', 'EMAIL', 'PHONE', 'ONLINE'}
+
+    @property
+    def needs_verification(self) -> bool:
+        """
+        Derived rather than stored, so there is no second source of truth
+        to drift from the channel the job arrived on.
+        """
+        return self.intake_channel in self.REMOTE_CHANNELS
+
+    @property
+    def latest_verification(self):
+        """Most recent check. Verifications are ordered newest first."""
+        return self.verifications.first()
+
+    @property
+    def is_verified(self) -> bool:
+        """Cleared for production. False where no check has passed yet."""
+        latest = self.latest_verification
+        return bool(latest and latest.passed)
+
+    @property
+    def balance_due(self):
+        """Remaining amount owed after deposit."""
+        if self.estimated_cost is None:
+            return None
+        paid = self.amount_paid or 0
+        return max(self.estimated_cost - paid, 0)
+
+    @property
+    def is_fully_paid(self) -> bool:
+        if self.estimated_cost is None:
+            return False
+        return (self.amount_paid or 0) >= self.estimated_cost
+
+    @property
+    def cancellation_fee_due(self):
+        """10% of full job value â€” only applies when cancelled after IN_PROGRESS."""
+        if self.estimated_cost is None:
+            return None
+        return round(self.estimated_cost * 10 / 100, 2)
+    
+    @property
+    def computed_total(self):
+        """Sum of all line item totals."""
+        from django.db.models import Sum
+        return self.line_items.aggregate(
+            total=Sum('line_total')
+        )['total'] or 0
+
+    @property
+    def line_item_summary(self) -> str:
+        """Short summary of services â€” e.g. 'Photocopy, Binding, Envelope'"""
+        names = list(
+            self.line_items.values_list('service__name', flat=True)
+        )
+        if not names:
+            return self.title or 'â€”'
+        overflow = len(names) - 3
+        base = ', '.join(names[:3])
+        return f"{base} +{overflow} more" if overflow > 0 else base
+
+===== apps\jobs\models\job_halt.py =====
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class JobHalt(AuditModel):
+    """
+    A period during which work on a job was stopped.
+
+    Deliberately a record rather than a status. Overwriting the job's work
+    state with HALTED loses the stage it was in, so resuming depends on
+    someone remembering â€” and a job put back into IN_PRODUCTION when it was
+    actually in FINISHING gets remade from scratch.
+
+    A job may be halted more than once over its life. Each occurrence is
+    kept: three machine breakdowns in a month is a maintenance signal,
+    repeated 'awaiting customer decision' against one customer is a
+    commercial one. Halted time is also excluded from working time, which
+    matters once wait times are estimated from history.
+    """
+
+    class Reason(models.TextChoices):
+        MACHINE_BREAKDOWN = 'MACHINE_BREAKDOWN', 'Machine breakdown'
+        MATERIALS_OUT     = 'MATERIALS_OUT',     'Materials unavailable'
+        CUSTOMER_PAUSE    = 'CUSTOMER_PAUSE',    'Customer requested pause'
+        AWAITING_CUSTOMER = 'AWAITING_CUSTOMER', 'Awaiting customer decision'
+        QUALITY_FAILURE   = 'QUALITY_FAILURE',   'Quality failure'
+        # The work can't start: the file is wrong (resolution, size,
+        # missing page). Not a quality failure, which is about the made
+        # piece. Only this job stops; the machine carries on.
+        FILE_FAULT        = 'FILE_FAULT',        'File fault'
+        OTHER             = 'OTHER',             'Other'
+
+    job = models.ForeignKey(
+        'jobs.Job',
+        on_delete    = models.CASCADE,
+        related_name = 'halts',
+    )
+
+    reason = models.CharField(max_length=30, choices=Reason.choices)
+
+    # Which machine, where a machine caused it. Set when a device is marked
+    # down, so bringing it back resumes exactly the jobs it stopped â€”
+    # matching on a note prefix would break silently the day the wording
+    # changed. Null for halts with no machine behind them: materials out,
+    # a customer pause, a quality failure.
+    machine = models.ForeignKey(
+        'production.Machine',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='halts_caused',
+    )
+    # Optional by design. A mandatory note becomes ritual â€” the same text
+    # typed every time â€” and tells you less than the reason code alone.
+    note = models.TextField(blank=True)
+
+    # The stage the job was in when work stopped, so resuming restores it.
+    work_state_at_halt = models.CharField(max_length=20)
+
+    halted_at = models.DateTimeField(auto_now_add=True)
+    halted_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'job_halts_raised',
+    )
+
+    resumed_at = models.DateTimeField(null=True, blank=True)
+    resumed_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.SET_NULL,
+        null         = True,
+        blank        = True,
+        related_name = 'job_halts_resumed',
+    )
+
+    class Meta:
+        ordering            = ['-halted_at']
+        verbose_name        = 'Job Halt'
+        verbose_name_plural = 'Job Halts'
+        indexes = [
+            models.Index(fields=['job', 'resumed_at'], name='halt_job_resumed_idx'),
+        ]
+
+    def __str__(self):
+        state = 'resumed' if self.resumed_at else 'active'
+        return f'{self.job.job_number} â€” {self.get_reason_display()} ({state})'
+
+    @property
+    def is_active(self) -> bool:
+        return self.resumed_at is None
+
+    @property
+    def duration(self):
+        """How long work was stopped. None while still halted."""
+        if not self.resumed_at:
+            return None
+        return self.resumed_at - self.halted_at
+
+===== apps\jobs\models\job_step.py =====
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class JobStep(AuditModel):
+    """
+    One station one line passes through, on one machine or by hand.
+
+    A line's route (ServiceStation, in sequence) becomes its steps when the
+    job is cleared: print on the 10ft, then cut by hand, then eyelets. Each
+    line has its own, so a banner and its stickers run on different machines
+    at once.
+
+    A machine's queue is its steps that are not done: the one ACTIVE (being
+    worked now) first, then the WAITING ones by slack, the least first.
+    Slack is the job's promise less the work still left on the line.
+    reached_at records when a step came to the front. On a machine with no
+    operator assigned it goes straight on, as before. On a staffed machine
+    it waits there for the operator's Start, which is when the work really
+    began (started_at). Marking it DONE moves the line to its next step and
+    the next job up. Every line ends at the bench, so an operator's Done
+    always frees the machine and the final check happens at finishing.
+
+    by_hand is decided by the route, not the station: a route step naming
+    no machine type is done by hand at that station's bench, even where the
+    station has machines for other work. Cutting a banner is by hand though
+    the cutting station also has a plotter.
+
+    A step with no machine that is not by hand is unassigned: nothing that
+    fits was up, or the branch has no such machine. The coordinator places
+    it, or marks it done when it was done another way.
+
+    The customer never sees steps. Their stage follows: every print step
+    done means Finishing; every step done means ready for the check.
+
+    expected_minutes is the work itself, worked out when the step is made,
+    from measured timings where Octos has them and seed figures where not.
+    reached_at and done_at are what actually happened, which is what the
+    timing service learns from.
+    """
+
+    class State(models.TextChoices):
+        WAITING = 'WAITING', 'Waiting'
+        ACTIVE  = 'ACTIVE',  'On the machine'
+        DONE    = 'DONE',    'Done'
+
+    job = models.ForeignKey(
+        'jobs.Job',
+        on_delete=models.CASCADE,
+        related_name='steps',
+    )
+    line_item = models.ForeignKey(
+        'jobs.JobLineItem',
+        on_delete=models.CASCADE,
+        related_name='steps',
+    )
+    station = models.ForeignKey(
+        'production.Station',
+        on_delete=models.PROTECT,
+        related_name='job_steps',
+    )
+    machine = models.ForeignKey(
+        'production.Machine',
+        on_delete=models.SET_NULL,
+        related_name='job_steps',
+        null=True,
+        blank=True,
+        help_text='Empty for work done by hand, or where nothing fitted and the coordinator must place it.',
+    )
+    by_hand = models.BooleanField(
+        default=False,
+        help_text="Worked at the station's bench: the route names no machine type for this step.",
+    )
+    sequence = models.PositiveSmallIntegerField(
+        help_text='Order within the line, from the route.',
+    )
+    state = models.CharField(
+        max_length=10,
+        choices=State.choices,
+        default=State.WAITING,
+        db_index=True,
+    )
+    expected_minutes = models.DecimalField(
+        max_digits=8,
+        decimal_places=1,
+        default=0,
+    )
+
+    reached_at = models.DateTimeField(null=True, blank=True)
+    done_at    = models.DateTimeField(null=True, blank=True)
+    done_by    = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='job_steps_done',
+        null=True,
+        blank=True,
+    )
+
+    # The operator's Start on a staffed machine: when the work really
+    # began, as opposed to when the step reached the front (reached_at).
+    started_at = models.DateTimeField(null=True, blank=True)
+    started_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='job_steps_started',
+        null=True,
+        blank=True,
+    )
+    # What the operator reported at Done. Spoilt pieces are waste until
+    # the coordinator confirms them for a reprint.
+    quantity_made   = models.PositiveIntegerField(null=True, blank=True)
+    quantity_spoilt = models.PositiveIntegerField(null=True, blank=True)
+    # On a staffed machine Done is the operator's. When someone else has
+    # to close it (the operator left with it running), why, in their
+    # words; done_by then names them, not the operator.
+    done_override = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta(AuditModel.Meta):
+        ordering = ['line_item_id', 'sequence']
+        verbose_name = 'Job Step'
+        verbose_name_plural = 'Job Steps'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['line_item', 'station'],
+                name='job_step_one_per_line_station',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['machine', 'state'], name='job_step_machine_state_idx'),
+            models.Index(fields=['job', 'state'], name='job_step_job_state_idx'),
+        ]
+
+    def __str__(self) -> str:
+        where = self.machine.name if self.machine_id else ('bench' if self.by_hand else 'unassigned')
+        return f'{self.job.job_number} â€” {self.station.code} on {where} ({self.state})'
+
+===== apps\jobs\models\final_check.py =====
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class FinalCheck(AuditModel):
+    """
+    The last look at a piece before it is handed to a customer: what was
+    ordered against what was made.
+
+    Taken at each line's last step, whatever that is: the bench for a
+    banner, the plotter for a sticker. A piece that matches is ready, and
+    once every piece of the job is, the customer is told. A piece that does
+    not match is never handed over: it goes back to its machine to be made
+    again, and the estimate grows by itself.
+
+    Kept as a record, every one, so a customer saying "this is not what I
+    ordered" weeks later can be answered with what was checked, by whom,
+    when, and why it went round twice if it did.
+    """
+
+    class Outcome(models.TextChoices):
+        PASSED    = 'PASSED',    'Matched, ready'
+        SENT_BACK = 'SENT_BACK', 'Sent back to be made again'
+
+    job = models.ForeignKey(
+        'jobs.Job',
+        on_delete=models.CASCADE,
+        related_name='final_checks',
+    )
+    line_item = models.ForeignKey(
+        'jobs.JobLineItem',
+        on_delete=models.CASCADE,
+        related_name='final_checks',
+    )
+    step = models.ForeignKey(
+        'jobs.JobStep',
+        on_delete=models.SET_NULL,
+        related_name='final_checks',
+        null=True,
+        blank=True,
+    )
+    outcome = models.CharField(max_length=12, choices=Outcome.choices)
+    rows = models.JSONField(
+        default=list,
+        help_text='Each row: field, label, ordered, made, match.',
+    )
+    promised_at = models.DateTimeField(null=True, blank=True)
+    note = models.TextField(blank=True)
+
+    checked_at = models.DateTimeField(auto_now_add=True)
+    checked_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='final_checks',
+    )
+
+    class Meta(AuditModel.Meta):
+        ordering = ['-checked_at']
+        verbose_name = 'Final Check'
+        verbose_name_plural = 'Final Checks'
+
+    def __str__(self) -> str:
+        return f'{self.job.job_number} â€” {self.get_outcome_display()}'
+
+===== apps\production\models\machine.py =====
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class Machine(AuditModel):
+    """
+    A physical device at a branch.
+
+    is_active is ownership; is_available is today. A machine sold or
+    written off is inactive. A machine with a fault is unavailable â€” and
+    that is what makes MACHINE_BREAKDOWN mean something. Until now it was a
+    halt reason with no machine behind it, so nothing in the system knew
+    the press was down.
+    """
+
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        related_name='machines',
+    )
+    machine_type = models.ForeignKey(
+        'production.MachineType',
+        on_delete=models.PROTECT,
+        related_name='machines',
+    )
+    name = models.CharField(
+        max_length=80,
+        help_text='What the branch calls it, e.g. "Canon C5535i".',
+    )
+    model_number = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text='Manufacturer model, e.g. "imageRUNNER ADVANCE DX C5535i".',
+    )
+    serial_number = models.CharField(max_length=80, blank=True)
+
+    max_width_mm = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text=(
+            'Widest material this machine takes, in millimetres. It '
+            'belongs to the machine rather than its class: a 6ft and a '
+            '10ft roll printer are both large format, and a route that '
+            'had to name each width separately would rule out machines '
+            'that could do the work perfectly well.'
+        ),
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Owned and in service. False once sold or written off.',
+    )
+    is_available = models.BooleanField(
+        default=True,
+        help_text=(
+            'Running right now. False takes the machine out of scheduling '
+            'and halts what is queued on it.'
+        ),
+    )
+    unavailable_reason = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text='Why it is down, for whoever asks before it is fixed.',
+    )
+    unavailable_since = models.DateTimeField(null=True, blank=True)
+
+    commissioned_on = models.DateField(
+        null=True,
+        blank=True,
+        help_text='When it entered service. Useful once age and downtime correlate.',
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta(AuditModel.Meta):
+        ordering = ['branch', 'machine_type__station__sequence', 'name']
+        verbose_name = 'Machine'
+        verbose_name_plural = 'Machines'
+        indexes = [
+            models.Index(
+                fields=['branch', 'is_active', 'is_available'],
+                name='machine_branch_state_idx',
+            ),
+        ]
+
+    def __str__(self) -> str:
+        state = '' if self.is_available else ' (down)'
+        return f'{self.name} â€” {self.branch.code}{state}'
+
+    @property
+    def station(self):
+        """The station this machine works at, via its type."""
+        return self.machine_type.station
+
+    @property
+    def is_usable(self) -> bool:
+        """Owned, in service, and running."""
+        return self.is_active and self.is_available
+
+===== apps\production\models\machine_operator.py =====
+from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+
+from apps.core.models import AuditModel
+
+
+class MachineOperator(AuditModel):
+    """
+    A person assigned to run a machine.
+
+    A record, not a field on the machine: who ran the 10ft in March stays
+    answerable after they move to UV. An assignment is current while
+    active_until is empty; ending it closes the record rather than
+    deleting it.
+
+    A machine may have several current operators (one to three per
+    machine, by load), and a person may hold several machines at once:
+    the DTF printer and the heat press are one person's work. A machine
+    with at least one current operator is staffed, and on a staffed
+    machine work starts only on the operator's Start.
+    """
+
+    operator = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.PROTECT,
+        related_name='machine_assignments',
+    )
+    machine = models.ForeignKey(
+        'production.Machine',
+        on_delete=models.PROTECT,
+        related_name='operator_assignments',
+    )
+    active_from  = models.DateTimeField(default=timezone.now)
+    active_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Empty while the assignment stands.',
+    )
+
+    class Meta(AuditModel.Meta):
+        ordering = ['machine', '-active_from']
+        verbose_name = 'Machine Operator'
+        verbose_name_plural = 'Machine Operators'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['operator', 'machine'],
+                condition=Q(active_until__isnull=True),
+                name='machine_operator_one_current',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['machine', 'active_until'], name='machine_operator_current_idx'),
+        ]
+
+    def __str__(self) -> str:
+        state = '' if self.active_until is None else ' (ended)'
+        return f'{self.operator} on {self.machine.name}{state}'
+
+    @property
+    def is_current(self) -> bool:
+        return self.active_until is None
+
+===== apps\production\models\machine_type.py =====
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class MachineType(AuditModel):
+    """
+    A class of device â€” digital press, large format, laminator, binder.
+
+    Capability is declared once per type rather than per physical device.
+    Mapping every machine to every service it can run would be a large
+    table maintained by hand and wrong the moment the catalogue changes;
+    this way, buying a second press of a known type is one row, and it
+    inherits every service that type can run.
+    """
+
+    class Code(models.TextChoices):
+        DIGITAL_PRESS = 'DIGITAL_PRESS', 'Digital press'
+        LARGE_FORMAT  = 'LARGE_FORMAT',  'Large format printer'
+        LAMINATOR     = 'LAMINATOR',     'Laminator'
+        BINDER        = 'BINDER',        'Binding machine'
+        CUTTER        = 'CUTTER',        'Cutter'
+        PLOTTER       = 'PLOTTER',       'Plotter'
+
+    code = models.CharField(
+        max_length=30,
+        choices=Code.choices,
+        unique=True,
+    )
+    name = models.CharField(max_length=60)
+    station = models.ForeignKey(
+        'production.Station',
+        on_delete=models.PROTECT,
+        related_name='machine_types',
+        help_text='The station a device of this type works at.',
+    )
+    max_paper_size = models.CharField(
+        max_length=10,
+        blank=True,
+        help_text=(
+            'Largest sheet this class of device handles, e.g. A3. Blank '
+            'where size is not the limit â€” a laminator and a press are '
+            'constrained by different things.'
+        ),
+    )
+    max_width_mm = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text=(
+            'Widest material this machine takes, in millimetres. It '
+            'belongs to the machine rather than its class: a 6ft and a '
+            '10ft roll printer are both large format, and a route that '
+            'had to name each width separately would rule out machines '
+            'that could do the work perfectly well.'
+        ),
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta(AuditModel.Meta):
+        ordering = ['station__sequence', 'name']
+        verbose_name = 'Machine Type'
+        verbose_name_plural = 'Machine Types'
+
+    def __str__(self) -> str:
+        return self.name
+
+===== apps\customers\models\customer.py =====
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from apps.core.models import AuditModel
+
+
+class CustomerProfile(AuditModel):
+    """
+    Registered customer profile.
+    Phone number is the primary identifier across all channels.
+    """
+
+    # â”€â”€ Customer Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    INDIVIDUAL  = 'INDIVIDUAL'
+    BUSINESS    = 'BUSINESS'
+    INSTITUTION = 'INSTITUTION'
+
+    TYPE_CHOICES = [
+        (INDIVIDUAL,  'Individual'),
+        (BUSINESS,    'Business'),
+        (INSTITUTION, 'Institution'),
+    ]
+
+    # â”€â”€ Institution Subtypes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    SCHOOL = 'SCHOOL'
+    CHURCH = 'CHURCH'
+    NGO    = 'NGO'
+    GOVT   = 'GOVT'
+    OTHER  = 'OTHER'
+
+    INSTITUTION_SUBTYPE_CHOICES = [
+        (SCHOOL, 'School'),
+        (CHURCH, 'Church / Religious'),
+        (NGO,    'NGO / Non-profit'),
+        (GOVT,   'Government / Public'),
+        (OTHER,  'Other Institution'),
+    ]
+
+    # â”€â”€ Loyalty Tiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    REGULAR   = 'REGULAR'
+    PREFERRED = 'PREFERRED'
+    VIP       = 'VIP'
+
+    TIER_CHOICES = [
+        (REGULAR,   'Regular'),
+        (PREFERRED, 'Preferred'),
+        (VIP,       'VIP'),
+    ]
+
+    # â”€â”€ Title choices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    MR          = 'MR'
+    MRS         = 'MRS'
+    MISS        = 'MISS'
+    MS          = 'MS'
+    MADAM       = 'MADAM'
+    DR          = 'DR'
+    PROF        = 'PROF'
+    REV         = 'REV'
+    ESQ         = 'ESQ'
+    OTHER_TITLE = 'OTHER'
+
+    TITLE_CHOICES = [
+        (MR,          'Mr'),
+        (MRS,         'Mrs'),
+        (MISS,        'Miss'),
+        (MS,          'Ms'),
+        (MADAM,       'Madam'),
+        (DR,          'Dr'),
+        (PROF,        'Prof'),
+        (REV,         'Rev'),
+        (ESQ,         'Esq'),
+        (OTHER_TITLE, 'Other'),
+    ]
+
+    # â”€â”€ Gender choices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    MALE       = 'MALE'
+    FEMALE     = 'FEMALE'
+    PREFER_NOT = 'PREFER_NOT'
+
+    GENDER_CHOICES = [
+        (MALE,       'Male'),
+        (FEMALE,     'Female'),
+        (PREFER_NOT, 'Prefer not to say'),
+    ]
+
+    # â”€â”€ Preferred contact choices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    CONTACT_WHATSAPP = 'WHATSAPP'
+    CONTACT_CALL     = 'CALL'
+    CONTACT_SMS      = 'SMS'
+    CONTACT_EMAIL    = 'EMAIL'
+
+    PREFERRED_CONTACT_CHOICES = [
+        (CONTACT_WHATSAPP, 'WhatsApp'),
+        (CONTACT_CALL,     'Call'),
+        (CONTACT_SMS,      'SMS'),
+        (CONTACT_EMAIL,    'Email'),
+    ]
+
+    # â”€â”€ Core identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    title = models.CharField(
+        max_length=10,
+        choices=TITLE_CHOICES,
+        blank=True,
+        help_text='Honorific title e.g. Mr, Dr, Prof',
+    )
+    title_other = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='Custom title when title=OTHER',
+    )
+    first_name  = models.CharField(max_length=100, blank=True)
+    last_name   = models.CharField(max_length=100, blank=True)
+    gender      = models.CharField(
+        max_length=10,
+        choices=GENDER_CHOICES,
+        blank=True,
+    )
+    date_of_birth = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Optional â€” used for birthday messages',
+    )
+    phone = models.CharField(max_length=20, unique=True)
+    secondary_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Alternative number â€” searchable but not used for payments or automated messages',
+    )
+    email = models.EmailField(blank=True)
+    preferred_contact = models.CharField(
+        max_length=10,
+        choices=PREFERRED_CONTACT_CHOICES,
+        blank=True,
+        help_text='How this customer prefers to be contacted',
+    )
+
+    # â”€â”€ Affiliation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    affiliation = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='affiliated_individuals',
+        help_text='Institution or business this individual is affiliated with',
+    )
+    affiliation_active = models.BooleanField(
+        default=True,
+        help_text='Set to False if individual has left the affiliated organisation',
+    )
+
+    # â”€â”€ Organisation details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    company_name = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text='Company, school, or church name if applicable',
+    )
+    address = models.TextField(
+        blank=True,
+        help_text='Physical address of customer or organisation',
+    )
+
+    # â”€â”€ Type classification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    customer_type = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES,
+        default=INDIVIDUAL,
+    )
+    institution_subtype = models.CharField(
+        max_length=20,
+        choices=INSTITUTION_SUBTYPE_CHOICES,
+        blank=True,
+        help_text='Only applicable when customer_type is INSTITUTION',
+    )
+    
+    # â”€â”€ Engagement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    visit_count = models.PositiveIntegerField(default=0)
+    total_spend = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text='Lifetime spend across all completed jobs. Auto-updated on job completion.',
+    )
+    tier        = models.CharField(
+        max_length=20,
+        choices=TIER_CHOICES,
+        default=REGULAR,
+    )
+    confidence_score = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            'System-computed score 0â€“100 based on job volume, '
+            'payment consistency, profile completeness, and tenure. '
+            'Score â‰¥ 50 triggers a credit eligibility recommendation.'
+        ),
+    )
+
+    # â”€â”€ Wallet (job-redeemable store credit â€” money the branch owes
+    # this customer, NOT to be confused with CreditAccount, which is
+    # the opposite direction. See apps.finance.models.CustomerWalletTransaction
+    # for the full ledger; these two fields are a reconciled cache. â”€â”€
+    wallet_balance = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0,
+        help_text='Job-redeemable credit balance, capped at GHS 200. '
+                   'Reconciled from CustomerWalletTransaction â€” never '
+                   'edited directly.',
+    )
+    wallet_last_activity_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Timestamp of the last wallet add or redemption. '
+                   'Drives 6-month expiry; resets on any activity.',
+    )
+
+    # â”€â”€ Branch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    preferred_branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='preferred_customers',
+    )
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customers',
+        help_text='Branch where this customer was first recorded',
+    )
+
+    # â”€â”€ Flags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    is_priority = models.BooleanField(default=False)
+    is_walkin   = models.BooleanField(
+        default=False,
+        help_text='True if auto-created from a walk-in receipt delivery',
+    )
+
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-visit_count', 'first_name']
+
+    def __str__(self) -> str:
+        name = f"{self.first_name} {self.last_name}".strip()
+        return f"{name} ({self.phone})" if name else self.phone
+
+    @property
+    def title_display(self) -> str:
+        """Returns the display label for the title."""
+        if not self.title:
+            return ''
+        if self.title == self.OTHER_TITLE:
+            return self._tidy_name(self.title_other)
+        return dict(self.TITLE_CHOICES).get(self.title, '')
+
+    @classmethod
+    def _tidy_name(cls, value: str) -> str:
+        """
+        Names arrive inconsistently â€” 'ABCDE EFGH' from one entry path,
+        'Abcd, EFGH' from another. Normalising on read rather than on write
+        keeps the stored value exactly as the customer gave it, so nothing
+        is lost if a real name turns out not to fit the rule.
+
+        Handles the particles that should not be capitalised mid-name, and
+        the ones that should be capitalised after a prefix â€” O'Brien,
+        McDonald â€” which a plain title() gets wrong.
+        """
+        if not value:
+            return ''
+
+        cleaned = value.replace(',', ' ')
+        out     = []
+
+        for word in cleaned.split():
+            lower = word.lower()
+            if lower in ('van', 'von', 'der', 'de', 'da', 'di', 'du', 'la', 'le'):
+                out.append(lower)
+                continue
+            fixed = lower.capitalize()
+            for prefix in ("mc", "mac", "o'"):
+                if lower.startswith(prefix) and len(lower) > len(prefix):
+                    fixed = (
+                        prefix.capitalize()
+                        + lower[len(prefix):].capitalize()
+                    )
+                    break
+            if '-' in fixed:
+                fixed = '-'.join(p.capitalize() for p in fixed.split('-'))
+            out.append(fixed)
+
+        return ' '.join(out)
+
+    @property
+    def full_name(self) -> str:
+        """
+        Title included â€” the title is part of how a person is addressed,
+        and showing it in one place and not another is the inconsistency
+        this is meant to remove.
+        """
+        return ' '.join(p for p in (
+            self.title_display,
+            self._tidy_name(self.first_name),
+            self._tidy_name(self.last_name),
+        ) if p).strip()
+
+    @property
+    def titled_name(self) -> str:
+        """
+        Title + surname only, for a formal greeting â€” 'Dear Dr Mensah'.
+        full_name now carries the title too, so the fallback here returns
+        the untitled name rather than full_name, which would repeat it.
+        """
+        parts = [self.title_display, self._tidy_name(self.last_name)]
+        titled = ' '.join(p for p in parts if p).strip()
+        if titled:
+            return titled
+        return ' '.join(p for p in (
+            self._tidy_name(self.first_name),
+            self._tidy_name(self.last_name),
+        ) if p).strip()
+
+    @classmethod
+    def _tidy_company(cls, value: str) -> str:
+        """
+        Company names carry acronyms that are genuinely capitalised â€” WASS,
+        ATM, GH â€” and no rule can tell those from a name typed in caps.
+        Short all-caps words are left alone; anything longer is normalised,
+        so DEHYENA CHAMBERS reads as Dehyena Chambers while WASS Ghana
+        Limited keeps its acronym.
+
+        Four letters is the cut-off because real acronyms in use here are
+        three or four, and the shortest surname-like word that needs
+        fixing is longer than that.
+        """
+        if not value:
+            return ''
+        out = []
+        for word in value.split():
+            stripped = word.strip('.,')
+            if stripped.isupper() and stripped.isalpha() and len(stripped) <= 4:
+                out.append(word)
+            else:
+                out.append(cls._tidy_name(word))
+        return ' '.join(out)
+
+    @property
+    def display_name(self) -> str:
+        """Company name if set, otherwise full name."""
+        if self.company_name:
+            return self._tidy_company(self.company_name)
+        return self.full_name or self.phone
+
+# â”€â”€ Customer Edit Audit Log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+class CustomerEditLog(models.Model):
+    """
+    Immutable audit record of every field change made to a CustomerProfile.
+    Never updated â€” only created.
+    """
+    customer   = models.ForeignKey(
+        CustomerProfile,
+        on_delete=models.CASCADE,
+        related_name='edit_logs',
+    )
+    changed_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='customer_edits',
+    )
+    field_name  = models.CharField(max_length=100)
+    old_value   = models.TextField(blank=True)
+    new_value   = models.TextField(blank=True)
+    changed_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-changed_at']
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('CustomerEditLog records are immutable.')
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.changed_by} changed {self.field_name} "
+            f"on {self.customer} at {self.changed_at}"
+        )
+
+
+# â”€â”€ Signal: recompute confidence score after each job completion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+@receiver(post_save, sender='jobs.Job')
+def update_customer_confidence(sender, instance, **kwargs):
+    """
+    Updates visit_count, total_spend and confidence score when a job completes.
+    Only fires when the job is COMPLETE and linked to a customer.
+    If the score crosses the recommendation threshold, notifies the BM.
+    """
+    if instance.status != 'COMPLETE':
+        return
+    if not instance.customer_id:
+        return
+
+    try:
+        from apps.finance.credit_engine import CreditEngine
+        from apps.notifications.services import notify
+        from django.db.models import F
+        from decimal import Decimal
+
+        customer = instance.customer
+
+        # Increment visit count and total spend atomically
+        amount = Decimal(str(instance.amount_paid or 0))
+        CustomerProfile.objects.filter(pk=customer.pk).update(
+            visit_count = F('visit_count') + 1,
+            total_spend = F('total_spend') + amount,
+        )
+        customer.refresh_from_db()
+
+        new_score = CreditEngine.compute_confidence_score(customer)
+
+        # Notify BM if customer just crossed the recommendation threshold
+        # and doesn't already have a credit account
+        if CreditEngine.should_recommend(customer):
+            branch = instance.branch
+            if branch:
+                from apps.accounts.models import CustomUser
+                bm = CustomUser.objects.filter(
+                    branch=branch,
+                    role__name='BRANCH_MANAGER',
+                ).first()
+                if bm:
+                    notify(
+                        recipient=bm,
+                        message=(
+                            f"{customer.display_name} may be eligible for a credit account "
+                            f"(confidence score: {new_score}). Consider nominating them."
+                        ),
+                        category='CREDIT',
+                        link=f'/customers/{customer.id}/',
+                    )
+    except Exception:
+        pass  # never let a signal crash a job save
+
+===== apps\storefront\models\online_order.py =====
+"""
+An order that does not yet belong to anyone.
+
+Every job in Octos is branch-shaped: a branch, a daily sheet, a
+branch-scoped number, a place in a queue. An online order has none of
+those. It is created by a stranger before any branch knows about it,
+and it only becomes a Job once routing and payment have settled.
+
+A Job with a null branch would leak into every queue and every sheet
+total, so the order is its own record and converts at the end. The
+precedent is ProformaInvoice, which is the same shape with a different
+trigger: a customer-facing document that becomes a job on acceptance.
+
+Most orders are abandoned. Someone browses, prices a banner, and closes
+the tab. That is normal and costs nothing â€” the record expires.
+"""
+
+from decimal import Decimal
+
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class OnlineOrder(AuditModel):
+    """
+    ORD-{YEAR}-{SEQUENCE}, company-wide rather than per branch, because
+    an online order belongs to Farhat before it belongs to anywhere.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT           = 'DRAFT',           'Being built'
+        AWAITING_PAYMENT = 'AWAITING_PAYMENT', 'Awaiting payment'
+        PAID            = 'PAID',            'Paid'
+        CONVERTED       = 'CONVERTED',       'Converted to a job'
+        ABANDONED       = 'ABANDONED',       'Abandoned'
+        CANCELLED       = 'CANCELLED',       'Cancelled'
+
+    class Fulfilment(models.TextChoices):
+        COLLECTION = 'COLLECTION', 'Collection'
+        DELIVERY   = 'DELIVERY',   'Delivery'
+
+    order_number = models.CharField(max_length=30, unique=True, editable=False)
+
+    # The order number is sequential and trivially guessable, so it
+    # cannot be what proves this order is yours. The token is returned
+    # once at creation and required on every request afterwards â€” and it
+    # is what the tracking link carries, so the customer reaches their
+    # own order without an account.
+    access_token = models.CharField(
+        max_length=64, unique=True, editable=False, db_index=True,
+        default='', blank=True,
+    )
+
+    short_code = models.CharField(
+        max_length=8, unique=True, editable=False, db_index=True,
+        default='', blank=True,
+        help_text=(
+            'A second key to the same door, short enough to text. The '
+            'access token runs to 43 characters and a tracking link '
+            'carrying it leaves no room for a message around it â€” an '
+            'SMS has 160 before it splits in two and costs double.'
+        ),
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True,
+    )
+
+    # Null until they tell us who they are, which is asked for late:
+    # a stranger should know what a job costs before being asked to
+    # identify themselves.
+    lead = models.ForeignKey(
+        'storefront.Lead',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='orders',
+    )
+
+    # Null until routing. Capability decides location â€” which branches
+    # can do this work is answerable only once the services are chosen.
+    branch = models.ForeignKey(
+        'organization.Branch',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='online_orders',
+    )
+
+    # The same contract the proforma uses â€” service_name, quantity,
+    # unit_price, total â€” plus the specifications the service declared.
+    # A record of what was asked for at a moment, not a live thing the
+    # floor edits; it becomes real line items at conversion.
+    line_items = models.JSONField(default=list, blank=True)
+
+    # Three figures, not one.
+    #
+    # full_total is what the work is worth at catalogue prices. total is
+    # what the customer actually pays, and what the receipt, the day
+    # sheet and every report count. The difference between them is the
+    # discount, kept as its own number so a month's giveaway can be
+    # added up â€” storing only what was charged would make the scheme
+    # invisible the moment it had run.
+    full_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_reason = models.CharField(max_length=100, blank=True)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    fulfilment = models.CharField(
+        max_length=20, choices=Fulfilment.choices, default=Fulfilment.COLLECTION,
+    )
+    delivery_address = models.TextField(blank=True)
+    # The moment Octos promised it ready, worked out from the floor when
+    # the customer pays. A moment, not a day: "ready by 3:40 pm".
+    promised_for = models.DateTimeField(null=True, blank=True)
+    # Proves the person at the counter is the customer, or someone they
+    # sent. Made when the order turns ready; never shown in public.
+    collection_pin = models.CharField(max_length=4, blank=True)
+    collected_by_name = models.CharField(max_length=100, blank=True)
+
+    # â”€â”€ Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Online orders are paid in full. The 70% deposit exists because the
+    # customer is standing in front of you and is known; a stranger on
+    # the internet is not.
+    #
+    # The reference is ours and goes to the provider, so a webhook can
+    # name the order it belongs to. paid_at is set by the webhook, never
+    # by the customer returning to the page â€” a customer who closes the
+    # tab after paying has still paid.
+    payment_reference = models.CharField(
+        max_length=100, blank=True, db_index=True,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    # What the customer paid is `total` above. These two are what
+    # happened to it on the way in: the provider's cut, and what
+    # actually reached the bank.
+    #
+    # Both are kept so the day sheet can show the work's full value â€”
+    # comparable with the same job sold at the counter â€” and the amount
+    # that has to reconcile against a bank statement. Neither number
+    # stands in for the other.
+    payment_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    net_received = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # â”€â”€ Conversion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    job = models.OneToOneField(
+        'jobs.Job',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='online_order',
+    )
+    converted_at = models.DateTimeField(null=True, blank=True)
+
+    # An unfinished order is swept rather than kept forever. Most orders
+    # are abandoned and that is fine.
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    job = models.OneToOneField(
+        'jobs.Job',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='online_order',
+        help_text=(
+            'The job this became, once the floor had it. Set at '
+            'conversion and never changed â€” an order becomes work '
+            'exactly once, however many times Paystack retries.'
+        ),
+    )
+
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.order_number} â€” {self.status}"
+
+    @property
+    def is_paid(self):
+        return self.paid_at is not None
+
+    def touch_expiry(self):
+        """
+        Push the expiry out. Called when the customer does something
+        deliberate â€” adds an item, changes one â€” not when a page merely
+        loads. A cart that never expires because something polls it is
+        a cart that is never swept.
+        """
+        from django.utils import timezone
+        self.expires_at = timezone.now() + timezone.timedelta(days=7)
+    
+    @property
+    def is_open(self):
+        return self.status in (self.Status.DRAFT, self.Status.AWAITING_PAYMENT)
+
+    def save(self, *args, **kwargs):
+        if not self.order_number:
+            self.order_number = self._next_number()
+        if not self.access_token:
+            from secrets import token_urlsafe
+            self.access_token = token_urlsafe(32)
+        if not self.short_code:
+            self.short_code = self._make_short_code()
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def _make_short_code():
+        """
+        Eight characters a tired eye can read off a phone.
+
+        I, O, 1, 0 and lowercase l are left out: a code typed back in
+        should not turn on a glyph. What remains gives 32^8 â€” about a
+        thousand billion â€” so guessing one is not a way in.
+        """
+        from secrets import choice
+
+        alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+        for _ in range(8):
+            code = ''.join(choice(alphabet) for _ in range(8))
+            if not OnlineOrder.objects.filter(short_code=code).exists():
+                return code
+        # Eight collisions in a row means something is very wrong, and
+        # a duplicate is worse than a loud failure.
+        raise RuntimeError('Could not mint a short code')
+
+    @staticmethod
+    def _next_number():
+        """
+        From a database sequence, not from the highest number so far.
+
+        Reading the maximum and adding one is what the proforma and the
+        receipt do, and it is safe when one member of staff creates one
+        document at a time. Two strangers can click in the same
+        millisecond, and both would compute the same number: one order
+        would fail on the unique constraint for no reason the customer
+        could understand.
+        """
+        from django.db import connection
+        from django.utils import timezone
+
+        year = timezone.localdate().year
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT nextval('storefront_order_seq')")
+            sequence = cursor.fetchone()[0]
+        return f"ORD-{year}-{sequence:05d}"
+
+    def next_payment_reference(self):
+        """
+        What to call this attempt at paying.
+
+        Paystack requires a reference to be unique forever and refuses
+        a second transaction reusing one. Sending the order number
+        meant a customer who opened the payment page and backed out
+        had bricked that order â€” it could never be paid, by refreshing
+        or otherwise.
+
+        So the first attempt is the order number, which is the thing a
+        customer might read out, and each one after it carries a
+        suffix. The reference is stored either way, so the webhook
+        still finds its way back here.
+
+        None when there is nothing to pay.
+        """
+        if self.is_paid:
+            return None
+
+        current = self.payment_reference or ''
+        if not current:
+            return self.order_number
+
+        if current == self.order_number:
+            return f'{self.order_number}-2'
+
+        # ORD-2026-00012-3 â†’ 4. A reference we did not mint ourselves
+        # starts the count again rather than guessing at its shape.
+        tail = current.rsplit('-', 1)[-1]
+        if tail.isdigit() and current.startswith(self.order_number):
+            return f'{self.order_number}-{int(tail) + 1}'
+
+        return f'{self.order_number}-2'
+
+===== apps\storefront\models\app_session.py =====
+"""
+A phone signed in to the Print Octos app.
+
+The app holds a long random token and sends it with every request. Only
+its hash is kept here, so a copy of the database signs nobody in. A
+session lasts while it is used: there is no expiry to surprise someone
+mid-order, and it ends when they sign out or delete their account.
+"""
+
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class AppSession(AuditModel):
+    lead = models.ForeignKey(
+        'storefront.Lead',
+        on_delete=models.CASCADE,
+        related_name='app_sessions',
+    )
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    device = models.CharField(max_length=120, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        state = 'revoked' if self.revoked_at else 'active'
+        return f'{self.lead.phone} â€” {state}'
+
+    @property
+    def is_active(self):
+        return self.revoked_at is None
+
+===== apps\storefront\models\app_notification.py =====
+"""
+What the Print Octos app is told, and where to tell it.
+
+DeviceToken is a phone's address for push notifications, tied to the
+signed-in session that registered it: signing out of that phone stops
+its notifications, and a phone that has gone away is forgotten the
+first time a push to it is refused.
+
+AppNotification is the inbox: every message stored, read or unread,
+with whether it went out by push, by SMS, or both. It is what the bell
+shows, and what proves a customer was told.
+"""
+
+from django.db import models
+
+from apps.core.models import AuditModel
+
+
+class DeviceToken(AuditModel):
+    session = models.ForeignKey(
+        'storefront.AppSession', on_delete=models.CASCADE, related_name='devices',
+    )
+    token = models.CharField(max_length=255, unique=True)
+    platform = models.CharField(max_length=10, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f'{self.platform or "phone"} for {self.session.lead.phone}'
+
+
+class AppNotification(AuditModel):
+    lead = models.ForeignKey(
+        'storefront.Lead', on_delete=models.CASCADE, related_name='notifications',
+    )
+    order = models.ForeignKey(
+        'storefront.OnlineOrder', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='notifications',
+    )
+    kind = models.CharField(max_length=30)
+    title = models.CharField(max_length=120)
+    body = models.CharField(max_length=300)
+    pushed = models.BooleanField(default=False)
+    texted = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.kind} for {self.lead.phone}'
+
+===== apps\inventory\models\stock.py =====
+from django.db import models
+from apps.core.models import AuditModel
+
+
+class BranchStock(AuditModel):
+    """
+    Current stock level for a consumable at a specific branch.
+    Never edited directly â€” always updated via StockMovement.
+    """
+    branch     = models.ForeignKey(
+        'organization.Branch',
+        on_delete    = models.PROTECT,
+        related_name = 'stock_levels',
+    )
+    consumable = models.ForeignKey(
+        'inventory.ConsumableItem',
+        on_delete    = models.PROTECT,
+        related_name = 'branch_stocks',
+    )
+    quantity   = models.DecimalField(
+        max_digits     = 10,
+        decimal_places = 2,
+        default        = 0,
+        help_text      = 'Current stock level',
+    )
+    last_movement = models.ForeignKey(
+        'inventory.StockMovement',
+        on_delete    = models.SET_NULL,
+        null         = True, blank = True,
+        related_name = '+',
+        help_text    = 'Most recent movement that updated this stock',
+    )
+
+    class Meta:
+        unique_together     = [['branch', 'consumable']]
+        verbose_name        = 'Branch Stock'
+        verbose_name_plural = 'Branch Stock Levels'
+
+    def __str__(self):
+        return f"{self.branch.code} â€” {self.consumable.name}: {self.quantity} {self.consumable.unit_label}"
+
+    @property
+    def is_low(self):
+        return float(self.quantity) <= self.consumable.reorder_point
+
+    @property
+    def is_critical(self):
+        rp = self.consumable.reorder_point
+        return rp > 0 and float(self.quantity) <= (rp * 0.5)
+
+
+class StockMovement(AuditModel):
+    """
+    Immutable ledger of all stock movements. Append only.
+    """
+
+    class MovementType(models.TextChoices):
+        OPENING    = 'OPENING',    'Opening Balance'
+        IN         = 'IN',         'Stock Received'
+        OUT        = 'OUT',        'Job Consumption'
+        WASTE      = 'WASTE',      'Waste / Spoilage'
+        CORRECTION = 'CORRECTION', 'HQ Correction'
+
+    branch        = models.ForeignKey(
+        'organization.Branch',
+        on_delete    = models.PROTECT,
+        related_name = 'stock_movements',
+    )
+    consumable    = models.ForeignKey(
+        'inventory.ConsumableItem',
+        on_delete    = models.PROTECT,
+        related_name = 'movements',
+    )
+    movement_type = models.CharField(
+        max_length = 12,
+        choices    = MovementType.choices,
+    )
+    quantity      = models.DecimalField(
+        max_digits     = 10,
+        decimal_places = 2,
+        help_text      = 'Always positive â€” direction determined by movement_type',
+    )
+    balance_after = models.DecimalField(
+        max_digits     = 10,
+        decimal_places = 2,
+        help_text      = 'Stock level after this movement â€” snapshot for audit',
+    )
+    reference_job = models.ForeignKey(
+        'jobs.Job',
+        on_delete    = models.SET_NULL,
+        null         = True, blank = True,
+        related_name = 'stock_movements',
+        help_text    = 'Job that triggered this movement (OUT only)',
+    )
+    recorded_by   = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'stock_movements_recorded',
+    )
+    notes         = models.TextField(blank=True)
+
+    class Meta:
+        ordering            = ['-created_at']
+        verbose_name        = 'Stock Movement'
+        verbose_name_plural = 'Stock Movements'
+
+    def __str__(self):
+        direction = '+' if self.movement_type in ['OPENING', 'IN'] else '-'
+        return (
+            f"{self.branch.code} | {self.consumable.name} | "
+            f"{self.movement_type} {direction}{self.quantity}"
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('StockMovement records are immutable and cannot be edited.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError('StockMovement records cannot be deleted.')
+
+
+class WasteIncident(AuditModel):
+    """
+    Attendant-reported waste incident â€” jams, misprints, damage.
+    Immutable once created.
+    """
+
+    class Reason(models.TextChoices):
+        JAM      = 'JAM',      'Paper Jam'
+        MISPRINT = 'MISPRINT', 'Misprint / Print Error'
+        DAMAGE   = 'DAMAGE',   'Physical Damage'
+        OTHER    = 'OTHER',    'Other'
+
+    branch      = models.ForeignKey(
+        'organization.Branch',
+        on_delete    = models.PROTECT,
+        related_name = 'waste_incidents',
+    )
+    consumable  = models.ForeignKey(
+        'inventory.ConsumableItem',
+        on_delete    = models.PROTECT,
+        related_name = 'waste_incidents',
+    )
+    quantity    = models.DecimalField(
+        max_digits     = 8,
+        decimal_places = 2,
+        help_text      = 'Number of sheets/units wasted',
+    )
+    reason      = models.CharField(
+        max_length = 12,
+        choices    = Reason.choices,
+        default    = Reason.JAM,
+    )
+    job         = models.ForeignKey(
+        'jobs.Job',
+        on_delete    = models.SET_NULL,
+        null         = True, blank = True,
+        related_name = 'waste_incidents',
+        help_text    = 'Job being worked on when waste occurred',
+    )
+    reported_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete    = models.PROTECT,
+        related_name = 'waste_incidents_reported',
+    )
+    notes          = models.TextField(blank=True)
+    stock_movement = models.OneToOneField(
+        StockMovement,
+        on_delete    = models.PROTECT,
+        related_name = 'waste_incident',
+        null         = True, blank = True,
+        help_text    = 'The WASTE StockMovement created for this incident',
+    )
+
+    class Meta:
+        ordering            = ['-created_at']
+        verbose_name        = 'Waste Incident'
+        verbose_name_plural = 'Waste Incidents'
+
+    def __str__(self):
+        return (
+            f"{self.branch.code} | {self.consumable.name} | "
+            f"{self.reason} â€” {self.quantity} {self.consumable.unit_label}"
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError('WasteIncident records are immutable and cannot be edited.')
+        super().save(*args, **kwargs)
+
+===== apps\notifications\models.py =====
+from django.db import models
+from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+
+
+class Notification(models.Model):
+
+    class Verb(models.TextChoices):
+        # Jobs
+        JOB_CREATED       = 'job_created',       'Job Created'
+        JOB_STATUS_CHANGE = 'job_status_changed', 'Job Status Changed'
+        JOB_ROUTED        = 'job_routed',         'Job Routed'
+        # Communications
+        MESSAGE_RECEIVED  = 'message_received',   'Message Received'
+        CONVERSATION_ASSIGNED = 'conversation_assigned', 'Conversation Assigned'
+        # HR
+        EMPLOYEE_CREATED  = 'employee_created',   'Employee Created'
+        # Reminders (harmonized system â€” see apps/notifications/management/commands/generate_reminders.py)
+        SHIFT_ENDING       = 'shift_ending',       'Shift Ending Soon'
+        TASK_CHECKPOINT    = 'task_checkpoint',    'Personal Task Reminder'
+        # System
+        SYSTEM            = 'system',             'System'
+
+    class Category(models.TextChoices):
+        ALERT    = 'ALERT',    'Alert'
+        REMINDER = 'REMINDER', 'Reminder'
+
+    class DisplayMode(models.TextChoices):
+        PASSIVE      = 'PASSIVE',      'Passive (bell only)'
+        INTERRUPTIVE = 'INTERRUPTIVE', 'Interruptive (modal + bell)'
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        db_index=True,
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='triggered_notifications',
+    )
+    verb    = models.CharField(max_length=64, choices=Verb.choices, db_index=True)
+    message = models.TextField()
+    link    = models.CharField(max_length=500, blank=True, default='')
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # â”€â”€ Harmonized reminder/notification fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    category = models.CharField(
+        max_length=10, choices=Category.choices, default=Category.ALERT, db_index=True,
+        help_text='ALERT = event-driven (existing behavior). REMINDER = time/schedule-driven.',
+    )
+    display_mode = models.CharField(
+        max_length=15, choices=DisplayMode.choices, default=DisplayMode.PASSIVE, db_index=True,
+        help_text='PASSIVE = bell only. INTERRUPTIVE = full-screen modal until dismissed, plus bell.',
+    )
+    requires_pin = models.BooleanField(
+        default=False,
+        help_text='True for personal-note reminders â€” message stays generic, real content is '
+                   'never exposed here, only accessible via the PIN-gated personal_notes endpoint.',
+    )
+    dedupe_key = models.CharField(
+        max_length=200, blank=True, default='', db_index=True,
+        help_text='Used with get_or_create to prevent duplicate reminder creation across task runs, '
+                   'e.g. "shift_ending-{user_id}-{date}-{bucket}". Blank for one-off ALERT notifications.',
+    )
+
+    # Generic link back to the real source (TaskCheckpoint, etc.) â€” kept
+    # nullable and content-free so Notification never needs to know
+    # about or duplicate private/domain-specific data.
+    content_type = models.ForeignKey(
+        ContentType, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    source = GenericForeignKey('content_type', 'object_id')
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes  = [
+            models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['recipient', 'created_at']),
+            models.Index(fields=['recipient', 'display_mode', 'is_read']),
+            models.Index(fields=['dedupe_key']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['dedupe_key'],
+                condition=~models.Q(dedupe_key=''),
+                name='unique_nonblank_dedupe_key',
+            ),
+        ]
+
+    def __str__(self):
+        return f'[{self.verb}] â†’ {self.recipient} | read={self.is_read}'
+
+    def mark_read(self):
+        if not self.is_read:
+            self.is_read = True
+            self.save(update_fields=['is_read'])
+
+===== clock-in usage =====
+accounts\models\rfid.py:11: ('CLOCK_IN', 'Clock In'),
+accounts\models\user.py:96: is_clocked_in  = models.BooleanField(default=False)
+accounts\models\user.py:97: last_clock_in  = models.DateTimeField(null=True, blank=True)
+accounts\admin.py:8: list_display = ['email', 'full_name', 'employee_id', 'branch', 'role', 'is_active', 'is_clocked_in', 'is_approved']
+accounts\admin.py:9: list_filter = ['is_active', 'is_clocked_in', 'role', 'branch']
+accounts\admin.py:19: ('Access', {'fields': ('is_active', 'is_staff', 'is_superuser', 'is_clocked_in', 'last_clock_in')}),
+organization\api\views.py:176: .filter(branch__in=branches, is_clocked_in=True)
+
+===== urls and installed apps =====
+--- C:\Users\kings\OneDrive\Documents\The Future People\Octos-1\config\urls.py
+from django.contrib import admin
+from django.urls import include, path
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({'status': 'ok'})
+from rest_framework_simplejwt.views import TokenRefreshView
+from apps.accounts.api.views import AuditedTokenObtainPairView
+from django.conf import settings
+from django.conf.urls.static import static
+from config.views import (
+    home_view, hr_portal_view, login_view, dashboard_view, inbox_view, jobs_view,
+    cashier_view, attendant_view, belt_manager_view, onboarding_view, regional_manager_view,
+    finance_portal_view, ops_portal_view, finance_ops_portal_view,
+    careers_view,  careers_view,
+    home_view,
+)
+
+urlpatterns = [
+    # Health check
+    path('api/v1/health/', health_check, name='health'),
+    # Admin
+    path('admin/', admin.site.urls),
+
+    # Auth
+    path('api/v1/auth/token/',         AuditedTokenObtainPairView.as_view(), name='token-obtain'),
+    path('api/v1/auth/token/refresh/', TokenRefreshView.as_view(),           name='token-refresh'),
+
+    # API v1
+    path('api/v1/organization/',  include('apps.organization.api.urls')),
+    path('api/v1/accounts/',      include('apps.accounts.api.urls')),
+    path('api/v1/customers/',     include('apps.customers.api.urls')),
+    path('api/v1/jobs/',          include('apps.jobs.api.urls')),
+    path('api/v1/production/',    include('apps.production.api.urls')),
+    path('api/v1/hr/',            include('apps.hr.api.urls')),
+    path('api/v1/recruitment/',   include('apps.hr.api.urls')),
+    path('api/v1/careers/',       include('apps.hr.api.careers_urls')),
+    path('api/v1/communications/',include('apps.communications.api.urls')),
+    path('api/v1/finance/',       include('apps.finance.api.urls')),
+    path('api/v1/notifications/', include('apps.notifications.api.urls')),
+    path('api/v1/analytics/',     include('apps.analytics.api.urls')),
+    path('api/v1/inventory/',     include('apps.inventory.api.urls')),
+    path('api/v1/procurement/',   include('apps.procurement.api.urls')),
+    path('api/v1/personal-notes/', include('apps.personal_notes.api.urls')),
+
+    # The public surface. Unauthenticated by design: a stranger pricing
+    # a banner has no account.
+    path('api/v1/storefront/',    include('apps.storefront.urls')),
+
+    # Portals
+    path('',        home_view,    name='home'),
+    path('careers/', careers_view, name='careers'),
+    path('portal/login/',            login_view,              name='login'),
+    path('portal/dashboard/',        dashboard_view,          name='dashboard'),
+    path('portal/inbox/',            inbox_view,              name='inbox'),
+    path('portal/jobs/',             jobs_view,               name='jobs'),
+    path('portal/cashier/',          cashier_view,            name='cashier'),
+    path('portal/attendant/',        attendant_view,          name='attendant'),
+    path('portal/belt-manager/',     belt_manager_view,       name='belt-manager'),
+    path('portal/regional-manager/', regional_manager_view,   name='regional-manager'),
+    path('portal/finance/',          finance_portal_view,     name='finance-portal'),
+    path('portal/ops/',              ops_portal_view,         name='ops-portal'),
+    path('portal/finance-ops/',      finance_ops_portal_view, name='finance-ops-portal'),
+    path('onboarding/<str:token>/', onboarding_view, name='onboarding'),
+
+path('portal/hr/', hr_portal_view, name='hr-portal'),
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+> config\settings.py:79:INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+  config\settings.py:80:
+  config\settings.py:81:MIDDLEWARE = [
+  config\settings.py:82:    'django.middleware.security.SecurityMiddleware',
+  config\settings.py:83:    'whitenoise.middleware.WhiteNoiseMiddleware',
+  config\settings.py:84:    'corsheaders.middleware.CorsMiddleware',
+  config\settings.py:85:    'django.contrib.sessions.middleware.SessionMiddleware',
+  config\settings.py:86:    'django.middleware.common.CommonMiddleware',
+  config\settings.py:87:    'django.middleware.csrf.CsrfViewMiddleware',
+  config\settings.py:88:    'django.contrib.auth.middleware.AuthenticationMiddleware',
+  config\settings.py:89:    'django.contrib.messages.middleware.MessageMiddleware',
+  config\settings.py:90:    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+  config\settings.py:91:    'apps.core.middleware.ShadowUserMiddleware',
+  config\settings.py:92:]
+  config\settings.py:93:
+  config\settings.py:94:ROOT_URLCONF = 'config.urls'
+  config\settings.py:95:X_FRAME_OPTIONS = 'SAMEORIGIN'
+  config\settings.py:96:TEMPLATES = [
+  config\settings.py:97:    {
+  config\settings.py:98:        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+  config\settings.py:99:        'DIRS': [BASE_DIR / 'templates'],
+  config\settings.py:100:        'APP_DIRS': True,
+  config\settings.py:101:        'OPTIONS': {
+  config\settings.py:102:            'context_processors': [
+  config\settings.py:103:                'django.template.context_processors.debug',
+  config\settings.py:104:                'django.template.context_processors.request',
+  config\settings.py:105:                'django.contrib.auth.context_processors.auth',
+  config\settings.py:106:                'django.contrib.messages.context_processors.messages',
+  config\settings.py:107:            ],
+  config\settings.py:108:        },
+  config\settings.py:109:    },
+  config\settings.py:110:]
+  config\settings.py:111:
+  config\settings.py:112:WSGI_APPLICATION = 'config.wsgi.application'
+  config\settings.py:113:
+  config\settings.py:114:# Database
+  config\settings.py:115:_DATABASE_URL = os.environ.get('DATABASE_URL')
+  config\settings.py:116:if _DATABASE_URL:
+  config\settings.py:117:    import dj_database_url as _dj_db
+  config\settings.py:118:    DATABASES = {'default': _dj_db.parse(_DATABASE_URL, conn_max_age=600)}
+  config\settings.py:119:else:
+  config\settings.py:120:    DATABASES = {
+  config\settings.py:121:        'default': {
+  config\settings.py:122:            'ENGINE': 'django.db.backends.postgresql',
+  config\settings.py:123:            'NAME': config('DB_NAME'),
+  config\settings.py:124:            'USER': config('DB_USER'),
+
+

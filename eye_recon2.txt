@@ -1,0 +1,321 @@
+﻿
+
+===== octos-web\octos-web\src\App.jsx =====
+// src/App.jsx
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
+import ProtectedRoute from './components/layout/ProtectedRoute'
+import DailyGreeting from './components/layout/DailyGreeting'
+import PortalPreloader from './components/layout/PortalPreloader'
+import LoginPage from './pages/auth/LoginPage'
+import CashierPortal from './pages/cashier/CashierPortal'
+import BMPortal        from './pages/bm/BMPortal'
+import AttendantPortal from './pages/attendant/AttendantPortal'
+import CoordinatorPortal from './pages/coordinator/CoordinatorPortal'
+import OperatorPortal from './pages/operator/OperatorPortal'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      // Refetch when the operator returns to the tab. The branch socket
+      // pushes updates live, but a socket that dies quietly â€” laptop asleep,
+      // wifi blip, an idle proxy timing it out â€” stops delivering with no
+      // error anywhere, and messages sent while disconnected are gone for
+      // good. Returning to the tab is the cheapest reliable moment to
+      // reconcile, and it is exactly when someone is about to act on what
+      // they see.
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+    },
+  },
+})
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+
+            <Route
+              path="/cashier/*"
+              element={
+                <ProtectedRoute allowedRoles={['CASHIER']}>
+                  <CashierPortal />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/bm/*"
+              element={
+                <ProtectedRoute allowedRoles={['BRANCH_MANAGER']}>
+                  <PortalPreloader>
+                    <BMPortal />
+                  </PortalPreloader>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/attendant/*"
+              element={
+                <ProtectedRoute allowedRoles={['ATTENDANT']}>
+                  <AttendantPortal />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/coordinator/*"
+              element={
+                <ProtectedRoute allowedRoles={['FLOW_COORDINATOR']}>
+                  <CoordinatorPortal />
+                </ProtectedRoute>
+              }
+            />
+            {/* The machine screen. Any signed-in person may open it; the
+                server decides whether they are assigned to a machine. */}
+            <Route
+              path="/operator"
+              element={
+                <ProtectedRoute>
+                  <OperatorPortal />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  )
+}
+
+===== octos-web\octos-web\src\api\client.js =====
+// src/api/client.js
+// Central Axios instance â€” all API calls go through here.
+// Handles JWT attach, token refresh, and 401 redirect.
+
+import axios from 'axios'
+
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+const client = axios.create({
+  baseURL: BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+})
+
+// â”€â”€ Attach access token to every request â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// â”€â”€ Handle 401 â€” attempt refresh, else redirect to login â”€â”€â”€â”€â”€â”€â”€â”€â”€
+client.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config
+
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true
+
+      try {
+        const refresh = localStorage.getItem('refresh_token')
+        if (!refresh) throw new Error('No refresh token')
+
+        const { data } = await axios.post(`${BASE_URL}/api/v1/auth/token/refresh/`, {
+          refresh,
+        })
+
+        localStorage.setItem('access_token', data.access)
+        original.headers.Authorization = `Bearer ${data.access}`
+        return client(original)
+      } catch {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        window.location.href = '/login'
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+export default client
+
+===== octos-web\octos-web\src\context\AuthContext.jsx =====
+// src/context/AuthContext.jsx
+// Global auth state. Wraps the entire app.
+// Any component can call useAuth() to get the current user.
+
+import { createContext, useContext, useState, useEffect } from 'react'
+import { getMe } from '../api/auth'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const [user, setUser]       = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const token = localStorage.getItem('access_token')
+    if (!token) { setLoading(false); return }
+
+    getMe()
+      .then(setUser)
+      .catch(() => {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  const [justLoggedIn, setJustLoggedIn] = useState(false)
+
+  const login = (tokens, userData) => {
+    localStorage.setItem('access_token',  tokens.access)
+    localStorage.setItem('refresh_token', tokens.refresh)
+    setUser(userData)
+    setLoading(false)
+    setJustLoggedIn(true)
+  }
+
+  const clearJustLoggedIn = () => setJustLoggedIn(false)
+
+  const logout = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    setUser(null)
+  }
+
+  const getAccessToken = () => {
+    return localStorage.getItem('access_token')
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, getAccessToken, justLoggedIn, clearJustLoggedIn }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => useContext(AuthContext)
+
+===== web files =====
+src\api\auth.js
+src\api\bm.js
+src\api\cashier.js
+src\api\client.js
+src\api\coordinator.js
+src\api\invalidations.js
+src\api\notifications.js
+src\api\operator.js
+src\api\personalNotes.js
+src\components\attendant\AttendantBranchJobs.jsx
+src\components\attendant\AttendantCollect.jsx
+src\components\attendant\AttendantDrafts.jsx
+src\components\attendant\AttendantInbox.jsx
+src\components\attendant\AttendantMyJobs.jsx
+src\components\attendant\AttendantOverview.jsx
+src\components\attendant\AttendantServices.jsx
+src\components\attendant\AttendantTopbar.jsx
+src\components\bm\BMInfoStrip.jsx
+src\components\bm\BMSidebar.jsx
+src\components\bm\BMTopbar.jsx
+src\components\bm\Catalogue.jsx
+src\components\bm\CloseSheetModal.jsx
+src\components\bm\CustomerProfileModal.jsx
+src\components\bm\Customers.jsx
+src\components\bm\DaySheet.jsx
+src\components\bm\Inbox.jsx
+src\components\bm\Inventory.jsx
+src\components\bm\InvoicesTab.jsx
+src\components\bm\Jobs.jsx
+src\components\bm\LateJobModal.jsx
+src\components\bm\LinksPanel.jsx
+src\components\bm\MonthReview.jsx
+src\components\bm\NewCustomerModal.jsx
+src\components\bm\NewJobModal.jsx
+src\components\bm\NewProformaModal.jsx
+src\components\bm\Overview.jsx
+src\components\bm\Performance.jsx
+src\components\bm\ProformasTab.jsx
+src\components\bm\RecoverSheetModal.jsx
+src\components\bm\Reports.jsx
+src\components\bm\ReviseProformaModal.jsx
+src\components\bm\Staff.jsx
+src\components\bm\StrandedSheetsCard.jsx
+src\components\bm\WeeklyFilingBlock.jsx
+src\components\cashier\CashierTopbar.jsx
+src\components\cashier\CreditAccounts.jsx
+src\components\cashier\FloatAcknowledgeModal.jsx
+src\components\cashier\InfoStrip.jsx
+src\components\cashier\IntakeHeldModal.jsx
+src\components\cashier\NotificationBell.jsx
+src\components\cashier\PaymentModal.jsx
+src\components\cashier\PaymentQueue.jsx
+src\components\cashier\ReceiptModal.jsx
+src\components\cashier\Receipts.jsx
+src\components\cashier\SignOffWizard.jsx
+src\components\cashier\SummaryStrip.jsx
+src\components\cashier\TodaysLog.jsx
+src\components\coordinator\ArrivalQueue.jsx
+src\components\coordinator\CoordinatorOverview.jsx
+src\components\coordinator\CoordinatorTopbar.jsx
+src\components\coordinator\FinalCheckModal.jsx
+src\components\coordinator\InspectionModal.jsx
+src\components\coordinator\MachineLanes.jsx
+src\components\coordinator\ProductionBoard.jsx
+src\components\coordinator\ReadyModal.jsx
+src\components\coordinator\shared.jsx
+src\components\coordinator\StageFlow.jsx
+src\components\coordinator\StageList.jsx
+src\components\layout\DailyGreeting.jsx
+src\components\layout\PortalPreloader.jsx
+src\components\layout\ProtectedRoute.jsx
+src\components\operator\OperatorTopbar.jsx
+src\components\shared\CounterArtwork.jsx
+src\components\shared\JobSuccessOverlay.jsx
+src\components\shared\PersonalNotes.jsx
+src\components\shared\PhoneInput.jsx
+src\components\shared\PortalLockedOverlay.jsx
+src\components\shared\ReminderModal.jsx
+src\components\shared\ShareDocumentModal.jsx
+src\context\AuthContext.jsx
+src\context\ThemeContext.jsx
+src\hooks\useBranchSocket.js
+src\hooks\useReminders.js
+src\pages\attendant\AttendantPortal.jsx
+src\pages\auth\LoginPage.jsx
+src\pages\bm\BMPortal.jsx
+src\pages\cashier\CashierPortal.jsx
+src\pages\coordinator\CoordinatorPortal.jsx
+src\pages\operator\OperatorPortal.jsx
+src\App.jsx
+src\main.jsx
+
+===== backend hooks =====
+apps\eye\services\health.py:33: {'part': 'Texts (mNotify)', 'state': 'unknown', 'note': 'text log not recorded yet'},
+apps\finance\management\commands\run_sheet_tasks.py:214: def _send_warning(self, branch, sheet, closing_at) -> None:
+apps\jobs\services\final_check.py:105: def _send_back(step, branch):
+apps\jobs\status_engine.py:546: # mNotify. DONE is terminal on the work axis, so this fires
+apps\organization\api\views.py:176: .filter(branch__in=branches, is_clocked_in=True)
+apps\production\services\machine_service.py:47: def mark_down(cls, machine, reason, actor, note='') -> dict:
+apps\production\services\machine_service.py:200: def mark_up(cls, machine, actor, resume_jobs=True) -> dict:
+apps\storefront\services\accounts.py:78: def _sends_key(phone):
+apps\storefront\services\conversion.py:406: Never raises. mNotify being down is not a reason for work to stop
+apps\storefront\services\sms.py:6: behind it. mNotify today; the call lives here and nothing else changes
+apps\storefront\services\sms.py:19: def send_sms(phone, message):
+apps\storefront\services\sms.py:26: api_key = getattr(settings, 'MNOTIFY_API_KEY', '')
+apps\storefront\services\sms.py:27: sender = getattr(settings, 'MNOTIFY_SENDER_ID', 'Farhat')
+apps\storefront\services\sms.py:45: 'https://api.mnotify.com/api/sms/quick',
+apps\storefront\services\sms.py:71: The number as mNotify wants it: international, digits only
+apps\storefront\tasks.py:50: never waits on mNotify.

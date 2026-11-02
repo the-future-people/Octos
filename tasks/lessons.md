@@ -1036,3 +1036,5 @@ Internal detail belongs in the log, not on the screen.
 - `CustomUser` is not Django's stock user: use `full_name`, not `get_full_name()`. Copy how existing code names a user before writing a new reference.
 - Before importing a helper, find where it's defined (`def name`), not where it's used: a function-level import makes a name look available in a module that doesn't export it.
 - PowerShell formats a whole paste with the first command's table columns, so later results can show as blank rows. Use `ForEach-Object { $_.FullName }` or run commands one at a time when outputs differ.
+- Run an app's tests by module (apps.eye.tests), not by app (apps.eye): `apps/` has no __init__.py, so Django's discovery hits a None path.
+- Anything cached must be cleared in setUp, or one test's answer leaks into the next.

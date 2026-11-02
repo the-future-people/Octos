@@ -24,7 +24,7 @@ def send_sms(phone, message):
     from django.conf import settings
 
     api_key = getattr(settings, 'MNOTIFY_API_KEY', '')
-    sender = getattr(settings, 'MNOTIFY_SENDER_ID', 'Farhat')
+    sender = getattr(settings, 'MNOTIFY_SENDER_ID', 'FarhatPrint')
 
     if not api_key:
         # Not configured yet. Logged rather than failed, so the flow can
