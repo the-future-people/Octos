@@ -9,10 +9,20 @@ a proper customer the counter recognises from the first visit.
 
 POST account/register/ (App token)
     { kind: PERSONAL | BUSINESS, title, gender, first_name, last_name,
-      business_name?, address? }
+      business_name?, business_type?, business_phone?, business_email?,
+      address? }
+
+A business account is the business as the customer, with the person who
+signed up as its contact (title, first and last name). The number that
+signed in stays the account's own; the business's line goes in the
+second phone. A company is a BUSINESS; a school, church, NGO or
+government office is an INSTITUTION of that kind, as the counter files
+them.
 
 Completes the customer behind the number, or makes one: never a second.
 """
+
+import re
 
 from django.db import transaction
 from django.db.models import Q
@@ -22,6 +32,16 @@ from rest_framework.response import Response
 TITLES = {'MR', 'MRS', 'MS', 'DR', 'PROF', 'OTHER'}
 GENDERS = {'MALE', 'FEMALE'}
 ORG_TYPES = ('BUSINESS', 'INSTITUTION')
+
+# The app's word -> (customer_type, institution_subtype)
+BUSINESS_TYPES = {
+    'COMPANY': ('BUSINESS', ''),
+    'SCHOOL':  ('INSTITUTION', 'SCHOOL'),
+    'CHURCH':  ('INSTITUTION', 'CHURCH'),
+    'NGO':     ('INSTITUTION', 'NGO'),
+    'GOVT':    ('INSTITUTION', 'GOVT'),
+}
+EMAIL = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 def customer_for(lead):
@@ -41,14 +61,24 @@ def customer_for(lead):
     return found
 
 
+def business_type_of(c):
+    if c.customer_type == 'BUSINESS':
+        return 'COMPANY'
+    if c.customer_type == 'INSTITUTION':
+        return c.institution_subtype if c.institution_subtype in BUSINESS_TYPES else ''
+    return ''
+
+
 def profile_for(lead):
     """What the app shows and whether the short registration is still needed."""
     c = customer_for(lead)
     if c is None:
         return {'complete': False, 'kind': None}
     business = c.customer_type in ORG_TYPES
+    btype = business_type_of(c) if business else ''
     complete = bool(c.first_name and c.last_name and c.title and (
-        (c.company_name and c.address) if business else c.gender))
+        (c.company_name and c.address and btype and c.email and c.secondary_phone)
+        if business else c.gender))
     return {
         'complete': complete,
         'kind': 'BUSINESS' if business else 'PERSONAL',
@@ -56,8 +86,11 @@ def profile_for(lead):
         'first_name': c.first_name or '',
         'last_name': c.last_name or '',
         'gender': c.gender or '',
-        'business_name': c.company_name or '' if business else '',
-        'address': c.address or '' if business else '',
+        'business_name': (c.company_name or '') if business else '',
+        'business_type': btype,
+        'business_phone': (c.secondary_phone or '') if business else '',
+        'business_email': (c.email or '') if business else '',
+        'address': (c.address or '') if business else '',
     }
 
 
@@ -71,7 +104,10 @@ def register(lead, data):
     gender = (data.get('gender') or '').upper()
     first = (data.get('first_name') or '').strip()[:100]
     last = (data.get('last_name') or '').strip()[:100]
-    business = (data.get('business_name') or '').strip()[:200]
+    business = (data.get('business_name') or '').strip()[:150]
+    btype = (data.get('business_type') or '').upper()
+    bphone_raw = (data.get('business_phone') or '').strip()
+    bemail = (data.get('business_email') or '').strip()[:254]
     address = (data.get('address') or '').strip()[:300]
 
     if kind not in ('PERSONAL', 'BUSINESS'):
@@ -82,28 +118,47 @@ def register(lead, data):
         return 'Tell us your first and last name.'
     if kind == 'PERSONAL' and gender not in GENDERS:
         return 'Choose male or female.'
-    if kind == 'BUSINESS' and (not business or not address):
-        return 'Tell us the business’s name and where it is.'
+
+    bphone = ''
+    if kind == 'BUSINESS':
+        if not business or not address:
+            return 'Tell us the business\u2019s name and where it is.'
+        if btype not in BUSINESS_TYPES:
+            return 'Choose what kind of business it is.'
+        # Business lines are often landlines (030...), which a mobile-only
+        # normaliser may refuse; a plausible run of digits is kept as typed.
+        digits = re.sub(r'\D', '', bphone_raw)
+        try:
+            normal = normalise_phone(bphone_raw) if bphone_raw else ''
+        except Exception:
+            normal = ''
+        bphone = normal or (digits if len(digits) in (9, 10, 12) else '')
+        if not bphone:
+            return 'Give the business\u2019s phone number.'
+        if not EMAIL.match(bemail):
+            return 'Give the business\u2019s email address.'
 
     with transaction.atomic():
         c = customer_for(lead)
         if c is None:
-            c = CustomerProfile(phone=normalise_phone(lead.phone),
-                                customer_type='BUSINESS' if kind == 'BUSINESS' else 'INDIVIDUAL')
+            c = CustomerProfile(phone=normalise_phone(lead.phone), customer_type='INDIVIDUAL')
         elif kind == 'BUSINESS' and c.customer_type not in ORG_TYPES:
             # A known person registering a business on their own number:
             # the counter links people to businesses; the app keeps them
             # as the person they already are.
             return ('This number is already registered to you personally. '
-                    'To order for a business, choose it at the counter, or use the business’s own number.')
+                    'To order for a business, choose it at the counter, or use the business\u2019s own number.')
         c.title = title
         c.first_name = first
         c.last_name = last
         if kind == 'PERSONAL':
             c.gender = gender
         else:
+            c.customer_type, c.institution_subtype = BUSINESS_TYPES[btype]
             c.company_name = business
             c.address = address
+            c.email = bemail
+            c.secondary_phone = bphone
         c.save()
         lead.customer = c
         lead.first_name = first
