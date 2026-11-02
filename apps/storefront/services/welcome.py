@@ -27,15 +27,31 @@ def business_name():
     return getattr(settings, 'BUSINESS_NAME', 'Farhat Printing Press')
 
 
+TITLES = {'mr', 'mrs', 'ms', 'mss', 'miss', 'mstr', 'master', 'dr', 'prof', 'rev', 'revd',
+          'pastor', 'madam', 'mad', 'mdm', 'sir', 'hon', 'nana', 'togbe', 'apostle', 'bishop', 'eng', 'esq'}
+
+
 def first_name(customer_or_name):
-    """A first name worth greeting with, or '' to leave the greeting plain."""
-    given = customer_or_name if isinstance(customer_or_name, str) else (customer_or_name.first_name or '')
-    raw = given.strip().split(' ')[0]
-    if not re.fullmatch(r"[A-Za-z][A-Za-z'-]{1,14}", raw or ''):
-        return ''
-    if raw.lower() in NOT_NAMES:
-        return ''
-    return raw[:1].upper() + raw[1:].lower()
+    """
+    A first name worth greeting with, or '' to leave the greeting plain.
+    Titles typed into the name ("Mss. Grace", "Dr Kofi") are skipped, and
+    when a title filled the whole first-name box, the last-name box is read
+    on: "Mss." + "Grace Adjorkor" greets Grace.
+    """
+    if isinstance(customer_or_name, str):
+        words = customer_or_name.split()
+    else:
+        words = f'{customer_or_name.first_name or ""} {customer_or_name.last_name or ""}'.split()
+    for word in words:
+        raw = word.strip(".,;:")
+        if raw.lower() in TITLES:
+            continue
+        if not re.fullmatch(r"[A-Za-z][A-Za-z'-]{1,14}", raw):
+            return ''
+        if raw.lower() in NOT_NAMES:
+            return ''
+        return raw[:1].upper() + raw[1:].lower()
+    return ''
 
 
 def welcome_text(customer_or_name) -> str:
