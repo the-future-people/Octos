@@ -88,3 +88,38 @@ class WelcomeTests(TestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 CustomerProfile.objects.create(phone='0201112226', first_name='Esi')
         q.assert_not_called()
+
+
+@override_settings(MNOTIFY_API_KEY='test-key', MNOTIFY_SENDER_ID='FarhatPrint', WELCOME_TEXTS=True)
+class AppSignUpWelcomeTests(TestCase):
+    """2 Nov 2026: app sign-ups create a lead, not a customer, and were never welcomed."""
+
+    def sign_up(self, phone, name):
+        from django.contrib.auth.hashers import make_password
+        from django.core.cache import cache
+        from apps.storefront.services.accounts import _code_key, normalise_phone, verify_code
+        cache.set(_code_key(normalise_phone(phone)), {'hash': make_password('123456'), 'guesses': 0}, 600)
+        return verify_code(phone, '123456', first_name=name)
+
+    def test_a_new_app_account_queues_the_welcome(self):
+        with mock.patch('apps.storefront.receivers._queue_greeting') as q:
+            with self.captureOnCommitCallbacks(execute=True):
+                self.sign_up('0558631014', 'Abena')
+        q.assert_called_once()
+        self.assertEqual(q.call_args[0][1], 'Abena')
+
+    def test_signing_in_again_is_not_a_new_welcome(self):
+        with mock.patch('apps.storefront.receivers._queue_greeting') as q:
+            with self.captureOnCommitCallbacks(execute=True):
+                self.sign_up('0558631015', 'Kwame')
+            with self.captureOnCommitCallbacks(execute=True):
+                self.sign_up('0558631015', '')
+        self.assertEqual(q.call_count, 1)
+
+    @mock.patch('requests.post', side_effect=accepted)
+    def test_one_welcome_per_number_across_both_doors(self, post):
+        self.assertTrue(w.greet('0558631016', 'Esi'))
+        with mock.patch('apps.storefront.receivers._queue'):
+            c = CustomerProfile.objects.create(phone='0558631016', first_name='Esi')
+        self.assertFalse(w.welcome(c.pk))
+        self.assertEqual(post.call_count, 1)

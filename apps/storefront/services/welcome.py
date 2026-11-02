@@ -27,9 +27,10 @@ def business_name():
     return getattr(settings, 'BUSINESS_NAME', 'Farhat Printing Press')
 
 
-def first_name(customer):
+def first_name(customer_or_name):
     """A first name worth greeting with, or '' to leave the greeting plain."""
-    raw = (customer.first_name or '').strip().split(' ')[0]
+    given = customer_or_name if isinstance(customer_or_name, str) else (customer_or_name.first_name or '')
+    raw = given.strip().split(' ')[0]
     if not re.fullmatch(r"[A-Za-z][A-Za-z'-]{1,14}", raw or ''):
         return ''
     if raw.lower() in NOT_NAMES:
@@ -37,8 +38,8 @@ def first_name(customer):
     return raw[:1].upper() + raw[1:].lower()
 
 
-def welcome_text(customer) -> str:
-    name = first_name(customer)
+def welcome_text(customer_or_name) -> str:
+    name = first_name(customer_or_name)
     hello = f'Hi {name}, welcome' if name else 'Welcome'
     text = (f"{hello} to {business_name()}! Thank you for choosing us. "
             "Whatever you need printed, we're here for you.")
@@ -52,17 +53,32 @@ def already_welcomed(phone) -> bool:
     return bool(number) and TextMessage.objects.filter(phone=number, kind=KIND, accepted=True).exists()
 
 
-def welcome(customer_id) -> bool:
-    """Send the welcome to one customer, if they have not had it. Never raises."""
-    from apps.customers.models import CustomerProfile
+def greet(phone, name='') -> bool:
+    """
+    The welcome to one phone number, if it has never had one. Never raises.
+    Both doors lead here: a customer registered by staff, and an account
+    made in the app (which creates a lead, not a customer).
+    """
     from apps.storefront.services.sms import send_sms
 
     try:
-        customer = CustomerProfile.objects.get(pk=customer_id)
-        if customer.is_walkin or not customer.phone or already_welcomed(customer.phone):
+        if not phone or already_welcomed(phone):
             return False
         # WhatsApp goes here first, once connected; SMS stays the fallback.
-        return send_sms(customer.phone, welcome_text(customer), kind=KIND)
+        return send_sms(phone, welcome_text(name or ''), kind=KIND)
     except Exception:
-        logger.warning('Welcome not sent to customer %s', customer_id, exc_info=True)
+        logger.warning('Welcome not sent to %s', phone, exc_info=True)
         return False
+
+
+def welcome(customer_id) -> bool:
+    """The welcome for a customer registered by staff. Never raises."""
+    from apps.customers.models import CustomerProfile
+
+    try:
+        customer = CustomerProfile.objects.get(pk=customer_id)
+    except CustomerProfile.DoesNotExist:
+        return False
+    if customer.is_walkin:
+        return False
+    return greet(customer.phone, customer.first_name or '')

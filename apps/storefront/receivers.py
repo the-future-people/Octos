@@ -37,3 +37,25 @@ def _queue(customer_id):
         # No worker reachable: send it here rather than not at all.
         from apps.storefront.services.welcome import welcome
         welcome(customer_id)
+
+
+def queue_greeting(phone, name=''):
+    """
+    The welcome for an account made in the app. Called by verify_code once
+    a new lead is created; sent after the sign-up has saved, by the worker.
+    """
+    if not getattr(settings, 'WELCOME_TEXTS', True):
+        return
+    transaction.on_commit(lambda: _queue_greeting(phone, name))
+
+
+def _queue_greeting(phone, name):
+    import sys
+    if 'test' in sys.argv and not getattr(settings, 'WELCOME_IN_TESTS', False):
+        return
+    try:
+        from apps.storefront.tasks import send_greeting
+        send_greeting.delay(phone, name)
+    except Exception:
+        from apps.storefront.services.welcome import greet
+        greet(phone, name)

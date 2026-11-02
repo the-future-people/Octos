@@ -168,3 +168,11 @@ def send_welcome(customer_id):
     """The welcome for a newly registered customer. Once per number, ever."""
     from apps.storefront.services.welcome import welcome
     welcome(customer_id)
+
+
+
+@_shared_task(ignore_result=True)
+def send_greeting(phone, name=''):
+    """The welcome for a new app account. Once per number, ever."""
+    from apps.storefront.services.welcome import greet
+    greet(phone, name)

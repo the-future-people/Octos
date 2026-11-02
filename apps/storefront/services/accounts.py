@@ -99,7 +99,7 @@ def send_code(raw_phone):
     cache.set(_sends_key(phone), sends + [now], SEND_WINDOW)
 
     from apps.storefront.services.messages import code_text
-    send_sms(phone, code_text(code))
+    send_sms(phone, code_text(code), kind='code')
     return phone
 
 
@@ -139,6 +139,10 @@ def verify_code(raw_phone, code, first_name='', device=''):
         if not name:
             raise AccountRefused('Tell us your first name to finish signing up.')
         lead = Lead.objects.create(phone=phone, first_name=name[:100])
+        # A new app account is a new customer to the business: welcome
+        # them, once per number, after the sign-up has saved.
+        from apps.storefront.receivers import queue_greeting
+        queue_greeting(phone, name)
     elif first_name and not lead.first_name:
         lead.first_name = first_name.strip()[:100]
         lead.save(update_fields=['first_name'])
