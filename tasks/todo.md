@@ -133,6 +133,53 @@ Status updates on the text log (Step 3), inbox UI (Step 4), templates (Step 2)
 ## Review
 (filled in when done)
 
+## Step 2: The sender (one way out for everything Octos says)
+
+### Goal
+Every outgoing WhatsApp message, whether Octos, staff or a system
+notification, goes through one send() that knows the 24-hour window,
+records the message in the customer's conversation, follows its
+delivery, and falls back to SMS when WhatsApp can't deliver.
+
+### Decisions (proposed, confirm before building)
+- Outbound messages are `Message` rows in the conversation, so the inbox
+  shows the whole thread. sent_by = staff member, or empty = Octos.
+- Window open = an inbound message from this customer in the last 24h.
+  Free text with the window closed is refused with a clear reason, never
+  dropped silently.
+- A message is recorded even when sending fails: status FAILED plus
+  Meta's reason, visible in the thread.
+- Statuses only move forward: sent → delivered → read. Failed can
+  arrive at any point. An out-of-order "delivered" after "read" changes
+  nothing.
+- Sending happens in the worker, after commit, never inside a request.
+- Graph API pinned at v26.0 (what Meta subscribed us at).
+- Until templates are approved, a system message to a customer whose
+  window is closed goes by SMS, exactly as today. WhatsApp first, SMS as
+  backup, with nothing worse than now in between.
+
+### Plan
+- [ ] Read first: welcome.greet, the mNotify send path, TextMessage,
+      receipt_engine's WhatsApp stub and its callers
+- [ ] whatsapp_client.py: send_text / send_template over HTTP, returns
+      the wamid, raises with Meta's error code. Nothing else
+- [ ] Message: add `error` (Meta's reason on failure) and a QUEUED status
+- [ ] window.py: window_open(conversation), window_closes_at(conversation)
+- [ ] whatsapp_outbound.py: send(conversation, text=..., sent_by=...)
+      → window check → Message (QUEUED) → task → client → SENT or FAILED
+- [ ] Webhook statuses update outbound Messages (forward-only)
+- [ ] Shared notify step: WhatsApp when the window is open, SMS otherwise;
+      log which channel was used
+- [ ] receipt_engine stub: stop marking receipts SENT without sending
+- [ ] Tests: window edges (frozen clock), refusal, failure recorded,
+      status ordering, SMS fallback, an import test for the client module
+- [ ] Prove it: reply to your own test message from the Railway shell;
+      watch it go SENT → DELIVERED → READ
+
+### Out of scope
+Template wording (after the real conversations are collected), inbox
+UI, the language model.
+
 ## Step 5: Octos answers (the point of all of this)
 
 ### Goal
