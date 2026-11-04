@@ -94,3 +94,86 @@ Updated 17 October 2026.
 - When a file has been replaced several times, check for something only the newest copy contains, and check the file name (NewJob vs NewCustomer).
 - In a React component, define each part before anything that uses it.
 - Names alone can't tell a person from their company. Compare the record kind too, and keep merges undoable.
+
+# WhatsApp webhook (Step 1) — 4 Nov 2026
+
+## Goal
+Meta can verify our endpoint, and every inbound message and delivery/read status
+reaches Octos, is checked as genuinely from Meta, and is stored without loss or duplication.
+
+## Plan
+- [ ] Settings: read WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN, WHATSAPP_API_VERSION
+      explicitly in settings.py (the mNotify lesson: getattr silently returned '')
+- [ ] Model `WhatsAppEvent`: raw payload (JSON), received_at, processed_at, error.
+      Every POST is stored before anything else happens.
+- [ ] Model `InboundMessage`: wamid (unique), wa_phone, profile_name, type, text,
+      sent_at, customer (nullable FK, matched by phone), event FK
+- [ ] Service `signature.py`: HMAC-SHA256 of the raw body with the app secret,
+      hmac.compare_digest against X-Hub-Signature-256
+- [ ] Service `inbound.py`: parse an event into InboundMessages + status log lines;
+      idempotent on wamid (Meta re-delivers)
+- [ ] View (plain Django View, csrf_exempt, no JWT):
+      GET  → hub.mode=subscribe + token match → echo hub.challenge, else 403
+      POST → signature fails → 403; empty secret → 403 + logged error (never accept unsigned);
+             else store WhatsAppEvent → dispatch Celery task → 200 immediately
+- [ ] Celery task `process_whatsapp_event(event_id)`: runs inbound.py, sets processed_at / error
+- [ ] URL: /api/v1/whatsapp/webhook/
+- [ ] Management command `whatsapp_subscribe`: POST /{WABA}/subscribed_apps, prints the result
+      (verifiable, repeatable, no hand-typed curl)
+- [ ] Tests: GET good/bad token; POST bad/missing signature → 403; good signature → 200 +
+      event stored; same wamid twice → one InboundMessage; status payload parsed
+- [ ] Railway: APP_SECRET + VERIFY_TOKEN as shared variables (web + worker)
+- [ ] Brother pastes URL + verify token in WhatsApp → Configuration, subscribes to `messages`
+- [ ] Run whatsapp_subscribe in the Railway shell (after the deploy is live)
+- [ ] Prove it: send a message to +233 55 196 9777 → InboundMessage row appears
+
+## Out of scope (later steps)
+Status updates on the text log (Step 3), inbox UI (Step 4), templates (Step 2)
+
+## Review
+(filled in when done)
+
+## Step 5: Octos answers (the point of all of this)
+
+### Goal
+A customer who writes when nobody is watching feels heard, by name, in
+their own register, with real answers from the floor. Clearly Octos,
+Farhat's assistant; never stiff, never a menu, never a wall of text.
+
+### Principles (locked)
+- Introduces itself once per conversation ("Octos here, Farhat's assistant")
+- Short: one idea per message, the way people text. Mirrors the greeting.
+  Emoji and "hmm" / "oops" where a person would use them
+- Grounded: every fact comes from the floor (jobs, promises, catalogue,
+  branch availability, prices, hours). Nothing invented
+- Never commits the floor: times only from the promise engine
+- Doesn't know → hands to the team and says when they'll pick it up
+- Steps back the moment a staff member joins; staff can take over any time
+- Asks which branch only when it physically matters (a pickup) and
+  nothing (recent jobs, wall QR) already says
+- Files sent on WhatsApp become draft jobs on that branch's counter screen
+
+### Shape (to design properly before building)
+- Language model reads the message: intent, job code, quantities,
+  service, branch, files
+- Octos's own services fetch the facts
+- Model writes the reply from those facts only, in the house voice
+- A check before sending: every time, price, code and status in the reply
+  must appear in the facts, or the reply is not sent
+- Voice guide in Khofi's voice with real examples, shared with the Step 2
+  templates so automatic and template messages sound like one person
+- Test library of real customer messages ("please are you around",
+  "boss is my job ready", file + "I'll be there in 10 minutes"),
+  each with the expected behaviour, run before any change goes live
+- Kill switch, per-conversation limits, every reply logged and reviewable
+
+### Rollout
+- [ ] 5a Draft: Octos writes, staff approve in the inbox. Builds the
+      voice and the test library from real conversations
+- [ ] 5b Answer: autonomous for intents proven safe in 5a
+      (job status, hours, "do you do X")
+- [ ] 5c Intake: files and quantities become draft jobs at the counter
+
+### Depends on
+Step 1 (receive), Step 3 (send), Step 4 (inbox + media download within
+WhatsApp's ~30 days), catalogue availability, promise engine
