@@ -1059,3 +1059,7 @@ Internal detail belongs in the log, not on the screen.
   crashed on zero events and hid the answer ("nothing arrived").
 - **Search the codebase for the behaviour before adding an app.** `communications`
   already had Conversation, Message, a webhook stub and notification signals.
+
+  - **An untracked app-sized folder is probably a stray copy.** `apps/inventory/jobs/`
+  was a byte-identical copy of `apps/jobs` (folders dated today, files dated months
+  back). Compare every file by hash before deleting; never delete on a guess.
