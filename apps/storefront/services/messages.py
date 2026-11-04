@@ -92,17 +92,22 @@ def counter_paid_text(order, balance=None):
 
 
 def ready_text(order):
-    """The one a customer is waiting for: it is ready, where, and the PIN to collect."""
-    name, what = _first_name(order), _what(order)
+    """
+    The one a customer is waiting for: it is ready, where, the reference
+    and the PIN to collect. The reference was lost in the 29 Oct rewrite
+    and is back: it is what they read out when they call to ask.
+    """
+    name, what, ref = _first_name(order), _what(order), _ref(order)
     where = _branch_name(order) or 'the shop'
     pin = order.collection_pin
     link = f'{STOREFRONT}/t/{order.short_code}'
 
     hello = f'Good news, {name}!' if name else 'Good news!'
+    ready = f'{_cap(what)} is ready (ref {ref}).'
     return _first_that_fits(
-        _join(hello, f'{_cap(what)} is ready. Come for it at {where} with PIN {pin}.', link),
-        _join('Good news!', f'{_cap(what)} is ready. Come for it at {where} with PIN {pin}.', link),
-        _join(f'{_cap(what)} is ready. Collect with PIN {pin}.', link),
+        _join(hello, ready, f'Come for it at {where} with PIN {pin}.', link),
+        _join('Good news!', ready, f'Come for it at {where} with PIN {pin}.', link),
+        _join(ready, f'Collect with PIN {pin}.', link),
     )
 
 
