@@ -1048,14 +1048,11 @@ class ReceiptSendWhatsAppView(APIView):
             )
 
         engine = ReceiptEngine(receipt.job.branch)
-        success = engine.send_whatsapp(receipt)
+        sent, reason = engine.send_whatsapp(receipt)
 
-        if success:
-            return Response({'detail': 'Receipt sent via WhatsApp.'})
-        return Response(
-            {'detail': 'WhatsApp delivery failed - check phone number.'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        if sent:
+            return Response({'detail': 'Receipt sent on WhatsApp.'})
+        return Response({'detail': reason}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ReceiptThermalView(APIView):

@@ -40,6 +40,11 @@ class AppNotification(AuditModel):
     title = models.CharField(max_length=120)
     body = models.CharField(max_length=300)
     pushed = models.BooleanField(default=False)
+    whatsapped = models.BooleanField(
+        default=False,
+        help_text='Sent on WhatsApp (their 24-hour window was open) because no push '
+                  'reached them. If WhatsApp then failed, the SMS fallback is in the text log.',
+    )
     texted = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)
 

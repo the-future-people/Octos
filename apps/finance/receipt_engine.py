@@ -146,47 +146,56 @@ class ReceiptEngine:
 
     # ── WhatsApp delivery ─────────────────────────────────────────────────
 
-    def send_whatsapp(self, receipt) -> bool:
+    def send_whatsapp(self, receipt):
         """
-        Queue a WhatsApp receipt delivery.
-        Returns True if queued successfully, False otherwise.
+        The receipt on WhatsApp. Returns (sent, reason).
+
+        WhatsApp lets a business send a free message only to someone who
+        wrote to it in the last 24 hours. So this works when the customer
+        has been chatting with us, and says so plainly when not: the
+        receipt stays as it was, and staff can print it.
+
+        SENT here means handed to WhatsApp. Whether it arrived shows on
+        the customer's conversation (delivered, read). A receipt never
+        falls back to SMS: see NO_SMS_FALLBACK in whatsapp_outbound.
         """
+        from apps.communications.services.whatsapp_outbound import try_send_text
         from apps.finance.models import Receipt
 
-        phone = receipt.customer_phone
-        if not phone:
-            logger.warning(
-                'ReceiptEngine: no phone number for receipt %s — '
-                'WhatsApp delivery skipped',
+        if not receipt.customer_phone:
+            return False, 'This receipt has no phone number to send it to.'
+
+        # Formatting first, on its own: a receipt that can't be written out
+        # (one with no job, say) must not be reported as WhatsApp being down.
+        try:
+            text = self._format_whatsapp_message(receipt)
+        except Exception:
+            logger.exception(
+                'ReceiptEngine: receipt %s could not be formatted for WhatsApp',
                 receipt.receipt_number,
             )
-            return False
+            return False, "This receipt couldn't be prepared for WhatsApp. Print it instead."
 
         try:
-            message = self._format_whatsapp_message(receipt)
-
-            # TODO: wire to WhatsApp Business API / Twilio
-            logger.info(
-                'ReceiptEngine: WhatsApp receipt queued for %s → %s',
-                receipt.receipt_number,
-                phone,
-            )
-
-            receipt.whatsapp_status  = Receipt.DeliveryStatus.SENT
-            receipt.whatsapp_sent_at = timezone.now()
-            receipt.save(update_fields=['whatsapp_status', 'whatsapp_sent_at'])
-            return True
-
-        except Exception as exc:
+            message = try_send_text(receipt.customer_phone, text, kind='receipt')
+        except Exception:
             logger.exception(
-                'ReceiptEngine: WhatsApp delivery failed for %s: %s',
+                'ReceiptEngine: WhatsApp receipt %s could not be queued',
                 receipt.receipt_number,
-                exc,
             )
-            receipt.whatsapp_status = Receipt.DeliveryStatus.FAILED
-            receipt.save(update_fields=['whatsapp_status'])
-            return False
+            return False, "WhatsApp couldn't be reached just now. Try again, or print the receipt."
 
+        if message is None:
+            return False, (
+                "This customer hasn't written to us on WhatsApp in the last 24 hours, "
+                "so WhatsApp won't let us send it. Print the receipt, or ask them to "
+                "send us a message first, then try again."
+            )
+
+        receipt.whatsapp_status = Receipt.DeliveryStatus.SENT
+        receipt.whatsapp_sent_at = timezone.now()
+        receipt.save(update_fields=['whatsapp_status', 'whatsapp_sent_at'])
+        return True, ''
     # ── Thermal print format ──────────────────────────────────────────────
 
     def format_thermal(self, receipt) -> str:

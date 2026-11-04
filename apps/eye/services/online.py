@@ -83,6 +83,7 @@ def app(first, last, prev_first, prev_last) -> dict:
         'customers_with_app': with_customer,
         'platforms': {k or 'unknown': v for k, v in platforms.items()},
         'notifications': {'sent': notes.count(), 'pushed': notes.filter(pushed=True).count(),
+                          'whatsapped': notes.filter(whatsapped=True).count(),
                           'texted': notes.filter(texted=True).count(),
                           'read': notes.filter(read_at__isnull=False).count()},
         'orders_from_app': {'state': 'NOT_TRACKED'},

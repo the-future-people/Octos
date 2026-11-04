@@ -80,6 +80,13 @@ class Message(AuditModel):
         blank=True,
         help_text="Why sending failed, in the provider's words. Empty when it didn't.",
     )
+    kind = models.CharField(
+        max_length=30,
+        blank=True,
+        db_index=True,
+        help_text='What a system message is about (welcome, paid, ready, late…), '
+                  'the same words as the SMS log. Blank for conversation replies.',
+    )
 
     # Content
     body = models.TextField(blank=True)

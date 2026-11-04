@@ -3,9 +3,10 @@ Telling a customer something about their order.
 
 App first: the message goes to the inbox, and by push to every phone
 signed in to their number. If no phone could be reached (no app, signed
-out, notifications turned off, or Firebase not set up), the same news
-goes by SMS, as it always has. Website customers have no app, so for
-them nothing changes.
+out, notifications turned off, or Firebase not set up), WhatsApp next,
+but only while their 24-hour window is open, meaning they wrote to us in
+the last day. Otherwise the same news goes by SMS, as it always has.
+Website customers have no app, so for them it is WhatsApp or SMS.
 """
 
 import logging
@@ -49,7 +50,7 @@ def tell(order, kind, title, body, sms_text=None, text_with=None):
 
 
 def _tell_one(order, lead, kind, title, body, sms_text, text_with):
-    """One person: store, push to their devices, text if no push arrived."""
+    """One person: store, push to their devices, then WhatsApp or text."""
     from apps.storefront.models import AppNotification, DeviceToken
     from apps.storefront.services import push
     from apps.storefront.services.accounts import leads_for
@@ -73,6 +74,17 @@ def _tell_one(order, lead, kind, title, body, sms_text, text_with):
             logger.exception('Could not push %s about %s', kind, order.order_number)
 
     if not note.pushed and sms_text:
+        # WhatsApp next, only inside their 24-hour window. try_send_text
+        # answers None for no conversation or a shut window: the SMS below.
+        # If WhatsApp fails later, the worker sends this same text by SMS.
+        try:
+            from apps.communications.services.whatsapp_outbound import try_send_text
+            if try_send_text(lead.phone, sms_text, kind=kind):
+                note.whatsapped = True
+        except Exception:
+            logger.exception('Could not WhatsApp %s about %s', lead.phone, order.order_number)
+
+    if not note.pushed and not note.whatsapped and sms_text:
         try:
             # The caller's own send_sms where given, so the places that
             # always texted (and their tests) keep their texter.
@@ -81,7 +93,7 @@ def _tell_one(order, lead, kind, title, body, sms_text, text_with):
         except Exception:
             logger.exception('Could not text %s about %s', lead.phone, order.order_number)
 
-    note.save(update_fields=['pushed', 'texted'])
+    note.save(update_fields=['pushed', 'whatsapped', 'texted'])
     return note
 
 def ready_phrase(order):

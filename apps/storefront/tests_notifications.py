@@ -64,6 +64,35 @@ class NotifyTests(TestCase):
         self.sms.assert_called_once()
         self.assertTrue(note.texted)
 
+    # ── WhatsApp between the app and SMS, inside the 24-hour window ──
+
+    def _whatsapp_conversation(self, last_wrote):
+        from apps.communications.tests import make_conversation
+        from apps.communications.tests_whatsapp_outbound import customer_wrote
+        conv = make_conversation(None, contact_phone='+233244999888')
+        customer_wrote(conv, last_wrote)
+        return conv
+
+    def test_no_app_but_an_open_window_means_whatsapp_not_sms(self):
+        from datetime import timedelta
+        self._signed_in()
+        conv = self._whatsapp_conversation(timedelta(minutes=10))
+        note = tell(self._order(), 'ready', 'Ready to collect', 'Your order is ready.', 'SMS text')
+        self.sms.assert_not_called()
+        self.assertTrue(note.whatsapped)
+        self.assertFalse(note.texted)
+        sent = conv.messages.get(direction='OUTBOUND')
+        self.assertEqual((sent.kind, sent.body), ('ready', 'SMS text'))
+
+    def test_a_closed_window_means_an_sms_as_before(self):
+        from datetime import timedelta
+        self._signed_in()
+        self._whatsapp_conversation(timedelta(hours=30))
+        note = tell(self._order(), 'ready', 'Ready to collect', 'Your order is ready.', 'SMS text')
+        self.sms.assert_called_once()
+        self.assertFalse(note.whatsapped)
+        self.assertTrue(note.texted)
+
     def test_a_push_that_fails_falls_back_to_sms(self):
         client = self._signed_in()
         self._device(client)

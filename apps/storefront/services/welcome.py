@@ -2,11 +2,13 @@
 The welcome: one warm message to a customer the first time they are
 registered, thanking them for choosing the business.
 
-Sent once per phone number, ever. The text log decides that, so it holds
-however many times a customer is created, merged or re-registered.
+Sent once per phone number, ever, whichever channel carried it: the text
+log and the WhatsApp thread are both checked, so it holds however many
+times a customer is created, merged or re-registered.
 
-One step for every channel: SMS today; once WhatsApp is connected it is
-tried first and SMS becomes the fallback, here and nowhere else.
+One step for every channel: WhatsApp first, when the customer wrote to
+us in the last 24 hours; SMS otherwise, and as the fallback if WhatsApp
+fails. Here and nowhere else.
 
 Plain ASCII on purpose: a single curly apostrophe turns an SMS into
 Unicode, which halves its length and doubles its cost.
@@ -63,10 +65,30 @@ def welcome_text(customer_or_name) -> str:
 
 
 def already_welcomed(phone) -> bool:
+    """
+    True if this number has had its welcome on either channel: an SMS
+    the provider accepted, or a WhatsApp welcome that has not failed.
+    A queued one counts, so two registrations seconds apart can't both
+    send. A failed WhatsApp welcome doesn't count; its SMS fallback,
+    once accepted, does.
+    """
+    from apps.communications.models import Message
+    from apps.core.phones import to_international
     from apps.storefront.models import TextMessage
     from apps.storefront.services.sms import _normalise
+
     number = _normalise(phone)
-    return bool(number) and TextMessage.objects.filter(phone=number, kind=KIND, accepted=True).exists()
+    if number and TextMessage.objects.filter(phone=number, kind=KIND, accepted=True).exists():
+        return True
+
+    international = to_international(phone or '')
+    return bool(international) and (
+        Message.objects
+        .filter(channel=Message.WHATSAPP, direction=Message.OUTBOUND, kind=KIND,
+                conversation__contact_phone=international)
+        .exclude(status=Message.FAILED)
+        .exists()
+    )
 
 
 def greet(phone, name='') -> bool:
@@ -75,13 +97,16 @@ def greet(phone, name='') -> bool:
     Both doors lead here: a customer registered by staff, and an account
     made in the app (which creates a lead, not a customer).
     """
+    from apps.communications.services.whatsapp_outbound import try_send_text
     from apps.storefront.services.sms import send_sms
 
     try:
         if not phone or already_welcomed(phone):
             return False
-        # WhatsApp goes here first, once connected; SMS stays the fallback.
-        return send_sms(phone, welcome_text(name or ''), kind=KIND)
+        text = welcome_text(name or '')
+        if try_send_text(phone, text, kind=KIND):
+            return True
+        return send_sms(phone, text, kind=KIND)
     except Exception:
         logger.warning('Welcome not sent to %s', phone, exc_info=True)
         return False
