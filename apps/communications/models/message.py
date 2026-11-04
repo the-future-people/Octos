@@ -36,6 +36,7 @@ class Message(AuditModel):
     # Message Type
     TEXT = 'TEXT'
     IMAGE = 'IMAGE'
+    VIDEO = 'VIDEO'
     DOCUMENT = 'DOCUMENT'
     AUDIO = 'AUDIO'
     NOTE = 'NOTE'
@@ -43,6 +44,7 @@ class Message(AuditModel):
     TYPE_CHOICES = [
         (TEXT, 'Text'),
         (IMAGE, 'Image'),
+        (VIDEO, 'Video'),
         (DOCUMENT, 'Document'),
         (AUDIO, 'Audio'),
         (NOTE, 'Internal Note'),
@@ -78,6 +80,12 @@ class Message(AuditModel):
         upload_to='communications/media/%Y/%m/',
         null=True,
         blank=True
+    )
+    media_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="The provider's id for an attached file, used to download it. "
+                  "WhatsApp keeps media for about 30 days.",
     )
 
     # Sender
@@ -120,6 +128,17 @@ class Message(AuditModel):
 
     class Meta:
         ordering = ['created_at']
+        constraints = [
+            # Meta retries deliveries. The constraint is the duplicate
+            # check: the second insert fails, and that failure is how the
+            # webhook knows it has seen this message before. Blank ids
+            # (staff replies, calls, notes) are exempt.
+            models.UniqueConstraint(
+                fields=['channel', 'external_id'],
+                condition=~models.Q(external_id=''),
+                name='uniq_message_external_id_per_channel',
+            ),
+        ]
 
     def __str__(self):
         direction = '←' if self.direction == self.INBOUND else '→'

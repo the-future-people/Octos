@@ -100,13 +100,28 @@ def _branch_managers(branch):
 
 
 def _conversation_assignees(conversation):
-    """Return assigned user of a conversation, or branch managers as fallback."""
-    recipients = []
-    if hasattr(conversation, 'assigned_to') and conversation.assigned_to:
-        recipients.append(conversation.assigned_to)
-    elif hasattr(conversation, 'branch') and conversation.branch:
-        recipients = _branch_managers(conversation.branch)
-    return recipients
+    """
+    Who hears about a new message: the person it is assigned to, else the
+    branch's managers, else, for a company conversation with no branch
+    (the central WhatsApp number), the managers of every trading branch.
+
+    Routing a company conversation to the branch of the customer's active
+    job comes with the inbox. Until then, everyone hearing is better than
+    nobody hearing, which is what an empty list meant before.
+    """
+    if getattr(conversation, 'assigned_to', None):
+        return [conversation.assigned_to]
+    if getattr(conversation, 'branch_id', None):
+        return _branch_managers(conversation.branch)
+
+    from django.contrib.auth import get_user_model
+    return list(
+        get_user_model().objects.filter(
+            is_active=True,
+            role__name='BRANCH_MANAGER',
+            branch__is_active=True,
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

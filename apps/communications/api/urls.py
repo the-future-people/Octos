@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .whatsapp_webhook import WhatsAppWebhookView
 
 urlpatterns = [
     # Conversations
@@ -11,5 +12,5 @@ urlpatterns = [
     path('<int:pk>/link-job/', views.ConversationLinkJobView.as_view(), name='conversation-link-job'),
 
     # Webhooks
-    path('webhook/inbound/', views.InboundWebhookView.as_view(), name='webhook-inbound'),
+    path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='webhook-whatsapp'),
 ]

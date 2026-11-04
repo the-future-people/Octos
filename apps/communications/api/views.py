@@ -242,18 +242,3 @@ class ConversationLinkJobView(APIView):
             'job_id'                : job.id,
             'linked_to_conversation': conversation.id,
         })
-
-
-class InboundWebhookView(APIView):
-    """
-    POST /api/v1/communications/webhook/inbound/
-    Stub — will be wired to WhatsApp/Twilio providers in the Communications phase.
-    """
-    permission_classes = []  # Unauthenticated — verified by provider signature
-
-    def post(self, request):
-        # TODO: verify webhook signature
-        # TODO: parse provider payload (WhatsApp / Twilio)
-        # TODO: find or create Conversation
-        # TODO: create inbound Message record
-        return Response({'status': 'received'}, status=status.HTTP_200_OK)

@@ -268,6 +268,17 @@ PAYSTACK_PUBLIC_KEY = os.environ.get('PAYSTACK_PUBLIC_KEY', '')
 # real customer by accident.
 MNOTIFY_API_KEY = os.environ.get('MNOTIFY_API_KEY', '')
 MNOTIFY_SENDER_ID = os.environ.get('MNOTIFY_SENDER_ID', 'Farhat')
+
+# WhatsApp Cloud API, for Farhat's one central number. Empty defaults on
+# purpose: the webhook refuses every request while the app secret or the
+# verify token is missing, rather than accepting messages it cannot check.
+# (A default that means "do nothing" hid mNotify for weeks; one that means
+# "accept anything" would be worse.)
+WHATSAPP_ACCESS_TOKEN        = os.environ.get('WHATSAPP_ACCESS_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID     = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
+WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID', '')
+WHATSAPP_APP_SECRET          = os.environ.get('WHATSAPP_APP_SECRET', '')
+WHATSAPP_VERIFY_TOKEN        = os.environ.get('WHATSAPP_VERIFY_TOKEN', '')
 ASGI_APPLICATION = 'config.asgi.application'
 
 _REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')

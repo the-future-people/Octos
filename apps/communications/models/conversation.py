@@ -5,8 +5,17 @@ from apps.core.models import AuditModel
 class Conversation(AuditModel):
     """
     A threaded conversation with a customer across any channel.
-    One conversation per customer per branch.
-    All channels from the same customer collapse into one thread.
+
+    Branch conversations: one per customer per branch per channel.
+
+    Company conversations (branch is null): one per phone per channel.
+    WhatsApp arrives on one central number, the customer never says which
+    branch they mean, and any branch can answer, so there is no branch to
+    record. A branch can be linked later through a job.
+
+    The two need separate uniqueness rules because Postgres treats nulls
+    as distinct: unique_together alone would let a second company thread
+    open for the same number.
     """
 
     # Status
@@ -38,7 +47,10 @@ class Conversation(AuditModel):
     branch = models.ForeignKey(
         'organization.Branch',
         on_delete=models.PROTECT,
-        related_name='conversations'
+        null=True,
+        blank=True,
+        related_name='conversations',
+        help_text='Empty for company conversations, such as the central WhatsApp number.',
     )
     customer = models.ForeignKey(
         'customers.CustomerProfile',
@@ -80,10 +92,18 @@ class Conversation(AuditModel):
     class Meta:
         ordering = ['-last_message_at']
         unique_together = [['branch', 'contact_phone', 'channel']]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['contact_phone', 'channel'],
+                condition=models.Q(branch__isnull=True),
+                name='uniq_company_conversation_per_phone',
+            ),
+        ]
 
     def __str__(self):
         contact = self.contact_name or self.contact_phone or self.contact_email
-        return f"{contact} @ {self.branch.name} ({self.channel})"
+        where = self.branch.name if self.branch_id else 'all branches'
+        return f"{contact} @ {where} ({self.channel})"
 
     @property
     def display_name(self):
