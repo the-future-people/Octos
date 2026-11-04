@@ -8,12 +8,7 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 # here has its tasks silently discarded by the worker at runtime — beat
 # schedules them by name, the worker finds nothing registered, and the
 # message is dropped with no failure anywhere that a person would see.
-app.autodiscover_tasks([
-    'apps.finance',
-    'apps.jobs',
-    'apps.analytics',
-    'apps.notifications',
-    'apps.accounts',
-    'apps.production',
-    'apps.storefront',
-])
+# Every app in INSTALLED_APPS, found by Celery itself. The explicit list
+# that was here forgot apps.storefront (lessons, 13 Oct) and then
+# apps.communications (4 Nov); a list nobody has to maintain can't forget.
+app.autodiscover_tasks()

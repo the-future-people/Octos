@@ -79,7 +79,7 @@ def process(event):
                     failures.append(f'{message.get("id")}: {exc!r}')
 
             for status in value.get('statuses') or []:
-                _log_status(status)
+                _apply_status(status)
 
     event.processed_at = timezone.now()
     event.error = '\n'.join(failures)
@@ -199,14 +199,49 @@ def _content(message):
     return Message.TEXT, f'[A {kind or "unknown"} message Octos cannot show yet]', ''
 
 
-def _log_status(status):
+# Meta's status words, and how far along each one is. Statuses can arrive
+# out of order (a "delivered" after a "read"), so a message only ever
+# moves forward. Failed is the exception: it can land at any point.
+STATUS_MAP = {
+    'sent':      Message.SENT,
+    'delivered': Message.DELIVERED,
+    'read':      Message.READ,
+    'failed':    Message.FAILED,
+}
+PROGRESS = [Message.QUEUED, Message.SENT, Message.DELIVERED, Message.READ]
+
+
+def _apply_status(status):
     """
-    Delivery and read receipts for messages Octos sent. Logged only until
-    outbound messages are recorded (Step 3); then they update them.
+    A delivery receipt for a message Octos sent. Updates that message,
+    forward only. A receipt that matches nothing (a message sent before
+    Octos recorded sends, or one racing ahead of its own wamid) is logged
+    and ignored.
     """
-    errors = status.get('errors') or []
-    level = logging.WARNING if status.get('status') == 'failed' else logging.INFO
-    logger.log(
-        level, 'WhatsApp status %s for %s%s',
-        status.get('status'), status.get('id'), f': {errors}' if errors else '',
+    wamid = status.get('id') or ''
+    word = status.get('status') or ''
+    new = STATUS_MAP.get(word)
+    if not wamid or new is None:
+        logger.info('WhatsApp status %r for %r ignored', word, wamid)
+        return
+
+    ours = Message.objects.filter(
+        channel=Message.WHATSAPP, direction=Message.OUTBOUND, external_id=wamid,
     )
+
+    if new == Message.FAILED:
+        reason = '; '.join(
+            f"{e.get('code')}: {e.get('title') or e.get('message') or ''}".strip()
+            for e in status.get('errors') or []
+        ) or 'failed, no reason given'
+        updated = ours.update(status=Message.FAILED, error=reason[:500])
+        logger.warning('WhatsApp message %s failed: %s', wamid, reason)
+    else:
+        earlier = PROGRESS[:PROGRESS.index(new)]
+        updated = ours.filter(status__in=earlier).update(status=new)
+
+    if not updated:
+        logger.info(
+            'WhatsApp status %s for %s matched nothing (unknown, or already further along)',
+            word, wamid,
+        )

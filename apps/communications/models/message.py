@@ -5,8 +5,8 @@ from apps.core.models import AuditModel
 class Message(AuditModel):
     """
     A single message within a conversation.
-    Can be inbound (from customer) or outbound (from staff).
-    Every reply is logged against the staff member who sent it.
+    Can be inbound (from customer) or outbound (from staff or Octos).
+    Every staff reply is logged against the staff member who sent it.
     """
 
     # Direction
@@ -50,13 +50,16 @@ class Message(AuditModel):
         (NOTE, 'Internal Note'),
     ]
 
-    # Status
+    # Status. Outbound messages move forward only:
+    # QUEUED → SENT → DELIVERED → READ. FAILED can arrive at any point.
+    QUEUED = 'QUEUED'
     SENT = 'SENT'
     DELIVERED = 'DELIVERED'
     READ = 'READ'
     FAILED = 'FAILED'
 
     STATUS_CHOICES = [
+        (QUEUED, 'Queued'),
         (SENT, 'Sent'),
         (DELIVERED, 'Delivered'),
         (READ, 'Read'),
@@ -72,6 +75,11 @@ class Message(AuditModel):
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES)
     message_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TEXT)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=SENT)
+    error = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Why sending failed, in the provider's words. Empty when it didn't.",
+    )
 
     # Content
     body = models.TextField(blank=True)
@@ -95,7 +103,8 @@ class Message(AuditModel):
         null=True,
         blank=True,
         related_name='sent_messages',
-        help_text='Staff member who sent this. Null for inbound messages.'
+        help_text='Staff member who sent this. Empty for inbound messages, '
+                  'and for outbound messages Octos sent itself.'
     )
 
     # External IDs for third party webhooks
