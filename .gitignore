@@ -62,3 +62,5 @@ tasks/*
 !tasks/lessons.md
 
 *.dump
+
+docs/octos-voice/raw/
