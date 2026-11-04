@@ -1038,3 +1038,24 @@ Internal detail belongs in the log, not on the screen.
 - PowerShell formats a whole paste with the first command's table columns, so later results can show as blank rows. Use `ForEach-Object { $_.FullName }` or run commands one at a time when outputs differ.
 - Run an app's tests by module (apps.eye.tests), not by app (apps.eye): `apps/` has no __init__.py, so Django's discovery hits a None path.
 - Anything cached must be cleared in setUp, or one test's answer leaks into the next.
+
+## 4 November 2026
+
+- **Railway's `${{shared.X}}` goes in the Value box, never the Name.** A variable
+  named `${{shared.WHATSAPP_APP_SECRET}}` existed in the container holding the
+  verify token, and settings read nothing. Check names and lengths, never values:
+  `python -c "import os; print({k: len(v) for k, v in os.environ.items() if 'X' in k})"`
+- **A shared variable reaches no service until the service references it,** and
+  Railway stages variable changes until Deploy is clicked. Same container ID in
+  the shell prompt = nothing redeployed.
+- **The Railway container has no curl.** Use `python -c` with `requests`.
+- **In PowerShell, `curl` is `Invoke-WebRequest`,** and `$ENV_NAME` is an empty
+  local variable. Railway commands go in the Railway shell (`root@…:/app#`).
+- **Meta's dashboard can be skipped.** An app access token is `app_id|app_secret`;
+  `POST /{app_id}/subscriptions` sets the webhook and runs the verification,
+  with no secret leaving the container. A read straight after may show `[]`;
+  read again.
+- **A check command must survive the empty case.** `E.objects.first().error`
+  crashed on zero events and hid the answer ("nothing arrived").
+- **Search the codebase for the behaviour before adding an app.** `communications`
+  already had Conversation, Message, a webhook stub and notification signals.

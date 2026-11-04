@@ -177,3 +177,12 @@ Farhat's assistant; never stiff, never a menu, never a wall of text.
 ### Depends on
 Step 1 (receive), Step 3 (send), Step 4 (inbox + media download within
 WhatsApp's ~30 days), catalogue availability, promise engine
+
+## Review (Step 1, done 4 Nov 2026)
+- Live: first real message received end to end (event 1, done, no error)
+- Built into apps/communications (existing inbox models), not a new app
+- Company conversations: branch null, one per phone; branch comes from jobs
+- Webhook subscribed via Graph API (app token built in the Railway shell),
+  not the dashboard. The dashboard's pencil did nothing on mobile
+- Graph API version: v26.0 (pin for Step 3)
+- 26 new tests, 61 total in communications, all green
