@@ -45,8 +45,12 @@ class ProfileTests(TestCase):
         lead = Lead.objects.create(phone='+233558496250', first_name='Edward')
         self.assertIn('business', register(lead, {'kind': 'BUSINESS', 'title': 'MR', 'first_name': 'Edward',
                                                   'last_name': 'Appiah'}).lower())
+        # Since 2 Nov (e4449e7) registration also asks what kind of business,
+        # and its phone and email; this test predated that and was left behind.
         self.assertIsNone(register(lead, {'kind': 'BUSINESS', 'title': 'MR', 'first_name': 'Edward', 'last_name': 'Appiah',
-                                          'business_name': 'Piwak Construction Ltd', 'address': 'Westland, Accra'}))
+                                          'business_name': 'Piwak Construction Ltd', 'address': 'Westland, Accra',
+                                          'business_type': 'COMPANY', 'business_phone': '0302123456',
+                                          'business_email': 'office@piwak.example'}))
         lead.refresh_from_db()
         self.assertEqual(lead.customer.customer_type, 'BUSINESS')
         self.assertEqual(profile_for(lead)['kind'], 'BUSINESS')
