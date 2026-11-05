@@ -14,16 +14,19 @@ Per chat, it:
   - reads the chat text out of the zip and never extracts the media
   - takes the customer to be the name in the export's file name
     ("WhatsApp Chat with Ama.zip") and calls everyone else Staff
-  - strips phone numbers, emails, links, job/order codes and long
-    references, and the customer's name wherever it appears
-  - splits a long chat wherever it went quiet for days, since each
-    conversation is a separate test
-  - writes one file per conversation, plus index.md: one row each,
-    to choose the best from without opening hundreds of files
+  - drops WhatsApp's own noise (encryption notice, deleted messages,
+    username changes) and turns calls into [call] / [missed call]
+  - replaces every attachment with its kind and size only, never its
+    file name: [sends a PDF, 4 pages]
+  - strips phone numbers, emails, links, codes, handles, long ids,
+    and the customer's name wherever it appears
+  - splits a long chat wherever it went quiet for days
+  - writes one file per conversation, plus index.md to choose from;
+    long first messages are summarised there, not previewed
 
 Then read the ones worth keeping, rename them by topic, and move them
-into docs/octos-voice/real/. Only those are committed. The script
-catches most personal details, not all; reading is not optional.
+into docs/octos-voice/real/. Names of other people typed inside a
+message can't be caught by a script; reading is not optional.
 """
 import argparse
 import re
@@ -44,25 +47,41 @@ TIME = r'(?P<time>\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APap]\.?\s?[Mm]\.?)?)'
 # Android: 04/11/2026, 21:36 - Ama: hello
 # iPhone:  [04/11/2026, 21:36:12] Ama: hello
 MESSAGE = re.compile(r'^\[?' + DATE + TIME + r'\]?(?:\s-\s|\s)(?P<who>[^:]{1,60}):\s(?P<text>.*)$')
-# A timestamped line with no sender: "Messages and calls are end-to-end
-# encrypted", "Missed voice call"... skipped, never glued onto a message.
+# A timestamped line with no sender is WhatsApp talking: skipped.
 SYSTEM = re.compile(r'^\[?' + DATE + TIME + r'\]?(?:\s-\s|\s)')
 
+# Messages that are WhatsApp's, not the person's, even with a sender on them.
+NOISE = re.compile(
+    r'^(?:Messages and calls are end-to-end encrypted|This message was deleted|You deleted this message'
+    r'|null$|Waiting for this message)'
+    r'|created the username|changed their username|changed their phone number|security code',
+    re.IGNORECASE,
+)
+CALL = re.compile(r'^(missed )?(?:voice|video) call', re.IGNORECASE)
+EDITED = re.compile(r'\s*<This message was edited>', re.IGNORECASE)
+
 MEDIA = re.compile(
-    r'<Media omitted>|<attached:[^>]*>|\S+\s\(file attached\)'
+    r'<Media omitted>|<attached:[^>]*>|\(file attached\)'
     r'|\b(?:image|photo|video|audio|sticker|document|GIF)\s+omitted',
     re.IGNORECASE,
 )
+EXTENSIONS = {
+    'pdf': 'a PDF', 'doc': 'a Word file', 'docx': 'a Word file',
+    'xls': 'a spreadsheet', 'xlsx': 'a spreadsheet', 'csv': 'a spreadsheet',
+    'ppt': 'slides', 'pptx': 'slides',
+    'cdr': 'a design file', 'ai': 'a design file', 'psd': 'a design file', 'eps': 'a design file',
+    'jpg': 'a photo', 'jpeg': 'a photo', 'png': 'a photo', 'heic': 'a photo', 'webp': 'a sticker',
+    'opus': 'a voice note', 'm4a': 'a voice note', 'mp3': 'a voice note', 'ogg': 'a voice note', 'aac': 'a voice note',
+    'mp4': 'a video', 'mov': 'a video', '3gp': 'a video',
+}
 EMAIL = re.compile(r'\b[\w.+-]+@[\w-]+\.[\w.]+\b')
 LINK = re.compile(r'https?://\S+|www\.\S+|\b\S+\.(?:com|gh|app|net|org|io)\b\S*', re.IGNORECASE)
 CODE = re.compile(r'\b(?:FP-[A-Z]{2,5}-\d{4}-\d+|ORD-\d{4}-\d+|[A-Z]{2,5}-\d{8}-\d{3,5})\b')
 PHONE = re.compile(r'(?<![\w])\+?\d[\d\s-]{7,}\d(?![\w])')
 LONG_REF = re.compile(r'\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{10,}\b')
-# Mentions and social handles: @ama_prints.
 HANDLE = re.compile(r'@[\w.]{2,}')
-# Whatever the patterns above missed: any word holding 7+ digits in a row
-# (a number glued to text, a file name like IMG_20250310_101530.jpg, a
-# transaction id). Prices never reach 7 digits, so nothing real is lost.
+# Whatever the patterns above missed: any word holding 7+ digits in a row.
+# Prices never reach 7 digits, so nothing real is lost.
 GLUED = re.compile(r'\S*\d{7,}\S*')
 
 
@@ -128,11 +147,15 @@ def main():
 
 
 def summary(name, episode, customer, names):
+    """One index row. A long opener (a forwarded letter, say) is summarised, never previewed."""
     mine = [m for m in episode if m['who'] == customer]
-    first = clean(mine[0]['text'], names).replace('\n', ' ').replace('|', '/')
+    raw = mine[0]['text']
+    if len(raw) > 120:
+        first = f'[long message, {len(raw.split())} words]'
+    else:
+        first = clean(raw, names).replace('\n', ' ').replace('|', '/')[:80]
     media = sum(1 for m in episode if MEDIA.search(m['text']))
-    return (name, len(episode), len(mine), moment(episode[0]['at']), media,
-            first[:90] + ('…' if len(first) > 90 else ''))
+    return name, len(episode), len(mine), moment(episode[0]['at']), media, first
 
 
 def write_index(out, rows):
@@ -169,22 +192,31 @@ def contact_of(path):
 
 
 def parse(text, month_first):
-    """(messages, unreadable line count). Continuation lines join the message above."""
+    """
+    (messages, unreadable line count). Continuation lines join the message
+    above. WhatsApp's own notices are dropped; calls become [call].
+    """
     messages, orphans = [], 0
     for raw in text.splitlines():
         line = raw.translate(INVISIBLE).translate(SPACES).rstrip()
         match = MESSAGE.match(line)
         if match:
+            body = EDITED.sub('', match['text'].strip())
+            if NOISE.search(body):
+                continue
+            call = CALL.match(body)
+            if call:
+                body = '[missed call]' if call.group(1) else '[call]'
             messages.append({
                 'at': when(match['date'], match['time'], month_first),
                 'who': match['who'].strip(),
-                'text': match['text'].strip(),
+                'text': body,
             })
         elif SYSTEM.match(line):
             continue
         elif messages:
             if line.strip():
-                messages[-1]['text'] += '\n' + line.strip()
+                messages[-1]['text'] += '\n' + EDITED.sub('', line.strip())
         elif line.strip():
             orphans += 1
     return messages, orphans
@@ -235,32 +267,40 @@ def render(episode, customer, names, branch):
     return '\n'.join(lines)
 
 
-def clean(text, names):
-    def media(match):
-        t = match.group(0).lower()
-        if any(k in t for k in ('video', '.mp4', '.mov')):
-            return '[sends a video]'
-        if any(k in t for k in ('audio', 'voice', '.opus', 'ptt-')):
-            return '[sends a voice note]'
-        if 'sticker' in t or '.webp' in t:
-            return '[sends a sticker]'
-        if any(k in t for k in ('document', '.pdf', '.doc', '.cdr', '.ai', '.psd', '.xls')):
-            return '[sends a file]'
-        if any(k in t for k in ('image', 'photo', '.jpg', '.jpeg', '.png', 'img-')):
-            return '[sends a photo]'
-        return '[sends a photo or file]'
+def media_label(line):
+    """An attachment as its kind and size only. The file name never survives."""
+    low = line.lower()
+    found = re.findall(r'\.([a-z0-9]{2,4})\b', low)
+    kind = next((EXTENSIONS[e] for e in reversed(found) if e in EXTENSIONS), None)
+    if kind is None:
+        for word, label in (('sticker', 'a sticker'), ('video', 'a video'), ('audio', 'a voice note'),
+                            ('voice', 'a voice note'), ('document', 'a file'), ('gif', 'a GIF'),
+                            ('image', 'a photo'), ('photo', 'a photo')):
+            if word in low:
+                kind = label
+                break
+    pages = re.search(r'(\d+)\s+pages?\b', low)
+    size = f', {pages[1]} page{"s" if pages[1] != "1" else ""}' if pages else ''
+    return f'[sends {kind or "a file"}{size}]'
 
-    text = MEDIA.sub(media, text)
-    text = EMAIL.sub('[email]', text)
-    text = LINK.sub('[link]', text)
-    text = CODE.sub('[code]', text)
-    text = PHONE.sub('[number]', text)
-    text = LONG_REF.sub('[ref]', text)
-    text = HANDLE.sub('[handle]', text)
-    text = GLUED.sub('[ref]', text)
-    for word in names:
-        text = re.sub(rf'\b{re.escape(word)}\b', '[name]', text, flags=re.IGNORECASE)
-    return text
+
+def clean(text, names):
+    out = []
+    for line in text.split('\n'):
+        if MEDIA.search(line):
+            out.append(media_label(line))
+            continue
+        line = EMAIL.sub('[email]', line)
+        line = LINK.sub('[link]', line)
+        line = CODE.sub('[code]', line)
+        line = PHONE.sub('[number]', line)
+        line = LONG_REF.sub('[ref]', line)
+        line = HANDLE.sub('[handle]', line)
+        line = GLUED.sub('[ref]', line)
+        for word in names:
+            line = re.sub(rf'\b{re.escape(word)}\b', '[name]', line, flags=re.IGNORECASE)
+        out.append(line)
+    return '\n'.join(out)
 
 
 def name_words(name):
