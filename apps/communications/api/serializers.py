@@ -9,7 +9,8 @@ class MessageSerializer(serializers.ModelSerializer):
         model = Message
         fields = [
             'id', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
-            'body', 'media_url', 'media_file', 'sent_by', 'sent_by_name',
+            'body', 'media_url', 'media_file', 'media_id', 'media_name', 'media_mime',
+            'media_size', 'media_pages', 'sent_by', 'sent_by_name',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',
         ]
@@ -25,6 +26,12 @@ class MessageCreateSerializer(serializers.ModelSerializer):
         fields = ['body', 'message_type', 'media_file', 'is_internal_note']
 
 
+def _latest_job(conversation):
+    """The newest job linked to a conversation, or None. Uses prefetched jobs when there are any."""
+    jobs = list(conversation.jobs.all())
+    return max(jobs, key=lambda j: j.created_at) if jobs else None
+
+
 class ConversationListSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     assigned_to_name = serializers.CharField(
@@ -38,8 +45,18 @@ class ConversationListSerializer(serializers.ModelSerializer):
             'assigned_to', 'assigned_to_name',
             'handled_by', 'handled_since', 'handoff_reason',
             'unread_count', 'last_message_at', 'last_message_preview',
-            'created_at', 'updated_at',
+            'created_at', 'job',
         ]
+
+    job = serializers.SerializerMethodField()
+
+    def get_job(self, obj):
+        """The folder chip: the newest linked job's short reference and what it is."""
+        from apps.communications.assistant.tools import _ref
+        job = _latest_job(obj)
+        if job is None:
+            return None
+        return {'id': job.pk, 'ref': _ref(job.job_number), 'what': job.line_item_summary}
 
     def get_display_name(self, obj):
         return obj.display_name
@@ -61,7 +78,29 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
             'handled_by', 'handled_since', 'handoff_reason',
             'unread_count', 'last_message_at', 'jobs',
             'messages', 'created_at', 'updated_at',
+            'job_card', 'window_closes_at',
         ]
+
+    job_card = serializers.SerializerMethodField()
+    window_closes_at = serializers.SerializerMethodField()
+
+    def get_job_card(self, obj):
+        """
+        The newest linked job, described with the same facts Octos tells
+        customers (stage in plain words, promise, the cashier's balance),
+        so the screen and Octos can never disagree about a job.
+        """
+        from django.utils import timezone
+        from apps.communications.assistant.tools import _job_facts
+        job = _latest_job(obj)
+        if job is None:
+            return None
+        return {'id': job.pk, **_job_facts(job, timezone.localtime())}
+
+    def get_window_closes_at(self, obj):
+        """When free replies stop being allowed: the same rule the sender uses."""
+        from apps.communications.services.window import window_closes_at
+        return window_closes_at(obj)
 
     def get_display_name(self, obj):
         return obj.display_name

@@ -80,7 +80,7 @@ class BrainTests(TestCase):
         Conversation.objects.filter(pk=self.conv.pk).update(handled_by=Conversation.STAFF)
         model = Model(says(text('Hello')))
         run = self.run_with(model)
-        self.assertEqual((run.decision, run.reason), (AssistantRun.SKIPPED, 'a person has this conversation'))
+        self.assertEqual((run.decision, run.reason), (AssistantRun.SKIPPED, 'a person has taken over this conversation'))
         self.assertEqual(model.calls, [])
 
     def test_only_the_latest_message_is_answered(self):
@@ -181,3 +181,12 @@ class BrainTests(TestCase):
         turns = brain._history(self.conv)
         self.assertEqual(turns[0]['role'], 'user')
         self.assertEqual(len(turns), 1)  # two customer messages, one turn
+
+    
+    def test_octos_keeps_answering_while_waiting_for_a_person(self):
+        Conversation.objects.filter(pk=self.conv.pk).update(
+            handled_by=Conversation.STAFF, handoff_reason='customer asked to be called')
+        model = Model(says(text("You're welcome! Someone from the team will call you.")))
+        run = self.run_with(model)
+        self.assertEqual(run.decision, AssistantRun.REPLIED)
+        self.assertIn('already been asked to follow up', model.calls[0]['system'][1]['text'])

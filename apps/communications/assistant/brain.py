@@ -173,8 +173,11 @@ def _silence(conversation, trigger, now):
         return 'not a WhatsApp conversation'
     if conversation.status == Conversation.SPAM:
         return 'marked spam'
-    if conversation.handled_by != Conversation.OCTOS:
-        return 'a person has this conversation'
+    # Asking for a person doesn't mean Octos stops listening: until someone
+    # actually takes over (the button, or replying), it keeps answering, so
+    # a customer is never left in silence while they wait.
+    if conversation.handled_by == Conversation.STAFF and not conversation.handoff_reason:
+        return 'a person has taken over this conversation'
 
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
     last = visible.first()
@@ -317,7 +320,14 @@ def _history(conversation):
             # "Octos would say: ..." without the prefix or the handover line.
             text = text[len(SHADOW_PREFIX):].split('\nOctos would hand')[0].strip()
         if m.media_id or m.message_type in (Message.IMAGE, Message.VIDEO, Message.DOCUMENT, Message.AUDIO):
-            text = (text + f' [sent a {m.message_type.lower()}]').strip()
+            what = m.message_type.lower()
+            if m.media_name:
+                what += f': {m.media_name}'
+            if m.media_pages:
+                what += f", {m.media_pages} page{'s' if m.media_pages != 1 else ''}"
+            if not m.media_file:
+                what += ', not saved yet'
+            text = (text + f' [sent a {what}]').strip()
         if not text:
             continue
         if turns and turns[-1]['role'] == role:

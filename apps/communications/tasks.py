@@ -38,3 +38,19 @@ def answer_whatsapp(conversation_id, trigger_id):
     """Octos considers a customer's message. All the rules are in assistant/brain."""
     from apps.communications.assistant import brain
     brain.respond(conversation_id, trigger_id)
+
+@shared_task(bind=True, max_retries=5, default_retry_delay=60)
+def fetch_whatsapp_media(self, message_id):
+    """
+    Keep a customer's file before WhatsApp deletes it. A network failure
+    tries again, a minute apart; a file that is gone or too big is logged
+    and left (the inbox says it wasn't saved).
+    """
+    import requests
+    from apps.communications.services import whatsapp_media
+    try:
+        whatsapp_media.fetch(message_id)
+    except whatsapp_media.MediaError:
+        logger.warning('WhatsApp media for message %s cannot be kept', message_id, exc_info=True)
+    except requests.RequestException as exc:
+        raise self.retry(exc=exc)

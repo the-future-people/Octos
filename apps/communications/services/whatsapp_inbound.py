@@ -108,6 +108,7 @@ def _receive(message, profile_name):
     )
 
     message_type, body, media_id = _content(message)
+    media_name, media_mime = _media_details(message)
     try:
         with transaction.atomic():
             # The write is the duplicate check: Meta retries, and the
@@ -119,6 +120,8 @@ def _receive(message, profile_name):
                 message_type=message_type,
                 body=body,
                 media_id=media_id,
+                media_name=media_name,
+                media_mime=media_mime,
                 external_id=wamid,
             )
     except IntegrityError:
@@ -129,6 +132,8 @@ def _receive(message, profile_name):
     # that staff resolved after the original arrived.
     _refresh(conversation, phone, profile_name)
     wake_octos(conversation, message, pause=8)
+    if message.media_id:
+        _keep_media(message)
     return True
 
 
@@ -262,3 +267,19 @@ def _apply_status(status):
             'WhatsApp status %s for %s matched nothing (unknown, or already further along)',
             word, wamid,
         )
+
+
+
+def _media_details(message):
+    """(file name, mime type) of a media message, as WhatsApp sends them."""
+    kind = message.get('type') or ''
+    if kind not in MEDIA_TYPES:
+        return '', ''
+    media = message.get(kind) or {}
+    return (media.get('filename') or '')[:255], (media.get('mime_type') or '')[:100]
+
+
+def _keep_media(message):
+    """Fetch the customer's file once the message is committed, before WhatsApp deletes it."""
+    from apps.communications.tasks import fetch_whatsapp_media
+    transaction.on_commit(lambda: fetch_whatsapp_media.delay(message.pk))

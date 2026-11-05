@@ -96,6 +96,12 @@ class Message(AuditModel):
         null=True,
         blank=True
     )
+        # What the file is, kept when it arrives, so the inbox and Octos can
+    # name it ("albion-sticker.pdf, 1 page") and price by its page count.
+    media_name  = models.CharField(max_length=255, blank=True)
+    media_mime  = models.CharField(max_length=100, blank=True)
+    media_size  = models.PositiveIntegerField(null=True, blank=True)
+    media_pages = models.PositiveSmallIntegerField(null=True, blank=True)
     media_id = models.CharField(
         max_length=255,
         blank=True,
