@@ -49,3 +49,8 @@ class PromiseHolidayTests(TestCase):
         # closing, the other 30 at the next opening.
         self.declare_monday()
         self.assertEqual(self.engine._add_working_minutes(at(SAT, 19), 60), at(TUE, 8, 30))
+
+    
+    def test_no_work_is_ready_at_once_and_warns_nothing(self):
+        with self.assertNoLogs('apps.production.services.prediction_service', level='WARNING'):
+            self.assertEqual(self.engine._add_working_minutes(at(MON, 10), 0), at(MON, 10))

@@ -282,6 +282,12 @@ class PredictionService:
         remaining = minutes
         guard     = 0
 
+        # No work is ready the moment work could begin. Without this, the
+        # walk below never ran and still warned that it had "given up":
+        # every zero-minute prediction logged a false alarm (seen Nov 2026).
+        if remaining <= 0:
+            return current
+
         while remaining > 0 and guard < 30:
             guard += 1
 
