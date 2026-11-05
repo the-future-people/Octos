@@ -165,6 +165,12 @@ class BrainTests(TestCase):
         self.assertEqual(run.decision, AssistantRun.FAILED)
         self.assertIn('API down', run.error)
         self.assertEqual(self.sent().get().body, brain.HOLDING)
+
+    def test_a_reply_cut_off_mid_sentence_is_never_sent(self):
+        run = self.run_with(Model(says(text('For 5 sets of A3 colour, one side, 10 p'), stop='max_tokens')))
+        self.assertEqual(run.decision, AssistantRun.FAILED)
+        # The half sentence never goes out; the holding reply does.
+        self.assertEqual(self.sent().get().body, brain.HOLDING)
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.handled_by, Conversation.STAFF)
 

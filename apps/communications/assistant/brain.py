@@ -224,6 +224,10 @@ def _converse(conversation, ctx, run):
         run.input_tokens += getattr(response.usage, 'input_tokens', 0) or 0
         run.output_tokens += getattr(response.usage, 'output_tokens', 0) or 0
 
+        if response.stop_reason == 'max_tokens':
+            # Cut off mid-reply ("...10 p"): never sent. Fails the run, so the
+            # customer gets the holding reply and a person is brought in.
+            raise RuntimeError('Octos ran out of room mid-reply; a cut-off reply is never sent.')
         if response.stop_reason != 'tool_use':
             return ''.join(b.text for b in response.content if b.type == 'text').strip()
 

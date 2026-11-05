@@ -51,11 +51,13 @@ CASES = [
 
     # The earlier turn must not depend on the time of day: an "open now"
     # scripted for the morning is false at night, and Octos rightly corrects it.
+    # Scripted Octos turns must be true (from the real price list), or Octos
+    # rightly corrects them and the case fails for the wrong reason.
     {'name': 'answers_only_the_new_question',
-     'turns': [(C, 'Good morning, do you do binding?'),
-               (O, 'Good morning! Yes, we do ring binding for any document we print.'),
-               (C, 'Ok. How much is A4 black and white?')],
-     'expect': {'tools': ['quote'], 'contains_none': [r'bind', r'ring']}},
+     'turns': [(C, 'Good morning, how much is A3 colour?'),
+               (O, 'Good morning! A3 colour is GHS 5.00 per sheet for front only.'),
+               (C, 'Ok. And A4 black and white?')],
+     'expect': {'tools': ['quote'], 'contains_none': [r'\bA3\b', r'5\.00']}},
 
     {'name': 'status_with_no_jobs_is_honest',
      'turns': [(C, 'Please is my job ready?')],
