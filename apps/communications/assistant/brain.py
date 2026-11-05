@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.communications.assistant import checker, prompt, tools
@@ -38,7 +39,7 @@ HISTORY = 20            # messages of context
 ECHO_SECONDS = 5        # a message this soon after Octos's own is an auto-reply
 LOOP_WINDOW = timedelta(minutes=10)
 LOOP_REPLIES = 4        # Octos replies in that window before a person is brought in
-
+SHADOW_PREFIX = 'Octos would say: '
 TOOL_SPECS = [
     {
         'name': 'branch_hours',
@@ -260,15 +261,23 @@ def _run_tool(name, args, ctx):
 
 def _history(conversation):
     """The last messages as alternating turns, starting with the customer."""
+    # In shadow mode Octos's replies are internal notes the customer never
+    # saw; they still count as what Octos "said", or every earlier question
+    # looks unanswered and gets answered again. Only in shadow: after
+    # switching to live, notes the customer never received don't count.
+    said = Q(is_internal_note=False) & ~Q(channel=Message.SYSTEM)
+    if settings.OCTOS_ASSISTANT_MODE == 'shadow':
+        said |= Q(is_internal_note=True, body__startswith=SHADOW_PREFIX)
     recent = list(
-        conversation.messages.filter(is_internal_note=False)
-        .exclude(channel=Message.SYSTEM)
-        .order_by('-created_at')[:HISTORY]
+        conversation.messages.filter(said).order_by('-created_at')[:HISTORY]
     )[::-1]
     turns = []
     for m in recent:
         role = 'user' if m.direction == Message.INBOUND else 'assistant'
         text = (m.body or '').strip()
+        if m.is_internal_note:
+            # "Octos would say: ..." without the prefix or the handover line.
+            text = text[len(SHADOW_PREFIX):].split('\nOctos would hand')[0].strip()
         if m.media_id or m.message_type in (Message.IMAGE, Message.VIDEO, Message.DOCUMENT, Message.AUDIO):
             text = (text + f' [sent a {m.message_type.lower()}]').strip()
         if not text:
@@ -289,7 +298,7 @@ def _act(mode, conversation, run, text, handoff, note=''):
     from apps.communications.services import handover, whatsapp_outbound
 
     if mode == 'shadow':
-        lines = [note or (f'Octos would say: {text}' if text else 'Octos would stay silent.')]
+        lines = [note or (f'{SHADOW_PREFIX}{text}' if text else 'Octos would stay silent.')]
         if handoff:
             lines.append(f'Octos would hand to a person: {handoff}')
         Message.objects.create(

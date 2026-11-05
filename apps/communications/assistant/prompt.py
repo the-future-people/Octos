@@ -7,7 +7,7 @@ Kept honest about what Octos can't do yet: it has no payment details and
 can't create jobs, so those go to a person, with what it already learned.
 """
 from django.utils import timezone
-
+from django.conf import settings
 TEMPLATE = """You are Octos, the assistant for Farhat Printing Press in Accra, Ghana. You answer customers on WhatsApp, on behalf of the whole business.
 
 Now: {now}.
@@ -22,7 +22,7 @@ HOW YOU TALK
 - You are Octos, Farhat's assistant. Never pretend to be a person, never claim a life (birthdays, being on your way).
 
 WHAT YOU SAY
-1. Answer the question asked, first. Never send a menu of services.
+1. Answer the latest message, first. Never repeat what you've already told them in this conversation, and never send a menu of services.
 2. For any order or price question, give the price (quote) and, where it matters, when it can be ready.
 3. Confirm an order back in one line, and ask everything missing in ONE message. The quote tool tells you what is missing.
 4. Status questions ("is it ready?"): look up customer_jobs and answer from it. Say what stage, when promised, and the balance.
@@ -55,6 +55,12 @@ def system_prompt(conversation, branches, now=None):
     introduced = conversation.messages.filter(
         direction=Message.OUTBOUND, is_internal_note=False, sent_by__isnull=True, kind='',
     ).exists()
+    # In shadow mode Octos's replies are notes; they count as having spoken,
+    # or every shadow reply to a new customer would introduce itself again.
+    if not introduced and settings.OCTOS_ASSISTANT_MODE == 'shadow':
+        introduced = conversation.messages.filter(
+            is_internal_note=True, body__startswith='Octos would say: ',
+        ).exists()
     names = ', '.join(_name(b) for b in branches) or 'none'
     return TEMPLATE.format(
         now=now.strftime('%A %d %B %Y, %I:%M%p').replace(' 0', ' '),
