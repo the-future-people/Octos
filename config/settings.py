@@ -279,6 +279,14 @@ WHATSAPP_PHONE_NUMBER_ID     = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
 WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID', '')
 WHATSAPP_APP_SECRET          = os.environ.get('WHATSAPP_APP_SECRET', '')
 WHATSAPP_VERIFY_TOKEN        = os.environ.get('WHATSAPP_VERIFY_TOKEN', '')
+
+# Octos's assistant. Mode is the kill switch: 'off' (silent, the default),
+# 'shadow' (writes its reply as an internal note, sends nothing) or 'live'.
+# An unknown mode is treated as off. The model is a setting so the exams can
+# compare models before one is switched on.
+ANTHROPIC_API_KEY      = os.environ.get('ANTHROPIC_API_KEY', '')
+OCTOS_ASSISTANT_MODE   = os.environ.get('OCTOS_ASSISTANT_MODE', 'off')
+OCTOS_ASSISTANT_MODEL  = os.environ.get('OCTOS_ASSISTANT_MODEL', 'claude-sonnet-5-5')
 ASGI_APPLICATION = 'config.asgi.application'
 
 _REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
