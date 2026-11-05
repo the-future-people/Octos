@@ -206,7 +206,8 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
 
     facts = {
         'success': True,
-        'service': service.display_name or service.name,
+        'service': service.name,
+        'variant': service.variant_label or None,
         'quantity': quantity,
         'unit_price': f"GHS {line['unit_price']:.2f}",
         'addons': addons_out,
@@ -223,7 +224,11 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
 def _service_facts(service):
     return {
         'code': service.code,
-        'name': service.display_name or service.name,
+        # Variants share a display name ("Colour Printing"), so the service's
+        # own name and its variant label tell them apart; with only the
+        # display name, one-sided and front-and-back look like a conflict.
+        'name': service.name,
+        'variant': service.variant_label or None,
         'unit': (service.unit or '').replace('PER_', '').lower(),
         'needs_file': bool(service.requires_file_upload),
         'needs_design': bool(service.requires_design),

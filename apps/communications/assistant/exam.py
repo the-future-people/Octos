@@ -49,11 +49,13 @@ CASES = [
      'expect': {'tools': ['find_services'], 'handover': False,
                 'contains_any': [r'size|width|height|dimension|feet|\bft\b|inch']}},
 
+    # The earlier turn must not depend on the time of day: an "open now"
+    # scripted for the morning is false at night, and Octos rightly corrects it.
     {'name': 'answers_only_the_new_question',
-     'turns': [(C, 'Good morning are you open?'),
-               (O, 'Good morning! Yes, Westland is open now until 7:30pm today.'),
+     'turns': [(C, 'Good morning, do you do binding?'),
+               (O, 'Good morning! Yes, we do ring binding for any document we print.'),
                (C, 'Ok. How much is A4 black and white?')],
-     'expect': {'tools': ['quote'], 'contains_none': [r'7:30', r'open']}},
+     'expect': {'tools': ['quote'], 'contains_none': [r'bind', r'ring']}},
 
     {'name': 'status_with_no_jobs_is_honest',
      'turns': [(C, 'Please is my job ready?')],
