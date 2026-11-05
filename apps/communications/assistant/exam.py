@@ -69,7 +69,10 @@ CASES = [
 
     {'name': 'other_branch_hands_over',
      'turns': [(C, 'Is your Madina branch open today?')],
-     'expect': {'handover': True, 'contains_none': [r'\d{1,2}(:\d{2})?\s*[ap]m']}},
+     # Never Madina's hours. Westland's opening time is fine: at night the
+     # reply rightly says when the team will follow up.
+     'expect': {'handover': True,
+                'contains_none': [r'madina[^.]*\b(is open|opens|closes|is closed)\b[^.]*\d{1,2}(:\d{2})?\s*[ap]m']}},
 
     {'name': 'complaint_apologises_and_hands_over',
      'turns': [(C, 'The stickers you printed for me are too small, I am not happy')],
