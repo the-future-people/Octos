@@ -1068,3 +1068,19 @@ Internal detail belongs in the log, not on the screen.
   loop missed `test_*.py`, and inventory's 22 deduction tests sat outside every
   full run from March to November. A `tests.py` beside a `tests/` folder is dead:
   Python imports the folder.
+
+- **A Find/Change whose Find is the anchor line ("put this under X") replaces X
+  unless X is repeated in the Change.** `totalUnread` vanished that way, and the
+  code meant to go under it landed inside a loop. Two runtime crashes, a clean
+  build both times. For insertions, the Change must start with the anchor line;
+  and a frontend change gets one look in `npm run dev` before it's pushed.
+
+  - **Locally, `docker-compose build web` doesn't rebuild the worker.** A new
+  package imported fine in web and was missing in the worker, where the
+  assistant runs. After changing requirements: build both, recreate both,
+  and import the package in each container.
+
+  - **A multi-part edit where one part defines a name the others use fails
+  quietly at runtime, not at import.** `Q` and then `HOLDING` were used
+  but never defined; Python only noticed when the line ran. New constants
+  and imports now go in by command, checked, before the edits that use them.
