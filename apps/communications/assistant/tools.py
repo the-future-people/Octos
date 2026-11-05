@@ -228,6 +228,11 @@ def _service_facts(service):
         'needs_file': bool(service.requires_file_upload),
         'needs_design': bool(service.requires_design),
         'needs': _spec_fields(service),
+        # Binding, lamination and so on: the codes quote() takes as addon_codes.
+        'addons': [
+            {'code': a.code, 'name': a.display_name or a.name}
+            for a in service.addons.filter(is_active=True)
+        ],
     }
 
 
