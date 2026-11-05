@@ -38,7 +38,8 @@ MAX_TOKENS = 600        # replies are short by design
 HISTORY = 20            # messages of context
 ECHO_SECONDS = 5        # a message this soon after Octos's own is an auto-reply
 LOOP_WINDOW = timedelta(minutes=10)
-LOOP_REPLIES = 4        # Octos replies in that window before a person is brought in
+FAST_REPLIES = 2        # replies within ECHO_SECONDS of Octos's, in the window: an auto-reply
+RUNAWAY_REPLIES = 15    # Octos replies in the window: a ceiling no human conversation reaches
 SHADOW_PREFIX = 'Octos would say: '
 # Sent when Octos can't safely answer (a blocked reply, a failure): no
 # figures in it, so it can never be wrong, and the customer isn't left
@@ -190,17 +191,35 @@ def _silence(conversation, trigger, now):
 
 
 def _looks_automated(conversation, now):
-    """A reason a person should look (a possible bot loop), or None."""
-    recent = conversation.messages.filter(is_internal_note=False, created_at__gte=now - LOOP_WINDOW)
-    octos = recent.filter(direction=Message.OUTBOUND, sent_by__isnull=True, kind='').count()
-    if octos >= LOOP_REPLIES:
-        return 'many replies back and forth in a few minutes; possibly an automatic reply'
-    last_three = list(
-        conversation.messages.filter(direction=Message.INBOUND)
-        .order_by('-created_at').values_list('body', flat=True)[:3]
+    """
+    A reason a person should look (a possible bot loop), or None.
+
+    Judged by speed, not volume: a person needs more than a few seconds
+    to read Octos's message and answer, an auto-reply doesn't. A busy
+    human conversation (ten quick exchanges about an order) is normal and
+    must never trip this. Only messages since the conversation last came
+    back to Octos count, so a person handing back starts afresh.
+    """
+    since = now - LOOP_WINDOW
+    if conversation.handled_since and conversation.handled_since > since:
+        since = conversation.handled_since
+    recent = list(
+        conversation.messages.filter(is_internal_note=False, created_at__gte=since)
+        .order_by('created_at')
     )
-    if len(last_three) == 3 and last_three[0] and len(set(last_three)) == 1:
-        return 'the same message three times; possibly an automatic reply'
+
+    def from_octos(m):
+        return m.direction == Message.OUTBOUND and m.sent_by_id is None and not m.kind
+
+    if sum(1 for m in recent if from_octos(m)) >= RUNAWAY_REPLIES:
+        return 'an unusually long run of replies in a few minutes; possibly an automatic reply'
+    fast = sum(
+        1 for before, after in zip(recent, recent[1:])
+        if from_octos(before) and after.direction == Message.INBOUND
+        and (after.created_at - before.created_at).total_seconds() <= ECHO_SECONDS
+    )
+    if fast >= FAST_REPLIES:
+        return 'replies arriving within seconds of Octos, more than once; possibly an automatic reply'
     return None
 
 
