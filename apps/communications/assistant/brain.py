@@ -220,9 +220,16 @@ def _converse(conversation, ctx, run):
             system=system,
             tools=TOOL_SPECS,
             messages=messages,
+            # Automatic caching: the tools, instructions and conversation so
+            # far are re-read from the cache on each later round, at a tenth
+            # of the input price, instead of being sent again in full.
+            cache_control={'type': 'ephemeral'},
         )
-        run.input_tokens += getattr(response.usage, 'input_tokens', 0) or 0
-        run.output_tokens += getattr(response.usage, 'output_tokens', 0) or 0
+        usage = response.usage
+        run.input_tokens += getattr(usage, 'input_tokens', 0) or 0
+        run.output_tokens += getattr(usage, 'output_tokens', 0) or 0
+        run.cache_read_tokens += getattr(usage, 'cache_read_input_tokens', 0) or 0
+        run.cache_write_tokens += getattr(usage, 'cache_creation_input_tokens', 0) or 0
 
         if response.stop_reason == 'max_tokens':
             # Cut off mid-reply ("...10 p"): never sent. Fails the run, so the

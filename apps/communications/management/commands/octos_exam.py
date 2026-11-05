@@ -25,7 +25,7 @@ class Command(BaseCommand):
             raise CommandError(f"No case matches {opts['case']!r}.")
 
         self.stdout.write(f'Octos exam: {len(cases)} cases, model {settings.OCTOS_ASSISTANT_MODEL}\n')
-        passed, tokens_in, tokens_out = 0, 0, 0
+        passed, tokens_in, tokens_out, cache_read, cache_write = 0, 0, 0, 0, 0
         for case in cases:
             try:
                 r = run_case(case)
@@ -35,6 +35,8 @@ class Command(BaseCommand):
             passed += r['passed']
             tokens_in += r['tokens'][0]
             tokens_out += r['tokens'][1]
+            cache_read += r['tokens'][2]
+            cache_write += r['tokens'][3]
             mark = self.style.SUCCESS('PASS') if r['passed'] else self.style.ERROR('FAIL')
             self.stdout.write(f"{mark} {r['name']}  [{', '.join(r['tools']) or 'no tools'}]")
             for why in r['fails']:
@@ -44,4 +46,7 @@ class Command(BaseCommand):
                 if r['handover']:
                     self.stdout.write(f"     handover: {r['handover']}")
 
-        self.stdout.write(f'\n{passed}/{len(cases)} passed. Tokens: {tokens_in} in, {tokens_out} out.')
+        self.stdout.write(
+            f'\n{passed}/{len(cases)} passed. Tokens: {tokens_in} in, {tokens_out} out, '
+            f'{cache_read} read from cache, {cache_write} written to cache.'
+        )

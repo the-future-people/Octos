@@ -53,6 +53,10 @@ class AssistantRun(models.Model):
     )
     input_tokens  = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
+    # Prompt caching: tokens re-read from the cache (a tenth of the input
+    # price) and written to it (a quarter more than input, once).
+    cache_read_tokens  = models.PositiveIntegerField(default=0)
+    cache_write_tokens = models.PositiveIntegerField(default=0)
     duration_ms   = models.PositiveIntegerField(default=0)
     error         = models.TextField(blank=True)
     created_at    = models.DateTimeField(auto_now_add=True, db_index=True)
