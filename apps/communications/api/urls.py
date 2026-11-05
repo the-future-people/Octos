@@ -10,6 +10,8 @@ urlpatterns = [
     path('<int:pk>/assign/', views.ConversationAssignView.as_view(), name='conversation-assign'),
     path('<int:pk>/resolve/', views.ConversationResolveView.as_view(), name='conversation-resolve'),
     path('<int:pk>/link-job/', views.ConversationLinkJobView.as_view(), name='conversation-link-job'),
+    path('<int:pk>/take-over/', views.ConversationTakeOverView.as_view(), name='conversation-take-over'),
+    path('<int:pk>/hand-back/', views.ConversationHandBackView.as_view(), name='conversation-hand-back'),
 
     # Webhooks
     path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='webhook-whatsapp'),

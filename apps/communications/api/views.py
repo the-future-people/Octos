@@ -125,6 +125,13 @@ class ConversationReplyView(APIView):
                 **data
             )
 
+        if not is_note:
+            # A reply to the customer takes the conversation over from Octos,
+            # which must never talk over a person, and clears any reminder.
+            # An internal note is not a reply: it changes neither.
+            from apps.communications.services import handover
+            handover.staff_replied(conversation, request.user)
+
         # Auto-claim if unclaimed, now that something was actually sent or noted
         if not conversation.assigned_to:
             conversation.assigned_to = request.user
@@ -255,3 +262,45 @@ class ConversationLinkJobView(APIView):
             'job_id'                : job.id,
             'linked_to_conversation': conversation.id,
         })
+
+class ConversationTakeOverView(APIView):
+    """
+    POST /api/v1/communications/<id>/take-over/
+    A person answers from now on; Octos goes quiet in this thread.
+    Taking over a conversation Octos handed over clears its reason, since
+    someone has now come.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+
+        from apps.communications.services import handover
+        already_mine = (
+            conversation.handled_by == Conversation.STAFF
+            and not conversation.handoff_reason
+            and conversation.assigned_to_id == request.user.pk
+        )
+        if not already_mine:
+            handover.take_over(conversation, request.user)
+        return Response({'handled_by': conversation.handled_by})
+
+
+class ConversationHandBackView(APIView):
+    """
+    POST /api/v1/communications/<id>/hand-back/
+    Octos answers from now on.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+
+        from apps.communications.services import handover
+        if conversation.handled_by != Conversation.OCTOS:
+            handover.hand_back(conversation, request.user)
+        return Response({'handled_by': conversation.handled_by})

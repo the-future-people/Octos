@@ -415,6 +415,13 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.storefront.tasks.convert_stragglers',
         'schedule': crontab(minute=20),
     },
+    # Who answers WhatsApp: a customer waiting 30 minutes on a person gets
+    # that person reminded; 10 minutes after an ignored reminder, Octos
+    # takes the conversation back (communications/services/handover.py).
+    'watch-handovers-every-minute': {
+        'task': 'apps.communications.tasks.watch_handovers',
+        'schedule': crontab(),
+    },
 }
 
 # CORS

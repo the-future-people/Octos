@@ -78,6 +78,28 @@ class Conversation(AuditModel):
     )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=OPEN)
+
+    # Who answers the customer. Octos by default; a person once they take
+    # over (the button, or by replying); Octos again when handed back. Octos
+    # hands over itself when a person is needed, and says why.
+    OCTOS = 'OCTOS'
+    STAFF = 'STAFF'
+    HANDLER_CHOICES = [
+        (OCTOS, 'Octos'),
+        (STAFF, 'Staff'),
+    ]
+    handled_by = models.CharField(max_length=10, choices=HANDLER_CHOICES, default=OCTOS)
+    handled_since = models.DateTimeField(null=True, blank=True)
+    handoff_reason = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text='Why Octos asked for a person, when it did. Empty when a person took over themselves.',
+    )
+    # A person has the conversation and the customer has been waiting 30
+    # minutes: whoever handles it is reminded, and this records when. Ten
+    # minutes after the reminder, Octos takes the conversation back. Any
+    # staff reply clears it.
+    reminded_at = models.DateTimeField(null=True, blank=True)
     unread_count = models.PositiveIntegerField(default=0)
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_message_preview = models.CharField(max_length=200, blank=True)

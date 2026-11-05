@@ -55,12 +55,17 @@ class InboxAccessTests(CommunicationsTestBase):
             with self.captureOnCommitCallbacks(execute=True):
                 res = self.client.post(self.url_reply(self.company.pk), {'body': 'Ready by 4pm 👍'})
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
-        sent = self.company.messages.get(direction=Message.OUTBOUND)
+        # A reply leaves two outbound records: the message itself, and the
+        # internal note saying who took over from Octos.
+        sent = self.company.messages.get(direction=Message.OUTBOUND, is_internal_note=False)
         self.assertEqual(sent.status, Message.QUEUED)
         self.assertEqual(sent.sent_by, self.user)
         delay.assert_called_once_with(sent.pk)
         self.company.refresh_from_db()
         self.assertEqual(self.company.assigned_to, self.user)
+        # Replying took the conversation over: Octos must not talk over a person.
+        self.assertEqual(self.company.handled_by, 'STAFF')
+        self.assertTrue(self.company.messages.filter(is_internal_note=True, body__contains='took over').exists())
 
     def test_a_shut_window_gives_the_reason_and_saves_nothing(self):
         res = self.client.post(self.url_reply(self.company.pk), {'body': 'Hello?'})
