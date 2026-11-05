@@ -143,7 +143,8 @@ class BrainTests(TestCase):
         run = self.run_with(Model(says(text("That's GHS 35 for the lot."))))
         self.assertEqual(run.decision, AssistantRun.BLOCKED)
         self.assertIn('GHS 35.00', run.reason)
-        self.assertFalse(self.sent().exists())
+        # The made-up price never goes out; a holding reply with no figures does.
+        self.assertEqual(self.sent().get().body, brain.HOLDING)
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.handled_by, Conversation.STAFF)
 
@@ -163,6 +164,7 @@ class BrainTests(TestCase):
         run = self.run_with(Model(error=RuntimeError('API down')))
         self.assertEqual(run.decision, AssistantRun.FAILED)
         self.assertIn('API down', run.error)
+        self.assertEqual(self.sent().get().body, brain.HOLDING)
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.handled_by, Conversation.STAFF)
 

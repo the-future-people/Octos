@@ -40,6 +40,10 @@ ECHO_SECONDS = 5        # a message this soon after Octos's own is an auto-reply
 LOOP_WINDOW = timedelta(minutes=10)
 LOOP_REPLIES = 4        # Octos replies in that window before a person is brought in
 SHADOW_PREFIX = 'Octos would say: '
+# Sent when Octos can't safely answer (a blocked reply, a failure): no
+# figures in it, so it can never be wrong, and the customer isn't left
+# in silence while a person is brought in.
+HOLDING = 'Let me check that with the team. Someone will get back to you shortly 🙏'
 TOOL_SPECS = [
     {
         'name': 'branch_hours',
@@ -128,12 +132,12 @@ def respond(conversation_id, trigger_id=None, now=None):
         problems = checker.unverified(reply, facts)
         if problems:
             why = 'I could not verify ' + ', '.join(problems) + ' before sending.'
-            _act(mode, conversation, run, text='', handoff=why, note=f'Octos blocked its own reply: {reply}')
+            _act(mode, conversation, run, text=HOLDING, handoff=why, note=f'Octos blocked its own reply: {reply}')
             return _finish(run, AssistantRun.BLOCKED, started, reason=why, reply=reply)
 
         if not reply and not ctx.handoff:
             why = 'Octos had nothing to say.'
-            _act(mode, conversation, run, text='', handoff=why)
+            _act(mode, conversation, run, text=HOLDING, handoff=why)
             return _finish(run, AssistantRun.HANDED_OVER, started, reason=why)
 
         _act(mode, conversation, run, text=reply, handoff=ctx.handoff)
@@ -147,7 +151,11 @@ def respond(conversation_id, trigger_id=None, now=None):
         run.error = repr(exc)[:2000]
         if mode == 'live':
             try:
-                from apps.communications.services import handover
+                from apps.communications.services import handover, whatsapp_outbound
+                try:
+                    run.sent = whatsapp_outbound.send_text(conversation, HOLDING)
+                except Exception:
+                    logger.exception('Octos could not send its holding reply on %s', conversation_id)
                 handover.octos_hands_over(conversation, 'Octos hit a problem and could not answer.')
             except Exception:
                 logger.exception('Octos could not hand over conversation %s', conversation_id)
