@@ -8,7 +8,7 @@ class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
         fields = [
-            'id', 'direction', 'channel', 'message_type', 'status',
+            'id', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
             'body', 'media_url', 'media_file', 'sent_by', 'sent_by_name',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',

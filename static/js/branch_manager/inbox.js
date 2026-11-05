@@ -250,9 +250,11 @@ const Inbox = (() => {
         lastDate = msgDate;
       }
 
-      const dir    = m.direction === 'outbound' ? 'outbound' : 'inbound';
+      // The API sends OUTBOUND / INBOUND in capitals; compare without case.
+      const dir    = (m.direction || '').toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
+      // An outbound message with no staff member on it was sent by Octos.
       const sender = dir === 'outbound'
-        ? (m.sent_by_name || 'You')
+        ? (m.sent_by_name || 'Octos')
         : (State.activeConvo?.display_name || 'Customer');
       const time   = formatTime(m.created_at);
 
@@ -260,12 +262,30 @@ const Inbox = (() => {
         <div class="msg-row ${dir}">
           <div class="msg-wrap">
             <div class="msg-bubble">${esc(m.body || '')}</div>
-            <div class="msg-meta">${esc(sender)} · ${time}</div>
+            <div class="msg-meta">${esc(sender)} · ${time}${statusMark(m)}</div>
           </div>
         </div>`);
     });
 
     $messagesArea.innerHTML = html.join('');
+  }
+
+  // WhatsApp's own ticks, which staff already read without thinking.
+  // Only on outbound WhatsApp messages; a failed one names Meta's reason
+  // on hover.
+  function statusMark(m) {
+    if ((m.channel || '').toUpperCase() !== 'WHATSAPP') return '';
+    if ((m.direction || '').toUpperCase() !== 'OUTBOUND') return '';
+    const mark = (text, title, colour) =>
+      ` <span title="${esc(title)}" style="margin-left:4px;${colour ? `color:${colour};` : ''}">${text}</span>`;
+    switch (m.status) {
+      case 'QUEUED':    return mark('🕓', 'Sending');
+      case 'SENT':      return mark('✓', 'Sent');
+      case 'DELIVERED': return mark('✓✓', 'Delivered');
+      case 'READ':      return mark('✓✓', 'Read', '#53bdeb');
+      case 'FAILED':    return mark('Not delivered', m.error || 'Not delivered', '#e5484d');
+      default:          return '';
+    }
   }
 
   function scrollMessages() {
@@ -300,19 +320,22 @@ const Inbox = (() => {
         headers : { 'Content-Type': 'application/json' },
         body    : JSON.stringify({ body }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // The server says why (a closed WhatsApp window, say). Show it, and
+        // keep the typed message in the box so nothing is lost.
+        let reason = 'Could not send message';
+        try { reason = (await res.json()).detail || reason; } catch { /* keep default */ }
+        toast(reason, 'error');
+        return;
+      }
+      const sent = await res.json();
 
       $replyInput.value        = '';
       $replyInput.style.height = 'auto';
 
-      // Optimistic render
-      State.messages.push({
-        id           : Date.now(),
-        body,
-        direction    : 'outbound',
-        created_at   : new Date().toISOString(),
-        sent_by_name : null,
-      });
+      // The message as the server recorded it: on WhatsApp it starts QUEUED,
+      // and the 15-second poll moves its mark on to sent, delivered, read.
+      State.messages.push(sent);
       renderMessages();
       scrollMessages();
 
