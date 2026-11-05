@@ -206,6 +206,18 @@ class ConversationDetailTests(CommunicationsTestBase):
 
 class ConversationReplyTests(CommunicationsTestBase):
 
+    def setUp(self):
+        super().setUp()
+        # These tests are about replying (claiming, sent_by, the preview),
+        # not WhatsApp's 24-hour window, so the window is held open here; it
+        # is tested in tests_whatsapp_outbound and tests_inbox_access. Until
+        # 6 Nov they passed only because a reply was recorded without ever
+        # being sent.
+        from unittest.mock import patch
+        patcher = patch('apps.communications.services.whatsapp_outbound.window_open', return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_reply_creates_message(self):
         res = self.client.post(self.url_reply(self.convo.pk), {'body': 'Hello!'})
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)

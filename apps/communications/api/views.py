@@ -3,11 +3,28 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from apps.communications.models import Conversation, Message
+from apps.communications.services.access import visible_conversations
 from apps.accounts.models import CustomUser
 from .serializers import (
     ConversationListSerializer, ConversationDetailSerializer,
     MessageSerializer, MessageCreateSerializer, ConversationAssignSerializer
 )
+
+# What staff are told when WhatsApp's 24-hour window is shut. Plain words:
+# staff don't need to know what a template is, only when it will work again.
+WINDOW_CLOSED = (
+    "This customer hasn't written to us in the last 24 hours, so WhatsApp "
+    "won't deliver a normal message. It will work again as soon as they write."
+)
+
+
+def _visible(request, pk):
+    """The conversation, if this user may see it; None if not, or if it doesn't exist."""
+    return visible_conversations(request.user).filter(pk=pk).first()
+
+
+def _not_found():
+    return Response({'detail': 'Conversation not found.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class ConversationListView(generics.ListAPIView):
@@ -17,14 +34,11 @@ class ConversationListView(generics.ListAPIView):
     search_fields = ['contact_phone', 'contact_email', 'contact_name']
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Conversation.objects.select_related(
+        # The user's branch plus every company (WhatsApp) conversation;
+        # everything for a user with no branch. See services/access.py.
+        qs = visible_conversations(self.request.user).select_related(
             'branch', 'customer', 'assigned_to'
         )
-
-        # Scope to user's branch by default
-        if hasattr(user, 'branch') and user.branch:
-            qs = qs.filter(branch=user.branch)
 
         # Optional query param overrides (for managers with multi-branch access)
         branch_id    = self.request.query_params.get('branch')
@@ -49,15 +63,9 @@ class ConversationDetailView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Conversation.objects.select_related(
+        return visible_conversations(self.request.user).select_related(
             'branch', 'customer', 'assigned_to'
         ).prefetch_related('messages', 'jobs')
-
-        if hasattr(user, 'branch') and user.branch:
-            qs = qs.filter(branch=user.branch)
-
-        return qs
 
     def get_object(self):
         obj = super().get_object()
@@ -71,39 +79,56 @@ class ConversationReplyView(APIView):
     """
     POST /api/v1/communications/<id>/reply/
     Body: { body, message_type?, is_internal_note? }
-    Replying to an unclaimed conversation auto-assigns it to the replying user.
+
+    A reply on a WhatsApp conversation is really sent: through
+    whatsapp_outbound.send_text, which checks the 24-hour window, records
+    the message as QUEUED and has the worker deliver it. Its status then
+    follows Meta's receipts. A shut window is refused with a plain reason;
+    nothing is saved that wasn't sent.
+
+    Internal notes, and replies on other channels, are recorded as before.
+    Replying to an unclaimed conversation claims it for the replying user,
+    once the reply has actually gone.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        try:
-            conversation = Conversation.objects.get(pk=pk)
-        except Conversation.DoesNotExist:
-            return Response(
-                {'detail': 'Conversation not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
 
         serializer = MessageCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Auto-claim if unclaimed
+        data = serializer.validated_data
+        is_note = data.get('is_internal_note', False)
+
+        if conversation.channel == Conversation.WHATSAPP and not is_note:
+            from apps.communications.services import whatsapp_outbound
+            try:
+                message = whatsapp_outbound.send_text(
+                    conversation, data.get('body', ''), sent_by=request.user,
+                )
+            except whatsapp_outbound.WindowClosed:
+                return Response({'detail': WINDOW_CLOSED}, status=status.HTTP_400_BAD_REQUEST)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Use SYSTEM channel for internal notes, otherwise the conversation's channel
+            channel = Message.SYSTEM if is_note else conversation.channel
+            message = Message.objects.create(
+                conversation=conversation,
+                direction=Message.OUTBOUND,
+                channel=channel,
+                sent_by=request.user,
+                **data
+            )
+
+        # Auto-claim if unclaimed, now that something was actually sent or noted
         if not conversation.assigned_to:
             conversation.assigned_to = request.user
             conversation.save(update_fields=['assigned_to'])
-
-        # Use SYSTEM channel for internal notes, otherwise use conversation channel
-        is_note = serializer.validated_data.get('is_internal_note', False)
-        channel = Message.SYSTEM if is_note else conversation.channel
-
-        message = Message.objects.create(
-            conversation=conversation,
-            direction=Message.OUTBOUND,
-            channel=channel,
-            sent_by=request.user,
-            **serializer.validated_data
-        )
 
         return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)
 
@@ -116,13 +141,9 @@ class ConversationAssignView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        try:
-            conversation = Conversation.objects.get(pk=pk)
-        except Conversation.DoesNotExist:
-            return Response(
-                {'detail': 'Conversation not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
 
         serializer = ConversationAssignSerializer(data=request.data)
         if not serializer.is_valid():
@@ -171,13 +192,9 @@ class ConversationResolveView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        try:
-            conversation = Conversation.objects.get(pk=pk)
-        except Conversation.DoesNotExist:
-            return Response(
-                {'detail': 'Conversation not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
 
         if conversation.status == Conversation.RESOLVED:
             return Response(
@@ -210,13 +227,9 @@ class ConversationLinkJobView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        try:
-            conversation = Conversation.objects.get(pk=pk)
-        except Conversation.DoesNotExist:
-            return Response(
-                {'detail': 'Conversation not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
 
         job_id = request.data.get('job_id')
 
