@@ -1345,30 +1345,10 @@ class ArtworkCheckView(APIView):
         content = upload.read()
         name, content_type = _readable_name(upload.name, service), upload.content_type
 
-        def rewound():
-            return SimpleUploadedFile(name, content, content_type=content_type)
-
-        upload_hash = file_hash(rewound())
-
-        # The same measuring the counter uses. Two implementations of
-        # "how many dots per inch is this" would eventually disagree,
-        # and a customer would get different answers about one file.
-        found = measure(_Carrier(rewound()))
-
-        verdict = check_file(
-            metadata_state=found.get('metadata_state'),
-            content_type=upload.content_type or '',
-            width_px=found.get('width_px'),
-            height_px=found.get('height_px'),
-            width_mm=found.get('width_mm'),
-            height_mm=found.get('height_mm'),
-            page_count=found.get('page_count'),
-            colour_mode=found.get('colour_mode'),
-            pdf_images=found.get('pdf_images'),
-            ordered_width_in=specs.get('width_in'),
-            ordered_height_in=specs.get('height_in'),
-            ordered_pages=specs.get('pages'),
-        )
+        # Measured, judged and (unless refused) staged by the same service
+        # Octos uses for WhatsApp files: storefront/services/inspection.py.
+        from apps.storefront.services.inspection import inspect_file
+        upload_hash, found, verdict, staged = inspect_file(content, name, content_type, specs)
 
         payload = {
             'verdict': verdict['verdict'],
@@ -1385,23 +1365,7 @@ class ArtworkCheckView(APIView):
         # and nothing is handed back. A warned one is kept: the customer
         # may accept it, and making them send thirty megabytes a second
         # time is the likeliest moment they give up.
-        if verdict['verdict'] != 'refuse':
-            staged = StagedUpload.objects.create(
-                file=rewound(),
-                original_filename=name,
-                size_bytes=len(content),
-                content_type=content_type or '',
-                file_hash=upload_hash,
-                verdict=verdict['verdict'],
-                checks=verdict['checks'],
-                **{k: v for k, v in found.items()
-                   if k in (
-                       'metadata_state', 'page_count', 'width_px', 'height_px',
-                       'width_mm', 'height_mm', 'dpi', 'colour_mode',
-                       'pdf_images',
-                   )},
-            )
-
+        if staged is not None:
             payload['token'] = sign_claim({
                 'staged': staged.pk,
                 'service': service.id,
