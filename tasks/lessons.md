@@ -1063,3 +1063,8 @@ Internal detail belongs in the log, not on the screen.
   - **An untracked app-sized folder is probably a stray copy.** `apps/inventory/jobs/`
   was a byte-identical copy of `apps/jobs` (folders dated today, files dated months
   back). Compare every file by hash before deleting; never delete on a guess.
+
+  - **The full suite is `.\run-tests.ps1`, never a retyped loop.** A hand-typed
+  loop missed `test_*.py`, and inventory's 22 deduction tests sat outside every
+  full run from March to November. A `tests.py` beside a `tests/` folder is dead:
+  Python imports the folder.

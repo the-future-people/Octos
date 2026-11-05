@@ -233,3 +233,24 @@ WhatsApp's ~30 days), catalogue availability, promise engine
   not the dashboard. The dashboard's pencil did nothing on mobile
 - Graph API version: v26.0 (pin for Step 3)
 - 26 new tests, 61 total in communications, all green
+
+- Bot-loop guard: business customers have WhatsApp auto-replies (seen live
+  4 Nov: Kings Hub's greeting answered Octos's first reply). Octos never
+  answers an auto-reply: repeated identical messages, replies within
+  seconds of its own message, or more than N exchanges with no real
+  question in between all hand the conversation to staff.
+
+  ## Review (Step 2: the sender, done 4–5 Nov 2026)
+- Live: Octos's first reply went QUEUED → SENT → DELIVERED → READ on production
+- Live: a system message (kind 'test') chose WhatsApp inside the window
+- One send() for everything; window from the customer's last message, 5-min margin
+- tell(): app push → WhatsApp (window open) → SMS; failed WhatsApp falls back to SMS
+  by itself, except receipts (staff print those)
+- Welcome sent once across both channels; receipts honest about why they can't send
+- Celery now finds every app's tasks itself (the explicit list had forgotten two apps)
+- Found and fixed along the way: ready text had lost its reference (29 Oct);
+  business registration test predated 2 Nov; inventory's 22 deduction tests
+  hadn't run in a full suite since March
+- run-tests.ps1 is the full suite: 897 tests, all green
+- Noted for later: a test reaches a real weather API; Kings Hub's auto-reply
+  showed the bot-loop risk for Step 5
