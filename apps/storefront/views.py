@@ -907,91 +907,18 @@ class OrderPayView(APIView):
     def post(self, request, order_number):
         order = _order_or_404(order_number, request.data.get('token'))
 
-        if order.is_paid or order.status == OnlineOrder.Status.PAID:
-            return Response(
-                {'detail': 'This order has already been paid for.'},
-                status=status.HTTP_409_CONFLICT,
+        # One path for taking money, shared with Octos on WhatsApp:
+        # storefront/services/payment.py. Same checks, same answers.
+        from apps.storefront.services import payment as payment_service
+        try:
+            started = payment_service.start_payment(
+                order,
+                email=(request.data.get('email') or '').strip(),
+                callback_url=request.data.get('callback_url') or None,
             )
-
-        if not order.lead_id:
-            return Response(
-                {'detail': 'Tell us who you are first.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not order.branch_id:
-            return Response(
-                {'detail': 'Choose where you’d like this made.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if order.total <= 0:
-            return Response(
-                {'detail': 'There is nothing on this order yet.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        missing = _artwork_missing(order)
-        if missing:
-            return Response({'detail': missing}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Paystack wants an email. Most of our customers give a phone
-        # number and nothing else, so one is derived from it — the
-        # receipt that matters is the one we send by SMS.
-        email = (request.data.get('email') or '').strip()
-        if not email:
-            digits = ''.join(c for c in order.lead.phone if c.isdigit())
-            email = f'{digits}@customers.farhatpress.com'
-
-        reference = order.next_payment_reference()
-        if reference is None:
-            return Response(
-                {'detail': 'This order has already been paid.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # The promise, worked out now: the moment the customer pays is the
-        # moment it is made. A cart can sit for days, and a time worked out
-        # on Monday means nothing on Thursday.
-        from apps.storefront.services.conversion import promise_for
-        promise = promise_for(order)
-        if promise is not None:
-            order.promised_for = promise
-            order.save(update_fields=['promised_for'])
-
-        result = paystack.initialise(
-            # Its own reference, so backing out of one attempt does not
-            # stop the next. Paystack never forgets a reference it has
-            # seen, and the order number alone would be seen once.
-            reference=reference,
-            amount_minor=paystack.to_minor(order.total),
-            email=email,
-            callback_url=request.data.get('callback_url') or None,
-            metadata={
-                'order_number': order.order_number,
-                'customer': order.lead.first_name,
-                'phone': order.lead.phone,
-            },
-        )
-
-        if not result.get('success'):
-            # The order is left exactly as it was, so the customer can
-            # try again without rebuilding anything.
-            return Response(
-                {'detail': result.get('error', 'Could not start the payment.')},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        order.payment_reference = result.get('reference') or order.order_number
-        order.status = OnlineOrder.Status.AWAITING_PAYMENT
-        order.save(update_fields=[
-            'payment_reference', 'status', 'updated_at',
-        ])
-
-        return Response({
-            'authorization_url': result.get('authorization_url'),
-            'reference': order.payment_reference,
-            'amount': f'{Decimal(order.total):.2f}',
-        })
+        except payment_service.PaymentRefused as refused:
+            return Response({'detail': refused.detail}, status=refused.status)
+        return Response(started)
 
 """
 Append this class to apps/storefront/views.py.
@@ -1219,37 +1146,8 @@ def _file_payload(record):
         'warning_accepted': record.warning_accepted,
     }
 
-def _artwork_missing(order):
-    """
-    Whether this order still needs a file before it can be paid for.
-
-    A branch cannot print what it has not been sent. Taking the money
-    first means an order reaches the floor with nothing on it, and the
-    conversation that follows starts with the customer already out of
-    pocket.
-
-    A refused file is not a file: we have already said we cannot print
-    it. A warned one is, as long as the customer said carry on — that
-    acceptance is on the record for the coordinator to see.
-    """
-    needs_file = False
-    for line in (order.line_items or []):
-        service = Service.objects.filter(pk=line.get('service')).first()
-        if service and service.requires_file_upload:
-            needs_file = True
-            break
-
-    if not needs_file:
-        return None
-
-    record = order.files.first()
-    if record is None:
-        return 'Send us your artwork before paying.'
-    if record.verdict == 'refuse':
-        return 'We can’t print the file you sent. Send another before paying.'
-    if record.verdict == 'warn' and not record.warning_accepted:
-        return 'Have a look at the note on your file before paying.'
-    return None
+# Moved to storefront/services/payment.py, which paying depends on.
+from apps.storefront.services.payment import artwork_missing as _artwork_missing  # noqa: E402
 
 """
 Append this class and its two helpers to apps/storefront/views.py.
