@@ -42,6 +42,11 @@ def hand_back(conversation, user=None, why=''):
     _switch(conversation, Conversation.OCTOS, reason='')
     who = user.full_name if user else 'Octos'
     _note(conversation, f'{who} handed the conversation back to Octos.' if user else f'Octos took the conversation back: {why}', user)
+    # A customer still waiting gets an answer now, not at their next message.
+    waiting = conversation.messages.filter(is_internal_note=False).order_by('-created_at').first()
+    if waiting is not None and waiting.direction == Message.INBOUND:
+        from apps.communications.services.whatsapp_inbound import wake_octos
+        wake_octos(conversation, waiting)
 
 
 def octos_hands_over(conversation, reason):

@@ -112,7 +112,7 @@ def _receive(message, profile_name):
         with transaction.atomic():
             # The write is the duplicate check: Meta retries, and the
             # unique wamid lets only the first delivery through.
-            Message.objects.create(
+            message = Message.objects.create(
                 conversation=conversation,
                 direction=Message.INBOUND,
                 channel=Message.WHATSAPP,
@@ -128,7 +128,24 @@ def _receive(message, profile_name):
     # After the message, not before: a retry must not reopen a thread
     # that staff resolved after the original arrived.
     _refresh(conversation, phone, profile_name)
+    wake_octos(conversation, message, pause=8)
     return True
+
+
+def wake_octos(conversation, message, pause=0):
+    """
+    Ask Octos to consider a customer's message, once the database has
+    committed it. The pause lets a burst of short messages arrive first:
+    each gets a run, but only the latest message's run answers. When the
+    assistant is off, nothing is queued at all.
+    """
+    from django.conf import settings
+    if settings.OCTOS_ASSISTANT_MODE not in ('shadow', 'live'):
+        return
+    from apps.communications.tasks import answer_whatsapp
+    transaction.on_commit(
+        lambda: answer_whatsapp.apply_async((conversation.pk, message.pk), countdown=pause)
+    )
 
 
 def _refresh(conversation, phone, profile_name):

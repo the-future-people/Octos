@@ -32,3 +32,9 @@ def watch_handovers():
     reminded, taken_back = handover.watch()
     if reminded or taken_back:
         logger.info('Handover watch: %s reminded, %s taken back', reminded, taken_back)
+
+@shared_task
+def answer_whatsapp(conversation_id, trigger_id):
+    """Octos considers a customer's message. All the rules are in assistant/brain."""
+    from apps.communications.assistant import brain
+    brain.respond(conversation_id, trigger_id)
