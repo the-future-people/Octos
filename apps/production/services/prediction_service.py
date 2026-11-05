@@ -24,6 +24,8 @@ from datetime import datetime, timedelta
 
 from django.utils import timezone
 
+from apps.organization.services import hours
+
 logger = logging.getLogger(__name__)
 
 # Under-promise. A flat multiplier until there is variance to measure, at
@@ -253,7 +255,8 @@ class PredictionService:
             datetime.combine(at.date(), closing), at.tzinfo
         )
 
-        if at.weekday() == SUNDAY:
+        # Sundays and declared holidays alike: the one calendar decides.
+        if not hours.is_trading_day(self.branch, at.date()):
             return self._opening_on(self._next_working_day(at.date()), at)
 
         if at.time() < opening:
@@ -303,13 +306,14 @@ class PredictionService:
         )
         return current
 
-    @staticmethod
-    def _next_working_day(from_date):
-        """The next day the branch trades. The week runs Monday to Saturday."""
-        nxt = from_date + timedelta(days=1)
-        while nxt.weekday() == SUNDAY:
-            nxt += timedelta(days=1)
-        return nxt
+    def _next_working_day(self, from_date):
+        """
+        The next day the branch trades, from the one calendar
+        (organization/services/hours): Sundays and declared holidays are
+        both skipped. Until November 2026 only Sundays were, so a ready
+        time could land on a day the branch had declared closed.
+        """
+        return hours.next_trading_day(self.branch, from_date)
 
     def _opening_on(self, day, reference) -> datetime:
         return timezone.make_aware(
