@@ -81,10 +81,11 @@ class KeepMediaTests(TestCase):
         self.assertEqual(self.conv.last_message_preview, 'Please 10 copies')
 
     def test_octos_sees_the_file_by_name_and_pages(self):
-        self.media_message(media_name='albion-sticker.pdf', media_pages=2,
-                           media_file='communications/media/albion-sticker.pdf')
+        msg = self.media_message(media_name='albion-sticker.pdf', media_pages=2,
+                                 media_file='communications/media/albion-sticker.pdf')
         (turn,) = brain._history(self.conv)
-        self.assertIn('[sent a document: albion-sticker.pdf, 2 pages]', turn['content'])
+        # The file's number is how Octos names it when it prepares an order.
+        self.assertIn(f'[sent a document: albion-sticker.pdf, 2 pages, file {msg.pk}]', turn['content'])
 
 
 class ArrivalTests(WebhookTestCase):

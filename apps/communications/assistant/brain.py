@@ -88,6 +88,33 @@ TOOL_SPECS = [
             'reason': {'type': 'string'},
         }, 'required': ['reason']},
     },
+    {
+        'name': 'prepare_order',
+        'description': "Create the order as agreed in this chat. Each line: service_code (from find_services), "
+                       "quantity, specifications (the service's needs, e.g. width_in and height_in; pages come "
+                       "from the file when one is given), addon_codes, and file: the number after 'file' in "
+                       "[sent a document: ..., file 123]. Returns the order, itemised lines, total and ready time, "
+                       "or why not (a missing or refused file, or a file warning the customer must accept). Set "
+                       "accept_warnings only after the customer has said to go ahead despite the warning.",
+        'input_schema': {'type': 'object', 'properties': {
+            'lines': {'type': 'array', 'items': {'type': 'object', 'properties': {
+                'service_code': {'type': 'string'},
+                'quantity': {'type': 'integer', 'minimum': 1},
+                'specifications': {'type': 'object'},
+                'addon_codes': {'type': 'array', 'items': {'type': 'string'}},
+                'file': {'type': 'integer'},
+            }, 'required': ['service_code']}},
+            'accept_warnings': {'type': 'boolean'},
+        }, 'required': ['lines']},
+    },
+    {
+        'name': 'send_payment_link',
+        'description': 'The Paystack link for an order you prepared in this chat. Only after the customer has '
+                       'clearly agreed to the order and its total. Payment is in full.',
+        'input_schema': {'type': 'object', 'properties': {
+            'order': {'type': 'string', 'description': 'The order number prepare_order returned.'},
+        }, 'required': ['order']},
+    },
 ]
 
 
@@ -294,6 +321,15 @@ def _run_tool(name, args, ctx):
             args.get('service_code', ''), args.get('specifications') or {},
             args.get('quantity') or 1, args.get('addon_codes') or (), branches=ctx.branches,
         )
+    if name == 'prepare_order':
+        from apps.communications.assistant import ordering
+        return ordering.prepare_order(
+            ctx.conversation, args.get('lines') or [],
+            accept_warnings=bool(args.get('accept_warnings')), branches=ctx.branches,
+        )
+    if name == 'send_payment_link':
+        from apps.communications.assistant import ordering
+        return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
     if name == 'hand_to_person':
         ctx.handoff = (args.get('reason') or 'Octos asked for a person.')[:200]
         return {'ok': True}
@@ -327,6 +363,8 @@ def _history(conversation):
                 what += f", {m.media_pages} page{'s' if m.media_pages != 1 else ''}"
             if not m.media_file:
                 what += ', not saved yet'
+            else:
+                what += f', file {m.pk}'
             text = (text + f' [sent a {what}]').strip()
         if not text:
             continue

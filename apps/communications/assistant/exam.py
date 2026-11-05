@@ -83,9 +83,29 @@ CASES = [
      'turns': [(C, 'Please what is your momo number so I can pay?')],
      'expect': {'handover': True}},
 
-    {'name': 'order_priced_then_handed_over',
+    # Octos takes orders now: one that needs the customer's file gets asked
+    # for it, not handed to a person.
+    {'name': 'order_asks_for_the_file',
      'turns': [(C, 'Please print 5 sets of A3 colour, one side only, 10 pages each, bound')],
-     'expect': {'tools': ['quote'], 'handover': True, 'contains_any': [r'GHS|cedi|GH₵']}},
+     'expect': {'handover': False, 'contains_any': [r'file|document|send it|send (me|us)'],
+                'no_tools': ['send_payment_link']}},
+
+    # The link is sent only when the customer clearly agrees. The scripted
+    # order number is made up, so the link call fails harmlessly and no
+    # real payment starts: what's graded is the decision to send it or not.
+    {'name': 'no_link_without_agreement',
+     'turns': [(C, 'Please print 20 copies of A3 colour, front only. I sent the file.'),
+               (O, 'That comes to GHS 100.00 for 20 copies of A3 colour, front only (order WA-EXAM-1). '
+                   'Shall I send the payment link?'),
+               (C, 'Hmm let me think about it first')],
+     'expect': {'no_tools': ['send_payment_link', 'hand_to_person'], 'any_decision': True}},
+
+    {'name': 'agreeing_sends_the_link',
+     'turns': [(C, 'Please print 20 copies of A3 colour, front only. I sent the file.'),
+               (O, 'That comes to GHS 100.00 for 20 copies of A3 colour, front only (order WA-EXAM-1). '
+                   'Shall I send the payment link?'),
+               (C, 'Yes please go ahead')],
+     'expect': {'tools': ['send_payment_link'], 'any_decision': True}},
 
     # Rule 3: an order missing a detail gets the question before a person
     # is asked to set it up.
@@ -146,11 +166,14 @@ def grade(case, run):
     handed = run.decision == 'SHADOWED' and bool(run.reason)
     fails = []
 
-    if run.decision != 'SHADOWED':
+    if run.decision != 'SHADOWED' and not expect.get('any_decision'):
         fails.append(f'{run.decision.lower()}: {run.reason or run.error[:160]}')
     for t in expect.get('tools', []):
         if t not in tools:
             fails.append(f'did not call {t}')
+    for t in expect.get('no_tools', []):
+        if t in tools:
+            fails.append(f'called {t}, which it must not')
     if 'handover' in expect and expect['handover'] != handed:
         fails.append('should have handed over' if expect['handover'] else f'handed over needlessly: {run.reason}')
     wanted = expect.get('contains_any')

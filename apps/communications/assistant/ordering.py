@@ -107,7 +107,11 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
                 _attach_copies(order, [line['id']], staged)
 
     from apps.communications.assistant.tools import _branch_name, _when
-    ready = promise_for(order)
+    from apps.production.models import ServiceStation
+    # A service with no route on the floor has no measured work, so the
+    # engine would promise "ready at opening" for it. Octos never guesses.
+    routed = set(ServiceStation.objects.filter(service__in=services).values_list('service_id', flat=True))
+    ready = promise_for(order) if all(s.pk in routed for s in services) else None
     now = timezone.localtime()
     return {
         'success': True,
@@ -121,6 +125,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
         } for line in priced],
         'total': f'GHS {total:.2f}',
         'ready': _when(ready, now) if ready else None,
+        'ready_note': None if ready else 'The team will confirm the ready time.',
         'next': 'Confirm this with the customer. Send the payment link only when they agree.',
     }
 
