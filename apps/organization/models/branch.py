@@ -29,6 +29,12 @@ class Branch(AuditModel):
     capacity_score  = models.PositiveIntegerField(default=100)
     current_load    = models.PositiveIntegerField(default=0)
     is_active       = models.BooleanField(default=True)
+    is_trading      = models.BooleanField(
+        default=False,
+        help_text='Open to customers and run on Octos. Octos only speaks for '
+                  'trading branches: hours, prices, collection. Off by default, '
+                  'so a new branch never appears to customers by accident.',
+    )
     services        = models.ManyToManyField(
         'jobs.Service',
         blank=True,
