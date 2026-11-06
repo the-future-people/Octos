@@ -251,3 +251,32 @@ def _ready(order):
     if (at.date() - now.date()).days == 1:
         return f'{clock} tomorrow'
     return f'{at.strftime("%a")} {clock}'
+
+
+
+# ── WhatsApp versions ────────────────────────────────────────────
+# WhatsApp has room to sound like a person: line breaks, an emoji, the
+# link on its own line. SMS keeps its one-credit texts above (an emoji
+# alone would make an SMS cost about four).
+
+def paid_whatsapp_text(order):
+    """An online order paid for, as said on WhatsApp (worded by Khofi, 6 Nov 2026)."""
+    name, ref = _first_name(order), _ref(order)
+    when, where = _ready(order), _branch_name(order)
+    lines = [f'Thanks {name}! 🙏' if name else 'Thank you! 🙏',
+             f'We got your payment (GHS {_money(order.total)}).']
+    if when:
+        lines.append(f"We're on it: {_what(order)} should be ready by about {when}"
+                     + (f' at {where}.' if where else '.'))
+    else:
+        lines.append(f"We're on it" + (f' at {where}.' if where else '.'))
+    lines.append("We'll let you know as soon as it's ready!")
+    return '\n'.join(lines) + (f'\n\nFollow it live here:\n{STOREFRONT}/t/{order.short_code}'
+                               f'\nReference: {ref}')
+
+
+# Which notifications have a WhatsApp version. A kind not listed here is
+# sent on WhatsApp with its SMS text, so nothing goes missing.
+WHATSAPP_TEXTS = {
+    'paid': paid_whatsapp_text,
+}

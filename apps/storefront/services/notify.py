@@ -79,7 +79,7 @@ def _tell_one(order, lead, kind, title, body, sms_text, text_with):
         # If WhatsApp fails later, the worker sends this same text by SMS.
         try:
             from apps.communications.services.whatsapp_outbound import try_send_text
-            if try_send_text(lead.phone, sms_text, kind=kind):
+            if try_send_text(lead.phone, _whatsapp_text(order, kind, sms_text), kind=kind):
                 note.whatsapped = True
         except Exception:
             logger.exception('Could not WhatsApp %s about %s', lead.phone, order.order_number)
@@ -104,3 +104,17 @@ def ready_phrase(order):
     at = timezone.localtime(order.promised_for)
     day = 'today' if at.date() == timezone.localdate() else at.strftime('%A')
     return f'Ready about {at.strftime("%I:%M %p").lstrip("0").lower()} {day}.'
+
+
+
+def _whatsapp_text(order, kind, sms_text):
+    """The WhatsApp version where one is written (messages.WHATSAPP_TEXTS); otherwise the SMS text."""
+    from apps.storefront.services.messages import WHATSAPP_TEXTS
+    write = WHATSAPP_TEXTS.get(kind)
+    if write is None:
+        return sms_text
+    try:
+        return write(order) or sms_text
+    except Exception:
+        logger.exception('Could not write the WhatsApp %s message for %s', kind, order.order_number)
+        return sms_text

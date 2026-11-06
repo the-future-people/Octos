@@ -157,3 +157,13 @@ class NotifyTests(TestCase):
              patch('apps.storefront.services.push.nudge') as nudge:
             nudge_app(999999)
         nudge.assert_not_called()
+
+    
+    def test_whatsapp_gets_its_own_friendlier_paid_message(self):
+        from apps.storefront.services.messages import paid_whatsapp_text
+        Lead.objects.create(phone='+233244000111', first_name='James')
+        text = paid_whatsapp_text(self._order())
+        self.assertIn('Thanks James! 🙏', text)
+        self.assertIn('We got your payment (GHS 58.50)', text)
+        self.assertIn('Follow it live here:', text)
+        self.assertIn('Reference:', text)
