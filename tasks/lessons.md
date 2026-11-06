@@ -1084,3 +1084,27 @@ Internal detail belongs in the log, not on the screen.
   quietly at runtime, not at import.** `Q` and then `HOLDING` were used
   but never defined; Python only noticed when the line ran. New constants
   and imports now go in by command, checked, before the edits that use them.
+  - **A safety guard is judged on real conversations, not on the case it was
+  written for.** "4 Octos replies in 10 minutes = bot" handed over the first
+  real human order. Bots are fast, not busy: judge by seconds between
+  messages. And any guard that can fire right after a hand-back must count
+  only from the hand-back, or the hand-back silently undoes itself.
+
+  - **Django's get_valid_filename('') raises, it doesn't return ''.** Anything
+  naming files from outside input must guard the empty case first. Here every
+  photo a customer sent on WhatsApp would have failed to save, because only
+  documents carry a file name.
+
+  - **Silence from a filtered test run is not a pass.** A run that passes says
+  "Ran N tests" and "OK"; a filter that shows neither means the run died
+  before testing. Never commit on an empty result: rerun with the tail
+  (Select-Object -Last 40).
+
+  - **Never build Python triple quotes inside a PowerShell double-quoted string.**
+  The backtick escapes landed in views.py literally. Python text goes in a
+  single-quoted here-string (@' '@), or uses a # comment instead.
+
+  - **Long multi-block PowerShell pastes can silently not run.** Three steps of
+  here-strings showed no error and changed nothing. For edits across several
+  files, use one Python script run in the container: it prints what it did,
+  per file, and can be deleted after.
