@@ -54,3 +54,14 @@ class PromiseHolidayTests(TestCase):
     def test_no_work_is_ready_at_once_and_warns_nothing(self):
         with self.assertNoLogs('apps.production.services.prediction_service', level='WARNING'):
             self.assertEqual(self.engine._add_working_minutes(at(MON, 10), 0), at(MON, 10))
+    
+    
+    def test_finished_work_waiting_for_collection_is_never_queued_ahead(self):
+        from apps.communications.tests import make_job
+        stale = make_job(self.branch)
+        stale.work_state, stale.handover_state = 'RECEIVED', 'AWAITING_COLLECTION'
+        stale.save()
+        busy = make_job(self.branch)
+        busy.work_state, busy.handover_state = 'IN_PRODUCTION', ''
+        busy.save()
+        self.assertEqual(list(self.engine._jobs_ahead()), [busy])

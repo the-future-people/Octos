@@ -124,6 +124,27 @@ class PredictionService:
         return sum(per_station.values()), per_station
 
     # ── What is already ahead ────────────────────────────────────
+    def _jobs_ahead(self):
+        """
+        Jobs still being made at this branch, oldest first.
+
+        A job waiting for collection, out for delivery or handed over has
+        no work left, whatever its work state says. On 6 Nov 2026 four
+        finished jobs still said RECEIVED or FINISHING, and a 4-minute
+        passport photo was queued 5 hours behind them, promised for 7:16pm
+        and then for the next morning.
+        """
+        from apps.jobs.models import Job
+        return (
+            Job.objects
+            .filter(
+                branch=self.branch,
+                work_state__in=['RECEIVED', 'IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK'],
+            )
+            .exclude(status__in=['CANCELLED', 'DRAFT'])
+            .exclude(handover_state__in=['AWAITING_COLLECTION', 'OUT_FOR_DELIVERY', 'HANDED_OVER'])
+            .order_by('created_at')
+        )
 
     def _queue_minutes(self, station_codes) -> float:
         """
@@ -143,17 +164,7 @@ class PredictionService:
         if not station_codes:
             return 0.0
 
-        ahead = (
-            Job.objects
-            .filter(
-                branch=self.branch,
-                work_state__in=['RECEIVED', 'IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK'],
-            )
-            .exclude(status__in=['CANCELLED', 'DRAFT'])
-            .prefetch_related('line_items__service', 'halts')
-            .order_by('created_at')
-        )
-
+        ahead = self._jobs_ahead().prefetch_related('line_items__service', 'halts')
         per_station = {code: 0.0 for code in station_codes}
 
         for job in ahead:
