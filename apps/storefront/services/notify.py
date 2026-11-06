@@ -79,7 +79,7 @@ def _tell_one(order, lead, kind, title, body, sms_text, text_with):
         # If WhatsApp fails later, the worker sends this same text by SMS.
         try:
             from apps.communications.services.whatsapp_outbound import try_send_text
-            if try_send_text(lead.phone, _whatsapp_text(order, kind, sms_text), kind=kind):
+            if _send_whatsapp(order, lead, kind, sms_text):
                 note.whatsapped = True
         except Exception:
             logger.exception('Could not WhatsApp %s about %s', lead.phone, order.order_number)
@@ -118,3 +118,26 @@ def _whatsapp_text(order, kind, sms_text):
     except Exception:
         logger.exception('Could not write the WhatsApp %s message for %s', kind, order.order_number)
         return sms_text
+
+
+def _send_whatsapp(order, lead, kind, sms_text):
+    """
+    The card where one is drawn for this kind, with its caption; otherwise
+    the WhatsApp text. A card that can't be drawn falls back to the text,
+    so a customer is never left without the message.
+    """
+    from apps.communications.services.whatsapp_outbound import try_send_text
+    from apps.storefront.services.cards import CARDS
+    from apps.storefront.services.messages import WHATSAPP_CAPTIONS
+
+    draw = CARDS.get(kind)
+    if draw is not None:
+        try:
+            png = draw(order)
+            caption = WHATSAPP_CAPTIONS[kind](order)
+        except Exception:
+            logger.exception('Could not draw the %s card for %s; sending text', kind, order.order_number)
+        else:
+            return try_send_text(lead.phone, caption, kind=kind, image=png,
+                                 filename=f'{kind}-{order.order_number}.png')
+    return try_send_text(lead.phone, _whatsapp_text(order, kind, sms_text), kind=kind)

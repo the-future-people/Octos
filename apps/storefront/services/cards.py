@@ -172,3 +172,9 @@ def _ticket(draw, x, y):
     draw.ellipse((x - 4 * S, y + 5 * S, x + 4 * S, y + 13 * S), fill=PILL)
     draw.ellipse((x + 24 * S, y + 5 * S, x + 32 * S, y + 13 * S), fill=PILL)
     draw.ellipse((x + 11 * S, y + 6 * S, x + 17 * S, y + 12 * S), fill=INK)
+
+
+# Which notifications go as a card on WhatsApp. Any other kind is text.
+CARDS = {
+    'paid': paid_card,
+}

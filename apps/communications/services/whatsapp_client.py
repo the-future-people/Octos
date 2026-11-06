@@ -127,3 +127,39 @@ def show_typing(wamid):
         logger.warning('Typing for %s refused: %s %s', wamid, response.status_code, response.text[:200])
         return False
     return True
+
+
+def upload_media(content, filename, mime):
+    """Upload a file to Meta for sending; returns its media id."""
+    token = settings.WHATSAPP_ACCESS_TOKEN
+    number_id = settings.WHATSAPP_PHONE_NUMBER_ID
+    if not token or not number_id:
+        raise ImproperlyConfigured('WhatsApp access token or phone number id is not set.')
+    try:
+        response = requests.post(
+            f'https://graph.facebook.com/{API_VERSION}/{number_id}/media',
+            headers={'Authorization': f'Bearer {token}'},
+            data={'messaging_product': 'whatsapp', 'type': mime},
+            files={'file': (filename, content, mime)},
+            timeout=TIMEOUT * 3,
+        )
+    except requests.RequestException as exc:
+        raise WhatsAppError('network', str(exc)) from exc
+    try:
+        data = response.json()
+    except ValueError:
+        raise WhatsAppError(response.status_code, 'Meta answered the upload with something that is not JSON')
+    if 'error' in data:
+        error = data['error']
+        raise WhatsAppError(error.get('code', response.status_code), error.get('message', 'upload refused'))
+    if not data.get('id'):
+        raise WhatsAppError(response.status_code, f'no media id in the answer: {data!r}')
+    return data['id']
+
+
+def send_image(phone, content, filename, caption=''):
+    """An image (a card), uploaded then sent, with a caption whose links can be tapped."""
+    image = {'id': upload_media(content, filename, 'image/png')}
+    if caption:
+        image['caption'] = caption
+    return _send(phone, {'type': 'image', 'image': image})

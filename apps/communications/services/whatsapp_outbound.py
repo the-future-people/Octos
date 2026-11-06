@@ -23,6 +23,10 @@ from django.db import transaction
 
 from apps.communications.models import Conversation, Message
 from apps.communications.services import whatsapp_client
+import os
+
+from django.core.files.base import ContentFile
+
 from apps.communications.services.window import window_closes_at, window_open
 from apps.core.phones import to_international
 
@@ -49,7 +53,7 @@ class WindowClosed(Exception):
         )
 
 
-def send_text(conversation, body, sent_by=None, kind=''):
+def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png'):
     """
     Queue free text to the customer. Returns the QUEUED Message.
     sent_by is the staff member, or None when Octos is the sender.
@@ -68,19 +72,28 @@ def send_text(conversation, body, sent_by=None, kind=''):
         conversation=conversation,
         direction=Message.OUTBOUND,
         channel=Message.WHATSAPP,
-        message_type=Message.TEXT,
+        message_type=Message.IMAGE if image else Message.TEXT,
         status=Message.QUEUED,
         body=body,
         sent_by=sent_by,
         kind=kind,
     )
 
+    if image:
+        # A card: kept with the message (so the inbox shows it), the body as
+        # its caption. Written by update: save() would move the preview again.
+        message.media_file.save(filename, ContentFile(image), save=False)
+        Message.objects.filter(pk=message.pk).update(
+            media_file=message.media_file.name, media_name=filename,
+            media_mime='image/png', media_size=len(image), media_pages=1,
+        )
+
     from apps.communications.tasks import deliver_whatsapp
     transaction.on_commit(lambda: deliver_whatsapp.delay(message.pk))
     return message
 
 
-def try_send_text(phone, body, kind):
+def try_send_text(phone, body, kind, image=None, filename='card.png'):
     """
     A system message by WhatsApp if this number's window is open.
     Returns the queued Message, or None, meaning "send your SMS".
@@ -101,7 +114,7 @@ def try_send_text(phone, body, kind):
     if conversation is None or not window_open(conversation):
         return None
     try:
-        return send_text(conversation, body, kind=kind)
+        return send_text(conversation, body, kind=kind, image=image, filename=filename)
     except (WindowClosed, ValueError):
         return None
 
@@ -126,7 +139,14 @@ def deliver(message_id):
         return
 
     try:
-        wamid = whatsapp_client.send_text(message.conversation.contact_phone, message.body)
+        phone = message.conversation.contact_phone
+        if message.message_type == Message.IMAGE and message.media_file:
+            with message.media_file.open('rb') as handle:
+                content = handle.read()
+            wamid = whatsapp_client.send_image(phone, content, os.path.basename(message.media_file.name),
+                                               caption=message.body)
+        else:
+            wamid = whatsapp_client.send_text(phone, message.body)
     except whatsapp_client.WhatsAppError as exc:
         if exc.code == OUTSIDE_WINDOW:
             logger.warning('Meta says the window is closed for message %s', message_id)

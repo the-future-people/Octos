@@ -280,3 +280,18 @@ def paid_whatsapp_text(order):
 WHATSAPP_TEXTS = {
     'paid': paid_whatsapp_text,
 }
+
+
+def paid_caption(order):
+    """The words under the payment card: short, with the live link (a link in a picture can't be tapped)."""
+    name = _first_name(order)
+    return ((f'Thanks {name}! ' if name else 'Thank you! ')
+            + f'We got your payment (GHS {_money(order.total)}). '
+            + f'Follow it live here: {STOREFRONT}/t/{order.short_code}')
+
+
+# Captions for the cards (storefront/services/cards.py CARDS). If a card
+# can't be sent, the caption is also the SMS: short, with the link.
+WHATSAPP_CAPTIONS = {
+    'paid': paid_caption,
+}
