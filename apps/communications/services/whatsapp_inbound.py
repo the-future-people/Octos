@@ -147,10 +147,14 @@ def wake_octos(conversation, message, pause=0):
     from django.conf import settings
     if settings.OCTOS_ASSISTANT_MODE not in ('shadow', 'live'):
         return
-    from apps.communications.tasks import answer_whatsapp
+    from apps.communications.tasks import answer_whatsapp, show_whatsapp_typing
     transaction.on_commit(
         lambda: answer_whatsapp.apply_async((conversation.pk, message.pk), countdown=pause)
     )
+    # A fresh message (the pause is the burst wait): dots straight away, in
+    # live mode only. A hand-back answers at once, and the brain shows them.
+    if pause and settings.OCTOS_ASSISTANT_MODE == 'live':
+        transaction.on_commit(lambda: show_whatsapp_typing.delay(message.pk))
 
 
 def _refresh(conversation, phone, profile_name):

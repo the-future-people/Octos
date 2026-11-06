@@ -217,3 +217,13 @@ class BrainTests(TestCase):
         ok = self.octos_then_customer('Shall I send the payment link?', 'Ok')
         run = self.run_with(Model(says(text('Here you go.'))), trigger=ok)
         self.assertEqual(run.decision, AssistantRun.REPLIED, run.reason)
+
+    
+    def test_typing_only_when_octos_will_answer(self):
+        with patch('apps.communications.services.whatsapp_client.show_typing') as typing:
+            ok = self.octos_then_customer('Your print starts once you have paid.', 'Okay')
+            brain.show_typing_for(ok.pk)
+            typing.assert_not_called()
+            question = self.octos_then_customer('Shall I send the payment link?', 'Yes please')
+            brain.show_typing_for(question.pk)
+            typing.assert_called_once_with(question.external_id)

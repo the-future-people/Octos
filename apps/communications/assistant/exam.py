@@ -96,16 +96,21 @@ CASES = [
     # The link is sent only when the customer clearly agrees. The scripted
     # order number is made up, so the link call fails harmlessly and no
     # real payment starts: what's graded is the decision to send it or not.
+    # A real order, made inside the rolled-back exam with Paystack faked,
+    # so the decision is graded against something true and no real payment
+    # ever starts. {order} becomes its number.
     {'name': 'no_link_without_agreement',
-     'turns': [(C, 'Please print 20 copies of A3 colour, front only. I sent the file.'),
-               (O, 'That comes to GHS 100.00 for 20 copies of A3 colour, front only (order WA-EXAM-1). '
+     'order': {'service_code': 'PP-US', 'quantity': 1},
+     'turns': [(C, 'How much for one set of American passport photos?'),
+               (O, 'One set of 4 American size passport photos is GHS 50.00 (order {order}). '
                    'Shall I send the payment link?'),
                (C, 'Hmm let me think about it first')],
      'expect': {'no_tools': ['send_payment_link', 'hand_to_person'], 'any_decision': True}},
 
     {'name': 'agreeing_sends_the_link',
-     'turns': [(C, 'Please print 20 copies of A3 colour, front only. I sent the file.'),
-               (O, 'That comes to GHS 100.00 for 20 copies of A3 colour, front only (order WA-EXAM-1). '
+     'order': {'service_code': 'PP-US', 'quantity': 1},
+     'turns': [(C, 'How much for one set of American passport photos?'),
+               (O, 'One set of 4 American size passport photos is GHS 50.00 (order {order}). '
                    'Shall I send the payment link?'),
                (C, 'Yes please go ahead')],
      'expect': {'tools': ['send_payment_link'], 'any_decision': True}},
@@ -126,7 +131,7 @@ CASES = [
 
     {'name': 'ok_after_a_question_is_an_answer',
      'turns': [(C, 'How much is A3 colour?'),
-               (O, 'A3 colour is GHS 5.00 per sheet for front only. How many copies do you need?'),
+               (O, 'A3 colour is GHS 5.00 per sheet for front only. Shall I set up 20 copies for you?'),
                (C, 'Ok')],
      'expect': {'silent': False, 'any_decision': True}},
 
@@ -167,16 +172,20 @@ def run_case(case):
     from apps.communications.models import Conversation, Message
 
     with transaction.atomic(), override_settings(OCTOS_ASSISTANT_MODE='shadow'), \
-            patch('apps.notifications.services.notify_many'):
+            patch('apps.notifications.services.notify_many'), \
+            patch('apps.storefront.services.paystack.initialise',
+                  return_value={'success': True, 'authorization_url': 'https://checkout.paystack.com/exam',
+                                'reference': 'EXAM'}):
         now = timezone.now()
         conv = Conversation.objects.create(
             branch=None, channel=Conversation.WHATSAPP, contact_phone=EXAM_PHONE,
             contact_name='Exam customer',
         )
+        order_number = _exam_order(conv, case['order']) if case.get('order') else ''
         last, count = None, len(case['turns'])
         for i, (who, text) in enumerate(case['turns']):
             last = Message.objects.create(
-                conversation=conv, channel=Message.WHATSAPP, body=text,
+                conversation=conv, channel=Message.WHATSAPP, body=text.replace('{order}', order_number),
                 direction=Message.INBOUND if who == C else Message.OUTBOUND,
             )
             Message.objects.filter(pk=last.pk).update(created_at=now - timedelta(minutes=count - i))
@@ -185,6 +194,27 @@ def run_case(case):
         transaction.set_rollback(True)
     return result
 
+def _exam_order(conv, spec):
+    """A real, unpaid order for the exam's customer, priced by the storefront's rule (rolled back with the rest)."""
+    from apps.communications.assistant.ordering import _lead_for
+    from apps.communications.assistant.tools import whatsapp_specs
+    from apps.jobs.models import Service
+    from apps.organization.models import Branch
+    from apps.storefront.models import OnlineOrder
+    from apps.storefront.services.pricing import price_lines
+
+    service = Service.objects.get(code=spec['service_code'])
+    priced, total, problem = price_lines([{
+        'service': service.pk, 'quantity': spec['quantity'],
+        'specifications': whatsapp_specs(service, spec.get('specifications')), 'addons': [],
+    }])
+    if problem:
+        raise RuntimeError(f'exam order could not be priced: {problem}')
+    order = OnlineOrder.objects.create(
+        lead=_lead_for(conv), branch=Branch.objects.filter(is_trading=True).first(),
+        line_items=priced, full_total=total, total=total,
+    )
+    return order.order_number
 
 def grade(case, run):
     expect = case.get('expect', {})

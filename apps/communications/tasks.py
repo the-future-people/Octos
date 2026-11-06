@@ -54,3 +54,9 @@ def fetch_whatsapp_media(self, message_id):
         logger.warning('WhatsApp media for message %s cannot be kept', message_id, exc_info=True)
     except requests.RequestException as exc:
         raise self.retry(exc=exc)
+
+@shared_task
+def show_whatsapp_typing(message_id):
+    """'typing...' on a customer's message the moment it arrives, if Octos will answer."""
+    from apps.communications.assistant import brain
+    brain.show_typing_for(message_id)

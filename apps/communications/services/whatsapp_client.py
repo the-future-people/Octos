@@ -101,3 +101,29 @@ def _recipient(phone):
     if not international:
         raise WhatsAppError('invalid_number', f'not a real phone number: {phone!r}')
     return international.lstrip('+')
+
+def show_typing(wamid):
+    """
+    Mark a customer's message as read and show them "typing..." while Octos
+    prepares a reply. WhatsApp removes it when the reply arrives or after
+    25 seconds. Cosmetic: a failure is logged, never raised.
+    """
+    phone_id = settings.WHATSAPP_PHONE_NUMBER_ID
+    token = settings.WHATSAPP_ACCESS_TOKEN
+    if not (wamid and phone_id and token):
+        return False
+    try:
+        response = requests.post(
+            f'https://graph.facebook.com/{API_VERSION}/{phone_id}/messages',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'messaging_product': 'whatsapp', 'status': 'read', 'message_id': wamid,
+                  'typing_indicator': {'type': 'text'}},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException:
+        logger.warning('Could not show typing for %s', wamid, exc_info=True)
+        return False
+    if response.status_code != 200:
+        logger.warning('Typing for %s refused: %s %s', wamid, response.status_code, response.text[:200])
+        return False
+    return True

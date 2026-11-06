@@ -134,6 +134,7 @@ TOOL_SPECS = [
 class Context:
     conversation: Conversation
     branches: list
+    trigger: object = None
     handoff: str = ''
     calls: list = field(default_factory=list)
 
@@ -164,7 +165,8 @@ def respond(conversation_id, trigger_id=None, now=None):
             return _finish(run, AssistantRun.HANDED_OVER, started, reason=automated)
 
         from apps.organization.models import Branch
-        ctx = Context(conversation, list(Branch.objects.filter(is_trading=True, is_active=True)))
+        ctx = Context(conversation, list(Branch.objects.filter(is_trading=True, is_active=True)), trigger)
+        _show_typing(trigger)
         reply = _converse(conversation, ctx, run)
         run.tool_calls = ctx.calls
 
@@ -233,6 +235,25 @@ def _silence(conversation, trigger, now):
         return 'the customer was only closing the conversation'
     return None
 
+def _show_typing(trigger):
+    """'typing...' for the customer, only in live mode, where a reply really follows."""
+    if settings.OCTOS_ASSISTANT_MODE != 'live' or trigger is None or not trigger.external_id:
+        return
+    from apps.communications.services import whatsapp_client
+    whatsapp_client.show_typing(trigger.external_id)
+
+
+def show_typing_for(message_id):
+    """
+    On arrival, before the pause that lets a burst of messages land: the
+    dots only if Octos would answer this message (the same guards as a
+    run), so they never promise a reply that won't come.
+    """
+    message = Message.objects.select_related('conversation').filter(pk=message_id).first()
+    if message is None or settings.OCTOS_ASSISTANT_MODE != 'live':
+        return
+    if _silence(message.conversation, message, timezone.now()) is None:
+        _show_typing(message)
 
 def _just_acknowledging(last, before):
     """'Ok' after a statement ends a conversation; after Octos's question it is an answer."""
@@ -294,7 +315,10 @@ def _converse(conversation, ctx, run):
     system = prompt.system_prompt(conversation, ctx.branches)
     messages = _history(conversation)
 
-    for _ in range(MAX_ROUNDS):
+    for round_number in range(MAX_ROUNDS):
+        if round_number:
+            # Looking things up takes a while: keep the dots showing.
+            _show_typing(ctx.trigger)
         response = client.messages.create(
             model=settings.OCTOS_ASSISTANT_MODEL,
             max_tokens=MAX_TOKENS,

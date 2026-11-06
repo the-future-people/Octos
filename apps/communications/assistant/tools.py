@@ -183,7 +183,18 @@ def find_services(query, limit=5):
     closest = sorted((s for score, s in scored if score == best), key=lambda s: s.name)[:limit]
     return {'found': True, 'services': [_service_facts(s) for s in closest],
             'several': len(closest) > 1}
-
+def whatsapp_specs(service, specs):
+    """
+    What Octos may sell on WhatsApp, in a service's terms. A service priced
+    by output_mode (passport photos: printed, printed and digital, digital)
+    is always quoted printed: digital copies are taken at the front desk
+    (decided 6 Nov 2026). Without this the price list has no answer at all.
+    """
+    from apps.jobs.services.availability import _conditions_of
+    specs = dict(specs or {})
+    if 'output_mode' in _conditions_of(service) and not specs.get('output_mode'):
+        specs['output_mode'] = 'PRINT'
+    return specs
 
 def quote(service_code, specifications=None, quantity=1, addon_codes=(), branches=()):
     """
@@ -204,7 +215,7 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
     if service is None:
         return {'success': False, 'error': f'No active service with code {service_code!r}.'}
 
-    specs = dict(specifications or {})
+    specs = whatsapp_specs(service, specifications)
     quantity = max(1, int(quantity or 1))
     line = quote_line(service, None, specs, quantity)
     if not line.get('success'):

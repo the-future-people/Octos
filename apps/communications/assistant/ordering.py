@@ -52,7 +52,8 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
         if service is None:
             return stop({'error': f"Line {number}: no active service with code {line.get('service_code')!r}."})
         services.append(service)
-        specs = dict(line.get('specifications') or {})
+        from apps.communications.assistant.tools import whatsapp_specs
+        specs = whatsapp_specs(service, line.get('specifications'))
         quantity = max(1, int(line.get('quantity') or 1))
 
         codes = list(line.get('addon_codes') or [])

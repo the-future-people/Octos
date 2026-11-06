@@ -62,3 +62,16 @@ class WakeTests(WebhookTestCase):
         with patch(WAKE) as wake, self.captureOnCommitCallbacks(execute=True):
             handover.hand_back(conv, why='test')
         wake.assert_not_called()
+
+
+    @override_settings(OCTOS_ASSISTANT_MODE='live')
+    def test_live_shows_typing_the_moment_a_message_arrives(self):
+        with patch(WAKE), patch('apps.communications.tasks.show_whatsapp_typing.delay') as typing:
+            self.deliver_now(delivery(text('Good evening please are you open?')))
+        typing.assert_called_once_with(Message.objects.get(direction=Message.INBOUND).pk)
+
+    @override_settings(OCTOS_ASSISTANT_MODE='shadow')
+    def test_shadow_never_shows_typing(self):
+        with patch(WAKE), patch('apps.communications.tasks.show_whatsapp_typing.delay') as typing:
+            self.deliver_now(delivery(text('Hello')))
+        typing.assert_not_called()
