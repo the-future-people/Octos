@@ -581,3 +581,5 @@ class MachineStateTests(TimingFixtureMixin, TestCase):
 
         with self.assertRaises(PermissionError):
             self.svc.mark_down(self.machine, reason='PAPER_JAM', actor=cashier)
+
+    

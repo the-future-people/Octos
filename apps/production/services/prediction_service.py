@@ -146,6 +146,30 @@ class PredictionService:
             .order_by('created_at')
         )
 
+    def _jobs_ahead(self):
+        """
+        Jobs still being made at this branch, oldest first.
+
+        A job whose status is READY, OUT_FOR_DELIVERY or COMPLETE has no
+        work left, whatever its work state says. On 6 Nov 2026 two jobs
+        COMPLETE since August and September still said RECEIVED, and a
+        4-minute passport photo was queued hours behind them: promised for
+        7:16pm, then for the next morning.
+
+        (Not handover_state: AWAITING_COLLECTION is set when a job is made
+        for collection, so it says nothing about whether it is finished.)
+        """
+        from apps.jobs.models import Job
+        return (
+            Job.objects
+            .filter(
+                branch=self.branch,
+                work_state__in=['RECEIVED', 'IN_PRODUCTION', 'FINISHING', 'QUALITY_CHECK'],
+            )
+            .exclude(status__in=['CANCELLED', 'DRAFT', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETE'])
+            .order_by('created_at')
+        )
+
     def _queue_minutes(self, station_codes) -> float:
         """
         Work already accepted that must clear before this job runs.
