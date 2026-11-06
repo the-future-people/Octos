@@ -12,6 +12,7 @@ urlpatterns = [
     path('<int:pk>/link-job/', views.ConversationLinkJobView.as_view(), name='conversation-link-job'),
     path('<int:pk>/take-over/', views.ConversationTakeOverView.as_view(), name='conversation-take-over'),
     path('<int:pk>/hand-back/', views.ConversationHandBackView.as_view(), name='conversation-hand-back'),
+    path('<int:pk>/at-counter/', views.ConversationAtCounterView.as_view(), name='conversation-at-counter'),
 
     # Webhooks
     path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='webhook-whatsapp'),

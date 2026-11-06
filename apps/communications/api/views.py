@@ -308,3 +308,27 @@ class ConversationHandBackView(APIView):
         if conversation.handled_by != Conversation.OCTOS:
             handover.hand_back(conversation, request.user)
         return Response({'handled_by': conversation.handled_by})
+
+
+
+class ConversationAtCounterView(APIView):
+    """
+    POST /api/v1/communications/<id>/at-counter/
+    The attendant's one tap: this customer is at the counter. Octos stays
+    quiet for the visit (30 minutes after their last message), then comes
+    back by itself. Unlike Take over, it never needs handing back.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        from apps.communications.assistant import counter
+        counter.start_visit(conversation)
+        Message.objects.create(
+            conversation=conversation, direction=Message.OUTBOUND, channel=Message.SYSTEM,
+            message_type=Message.NOTE, is_internal_note=True, sent_by=request.user,
+            body=f'{request.user.full_name} marked the customer at the counter. Octos is quiet for this visit.',
+        )
+        return Response({'counter_until': conversation.counter_until})

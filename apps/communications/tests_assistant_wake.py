@@ -65,10 +65,11 @@ class WakeTests(WebhookTestCase):
 
 
     @override_settings(OCTOS_ASSISTANT_MODE='live')
-    def test_live_shows_typing_the_moment_a_message_arrives(self):
-        with patch(WAKE), patch('apps.communications.tasks.show_whatsapp_typing.delay') as typing:
+    def test_no_typing_dots_the_moment_a_message_arrives(self):
+        # The dots now show only once Octos really starts writing.
+        with patch(WAKE), patch('apps.communications.services.whatsapp_client.show_typing') as dots:
             self.deliver_now(delivery(text('Good evening please are you open?')))
-        typing.assert_called_once_with(Message.objects.get(direction=Message.INBOUND).pk)
+        dots.assert_not_called()
 
     @override_settings(OCTOS_ASSISTANT_MODE='shadow')
     def test_shadow_never_shows_typing(self):

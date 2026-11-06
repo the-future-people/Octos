@@ -139,22 +139,26 @@ def _receive(message, profile_name):
 
 def wake_octos(conversation, message, pause=0):
     """
-    Ask Octos to consider a customer's message, once the database has
-    committed it. The pause lets a burst of short messages arrive first:
-    each gets a run, but only the latest message's run answers. When the
-    assistant is off, nothing is queued at all.
+    Ask Octos to consider a customer's message once it is committed.
+
+    A fresh message (pause given) waits for the customer to go quiet
+    (assistant/counter.py): briefly after words, longer after a file or a
+    message with no words. Each new message starts its own wait and only
+    the latest one's run answers, so a burst, or a stream of photos, gets
+    one reply after the last. No typing dots here: they show only once
+    Octos really starts writing. A hand-back (pause 0) answers at once.
+    Off: nothing is queued.
     """
     from django.conf import settings
     if settings.OCTOS_ASSISTANT_MODE not in ('shadow', 'live'):
         return
-    from apps.communications.tasks import answer_whatsapp, show_whatsapp_typing
+    from apps.communications.assistant import counter
+    from apps.communications.tasks import answer_whatsapp
+    if pause:
+        pause = counter.quiet_window(message)
     transaction.on_commit(
         lambda: answer_whatsapp.apply_async((conversation.pk, message.pk), countdown=pause)
     )
-    # A fresh message (the pause is the burst wait): dots straight away, in
-    # live mode only. A hand-back answers at once, and the brain shows them.
-    if pause and settings.OCTOS_ASSISTANT_MODE == 'live':
-        transaction.on_commit(lambda: show_whatsapp_typing.delay(message.pk))
 
 
 def _refresh(conversation, phone, profile_name):

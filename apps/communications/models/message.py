@@ -102,6 +102,9 @@ class Message(AuditModel):
     media_mime  = models.CharField(max_length=100, blank=True)
     media_size  = models.PositiveIntegerField(null=True, blank=True)
     media_pages = models.PositiveSmallIntegerField(null=True, blank=True)
+    # What the file measured on arrival (paper size, pages, colour, pixels),
+    # so Octos says "3-page A4 PDF" instead of asking.
+    media_info  = models.JSONField(default=dict, blank=True)
     media_id = models.CharField(
         max_length=255,
         blank=True,

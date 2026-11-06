@@ -28,7 +28,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.communications.assistant import checker, prompt, tools
+from apps.communications.assistant import checker, counter, prompt, tools
 from apps.communications.models import AssistantRun, Conversation, Message
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,18 @@ def respond(conversation_id, trigger_id=None, now=None):
         if silent:
             return _finish(run, AssistantRun.SKIPPED, started, reason=silent)
 
+        # When to speak and when to wait (assistant/counter.py): counter
+        # visits, a file with no words, a batch already acknowledged.
+        counter_step = counter.step(conversation, trigger, now)
+        if counter_step is not None:
+            said, why = counter_step
+            if said:
+                _act(mode, conversation, run, text=said, handoff='')
+                decision = AssistantRun.SHADOWED if mode == 'shadow' else AssistantRun.REPLIED
+            else:
+                decision = AssistantRun.SKIPPED
+            return _finish(run, decision, started, reason=why, reply=said or '')
+
         automated = _looks_automated(conversation, now)
         if automated:
             if mode == 'live':
@@ -166,7 +178,7 @@ def respond(conversation_id, trigger_id=None, now=None):
 
         from apps.organization.models import Branch
         ctx = Context(conversation, list(Branch.objects.filter(is_trading=True, is_active=True)), trigger)
-        _show_typing(trigger)
+        typing_since = _show_typing(trigger)
         reply = _converse(conversation, ctx, run)
         run.tool_calls = ctx.calls
 
@@ -182,6 +194,7 @@ def respond(conversation_id, trigger_id=None, now=None):
             # conversation) is allowed: nothing is sent, nobody is called.
             return _finish(run, AssistantRun.SKIPPED, started, reason='Octos chose not to reply')
 
+        _natural_pause(typing_since, trigger)
         _act(mode, conversation, run, text=reply, handoff=ctx.handoff)
         if mode == 'shadow':
             return _finish(run, AssistantRun.SHADOWED, started, reason=ctx.handoff, reply=reply)
@@ -215,32 +228,38 @@ def _silence(conversation, trigger, now):
     if conversation.status == Conversation.SPAM:
         return 'marked spam'
     # Asking for a person doesn't mean Octos stops listening: until someone
-    # actually takes over (the button, or replying), it keeps answering, so
-    # a customer is never left in silence while they wait.
+    # actually takes over (the button, or replying), it keeps answering.
     if conversation.handled_by == Conversation.STAFF and not conversation.handoff_reason:
         return 'a person has taken over this conversation'
 
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
-    last = visible.first()
-    if last is None or last.direction != Message.INBOUND:
+    last = visible.filter(direction=Message.INBOUND).first()
+    if last is None:
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
         return 'a newer message will be answered instead'
-
+    # Answered already: by a person since, or by a run that saw this message.
+    # Not "Octos spoke after it": a customer typing while Octos writes lands
+    # messages just after its reply, unseen by it (Mercy, 6 Nov 2026).
+    if visible.filter(direction=Message.OUTBOUND, sent_by__isnull=False,
+                      created_at__gt=last.created_at).exists():
+        return 'a person has answered'
+    if AssistantRun.objects.filter(conversation=conversation, trigger__created_at__gte=last.created_at,
+                                   decision__in=[AssistantRun.REPLIED, AssistantRun.SHADOWED]).exists():
+        return 'already answered'
     before = visible.exclude(pk=last.pk).first()
-    if (before is not None and before.direction == Message.OUTBOUND and before.sent_by_id is None
-            and (last.created_at - before.created_at).total_seconds() <= ECHO_SECONDS):
-        return 'looks like an automatic reply to Octos'
     if _just_acknowledging(last, before):
         return 'the customer was only closing the conversation'
     return None
 
+
 def _show_typing(trigger):
-    """'typing...' for the customer, only in live mode, where a reply really follows."""
+    """'typing...' for the customer, only in live mode, where a reply really follows. Returns when."""
     if settings.OCTOS_ASSISTANT_MODE != 'live' or trigger is None or not trigger.external_id:
-        return
+        return None
     from apps.communications.services import whatsapp_client
     whatsapp_client.show_typing(trigger.external_id)
+    return time.monotonic()
 
 
 def show_typing_for(message_id):
@@ -277,32 +296,32 @@ def _looks_automated(conversation, now):
     """
     A reason a person should look (a possible bot loop), or None.
 
-    Judged by speed, not volume: a person needs more than a few seconds
-    to read Octos's message and answer, an auto-reply doesn't. A busy
-    human conversation (ten quick exchanges about an order) is normal and
-    must never trip this. Only messages since the conversation last came
-    back to Octos count, so a person handing back starts afresh.
+    A bot repeats itself: the same words coming back within seconds of
+    Octos, more than once (an away message bouncing off Octos). Speed alone
+    is not enough: a customer typing while Octos writes lands messages just
+    after its reply (Mercy, 6 Nov 2026), and photos have no words to repeat.
+    Only messages since the conversation last came back to Octos count.
     """
     since = now - LOOP_WINDOW
     if conversation.handled_since and conversation.handled_since > since:
         since = conversation.handled_since
-    recent = list(
-        conversation.messages.filter(is_internal_note=False, created_at__gte=since)
-        .order_by('created_at')
-    )
+    recent = list(conversation.messages.filter(is_internal_note=False, created_at__gte=since)
+                  .order_by('created_at'))
 
     def from_octos(m):
         return m.direction == Message.OUTBOUND and m.sent_by_id is None and not m.kind
 
     if sum(1 for m in recent if from_octos(m)) >= RUNAWAY_REPLIES:
         return 'an unusually long run of replies in a few minutes; possibly an automatic reply'
-    fast = sum(
-        1 for before, after in zip(recent, recent[1:])
+    fast = [
+        (after.body or '').strip().lower()
+        for before, after in zip(recent, recent[1:])
         if from_octos(before) and after.direction == Message.INBOUND
+        and after.message_type == Message.TEXT and (after.body or '').strip()
         and (after.created_at - before.created_at).total_seconds() <= ECHO_SECONDS
-    )
-    if fast >= FAST_REPLIES:
-        return 'replies arriving within seconds of Octos, more than once; possibly an automatic reply'
+    ]
+    if any(fast.count(words) >= FAST_REPLIES for words in set(fast)):
+        return 'the same words arriving within seconds of Octos, more than once; possibly an automatic reply'
     return None
 
 
@@ -417,6 +436,13 @@ def _history(conversation):
                 what += f': {m.media_name}'
             if m.media_pages:
                 what += f", {m.media_pages} page{'s' if m.media_pages != 1 else ''}"
+            info = m.media_info or {}
+            if info.get('paper'):
+                what += f", {info['paper']}"
+            elif info.get('width_px') and info.get('height_px'):
+                what += f", {info['width_px']} x {info['height_px']} px"
+            if info.get('colour_mode'):
+                what += ', black and white' if counter.is_grey(info['colour_mode']) else ', colour'
             if not m.media_file:
                 what += ', not saved yet'
             else:
@@ -462,3 +488,19 @@ def _finish(run, decision, started, reason='', reply=''):
     run.duration_ms = int((time.monotonic() - started) * 1000)
     run.save()
     return run
+
+
+
+MIN_DOTS = 5      # seconds of 'typing...' before a reply, so it never lands unnaturally fast
+DOTS_LAST = 20    # WhatsApp drops the dots after about 25 seconds: refresh before then
+
+
+def _natural_pause(since, trigger):
+    """At least a few seconds of dots before the reply, and dots still up when it lands."""
+    if since is None:
+        return
+    elapsed = time.monotonic() - since
+    if elapsed < MIN_DOTS:
+        time.sleep(MIN_DOTS - elapsed)
+    elif elapsed > DOTS_LAST:
+        _show_typing(trigger)

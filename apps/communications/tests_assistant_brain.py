@@ -89,16 +89,14 @@ class BrainTests(TestCase):
         self.assertEqual(run.decision, AssistantRun.SKIPPED)
         self.assertIn('newer message', run.reason)
 
-    def test_an_auto_reply_to_octos_is_ignored(self):
-        octos = Message.objects.create(conversation=self.conv, direction=Message.OUTBOUND,
-                                       channel=Message.WHATSAPP, body='Octos here 👋')
-        echo = customer_wrote(self.conv, timedelta(seconds=0))
-        Message.objects.filter(pk=echo.pk).update(created_at=octos.created_at + timedelta(seconds=2))
-        run = self.run_with(Model(says(text('Hello'))), trigger=echo)
-        self.assertEqual(run.decision, AssistantRun.SKIPPED)
-        self.assertIn('automatic reply', run.reason)
-
-    # ── Answering ───────────────────────────────────────────────
+    def test_a_single_fast_reply_is_a_person_typing_not_a_bot(self):
+        # Mercy, 6 Nov 2026: a quick human crosses Octos's reply. Answer her.
+        Message.objects.create(conversation=self.conv, direction=Message.OUTBOUND,
+                               channel=Message.WHATSAPP, body='Is it A4 or A3?')
+        quick = Message.objects.create(conversation=self.conv, direction=Message.INBOUND,
+                                       channel=Message.WHATSAPP, body='2 copies please')
+        run = self.run_with(Model(says(text('Got it, 2 copies.'))), trigger=quick)
+        self.assertEqual(run.decision, AssistantRun.REPLIED)
 
     def test_live_sends_the_reply_as_octos(self):
         run = self.run_with(Model(says(text("Good evening 👋 Octos here, Farhat's assistant. How can I help?"))))

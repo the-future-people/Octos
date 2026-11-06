@@ -49,9 +49,11 @@ def fetch(message_id):
     path = default_storage.save(
         f'communications/media/{timezone.now():%Y/%m}/{name}', ContentFile(content),
     )
+    info = describe(content, name, mime)
     Message.objects.filter(pk=message.pk).update(
         media_file=path, media_mime=mime, media_size=len(content),
-        media_pages=count_pages(content, mime),
+        media_pages=info.get('page_count') or count_pages(content, mime),
+        media_info=info,
     )
     message.refresh_from_db()
     logger.info('Kept WhatsApp media for message %s: %s, %s bytes', message.pk, path, len(content))
@@ -106,3 +108,47 @@ def _file_name(message, mime):
             pass
     ext = mimetypes.guess_extension((mime or '').split(';')[0].strip()) or ''
     return f'{(message.message_type or "file").lower()}-{message.pk}{ext}'
+
+
+# Paper sizes a file is matched to, in mm (either way round), within 6 mm.
+PAPER = [('A3', 297, 420), ('A4', 210, 297), ('A5', 148, 210), ('A6', 105, 148),
+         ('Letter', 215.9, 279.4), ('2 x 2 in', 50.8, 50.8)]
+
+
+def paper_size(width_mm, height_mm, tolerance=6):
+    """'A4', 'A3'..., or the size in mm when it matches none."""
+    if not width_mm or not height_mm:
+        return ''
+    short, long_ = sorted((float(width_mm), float(height_mm)))
+    for name, a, b in PAPER:
+        if abs(short - a) <= tolerance and abs(long_ - b) <= tolerance:
+            return name
+    return f'{round(short)} x {round(long_)} mm'
+
+
+def describe(content, name, mime):
+    """
+    What a file is, measured on arrival the way the counter measures it.
+    Photos carry no trustworthy paper size, only pixels. Colour here is
+    the file's, not the job's: a black-text CV saved by Word is a colour
+    PDF, so Octos still asks colour or black and white. Never raises.
+    """
+    from decimal import Decimal
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    from apps.jobs.services.file_metadata import measure
+    from apps.storefront.services.inspection import _Carrier
+
+    try:
+        found = measure(_Carrier(SimpleUploadedFile(name or 'file', content, content_type=mime)))
+    except Exception:
+        logger.warning('Could not measure %s', name, exc_info=True)
+        return {}
+    keys = ('page_count', 'width_px', 'height_px', 'dpi', 'colour_mode')
+    if not (mime or '').startswith('image/'):
+        keys += ('width_mm', 'height_mm')
+    info = {k: found.get(k) for k in keys if found.get(k) not in (None, '')}
+    if 'width_mm' in info and 'height_mm' in info:
+        info['paper'] = paper_size(info['width_mm'], info['height_mm'])
+    return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in info.items()}

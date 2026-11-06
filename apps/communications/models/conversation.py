@@ -100,6 +100,11 @@ class Conversation(AuditModel):
     # minutes after the reminder, Octos takes the conversation back. Any
     # staff reply clears it.
     reminded_at = models.DateTimeField(null=True, blank=True)
+    # A counter visit (assistant/counter.py): while it lasts the customer
+    # is at a branch and Octos stays quiet. Temporary, never a label.
+    counter_until  = models.DateTimeField(null=True, blank=True)
+    counter_branch = models.ForeignKey('organization.Branch', on_delete=models.SET_NULL,
+                                       null=True, blank=True, related_name='+')
     unread_count = models.PositiveIntegerField(default=0)
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_message_preview = models.CharField(max_length=200, blank=True)

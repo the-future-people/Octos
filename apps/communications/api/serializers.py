@@ -43,7 +43,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'display_name', 'branch', 'channel', 'status',
             'assigned_to', 'assigned_to_name',
-            'handled_by', 'handled_since', 'handoff_reason',
+            'handled_by', 'handled_since', 'handoff_reason', 'counter_until',
             'unread_count', 'last_message_at', 'last_message_preview',
             'created_at', 'job',
         ]
@@ -75,7 +75,7 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
             'id', 'display_name', 'branch', 'channel', 'status',
             'contact_phone', 'contact_email', 'contact_name',
             'customer', 'assigned_to', 'assigned_to_name',
-            'handled_by', 'handled_since', 'handoff_reason',
+            'handled_by', 'handled_since', 'handoff_reason', 'counter_until',
             'unread_count', 'last_message_at', 'jobs',
             'messages', 'created_at', 'updated_at',
             'job_card', 'window_closes_at',
