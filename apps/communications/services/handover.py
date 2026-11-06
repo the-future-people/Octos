@@ -51,14 +51,16 @@ def hand_back(conversation, user=None, why=''):
 
 def octos_hands_over(conversation, reason):
     """Octos needs a person: hand over, say why, and alert whoever should come."""
-    _switch(conversation, Conversation.STAFF, reason=reason[:200])
+    _switch(conversation, Conversation.STAFF, reason=_clip(reason, 200))
     _note(conversation, f'Octos asked for a person: {reason}', None)
     _alert(conversation, verb='needs_you', message=f'Needs you: {reason}')
 
 
 def staff_replied(conversation, user):
     """A staff reply: it takes the conversation over, and clears any reminder."""
-    if conversation.handled_by == Conversation.OCTOS:
+    # Octos answering, or Octos still answering while waiting for a person:
+    # either way a staff reply means a person has it now.
+    if conversation.handled_by == Conversation.OCTOS or conversation.handoff_reason:
         take_over(conversation, user)
     elif conversation.reminded_at:
         conversation.reminded_at = None
@@ -142,3 +144,20 @@ def _alert(conversation, verb, message):
         # An alert that fails must not stop the switch itself; it is logged
         # in full so it can't fail quietly.
         logger.exception('Could not alert about conversation %s', conversation.pk)
+
+
+
+def resolved(conversation):
+    """A resolved conversation is handled: no longer 'needs you', and Octos answers what comes next."""
+    conversation.handled_by = Conversation.OCTOS
+    conversation.handoff_reason = ''
+    conversation.reminded_at = None
+    conversation.save(update_fields=['handled_by', 'handoff_reason', 'reminded_at'])
+
+
+def _clip(text, limit):
+    """Cut at a word, never mid-word, with an ellipsis when anything was cut."""
+    text = (text or '').strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1].rsplit(' ', 1)[0].rstrip(',;:') + '…'

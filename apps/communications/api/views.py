@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from apps.communications.models import Conversation, Message
+from apps.communications.services import handover
 from apps.communications.services.access import visible_conversations
 from apps.accounts.models import CustomUser
 from .serializers import (
@@ -211,6 +212,9 @@ class ConversationResolveView(APIView):
 
         conversation.status = Conversation.RESOLVED
         conversation.save(update_fields=['status'])
+        # Resolved means handled: no longer "needs you", and Octos answers
+        # whatever the customer sends next.
+        handover.resolved(conversation)
 
         Message.objects.create(
             conversation=conversation,

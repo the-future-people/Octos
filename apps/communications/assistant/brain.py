@@ -387,7 +387,7 @@ def _run_tool(name, args, ctx):
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
     if name == 'hand_to_person':
-        ctx.handoff = (args.get('reason') or 'Octos asked for a person.')[:200]
+        ctx.handoff = args.get('reason') or 'Octos asked for a person.'
         return {'ok': True}
     return {'error': f'Unknown tool {name}.'}
 

@@ -128,3 +128,16 @@ class HandoverTests(CommunicationsTestBase):
         handover.staff_replied(self.conv, self.user)
         self.conv.refresh_from_db()
         self.assertIsNone(self.conv.reminded_at)
+
+    def test_a_staff_reply_takes_over_from_octos_waiting_for_a_person(self):
+        handover.octos_hands_over(self.conv, 'customer asked to be called')
+        handover.staff_replied(self.conv, self.user)
+        self.conv.refresh_from_db()
+        self.assertEqual((self.conv.handled_by, self.conv.handoff_reason), (Conversation.STAFF, ''))
+    
+    def test_resolving_clears_needs_you_and_returns_it_to_octos(self):
+        handover.octos_hands_over(self.conv, 'customer asked to be called')
+        self.client.post(f'{BASE}/{self.conv.pk}/resolve/')
+        self.conv.refresh_from_db()
+        self.assertEqual((self.conv.status, self.conv.handled_by, self.conv.handoff_reason),
+                         (Conversation.RESOLVED, Conversation.OCTOS, ''))
