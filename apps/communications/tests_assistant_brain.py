@@ -7,7 +7,7 @@ shadow notes, live sends, handovers and failures.
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
-
+from django.utils import timezone
 from django.test import TestCase, override_settings
 
 from apps.communications.assistant import brain
@@ -144,7 +144,7 @@ class BrainTests(TestCase):
         self.assertEqual(run.decision, AssistantRun.BLOCKED)
         self.assertIn('GHS 35.00', run.reason)
         # The made-up price never goes out; a holding reply with no figures does.
-        self.assertEqual(self.sent().get().body, brain.HOLDING)
+        self.assertIn(self.sent().get().body, (brain.HOLDING, brain.HOLDING_CLOSED))
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.handled_by, Conversation.STAFF)
 
@@ -164,13 +164,13 @@ class BrainTests(TestCase):
         run = self.run_with(Model(error=RuntimeError('API down')))
         self.assertEqual(run.decision, AssistantRun.FAILED)
         self.assertIn('API down', run.error)
-        self.assertEqual(self.sent().get().body, brain.HOLDING)
+        self.assertIn(self.sent().get().body, (brain.HOLDING, brain.HOLDING_CLOSED))
 
     def test_a_reply_cut_off_mid_sentence_is_never_sent(self):
         run = self.run_with(Model(says(text('For 5 sets of A3 colour, one side, 10 p'), stop='max_tokens')))
         self.assertEqual(run.decision, AssistantRun.FAILED)
         # The half sentence never goes out; the holding reply does.
-        self.assertEqual(self.sent().get().body, brain.HOLDING)
+        self.assertIn(self.sent().get().body, (brain.HOLDING, brain.HOLDING_CLOSED))
         self.conv.refresh_from_db()
         self.assertEqual(self.conv.handled_by, Conversation.STAFF)
 
@@ -190,3 +190,30 @@ class BrainTests(TestCase):
         run = self.run_with(model)
         self.assertEqual(run.decision, AssistantRun.REPLIED)
         self.assertIn('already been asked to follow up', model.calls[0]['system'][1]['text'])
+
+
+    def octos_then_customer(self, octos_said, customer_said):
+        """
+        Octos speaks 20 seconds ago, the customer answers now. After setUp's
+        own message (30 seconds ago), so Octos's really is the one just
+        before; and more than 5 seconds apart, so no auto-reply guard.
+        """
+        said = Message.objects.create(conversation=self.conv, direction=Message.OUTBOUND,
+                                      channel=Message.WHATSAPP, body=octos_said)
+        Message.objects.filter(pk=said.pk).update(created_at=timezone.now() - timedelta(seconds=20))
+        answer = customer_wrote(self.conv, timedelta(seconds=0))
+        Message.objects.filter(pk=answer.pk).update(body=customer_said)
+        return answer
+
+    def test_ok_after_a_statement_ends_the_conversation(self):
+        ok = self.octos_then_customer('Your print starts once you have paid.', 'Okay')
+        model = Model(says(text('Good night!')))
+        run = self.run_with(model, trigger=ok)
+        self.assertEqual((run.decision, run.reason),
+                         (AssistantRun.SKIPPED, 'the customer was only closing the conversation'))
+        self.assertEqual(model.calls, [])
+
+    def test_ok_after_octos_asked_is_an_answer(self):
+        ok = self.octos_then_customer('Shall I send the payment link?', 'Ok')
+        run = self.run_with(Model(says(text('Here you go.'))), trigger=ok)
+        self.assertEqual(run.decision, AssistantRun.REPLIED, run.reason)

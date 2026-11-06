@@ -120,6 +120,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
         'lines': [{
             'what': line['service_name'],
             'quantity': line['quantity'],
+            'unit_price': f"GHS {Decimal(line['unit_price']):.2f}",
             'pages': line['specifications'].get('pages'),
             'total': f"GHS {Decimal(line['total']):.2f}",
         } for line in priced],

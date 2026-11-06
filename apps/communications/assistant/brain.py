@@ -17,6 +17,7 @@ silent, what it looked up, what it said, what was blocked and why, and
 what it cost. In live mode, anything that goes wrong hands the
 conversation to a person, so no customer is left waiting on a failure.
 """
+import re
 import json
 import logging
 import time
@@ -45,6 +46,17 @@ SHADOW_PREFIX = 'Octos would say: '
 # figures in it, so it can never be wrong, and the customer isn't left
 # in silence while a person is brought in.
 HOLDING = 'Let me check that with the team. Someone will get back to you shortly 🙏'
+HOLDING_CLOSED = 'Let me check that with the team. Someone will get back to you as soon as we open 🙏'
+
+# A message that only closes a conversation. After a statement it ends
+# the conversation; after Octos's question ("Shall I send the link?") the
+# same "ok" is an answer, so it is answered.
+ACKNOWLEDGEMENTS = {
+    'ok', 'okay', 'okk', 'oki', 'k', 'kk', 'noted', 'alright', 'sure', 'fine', 'cool', 'great',
+    'thanks', 'thank you', 'thank u', 'thanks a lot', 'thx', 'tnx', 'ok thanks', 'okay thanks',
+    'ok thank you', 'alright thanks', 'noted thanks', 'good night', 'goodnight', 'gn', 'bye',
+    'bye bye', '👍', '🙏', '👌', '👍🏾', '🙏🏾', '👍🏽', '🙏🏽',
+}
 TOOL_SPECS = [
     {
         'name': 'branch_hours',
@@ -160,13 +172,13 @@ def respond(conversation_id, trigger_id=None, now=None):
         problems = checker.unverified(reply, facts)
         if problems:
             why = 'I could not verify ' + ', '.join(problems) + ' before sending.'
-            _act(mode, conversation, run, text=HOLDING, handoff=why, note=f'Octos blocked its own reply: {reply}')
+            _act(mode, conversation, run, text=_holding(), handoff=why, note=f'Octos blocked its own reply: {reply}')
             return _finish(run, AssistantRun.BLOCKED, started, reason=why, reply=reply)
 
         if not reply and not ctx.handoff:
-            why = 'Octos had nothing to say.'
-            _act(mode, conversation, run, text=HOLDING, handoff=why)
-            return _finish(run, AssistantRun.HANDED_OVER, started, reason=why)
+            # Choosing silence (the customer was only closing the
+            # conversation) is allowed: nothing is sent, nobody is called.
+            return _finish(run, AssistantRun.SKIPPED, started, reason='Octos chose not to reply')
 
         _act(mode, conversation, run, text=reply, handoff=ctx.handoff)
         if mode == 'shadow':
@@ -181,7 +193,7 @@ def respond(conversation_id, trigger_id=None, now=None):
             try:
                 from apps.communications.services import handover, whatsapp_outbound
                 try:
-                    run.sent = whatsapp_outbound.send_text(conversation, HOLDING)
+                    run.sent = whatsapp_outbound.send_text(conversation, _holding())
                 except Exception:
                     logger.exception('Octos could not send its holding reply on %s', conversation_id)
                 handover.octos_hands_over(conversation, 'Octos hit a problem and could not answer.')
@@ -217,7 +229,27 @@ def _silence(conversation, trigger, now):
     if (before is not None and before.direction == Message.OUTBOUND and before.sent_by_id is None
             and (last.created_at - before.created_at).total_seconds() <= ECHO_SECONDS):
         return 'looks like an automatic reply to Octos'
+    if _just_acknowledging(last, before):
+        return 'the customer was only closing the conversation'
     return None
+
+
+def _just_acknowledging(last, before):
+    """'Ok' after a statement ends a conversation; after Octos's question it is an answer."""
+    text = re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (last.body or '').strip().lower()))
+    if text not in ACKNOWLEDGEMENTS:
+        return False
+    asked = (before is not None and before.direction == Message.OUTBOUND
+             and (before.body or '').rstrip().endswith('?'))
+    return not asked
+
+
+def _holding():
+    """The holding reply: 'shortly' only when a branch is open, as everywhere else."""
+    from apps.organization.models import Branch
+    from apps.organization.services import hours
+    open_now = any(hours.is_open(b) for b in Branch.objects.filter(is_trading=True, is_active=True))
+    return HOLDING if open_now else HOLDING_CLOSED
 
 
 def _looks_automated(conversation, now):

@@ -11,6 +11,7 @@ language model as tool results.
 """
 import logging
 from decimal import Decimal
+import re
 from django.db.models import Q
 from django.utils import timezone
 
@@ -129,6 +130,24 @@ def _when(moment, now):
     return f'{moment:%a} {clock}'
 
 # ── Prices ─────────────────────────────────────────────────────────────
+# Words that say nothing about which service ("size", "please"), and the
+# spellings customers use for what the catalogue spells another way.
+SEARCH_STOP = {'the', 'of', 'for', 'and', 'or', 'in', 'on', 'to', 'please', 'pls', 'size', 'sized',
+               'want', 'need', 'my', 'me', 'some', 'with', 'how', 'much', 'is', 'price', 'can', 'you'}
+SEARCH_SAME = {
+    'colour': ('colour', 'color', 'col'), 'color': ('colour', 'color', 'col'),
+    'black': ('black', 'b&w', 'bw'), 'white': ('white', 'b&w', 'bw'),
+    'us': ('american',), 'usa': ('american',), 'america': ('american',),
+    'uk': ('british',), 'britain': ('british',), 'canada': ('canadian',),
+    'photos': ('photo',), 'stickers': ('sticker',), 'banners': ('banner',),
+    'copies': ('copy',), 'prints': ('print',),
+}
+
+
+def _search_words(query):
+    """The customer's words that can tell services apart, each with its other spellings."""
+    words = re.findall(r'[a-z0-9&]+', (query or '').lower())
+    return [SEARCH_SAME.get(w, (w,)) for w in words if len(w) > 1 and w not in SEARCH_STOP]
 
 def find_services(query, limit=5):
     """
@@ -139,19 +158,31 @@ def find_services(query, limit=5):
     """
     from apps.jobs.models import Service
 
-    words = [w for w in (query or '').split() if len(w) > 1]
+    words = _search_words(query)
     if not words:
         return {'found': False, 'services': []}
 
-    matches = Service.objects.filter(is_active=True)
-    for word in words:
-        matches = matches.filter(
-            Q(name__icontains=word) | Q(display_name__icontains=word) | Q(code__icontains=word)
-        )
-    return {
-        'found': matches.exists(),
-        'services': [_service_facts(s) for s in matches.order_by('name')[:limit]],
-    }
+    any_word = Q()
+    for alternatives in words:
+        for w in alternatives:
+            any_word |= (Q(name__icontains=w) | Q(display_name__icontains=w) | Q(code__icontains=w)
+                         | Q(variant_label__icontains=w) | Q(description__icontains=w))
+    scored = []
+    for service in Service.objects.filter(is_active=True).filter(any_word).distinct():
+        text = ' '.join([service.name, service.display_name or '', service.code,
+                         service.variant_label or '', service.description or '']).lower()
+        scored.append((sum(1 for alts in words if any(w in text for w in alts)), service))
+    if not scored:
+        return {'found': False, 'services': []}
+
+    # Only the closest matches: every service that fits as well as the best
+    # one. "American size photo" finds the American passport photo, not
+    # plain photo printing; "photo" alone finds all five, and several
+    # equally good matches are Octos's cue to ask which one.
+    best = max(score for score, _ in scored)
+    closest = sorted((s for score, s in scored if score == best), key=lambda s: s.name)[:limit]
+    return {'found': True, 'services': [_service_facts(s) for s in closest],
+            'several': len(closest) > 1}
 
 
 def quote(service_code, specifications=None, quantity=1, addon_codes=(), branches=()):
@@ -229,6 +260,9 @@ def _service_facts(service):
         # display name, one-sided and front-and-back look like a conflict.
         'name': service.name,
         'variant': service.variant_label or None,
+        # What one unit is ("a set of 4 passport photos"), so a price is
+        # quoted in the right units.
+        'about': service.description or '',
         'unit': (service.unit or '').replace('PER_', '').lower(),
         'needs_file': bool(service.requires_file_upload),
         'needs_design': bool(service.requires_design),
