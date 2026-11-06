@@ -43,3 +43,11 @@ class ShadowHistoryTests(TestCase):
         turns = brain._history(self.conv)
         self.assertEqual([t['role'] for t in turns], ['user'])
         self.assertIn(prompt.INTRO_FIRST, prompt.system_prompt(self.conv, [])[1]['text'])
+
+    
+    def test_octos_is_told_a_known_customers_name(self):
+        from apps.customers.models.customer import CustomerProfile
+        self.conv.customer = CustomerProfile.objects.create(
+            first_name='James', last_name='Adjei', phone='+233244999001', customer_type='INDIVIDUAL')
+        self.conv.save(update_fields=['customer'])
+        self.assertIn('You are talking to James', prompt.system_prompt(self.conv, [])[1]['text'])
