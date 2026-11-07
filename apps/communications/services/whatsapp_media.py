@@ -46,27 +46,24 @@ def fetch(message_id):
     content, mime = download(message.media_id)
     mime = message.media_mime or mime
     name = _file_name(message, mime)
-    # A Word file is kept as the PDF it becomes: that is what Octos counts,
-    # the customer is quoted for and the floor prints (7 Nov 2026).
-    converted_from = ''
-    from apps.jobs.services.word_to_pdf import ConversionFailed, is_word, pdf_name, to_pdf
-    if is_word(name, mime):
-        try:
-            content = to_pdf(content, name)
-            converted_from = 'Word'
-            name, mime = pdf_name(name), 'application/pdf'
-        except ConversionFailed:
-            logger.warning('Could not convert %s to PDF', name, exc_info=True)
     path = default_storage.save(
         f'communications/media/{timezone.now():%Y/%m}/{name}', ContentFile(content),
     )
-    info = describe(content, name, mime)
-    if converted_from:
-        info['converted_from'] = converted_from
+    # A Word file is kept as sent; its pages, size and colour are read from a
+    # PDF copy made for the moment and then dropped (Khofi, 7 Nov 2026).
+    from apps.jobs.services.word_to_pdf import ConversionFailed, is_word, pdf_name, to_pdf
+    measured, measured_name, measured_mime = content, name, mime
+    if is_word(name, mime):
+        try:
+            measured, measured_name, measured_mime = to_pdf(content, name), pdf_name(name), 'application/pdf'
+        except ConversionFailed:
+            logger.warning('Could not measure the Word file %s', name, exc_info=True)
+    info = describe(measured, measured_name, measured_mime)
+    if measured is not content:
+        info['word'] = True
     Message.objects.filter(pk=message.pk).update(
         media_file=path, media_mime=mime, media_size=len(content),
-        media_name=name if converted_from else message.media_name,
-        media_pages=info.get('page_count') or count_pages(content, mime),
+        media_pages=info.get('page_count') or count_pages(measured, measured_mime),
         media_info=info,
     )
     message.refresh_from_db()

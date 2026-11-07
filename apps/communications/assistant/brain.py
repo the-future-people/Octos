@@ -443,8 +443,8 @@ def _history(conversation):
                 what += f", {info['width_px']} x {info['height_px']} px"
             if info.get('colour_mode'):
                 what += ', black and white' if counter.is_grey(info['colour_mode']) else ', colour'
-            if info.get('converted_from'):
-                what += f", converted from {info['converted_from']} to PDF"
+            if info.get('word'):
+                what += ', a Word file'
             if not m.media_file:
                 what += ', not saved yet'
             else:
