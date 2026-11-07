@@ -149,12 +149,11 @@ def _branch_payload(branch):
     if branch is None:
         return None
 
+    from apps.organization.services import hours
     now = timezone.localtime()
-    open_now = (
-        branch.is_active
-        and now.weekday() != 6
-        and branch.opening_time <= now.time() < branch.closing_time
-    )
+    # The one calendar: Saturday's own hours, Sundays and declared holidays.
+    open_now = branch.is_active and hours.is_open(branch, now)
+    closes = hours.hours_on(branch, now.date())[1]
 
     return {
         'id': branch.id,
@@ -164,8 +163,7 @@ def _branch_payload(branch):
         'latitude': str(branch.latitude) if branch.latitude else None,
         'longitude': str(branch.longitude) if branch.longitude else None,
         'is_open': open_now,
-        'closing_time': branch.closing_time.strftime('%-I:%M%p').lower()
-                        if branch.closing_time else None,
+        'closing_time': closes.strftime('%-I:%M%p').lower() if closes else None,
     }
 
 

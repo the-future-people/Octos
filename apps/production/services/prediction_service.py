@@ -280,23 +280,21 @@ class PredictionService:
         after closing is tomorrow's work, and the customer is told so when
         they order rather than discovering it later.
         """
-        opening = self.branch.opening_time
-        closing = self.branch.closing_time
 
         # Arriving before closing still gets worked on — the branch is
         # winding down but people are there. At or after closing is
         # tomorrow's work, and the customer is told when they order.
         cutoff = timezone.make_aware(
-            datetime.combine(at.date(), closing), at.tzinfo
+            datetime.combine(at.date(), hours.hours_on(self.branch, at.date())[1]), at.tzinfo
         )
 
         # Sundays and declared holidays alike: the one calendar decides.
         if not hours.is_trading_day(self.branch, at.date()):
             return self._opening_on(self._next_working_day(at.date()), at)
 
-        if at.time() < opening:
+        if at.time() < hours.hours_on(self.branch, at.date())[0]:
             return timezone.make_aware(
-                datetime.combine(at.date(), opening), at.tzinfo
+                datetime.combine(at.date(), hours.hours_on(self.branch, at.date())[0]), at.tzinfo
             )
 
         if at >= cutoff:
@@ -310,8 +308,6 @@ class PredictionService:
         closing until it is done, but nothing new starts — so only the
         final stretch may run late.
         """
-        opening = self.branch.opening_time
-        closing = self.branch.closing_time
 
         current   = start
         remaining = minutes
@@ -327,7 +323,7 @@ class PredictionService:
             guard += 1
 
             close_at = timezone.make_aware(
-                datetime.combine(current.date(), closing), current.tzinfo
+                datetime.combine(current.date(), hours.hours_on(self.branch, current.date())[1]), current.tzinfo
             )
             available = (close_at - current).total_seconds() / 60
 
@@ -358,5 +354,5 @@ class PredictionService:
 
     def _opening_on(self, day, reference) -> datetime:
         return timezone.make_aware(
-            datetime.combine(day, self.branch.opening_time), reference.tzinfo
+            datetime.combine(day, hours.hours_on(self.branch, day)[0]), reference.tzinfo
         )

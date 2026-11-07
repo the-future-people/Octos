@@ -84,7 +84,8 @@ def compute(scope, day=None) -> list:
     if day == today:
         local = timezone.localtime()
         for s in DailySalesSheet.objects.filter(branch_id__in=ids, date=today, status='OPEN').select_related('branch'):
-            closing = timezone.make_aware(datetime.combine(today, s.branch.closing_time))
+            from apps.organization.services import hours
+            closing = timezone.make_aware(datetime.combine(today, hours.hours_on(s.branch, today)[1]))
             if local > closing + timedelta(minutes=30):
                 out.append(_a(AMBER, 'sheet_open', 'Cash sheet still open after closing',
                               s.branch.name, closing, 'money'))

@@ -50,8 +50,10 @@ def breakdowns(machine_ids, start, end) -> dict:
 
 def open_minutes_so_far(branch, day):
     now = timezone.localtime()
-    opening = timezone.make_aware(datetime.combine(day, branch.opening_time))
-    closing = timezone.make_aware(datetime.combine(day, branch.closing_time))
+    from apps.organization.services import hours
+    opens, closes = hours.hours_on(branch, day)     # Saturday's own hours too
+    opening = timezone.make_aware(datetime.combine(day, opens))
+    closing = timezone.make_aware(datetime.combine(day, closes))
     end = min(now, closing) if day == now.date() else closing
     return max(0, (end - opening).total_seconds() / 60)
 
