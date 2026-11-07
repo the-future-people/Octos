@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 MODES = ('shadow', 'live')
 MAX_ROUNDS = 5          # look-ups before Octos must answer
-MAX_TOKENS = 600        # replies are short by design
+MAX_TOKENS = 1000        # replies are short by design
 HISTORY = 20            # messages of context
 ECHO_SECONDS = 5        # a message this soon after Octos's own is an auto-reply
 LOOP_WINDOW = timedelta(minutes=10)
