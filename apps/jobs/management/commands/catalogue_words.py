@@ -93,6 +93,11 @@ WORDS = {
     'DL-ENVELOPE-PRINTING': ('Envelope Printing (DL)',
         'Printing on DL envelopes (110 x 220 mm), usually envelopes you bring; we can supply them too. '
         'Priced per envelope.'),
+    # Binding: priced by the ring size, per set (never by pages)
+    'A4-BIND': ('A4 Binding', 'Binding an A4 document you bring. Priced by the ring size, per set: '
+                              'the bigger the document, the bigger the ring.'),
+    'A3-BIND': ('A3 Binding', 'Binding an A3 document you bring. Priced by the ring size, per set: '
+                              'the bigger the document, the bigger the ring.'),
     # Lamination
     'A3-LAMINATION---C.F-': ('A3 Lamination (your own pouch)',
         "A3 lamination with your own pouch: you bring it, we laminate. Done at the front desk."),
