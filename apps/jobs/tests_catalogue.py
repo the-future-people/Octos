@@ -155,9 +155,9 @@ class CatalogueTests(JobsFixtureMixin, TestCase):
             return priced[0]['quantity']
 
         # Octos's suggestion: a one-sheet notice travels as one bundle,
-        # a six-sheet report is one envelope a set.
+        # and so does a six-sheet report, unless they ask for one each (7 Nov 2026).
         self.assertEqual(envelopes(10, 1), 1)
-        self.assertEqual(envelopes(3, 6), 3)
+        self.assertEqual(envelopes(3, 6), 1)
         # The customer's word wins: five letters to five employers...
         self.assertEqual(envelopes(5, 1, per_copy=True), 5)
         # ...or three reports bundled for one office.

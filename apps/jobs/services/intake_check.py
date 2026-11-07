@@ -93,14 +93,16 @@ def ordered_size(line):
     return None
 
 
-def _file_for(line):
+def _file_for(line, own_only=False):
     """The file to judge this piece by: its own print file, else the job's."""
     from django.db.models import Case, IntegerField, Value, When
     from apps.jobs.models import JobFile
     order = Case(When(file_type='FINAL', then=Value(0)), When(file_type='ORIGINAL', then=Value(1)),
                  default=Value(2), output_field=IntegerField())
     own = JobFile.objects.filter(line_item=line).annotate(o=order).order_by('o', 'pk').first()
-    return own or JobFile.objects.filter(job_id=line.job_id, line_item__isnull=True) \
+    if own or own_only:
+        return own
+    return JobFile.objects.filter(job_id=line.job_id, line_item__isnull=True) \
         .annotate(o=order).order_by('o', 'pk').first()
 
 
@@ -121,9 +123,14 @@ def compare(job):
     for line in job.line_items.select_related('service').filter(parent__isnull=True).order_by('position', 'pk'):
         rules = rules_for(line.service)
         rows = []
-        f = _file_for(line)
         size = ordered_size(line)
         needs_file = bool(getattr(line.service, 'requires_file_upload', False)) or line.service.category == 'PRODUCTION'
+        # Packing and finishing sold on their own (an envelope, lamination) are
+        # judged only by a file of their own, never the job's (7 Nov 2026).
+        no_file = _takes_no_file(line.service)
+        f = _file_for(line, own_only=no_file)
+        if f is None and no_file:
+            continue
 
         if f is None:
             if needs_file:
@@ -265,3 +272,15 @@ def operator_notes(job, settled):
         if (settled or {}).get(f"{piece['line']}:BLEED") == 'NO_BLEED':
             lines.append(f"{piece['product']}: print without bleed, as agreed at intake.")
     return lines
+
+
+# What is packing or finishing rather than print: never inspected against
+# the job's file (7 Nov 2026: an A4 envelope was asked to be checked).
+NO_FILE_WORDS = ('envelope', 'lamination', 'binding', 'bag', 'eyelet', 'typing', 'scanning')
+
+
+def _takes_no_file(service):
+    if getattr(service, 'requires_file_upload', False) or service.category == 'PRODUCTION':
+        return False
+    name = (service.name or '').lower()
+    return any(w in name for w in NO_FILE_WORDS) or service.addon_for.exists()

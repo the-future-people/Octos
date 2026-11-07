@@ -69,9 +69,9 @@ def display_price(service):
 # Packing (an envelope, a bag). Whether copies share one or each gets its
 # own is the customer's to say: five application letters going to five
 # employers want five envelopes; ten copies of a notice for one office
-# want one. Octos only suggests: one for all when a copy is a single
-# sheet, one per copy when each copy is a set of several.
-PACKING = {'ENV-PACK-A4', 'CLEAR-BAG'}
+# want one. One for all copies unless the customer asks for one each
+# (7 Nov 2026: three envelopes for one court bundle surprised James).
+PACKING = {'ENV-PACK-A4', 'ENV-PACK-A3', 'CLEAR-BAG'}
 
 
 def is_packing(addon):
@@ -88,7 +88,7 @@ def addon_quantity(addon, quantity, specs, per_copy=None):
         return quantity * sheets
     if is_packing(addon):
         if per_copy is None:
-            per_copy = sheets > 1
+            per_copy = False
         return quantity if per_copy else 1
     return quantity
 
@@ -161,7 +161,7 @@ def price_addons(service, chosen, quantity, specs):
 
         per_copy = raw.get('per_copy') if isinstance(raw, dict) else None
         if is_packing(addon) and per_copy is None:
-            per_copy = sheets > 1
+            per_copy = False
         count = addon_quantity(addon, quantity, specs, per_copy)
 
         # Only what chooses a tier is passed. Pages are never passed: the
