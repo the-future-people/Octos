@@ -10,7 +10,7 @@ class MessageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
             'body', 'media_url', 'media_file', 'media_id', 'media_name', 'media_mime',
-            'media_size', 'media_pages', 'sent_by', 'sent_by_name',
+            'media_size', 'media_pages', 'media_info', 'sent_by', 'sent_by_name',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',
         ]

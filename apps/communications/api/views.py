@@ -98,6 +98,12 @@ class ConversationReplyView(APIView):
         if conversation is None:
             return _not_found()
 
+        # Files: documents and photos sent on WhatsApp, or kept on a note
+        # for staff (7 Nov 2026). Text alongside goes after them.
+        files = request.FILES.getlist('attachments') if hasattr(request, 'FILES') else []
+        if files:
+            return _reply_with_files(request, conversation, files)
+
         serializer = MessageCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -332,3 +338,161 @@ class ConversationAtCounterView(APIView):
             body=f'{request.user.full_name} marked the customer at the counter. Octos is quiet for this visit.',
         )
         return Response({'counter_until': conversation.counter_until})
+
+
+# ── Files in replies, and starting a chat (7 Nov 2026, Khofi) ─────────────
+MAX_ATTACHMENT = 16 * 1024 * 1024        # what we accept; WhatsApp's own limits are higher
+MAX_PHOTO = 5 * 1024 * 1024              # WhatsApp's limit for an image sent as a photo
+
+
+def _as_png(content):
+    """A photo as PNG bytes, since images go out labelled as PNG; None if it can't be read."""
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(content)) as picture:
+            out = io.BytesIO()
+            picture.convert('RGBA' if picture.mode in ('RGBA', 'LA', 'P') else 'RGB').save(out, 'PNG', optimize=True)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def _send_file(conversation, user, content, name, mime):
+    """One file to the customer: a photo as a photo when it can be, anything else as a document."""
+    from apps.communications.services import whatsapp_outbound
+    if mime in ('image/jpeg', 'image/png', 'image/webp') and len(content) <= MAX_PHOTO:
+        png = content if mime == 'image/png' else _as_png(content)
+        if png is not None and len(png) <= MAX_PHOTO:
+            stem = name.rsplit('.', 1)[0] if '.' in name else name
+            return _caption_optional(lambda body: whatsapp_outbound.send_text(
+                conversation, body, sent_by=user, image=png, filename=f'{stem}.png'), name)
+    return _caption_optional(lambda body: whatsapp_outbound.send_text(
+        conversation, body, sent_by=user, document=content, filename=name,
+        document_mime=mime or 'application/octet-stream'), name)
+
+
+def _caption_optional(send, name):
+    """A file needs no caption; if the sender insists on one, its name will do."""
+    try:
+        return send('')
+    except ValueError:
+        return send(name)
+
+
+def _reply_with_files(request, conversation, files):
+    from django.core.files.base import ContentFile
+    from .serializers import MessageSerializer as _Out
+    from apps.communications.services import handover, whatsapp_outbound
+
+    text = (request.data.get('body') or '').strip()
+    is_note = str(request.data.get('is_internal_note', '')).lower() in ('1', 'true', 'yes', 'on')
+    too_big = [f.name for f in files if f.size > MAX_ATTACHMENT]
+    if too_big:
+        return Response({'detail': f"{', '.join(too_big)} is over 16 MB. Send a smaller file, or share a link."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not is_note and conversation.channel != Conversation.WHATSAPP:
+        return Response({'detail': 'Files can only be sent on WhatsApp. Save it as a note instead.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    made = []
+    try:
+        for f in files:
+            content, name = f.read(), f.name
+            mime = (f.content_type or 'application/octet-stream').split(';')[0]
+            if is_note:
+                note = Message(
+                    conversation=conversation, direction=Message.OUTBOUND, channel=Message.SYSTEM,
+                    sent_by=request.user, is_internal_note=True, body=text or name,
+                    message_type=Message.IMAGE if mime.startswith('image/') else Message.DOCUMENT,
+                    media_name=name, media_mime=mime, media_size=len(content),
+                )
+                note.media_file.save(name, ContentFile(content), save=False)
+                note.save()
+                made.append(note)
+            else:
+                made.append(_send_file(conversation, request.user, content, name, mime))
+        if text and not is_note:
+            made.append(whatsapp_outbound.send_text(conversation, text, sent_by=request.user))
+    except whatsapp_outbound.WindowClosed:
+        return Response({'detail': WINDOW_CLOSED}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not is_note:
+        handover.staff_replied(conversation, request.user)
+    return Response(_Out(made, many=True).data, status=status.HTTP_201_CREATED)
+
+
+# The approved WhatsApp messages a chat may start with. Each must be approved
+# in WhatsApp Manager under this exact name, in English, before it can be sent.
+START_TEMPLATES = {
+    'order_ready': 'Hello {1}, your order {2} is ready to collect at Farhat Printing Press, Westland.',
+    'job_question': 'Hello {1}, about your job {2}: please reply when you can.',
+    'proforma_ready': 'Hello {1}, your proforma {2} is ready. Reply to receive it here.',
+}
+
+
+def _e164(phone):
+    """'024 400 0776' -> '+233244000776'; '' when it isn't a phone number."""
+    digits = ''.join(ch for ch in str(phone or '') if ch.isdigit())
+    if digits.startswith('0') and len(digits) == 10:
+        digits = '233' + digits[1:]
+    return f'+{digits}' if 11 <= len(digits) <= 15 else ''
+
+
+class ConversationStartView(APIView):
+    """
+    POST /api/v1/communications/start/  { phone, name?, template, params: [..] }
+
+    Reaching a customer who hasn't written (Khofi, 7 Nov 2026). WhatsApp
+    allows only an approved message until they reply; this sends one and
+    opens (or reuses) their chat. Returns { conversation }.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({'templates': [{'name': k, 'text': v, 'params': v.count('{')}
+                                       for k, v in START_TEMPLATES.items()]})
+
+    def post(self, request):
+        from apps.communications.services import whatsapp_client
+        name = request.data.get('template')
+        params = [str(p).strip() for p in (request.data.get('params') or [])]
+        text = START_TEMPLATES.get(name)
+        if text is None:
+            return Response({'detail': 'Choose one of the approved messages.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(params) != text.count('{') or not all(params):
+            return Response({'detail': 'Fill in every blank in the message.'}, status=status.HTTP_400_BAD_REQUEST)
+        phone = _e164(request.data.get('phone'))
+        if not phone:
+            return Response({'detail': "That doesn't look like a phone number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from apps.core.phones import lookup_forms
+            forms = list(lookup_forms(phone)) or [phone]
+        except Exception:
+            forms = [phone]
+        conversation = (Conversation.objects.filter(channel=Conversation.WHATSAPP, contact_phone__in=forms)
+                        .order_by('-id').first())
+        if conversation is None:
+            conversation = Conversation.objects.create(
+                channel=Conversation.WHATSAPP, contact_phone=phone,
+                contact_name=(request.data.get('name') or '').strip())
+
+        try:
+            wamid = whatsapp_client.send_template(conversation.contact_phone, name, params=params)
+        except Exception:
+            logger.warning('Starting a chat with %s failed', name, exc_info=True)
+            return Response({'detail': "WhatsApp didn't accept that message. If it was added recently, Meta "
+                                       "may not have approved it yet."}, status=status.HTTP_400_BAD_REQUEST)
+
+        body = text
+        for number, value in enumerate(params, start=1):
+            body = body.replace('{%d}' % number, value)
+        Message.objects.create(
+            conversation=conversation, direction=Message.OUTBOUND, channel=conversation.channel,
+            sent_by=request.user, body=body, kind='template', status='SENT',
+            external_id=wamid if isinstance(wamid, str) else '',
+        )
+        return Response({'conversation': conversation.id}, status=status.HTTP_201_CREATED)

@@ -53,7 +53,8 @@ class WindowClosed(Exception):
         )
 
 
-def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png', document=None):
+def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png', document=None,
+              document_mime='application/pdf'):
     """
     Queue free text to the customer. Returns the QUEUED Message.
     sent_by is the staff member, or None when Octos is the sender.
@@ -84,7 +85,7 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
         message.media_file.save(filename, ContentFile(document), save=False)
         Message.objects.filter(pk=message.pk).update(
             media_file=message.media_file.name, media_name=filename,
-            media_mime='application/pdf', media_size=len(document),
+            media_mime=document_mime, media_size=len(document),
         )
 
     if image:
