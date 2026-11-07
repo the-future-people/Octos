@@ -252,6 +252,8 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
         'variant': service.variant_label or None,
         'quantity': quantity,
         'unit_price': f"GHS {line['unit_price']:.2f}",
+        # The item's own total before add-ons, so an itemised answer is verifiable.
+        'item_total': f"GHS {line['total']:.2f}",
         'addons': addons_out,
         'total': f'GHS {total:.2f}',
     }

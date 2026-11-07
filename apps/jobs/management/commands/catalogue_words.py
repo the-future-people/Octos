@@ -29,7 +29,7 @@ def _copy(size, colour, both):
 DESIGN = 'Customers usually bring a finished design.'
 FLYER = ('{size} flyers printed in colour on art paper, {sides}. Minimum 10 pieces. '
          'Black and white is possible on request. ' + DESIGN)
-PASSPORT = ('A set of {n} printed passport pictures, {kind} ({size}). Priced per set: one set is {n} pictures. '
+PASSPORT = ('A set of {n} printed passport pictures (passport photos), {kind} ({size}). Priced per set: one set is {n} pictures. '
             'Digital copies are done at the front desk only.')
 
 WORDS = {
