@@ -1,0 +1,136 @@
+﻿// src/components/Details.jsx
+//
+// The short registration: asked once, after the code, of anyone the shop
+// doesn't know yet, and of anyone who signed up before it existed.
+//
+// Personal or business first, because they are different customers:
+// a business's jobs are paid and receipted as the business. Then the
+// title (which suggests the gender), the names, and for a business its
+// name and where it is. The number is the one just verified.
+
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { accountRegister } from '../api/client'
+import { useAccount } from '../lib/AccountContext.jsx'
+
+const GENDER_FROM_TITLE = { MR: 'MALE', MRS: 'FEMALE', MS: 'FEMALE' }
+
+function Choice({ options, value, onChange }) {
+  return (
+    <div className="flex p-1 rounded-xl bg-substrate gap-1">
+      {options.map(([v, label]) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors
+                            ${value === v ? 'bg-white text-ink shadow-sm' : 'text-body'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export default function Details({ account }) {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const { setAccount } = useAccount()
+  const p = account.profile || {}
+
+  const [kind, setKind] = useState(p.kind || 'PERSONAL')
+  const [title, setTitle] = useState(p.title || '')
+  const [gender, setGender] = useState(p.gender || '')
+  const [genderChosen, setGenderChosen] = useState(!!p.gender)
+  const [first, setFirst] = useState(p.first_name || account.first_name || '')
+  const [last, setLast] = useState(p.last_name || '')
+  const [business, setBusiness] = useState(p.business_name || '')
+  const [address, setAddress] = useState(p.address || '')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState('')
+
+  const isBusiness = kind === 'BUSINESS'
+  const ready = title && first.trim() && last.trim()
+    && (isBusiness ? business.trim() && address.trim() : gender)
+
+  function pickTitle(t) {
+    setTitle(t)
+    if (!genderChosen && GENDER_FROM_TITLE[t]) setGender(GENDER_FROM_TITLE[t])
+  }
+
+  async function save() {
+    setBusy(true); setProblem('')
+    try {
+      const { data } = await accountRegister({
+        kind, title, gender, first_name: first.trim(), last_name: last.trim(),
+        business_name: business.trim(), address: address.trim(),
+      })
+      setAccount(data)
+      navigate(params.get('next') || '/', { replace: true })
+    } catch (err) {
+      setProblem(err.response?.data?.detail || 'That didnâ€™t save. Try again in a moment.')
+      setBusy(false)
+    }
+  }
+
+  const input = `w-full px-3 py-3 rounded-lg border border-rule bg-white text-[1rem]
+                 focus:outline-none focus:border-ink`
+  const label = 'block mb-1.5 text-xs text-body'
+
+  return (
+    <div>
+      <h1 className="text-xl font-bold">A few details, once</h1>
+      <p className="mt-1.5 text-sm leading-relaxed text-body">
+        So the shop knows you when you come in, and your receipts are right.
+      </p>
+
+      <p className="mt-5 mb-1.5 text-xs text-body">Is this account for</p>
+      <Choice options={[['PERSONAL', 'Me'], ['BUSINESS', 'A business']]} value={kind} onChange={setKind} />
+
+      {isBusiness && (
+        <>
+          <label className="block mt-4">
+            <span className={label}>Business name</span>
+            <input value={business} onChange={e => setBusiness(e.target.value)} autoComplete="organization"
+                   placeholder="e.g. Piwak Construction Ltd" className={input} />
+          </label>
+          <label className="block mt-3">
+            <span className={label}>Where is it?</span>
+            <input value={address} onChange={e => setAddress(e.target.value)} autoComplete="street-address"
+                   placeholder="e.g. Westland, Accra" className={input} />
+          </label>
+          <p className="mt-4 text-xs font-semibold text-ink">And you, the contact person</p>
+        </>
+      )}
+
+      <label className="block mt-4">
+        <span className={label}>Title</span>
+        <select value={title} onChange={e => pickTitle(e.target.value)} className={input}>
+          <option value="" disabled>Chooseâ€¦</option>
+          <option value="MR">Mr</option><option value="MRS">Mrs</option><option value="MS">Ms</option>
+          <option value="DR">Dr</option><option value="PROF">Prof</option><option value="OTHER">Other</option>
+        </select>
+      </label>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className={label}>First name</span>
+          <input value={first} onChange={e => setFirst(e.target.value)} autoComplete="given-name" className={input} />
+        </label>
+        <label className="block">
+          <span className={label}>Last name</span>
+          <input value={last} onChange={e => setLast(e.target.value)} autoComplete="family-name" className={input} />
+        </label>
+      </div>
+      {!isBusiness && (
+        <div className="mt-3">
+          <span className={label}>Gender</span>
+          <Choice options={[['MALE', 'Male'], ['FEMALE', 'Female']]} value={gender}
+                  onChange={g => { setGender(g); setGenderChosen(true) }} />
+        </div>
+      )}
+
+      <button onClick={save} disabled={busy || !ready}
+              className="mt-6 w-full px-4 py-3 rounded-lg bg-farhat text-white text-sm font-semibold disabled:opacity-40">
+        {busy ? 'Savingâ€¦' : 'Continue'}
+      </button>
+      {problem && <p className="mt-4 text-sm text-farhat">{problem}</p>}
+    </div>
+  )
+}

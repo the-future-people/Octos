@@ -1,0 +1,586 @@
+﻿
+
+===== Octos-1\apps\storefront\account_profile.py =====
+"""
+Who an app account is: the customer behind the number.
+
+Signing in proves a number; this says who holds it. A number the counter
+already knows is the counter's customer, so Eric Nortey, a regular since
+before the app, is welcomed back rather than signed up again. A number
+nobody knows yet is asked, once, for a short registration, which makes
+a proper customer the counter recognises from the first visit.
+
+POST account/register/ (App token)
+    { kind: PERSONAL | BUSINESS, title, gender, first_name, last_name,
+      business_name?, address? }
+
+Completes the customer behind the number, or makes one: never a second.
+"""
+
+from django.db import transaction
+from django.db.models import Q
+from rest_framework import status
+from rest_framework.response import Response
+
+TITLES = {'MR', 'MRS', 'MS', 'DR', 'PROF', 'OTHER'}
+GENDERS = {'MALE', 'FEMALE'}
+ORG_TYPES = ('BUSINESS', 'INSTITUTION')
+
+
+def customer_for(lead):
+    """The customer behind this lead: linked already, or found by any of their numbers (and linked)."""
+    from apps.core.phones import lookup_forms
+    from apps.customers.models import CustomerProfile
+
+    if lead.customer_id:
+        return lead.customer
+    forms = lookup_forms(lead.phone)
+    found = (CustomerProfile.objects
+             .filter(Q(phone__in=forms) | Q(secondary_phone__in=forms))
+             .order_by('created_at').first())
+    if found is not None:
+        lead.customer = found
+        lead.save(update_fields=['customer'])
+    return found
+
+
+def profile_for(lead):
+    """What the app shows and whether the short registration is still needed."""
+    c = customer_for(lead)
+    if c is None:
+        return {'complete': False, 'kind': None}
+    business = c.customer_type in ORG_TYPES
+    complete = bool(c.first_name and c.last_name and c.title and (
+        (c.company_name and c.address) if business else c.gender))
+    return {
+        'complete': complete,
+        'kind': 'BUSINESS' if business else 'PERSONAL',
+        'title': c.title or '',
+        'first_name': c.first_name or '',
+        'last_name': c.last_name or '',
+        'gender': c.gender or '',
+        'business_name': c.company_name or '' if business else '',
+        'address': c.address or '' if business else '',
+    }
+
+
+def register(lead, data):
+    """Complete the customer behind the number, or make one. Returns problems, or None."""
+    from apps.customers.models import CustomerProfile
+    from apps.customers.utils import normalise_phone
+
+    kind = (data.get('kind') or 'PERSONAL').upper()
+    title = (data.get('title') or '').upper()
+    gender = (data.get('gender') or '').upper()
+    first = (data.get('first_name') or '').strip()[:100]
+    last = (data.get('last_name') or '').strip()[:100]
+    business = (data.get('business_name') or '').strip()[:200]
+    address = (data.get('address') or '').strip()[:300]
+
+    if kind not in ('PERSONAL', 'BUSINESS'):
+        return 'Choose personal or business.'
+    if title not in TITLES:
+        return 'Choose a title.'
+    if not first or not last:
+        return 'Tell us your first and last name.'
+    if kind == 'PERSONAL' and gender not in GENDERS:
+        return 'Choose male or female.'
+    if kind == 'BUSINESS' and (not business or not address):
+        return 'Tell us the businessâ€™s name and where it is.'
+
+    with transaction.atomic():
+        c = customer_for(lead)
+        if c is None:
+            c = CustomerProfile(phone=normalise_phone(lead.phone),
+                                customer_type='BUSINESS' if kind == 'BUSINESS' else 'INDIVIDUAL')
+        elif kind == 'BUSINESS' and c.customer_type not in ORG_TYPES:
+            # A known person registering a business on their own number:
+            # the counter links people to businesses; the app keeps them
+            # as the person they already are.
+            return ('This number is already registered to you personally. '
+                    'To order for a business, choose it at the counter, or use the businessâ€™s own number.')
+        c.title = title
+        c.first_name = first
+        c.last_name = last
+        if kind == 'PERSONAL':
+            c.gender = gender
+        else:
+            c.company_name = business
+            c.address = address
+        c.save()
+        lead.customer = c
+        lead.first_name = first
+        lead.save(update_fields=['customer', 'first_name'])
+    return None
+
+
+def register_view(view, request):
+    session = view.session(request)
+    if session is None:
+        return view.refused()
+    problem = register(session.lead, request.data)
+    if problem:
+        return Response({'detail': problem}, status=status.HTTP_400_BAD_REQUEST)
+    from apps.storefront.account_views import _account
+    return Response(_account(session.lead))
+
+===== print-octos\src\pages\Account.jsx =====
+// src/pages/Account.jsx
+//
+// The customer's own space in the app: signing in, and once signed in,
+// their details, their orders and signing out.
+//
+// Signing in is a phone number and a code texted to it, nothing else: no
+// password to forget. A number we have not seen before is also asked for
+// a first name, and that is the whole of signing up.
+
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { accountCode, accountOrders, accountUpdate, accountVerify } from '../api/client'
+import { useAccount } from '../lib/AccountContext.jsx'
+import Header from '../components/Header.jsx'
+import Details from '../components/Details.jsx'
+import { useToast } from '../lib/ToastContext.jsx'
+
+export default function Account() {
+  const navigate = useNavigate()
+  const { account, ready } = useAccount()
+  return (
+    <div className="min-h-screen bg-white text-ink">
+      <Header curve={false} action={account ? (
+        <button onClick={() => navigate('/settings')} aria-label="Settings"
+                className="w-11 h-11 grid place-items-center text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+               strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+          </svg>
+        </button>
+      ) : null} />
+      <main className={`max-w-md mx-auto px-5 ${account ? 'pb-6' : 'py-8'}`}>
+        {!ready ? null
+          : !account ? <SignIn />
+          : account.profile && !account.profile.complete ? <Details account={account} />
+          : <Signed account={account} />}
+      </main>
+    </div>
+  )
+}
+
+
+function SignIn() {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const { signedIn } = useAccount()
+  const toast = useToast()
+  const [step, setStep] = useState('phone')
+  const [phone, setPhone] = useState('')
+  const [sentTo, setSentTo] = useState('')
+  const [isNew, setIsNew] = useState(false)
+  const [code, setCode] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState('')
+
+  async function send() {
+    setBusy(true); setProblem('')
+    try {
+      const { data } = await accountCode(phone.trim())
+      setSentTo(data.sent_to)
+      setIsNew(data.new_customer)
+      setStep('code')
+    } catch (err) {
+      setProblem(err.response?.data?.detail || 'We couldnâ€™t send a code just now. Try again in a moment.')
+    } finally { setBusy(false) }
+  }
+
+  async function verify() {
+    setBusy(true); setProblem('')
+    try {
+      const { data } = await accountVerify({
+        phone: phone.trim(), code: code.trim(), first_name: firstName.trim(),
+        device: navigator.userAgent.slice(0, 120),
+      })
+      await signedIn(data.token, data.account)
+      // Someone the shop already knows goes straight in; anyone else
+      // stays here, where the short registration now shows.
+      if (data.account.profile?.complete !== false) {
+        toast.show(`Welcome back, ${data.account.first_name}`, 'Good to see you again.')
+        navigate(params.get('next') || '/', { replace: true })
+      }
+    } catch (err) {
+      setProblem(err.response?.data?.detail || 'That didnâ€™t work. Check the code and try again.')
+      setBusy(false)
+    }
+  }
+
+  const input = `w-full px-3 py-3 rounded-lg border border-rule bg-white text-[1rem]
+                 focus:outline-none focus:border-ink`
+
+  return (
+    <div>
+      <h1 className="text-xl font-bold">Sign in or create your account</h1>
+      <p className="mt-1.5 text-sm leading-relaxed text-body">
+        Your number is your account. Weâ€™ll text you a code to check itâ€™s
+        yours. New here? The same code sets you up.
+      </p>
+
+      {step === 'phone' && (
+        <>
+          <label className="block mt-5">
+            <span className="block mb-1.5 text-xs text-body">Phone number</span>
+            <input type="tel" inputMode="tel" autoComplete="tel" value={phone}
+                   onChange={e => setPhone(e.target.value)} placeholder="024 000 0000"
+                   onKeyDown={e => { if (e.key === 'Enter' && phone.trim()) send() }}
+                   className={input} />
+          </label>
+          <button onClick={send} disabled={busy || !phone.trim()}
+                  className="mt-4 w-full px-4 py-3 rounded-lg bg-farhat text-white text-sm
+                             font-semibold disabled:opacity-40">
+            {busy ? 'Sendingâ€¦' : 'Send me a code'}
+          </button>
+        </>
+      )}
+
+      {step === 'code' && (
+        <>
+          <p className="mt-5 text-sm">We texted a code to <strong>{sentTo}</strong>.</p>
+          <label className="block mt-3">
+            <span className="block mb-1.5 text-xs text-body">The 6-digit code</span>
+            <input inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                   value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                   className={`${input} tracking-[0.5em] text-center text-lg font-semibold`} />
+          </label>
+          {isNew && (
+            <label className="block mt-3">
+              <span className="block mb-1.5 text-xs text-body">Your first name</span>
+              <input autoComplete="given-name" value={firstName}
+                     onChange={e => setFirstName(e.target.value)} className={input} />
+            </label>
+          )}
+          <button onClick={verify}
+                  disabled={busy || code.length !== 6 || (isNew && !firstName.trim())}
+                  className="mt-4 w-full px-4 py-3 rounded-lg bg-farhat text-white text-sm
+                             font-semibold disabled:opacity-40">
+            {busy ? 'Checkingâ€¦' : isNew ? 'Create my account' : 'Sign in'}
+          </button>
+          <button onClick={() => { setStep('phone'); setCode(''); setProblem('') }}
+                  className="mt-3 w-full text-sm font-semibold text-body">
+            Use a different number, or send the code again
+          </button>
+        </>
+      )}
+
+      {problem && <p className="mt-4 text-sm text-farhat">{problem}</p>}
+    </div>
+  )
+}
+
+const BRANCH_PHONE = '0556244194'
+const BRANCH_MAP = 'https://www.google.com/maps/search/?api=1&query=Farhat+Printing+Press+Westland+Accra'
+
+function Row({ icon, label, note, value, badge, onClick, muted }) {
+  return (
+    <button onClick={onClick} disabled={!onClick}
+            className="w-full flex items-center gap-3 px-4 py-3 text-left bg-white
+                       active:bg-substrate disabled:cursor-default">
+      <span className={`w-10 h-10 rounded-full grid place-items-center shrink-0
+                        ${muted ? 'bg-substrate text-body' : 'bg-farhat/10 text-farhat'}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+             strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" aria-hidden="true">
+          {icon}
+        </svg>
+      </span>
+      <span className="flex-1 min-w-0">
+        {value !== undefined ? (
+          <>
+            <span className="block text-xs text-body">{label}</span>
+            <span className="block text-[0.95rem] font-semibold truncate">{value}</span>
+          </>
+        ) : (
+          <>
+            <span className="block text-[0.95rem] font-semibold">{label}</span>
+            {note && <span className="block text-xs text-body mt-0.5">{note}</span>}
+          </>
+        )}
+      </span>
+      {badge}
+      {onClick && !badge && (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+             strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-body/60 shrink-0"
+             aria-hidden="true">
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+function Group({ title, action, children }) {
+  return (
+    <section className="mt-5">
+      <div className="flex items-baseline justify-between px-1">
+        <h2 className="text-base font-bold">{title}</h2>
+        {action}
+      </div>
+      <div className="mt-2 rounded-2xl border border-rule divide-y divide-rule overflow-hidden">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The customer's own space: who they are, what they have ordered, and
+ * the ways to reach the shop. The order lists themselves live in the
+ * Orders tab; here they are a count.
+ */
+function Signed({ account }) {
+  const navigate = useNavigate()
+  const { signOut, setAccount } = useAccount()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(account.first_name)
+  const [saving, setSaving] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+
+  const { data } = useQuery({
+    queryKey: ['my-orders'],
+    queryFn: () => accountOrders().then(r => r.data),
+  })
+  const active = data?.active?.length ?? 0
+  const collected = data?.collected?.length ?? 0
+
+  const since = account.member_since
+    ? new Date(account.member_since).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    : null
+
+  async function saveName() {
+    if (!name.trim() || name.trim() === account.first_name) { setEditing(false); return }
+    setSaving(true)
+    try {
+      const { data: updated } = await accountUpdate({ first_name: name.trim() })
+      setAccount(updated)
+      setEditing(false)
+    } finally { setSaving(false) }
+  }
+
+  const stats = [
+    { n: active + collected, label: 'Orders', tone: 'bg-farhat/10 text-farhat',
+      icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></> },
+    { n: active, label: 'Active', tone: 'bg-amber-100 text-amber-600',
+      icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></> },
+    { n: collected, label: 'Collected', tone: 'bg-emerald-100 text-emerald-600',
+      icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5M12 12v9" /></> },
+  ]
+
+  return (
+    <div className="-mx-5">
+      {/* The profile, on the red the header began. */}
+      <div className="bg-farhat px-5 pt-3 pb-12 text-center text-white">
+        <span className="relative inline-grid place-items-center w-24 h-24 rounded-full bg-white
+                         text-farhat text-4xl font-extrabold ring-4 ring-gold">
+          {(account.first_name || '?').charAt(0).toUpperCase()}
+          <span className="absolute top-0 left-1 w-5 h-5 rounded-full bg-gold border-[3px] border-farhat" />
+        </span>
+        <p className="mt-3 text-2xl font-bold">{account.first_name}</p>
+        {since && <p className="mt-0.5 text-sm text-white/85">Customer since {since}</p>}
+      </div>
+
+      <div className="px-4">
+        <div className="-mt-8 grid grid-cols-3 rounded-2xl bg-white border border-rule
+                        shadow-[0_6px_20px_rgba(0,0,0,0.07)] divide-x divide-rule">
+          {stats.map(s => (
+            <button key={s.label} onClick={() => navigate('/orders')}
+                    className="flex flex-col items-center gap-1.5 py-3.5 active:bg-substrate">
+              <span className={`w-9 h-9 rounded-full grid place-items-center ${s.tone}`}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+                     strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]"
+                     aria-hidden="true">{s.icon}</svg>
+              </span>
+              <span className="text-xl font-extrabold leading-none tabular-nums">{s.n}</span>
+              <span className="text-xs text-body">{s.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <Group
+          title="Your details"
+          action={!editing && (
+            <button onClick={() => { setName(account.first_name); setEditing(true) }}
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-farhat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                   strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16z" />
+              </svg>
+              Edit
+            </button>
+          )}
+        >
+          {editing ? (
+            <div className="px-4 py-3 bg-white">
+              <label className="block text-xs text-body">First name</label>
+              <input value={name} onChange={e => setName(e.target.value)} autoFocus maxLength={100}
+                     className="mt-1 w-full px-3 py-2.5 rounded-lg border border-rule text-[1rem]
+                                focus:outline-none focus:border-ink" />
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => setEditing(false)}
+                        className="flex-1 py-2.5 rounded-lg border border-rule text-sm font-semibold">
+                  Cancel
+                </button>
+                <button onClick={saveName} disabled={saving || !name.trim()}
+                        className="flex-1 py-2.5 rounded-lg bg-farhat text-white text-sm font-semibold
+                                   disabled:opacity-40">
+                  {saving ? 'Savingâ€¦' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <Row label="First name" value={account.first_name}
+                 icon={<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>} />
+          )}
+          <Row label="Phone number" value={account.phone}
+               icon={<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />}
+               badge={
+                 <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full
+                                  bg-emerald-50 text-emerald-700 text-xs font-bold">
+                   <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
+                     <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm5 7.2l-6.1 6.9a1 1 0 0 1-1.5 0L6 12.6a1 1 0 0 1 1.5-1.3l2.6 2.9 5.4-6.1A1 1 0 0 1 17 9.2z" />
+                   </svg>
+                   Verified
+                 </span>
+               } />
+        </Group>
+
+        <Group title="Print Octos">
+          <Row label="Notifications" note="Payment and ready messages"
+               onClick={() => navigate('/notifications')}
+               icon={<><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>} />
+          <Row label="My orders" note="Track whatâ€™s being made and collected"
+               onClick={() => navigate('/orders')}
+               icon={<><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5M12 12v9" /></>} />
+        </Group>
+
+        <Group title="Support & more">
+          <Row label="Call us" note={BRANCH_PHONE.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3')}
+               onClick={() => { window.location.href = `tel:${BRANCH_PHONE}` }}
+               icon={<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />} />
+          <Row label="Find our branch" note="Westland, Accra Â· directions"
+               onClick={() => window.open(BRANCH_MAP, '_blank')}
+               icon={<><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></>} />
+          <Row label="Terms & Privacy" note="Terms of service and privacy policy"
+               onClick={() => navigate('/terms')}
+               icon={<><path d="M7 3h7l4 4v14H7z" /><path d="M10 12h5M10 16h5" /></>} />
+          <Row label={leaving ? 'Signing outâ€¦' : 'Log out'} note="Sign out on this phone"
+               onClick={leaving ? undefined : async () => { setLeaving(true); await signOut(); navigate('/', { replace: true }) }}
+               icon={<><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 16l-4-4 4-4M6 12h10" /></>} />
+        </Group>
+
+        <p className="mt-6 mb-2 text-center text-[0.7rem] text-body">Print Octos Â· Farhat Printing Press</p>
+      </div>
+    </div>
+  )
+}
+
+const STAGE = {
+  paid: { label: 'Paid', tone: 'bg-substrate text-body' },
+  inspecting: { label: 'Being checked', tone: 'bg-substrate text-body' },
+  press: { label: 'In press', tone: 'bg-amber-50 text-amber-800' },
+  finishing: { label: 'Finishing', tone: 'bg-amber-50 text-amber-800' },
+  ready: { label: 'Ready to collect', tone: 'bg-emerald-50 text-emerald-800' },
+}
+
+function when(iso) {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+function timeLeft(e) {
+  if (!e) return null
+  if (e.held_up) return 'a short delay, weâ€™re on it'
+  if (e.running_over) return 'taking a little longer than usual'
+  const m = Number(e.minutes_left) || 0
+  if (m < 60) return `about ${m} min left`
+  const h = Math.floor(m / 60)
+  return `about ${h} hr${m % 60 ? ` ${m % 60} min` : ''} left`
+}
+
+/**
+ * Every paid order on their number, website ones included: what is
+ * being made now, and what they have collected. Tapping one opens its
+ * tracking page.
+ */
+export function MyOrders({ heading = true }) {
+  const navigate = useNavigate()
+  const [tab, setTab] = useState('active')
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['my-orders'],
+    queryFn: () => accountOrders().then(r => r.data),
+    // Stages move while they watch.
+    refetchInterval: 60_000,
+  })
+
+  const active = data?.active || []
+  const collected = data?.collected || []
+  const list = tab === 'active' ? active : collected
+  const open = o => navigate(`/track/${o.order_number}?t=${o.token}`)
+
+  return (
+    <section className="mt-6">
+      {heading && <h2 className="text-[0.95rem] font-semibold">My orders</h2>}
+
+      <div className="mt-3 flex p-1 rounded-lg bg-substrate gap-1" role="tablist">
+        {[['active', `Active Â· ${active.length}`], ['collected', `Collected Â· ${collected.length}`]].map(([key, label]) => (
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                  className={`flex-1 py-2 rounded-md text-sm font-semibold transition-colors
+                              ${tab === key ? 'bg-white text-ink shadow-sm' : 'text-body'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {isLoading && <p className="mt-4 text-sm text-body">Loading your ordersâ€¦</p>}
+      {isError && <p className="mt-4 text-sm text-farhat">Your orders didnâ€™t load. Try again in a moment.</p>}
+
+      {!isLoading && !isError && list.length === 0 && (
+        <div className="mt-4 rounded-xl border border-dashed border-rule px-4 py-6 text-center">
+          <p className="text-sm text-body">
+            {tab === 'active' ? 'Nothing being made right now.' : 'Nothing collected yet.'}
+          </p>
+          <button onClick={() => navigate('/')}
+                  className="mt-3 px-4 py-2 rounded-lg bg-farhat text-white text-sm font-semibold">
+            Order something
+          </button>
+        </div>
+      )}
+
+      <div className="mt-3 space-y-2">
+        {list.map(o => {
+          const stage = STAGE[o.stage]
+          const left = timeLeft(o.estimate)
+          return (
+            <button key={o.order_number} onClick={() => open(o)}
+                    className="w-full text-left rounded-xl border border-rule px-4 py-3
+                               hover:border-ink transition-colors">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold leading-snug">{o.summary}</p>
+                {tab === 'active' && stage ? (
+                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-[0.7rem] font-semibold ${stage.tone}`}>
+                    {stage.label}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">GHS {o.total}</span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-body">
+                {o.order_number}
+                {tab === 'active'
+                  ? (left ? ` Â· ${left}` : o.branch ? ` Â· ${o.branch}` : '')
+                  : ` Â· collected ${when(o.collected_at)}`}
+              </p>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
