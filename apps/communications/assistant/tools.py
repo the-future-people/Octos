@@ -265,6 +265,25 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
             for p in priced
         ]
 
+    # When it could be ready, read from the floor now (7 Nov 2026, Khofi):
+    # the prediction the counter's New Job window asks, at the branch that
+    # would make it, said as a half-hour window. An estimate while quoting;
+    # the promise is fixed once the order is paid.
+    ready, ready_note = None, 'The team will confirm the ready time.'
+    try:
+        from apps.organization.models import Branch
+        from apps.production.services.prediction_service import PredictionService
+        maker = next(iter(branches or ()), None) or Branch.objects.filter(is_trading=True, is_active=True).first()
+        if maker is not None:
+            pages = max(1, int(specs.get('pages') or 1))
+            ready_at = PredictionService(maker).predict([(service, quantity, pages)]).ready_at
+            if ready_at:
+                ready = f'{_window(ready_at, timezone.now())} at {_branch_name(maker)}'
+                ready_note = 'An estimate from the floor now; it is fixed once the order is paid.'
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning('Could not read the floor for a quote', exc_info=True)
+
     facts = {
         'success': True,
         'service': service.name,
@@ -274,6 +293,8 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
         # The item's own total before add-ons, so an itemised answer is verifiable.
         'item_total': f"GHS {line['total']:.2f}",
         'addons': addons_out,
+        'ready': ready,
+        'ready_note': ready_note,
         'total': f'GHS {total:.2f}',
     }
     if line.get('minimum_applied'):
