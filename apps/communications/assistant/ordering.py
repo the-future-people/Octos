@@ -79,7 +79,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
                 staged_for_line.append(staged)
                 return stop({'needs_customer_ok': True, 'file': name, 'checks': verdict['checks']})
             if counts_pages(service) and not specs.get('pages'):
-                specs['pages'] = sheets_for(service, staged.page_count)
+                specs['pages'] = staged.page_count or 1   # the document's pages: the price halves them for both sides
         elif service.requires_file_upload:
             return stop({'error': f"Line {number}: {service.display_name or service.name} needs the customer's file."})
 

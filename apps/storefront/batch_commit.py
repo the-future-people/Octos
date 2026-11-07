@@ -155,9 +155,9 @@ class BatchCommitView(APIView):
                         except SelectionRefused as refused:
                             return refuse(f'{staged.original_filename}: {refused}')
                         specs.update(page_selection=format_selection(chosen),
-                                     pages=sheets_for(service, len(chosen)))
+                                     pages=len(chosen))
                     else:
-                        specs['pages'] = sheets_for(service, staged.page_count)
+                        specs['pages'] = staged.page_count or 1   # the document's pages: the price halves them for both sides
                 lines.append({'service': service.pk, 'quantity': quantity,
                               'specifications': specs, 'addons': s.get('addons') or []})
             line_total += len(lines)

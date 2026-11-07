@@ -580,7 +580,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
                     from apps.jobs.services.availability import counts_pages, sheets_for
                     staged = read(token, svc, item_data.get('specifications'))
                     if counts_pages(svc):
-                        sheets = sheets_for(svc, staged.page_count)
+                        sheets = staged.page_count or 1   # the document's pages: the price halves them for both sides
                         item_data['pages'] = sheets
                         # The spec's pages win over the column when a line is
                         # saved (_reconcile_pages): the file's count goes in both.

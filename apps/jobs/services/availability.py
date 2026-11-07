@@ -140,7 +140,8 @@ def price_addons(service, chosen, quantity, specs):
         return None, None, 'Add-ons must be a list.'
 
     offered = {a.pk: a for a in service.addons.filter(is_active=True)}
-    sheets = int((specs or {}).get('pages') or 1)
+    pages = int((specs or {}).get('pages') or 1)
+    sheets = -(-pages // pages_per_sheet(service))   # both sides: half the pages, rounded up
     priced, total, seen = [], Decimal('0.00'), set()
 
     for raw in chosen:
@@ -162,7 +163,7 @@ def price_addons(service, chosen, quantity, specs):
         per_copy = raw.get('per_copy') if isinstance(raw, dict) else None
         if is_packing(addon) and per_copy is None:
             per_copy = False
-        count = addon_quantity(addon, quantity, specs, per_copy)
+        count = addon_quantity(addon, quantity, {**(specs or {}), 'pages': sheets}, per_copy)
 
         # Only what chooses a tier is passed. Pages are never passed: the
         # engine multiplies by them, which is how an envelope became
@@ -212,8 +213,15 @@ def price_addons(service, chosen, quantity, specs):
 DOUBLE_SIDED = 'Front and back'
 
 
+def is_double_sided(service):
+    """Printed on both sides: the product's own sides, or its version's label."""
+    if (getattr(service, 'smart_defaults', None) or {}).get('sides') == 'DOUBLE':
+        return True
+    return (getattr(service, 'variant_label', '') or '').strip().lower() in ('front and back', 'both sides')
+
+
 def pages_per_sheet(service):
-    return 2 if (service.variant_label or '').strip() == DOUBLE_SIDED else 1
+    return 2 if is_double_sided(service) else 1
 
 
 def counts_pages(service):

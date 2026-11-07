@@ -72,6 +72,15 @@ def quote_line(service, branch, specifications=None, quantity=1) -> dict:
         })
         return result
 
+    # A form's minimum is the product's minimum (flyers: 10 pieces).
+    least = form_minimum(service)
+    if least and quantity < least:
+        return {
+            'success': False,
+            'error': f'{service.display_name or service.name} has a minimum of {least}.',
+            'total': Decimal('0.00'),
+        }
+
     pages = int(specs.get('pages') or 1)
 
     # Everything else the spec carries goes to the engine as a condition.
@@ -191,6 +200,11 @@ class PricingEngine:
             }
 
        # ── Tiered pricing takes priority ─────────────────────
+        # Both sides: a sheet carries two pages, so the document's pages
+        # become sheets here, the one place every price passes (7 Nov 2026).
+        # Callers pass pages as the customer says them and the file shows them.
+        pages = sheets_of(self.service, pages)
+
         if self.rule.pricing_tiers:
             return self._calculate_tiered(quantity, pages, condition_params or {})
 
@@ -372,3 +386,29 @@ class PricingEngine:
                   condition_params: dict = None):
         """Convenience class method for quick price lookups."""
         return cls(service, branch).calculate(quantity, is_color, pages, condition_params)
+
+
+
+def sheets_of(service, pages):
+    """
+    Sheets for this many pages of one copy: half, rounded up, when the
+    product prints both sides. Area products count pieces, not pages, so
+    they are left alone.
+    """
+    from apps.jobs.services.availability import pages_per_sheet
+    if (service.unit or '').upper().replace('PER_', '') in ('SQFT', 'SQCM', 'SQM', 'SQIN', 'AREA'):
+        return pages
+    pages = max(1, int(pages or 1))
+    per = pages_per_sheet(service)
+    return (pages + per - 1) // per
+
+
+def form_minimum(service):
+    """The smallest quantity the product's form allows, when it says (flyers: 10)."""
+    for field in service.spec_template or []:
+        if isinstance(field, dict) and field.get('key') == 'quantity':
+            try:
+                return int(field.get('min') or 0) or None
+            except (TypeError, ValueError):
+                return None
+    return None
