@@ -68,7 +68,7 @@ def file_only(message):
 
 def quiet_window(message, now=None):
     """Seconds to wait after this message for the customer to go quiet."""
-    if not no_words(message):
+    if not no_words(message) and not expects_file(message):
         return WORDS_WAIT
     return OPEN_WAIT if shop_open(now) else CLOSED_WAIT
 
@@ -135,9 +135,15 @@ def ack_text(conversation, branch):
 
 def _batch_acknowledged(conversation, trigger):
     """
-    Octos last spoke in answer to files with no words, and since then the
+    Octos last spoke having seen files with no words, and since then the
     customer has only sent more of the same: wait for their words.
+
+    Only a reply written with the files in view counts: one from a run
+    that started after they arrived. A reply that merely crossed them
+    ("The file didn't come through", written while the PDF was still
+    uploading) does not (James, 6 Nov 2026).
     """
+    from apps.communications.models import AssistantRun
     earlier = list(conversation.messages.filter(is_internal_note=False, created_at__lt=trigger.created_at)
                    .order_by('-created_at')[:80])
     i = 0
@@ -147,12 +153,18 @@ def _batch_acknowledged(conversation, trigger):
         i += 1
     if i == len(earlier) or earlier[i].sent_by_id is not None:
         return False
+    files = []
     j = i + 1
     while j < len(earlier) and earlier[j].direction == Message.INBOUND and no_words(earlier[j]):
         if earlier[j].message_type in MEDIA:
-            return True
+            files.append(earlier[j])
         j += 1
-    return False
+    if not files:
+        return False
+    return AssistantRun.objects.filter(
+        conversation=conversation, decision__in=[AssistantRun.REPLIED, AssistantRun.SHADOWED],
+        trigger__created_at__gte=min(f.created_at for f in files),
+        trigger__created_at__lte=earlier[i].created_at).exists()
 
 
 def _branch(named):
@@ -172,3 +184,21 @@ def _visit(conversation, branch, now):
     Conversation.objects.filter(pk=conversation.pk).update(**fields)
     for key, value in fields.items():
         setattr(conversation, key, value)
+
+
+# Words that point to a file ("3 copies of this file") while it is still
+# uploading: wait for it, as for a file (James, 6 Nov 2026).
+MENTIONS_FILE = re.compile(r"\b(this|these|attached|attachment|files?|documents?|docs?|pdfs?|pictures?"
+                           r"|photos?|images?|flyers?|cv)\b", re.IGNORECASE)
+
+
+def expects_file(message):
+    """Words promising a file that hasn't arrived in the last 10 minutes."""
+    if message.direction != Message.INBOUND or message.message_type in MEDIA:
+        return False
+    if not MENTIONS_FILE.search(message.body or ''):
+        return False
+    since = message.created_at - timedelta(minutes=10)
+    return not message.conversation.messages.filter(
+        direction=Message.INBOUND, message_type__in=MEDIA,
+        created_at__gte=since, created_at__lte=message.created_at).exists()

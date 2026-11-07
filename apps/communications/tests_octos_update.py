@@ -134,7 +134,9 @@ class BatchAndCrossingTests(Base):
         self.addCleanup(closed.stop)
 
     def test_after_a_batch_is_acknowledged_more_files_wait_for_words(self):
-        self.customer(file=True)
+        photo = self.customer(file=True)
+        AssistantRun.objects.create(conversation=self.conv, trigger=photo, mode='live',
+                                    decision=AssistantRun.REPLIED)
         self.octos('Got your photo. How many copies?')
         model = Model(says(text('x')))
         run = self.respond(model, self.customer(file=True))
@@ -208,3 +210,36 @@ class NameOncePerVisitTests(Base):
     def test_within_a_visit_the_name_is_not_used_again(self):
         self.octos('Good afternoon, James! How can I help?')
         self.assertIn('already greeted', prompt.system_prompt(self.conv, [])[1]['text'])
+
+
+
+class JamesTests(Base):
+    """James, 6 Nov 2026: 'I want 3 copies of this file', the PDF 12 seconds behind."""
+
+    def setUp(self):
+        super().setUp()
+        closed = patch(OPEN, return_value=False)
+        closed.start()
+        self.addCleanup(closed.stop)
+
+    def test_words_promising_a_file_wait_for_it(self):
+        self.assertEqual(counter.quiet_window(self.customer('I want 3 copies of this file')), counter.CLOSED_WAIT)
+
+    def test_words_after_the_file_has_come_wait_briefly(self):
+        self.customer(file=True)
+        self.assertEqual(counter.quiet_window(self.customer('3 copies of this please')), counter.WORDS_WAIT)
+
+    def test_ordinary_words_wait_briefly(self):
+        self.assertEqual(counter.quiet_window(self.customer('How much is A4 colour?')), counter.WORDS_WAIT)
+
+    def test_a_reply_that_crossed_the_files_does_not_silence_the_next_one(self):
+        words = self.customer('I want 3 copies of this file')
+        AssistantRun.objects.create(conversation=self.conv, trigger=words, mode='live',
+                                    decision=AssistantRun.REPLIED)
+        self.customer(file=True)
+        self.octos("The file didn't come through on my side. Could you send it again?")
+        again = self.customer(file=True)
+        model = Model(says(text('Got it, 3 pages. Colour or black and white?')))
+        run = self.respond(model, again)
+        self.assertTrue(model.calls)
+        self.assertEqual(run.decision, AssistantRun.REPLIED)
