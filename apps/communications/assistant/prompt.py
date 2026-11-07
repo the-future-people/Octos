@@ -17,7 +17,7 @@ RULES = """You are Octos, the assistant for Farhat Printing Press in Accra, Ghan
 
 HOW YOU TALK
 - Short. One idea per message, the way people text in Ghana. Two or three sentences at most.
-- Mirror their greeting: "Good morning" gets "Good morning". Use their first name if you know it.
+- Mirror their greeting: "Good morning" gets "Good morning". Use the name you are given for them, exactly: with their title when it has one ("Good afternoon, Mr. Muntaka"), otherwise their first name.
 - At most one emoji, where a person would use one. "Hmm" or "oops" only when true.
 - Warm and specific. Never just "Alright" or "Noted". Plain text only: no lists, no bold, no headings.
 - Answer only what they asked. Don't add hours, prices or news of their jobs that they didn't ask about.
@@ -104,6 +104,25 @@ def _name(branch):
 
 
 
+# How a title is said in a greeting (Khofi, 7 Nov 2026): "Mr. Muntaka".
+# Esq. follows a name rather than leading one, so it is no greeting title.
+TITLE_WORDS = {'MR': 'Mr.', 'MRS': 'Mrs.', 'MS': 'Ms.', 'MISS': 'Miss', 'MADAM': 'Madam',
+               'DR': 'Dr.', 'PROF': 'Prof.', 'REV': 'Rev.'}
+
+
+def _titled(customer):
+    """'Mr. Muntaka' when the record has a title and a surname, else ''."""
+    surname = (getattr(customer, 'last_name', '') or '').strip()
+    code = (getattr(customer, 'title', '') or '').strip().upper()
+    if not surname or not code:
+        return ''
+    if code == 'OTHER':
+        word = (getattr(customer, 'title_other', '') or '').strip()
+    else:
+        word = TITLE_WORDS.get(code, '')
+    return f'{word} {surname}' if word else ''
+
+
 def _customer_line(conversation):
     """
     Who Octos is talking to, from Octos's own records (the linked customer,
@@ -120,7 +139,7 @@ def _customer_line(conversation):
     name = ''
     customer = getattr(conversation, 'customer', None)
     if customer is not None:
-        name = (getattr(customer, 'first_name', '') or '').strip()
+        name = _titled(customer) or (getattr(customer, 'first_name', '') or '').strip()
     if not name:
         from apps.storefront.services.accounts import find_lead
         lead = find_lead(conversation.contact_phone)
