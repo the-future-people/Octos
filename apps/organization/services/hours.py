@@ -3,6 +3,9 @@ When a branch is open: the one place everything asks.
 
 A branch trades Monday to Saturday, from its opening_time to its
 closing_time, except on a public holiday its manager has declared.
+Saturday may have hours of its own (saturday_opening_time and
+saturday_closing_time; empty means the same as weekdays): Westland opens
+9:00am to 5:30pm on Saturdays (7 Nov 2026).
 
 Until November 2026 this was known in pieces: "Sunday is closed" written
 out by hand in finance views, declared holidays read only by finance, and
@@ -14,7 +17,16 @@ from datetime import datetime, timedelta
 
 from django.utils import timezone
 
+SATURDAY = 5
 SUNDAY = 6
+
+
+def hours_on(branch, day):
+    """(opening, closing) times on this date: Saturday's own when the branch has them."""
+    if (day.weekday() == SATURDAY and getattr(branch, 'saturday_opening_time', None)
+            and getattr(branch, 'saturday_closing_time', None)):
+        return branch.saturday_opening_time, branch.saturday_closing_time
+    return branch.opening_time, branch.closing_time
 
 
 def is_trading_day(branch, day):
@@ -48,23 +60,21 @@ def next_trading_day(branch, after):
 
 def opening_at(branch, day, tz=None):
     return timezone.make_aware(
-        datetime.combine(day, branch.opening_time), tz or timezone.get_current_timezone()
+        datetime.combine(day, hours_on(branch, day)[0]), tz or timezone.get_current_timezone()
     )
 
 
 def closing_at(branch, day, tz=None):
     return timezone.make_aware(
-        datetime.combine(day, branch.closing_time), tz or timezone.get_current_timezone()
+        datetime.combine(day, hours_on(branch, day)[1]), tz or timezone.get_current_timezone()
     )
 
 
 def is_open(branch, at=None):
     """Doors open at this moment (now, if not given)."""
     at = timezone.localtime(at or timezone.now())
-    return (
-        is_trading_day(branch, at.date())
-        and branch.opening_time <= at.time() < branch.closing_time
-    )
+    opens, closes = hours_on(branch, at.date())
+    return is_trading_day(branch, at.date()) and opens <= at.time() < closes
 
 
 def next_opening(branch, at=None):
@@ -73,6 +83,6 @@ def next_opening(branch, at=None):
     trading day, otherwise the next trading day's opening.
     """
     at = timezone.localtime(at or timezone.now())
-    if is_trading_day(branch, at.date()) and at.time() < branch.opening_time:
+    if is_trading_day(branch, at.date()) and at.time() < hours_on(branch, at.date())[0]:
         return opening_at(branch, at.date(), at.tzinfo)
     return opening_at(branch, next_trading_day(branch, at.date()), at.tzinfo)

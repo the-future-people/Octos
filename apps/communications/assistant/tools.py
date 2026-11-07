@@ -43,7 +43,7 @@ def branch_hours(branch, at=None):
         'open_now': hours.is_open(branch, at),
         'today': (
             {'closed': closed} if closed else
-            {'opens': _clock(branch.opening_time), 'closes': _clock(branch.closing_time)}
+            dict(zip(('opens', 'closes'), map(_clock, hours.hours_on(branch, at.date()))))
         ),
         'next_opening': _when(hours.next_opening(branch, at), at),
     }
@@ -96,7 +96,7 @@ def _job_facts(job, at):
         'stage': words,
         'ready_to_collect': job.handover_state == job.Handover.AWAITING_COLLECTION,
         'out_for_delivery': job.handover_state == job.Handover.OUT_FOR_DELIVERY,
-        'promised_ready': _when(job.estimated_ready_at, at) if job.estimated_ready_at else None,
+        'promised_ready': _window(job.estimated_ready_at, at) if job.estimated_ready_at else None,
         'promise': (job.promise_state or '').lower() or None,
         'balance_due': f'GHS {balance:.2f}' if balance is not None else None,
         'paid_in_full': job.is_fully_paid,
@@ -128,6 +128,25 @@ def _when(moment, now):
     if days == 1:
         return f'{clock} tomorrow'
     return f'{moment:%a} {clock}'
+
+
+def _window(moment, now):
+    """
+    A ready time as the customer hears it (7 Nov 2026, Khofi): half an hour,
+    starting at the next quarter hour, so it never starts before the floor
+    can deliver. 'between 6:30pm and 7:00pm today'. A single time sounds
+    more certain than anyone can be.
+    """
+    from datetime import timedelta
+    moment = timezone.localtime(moment)
+    start = moment.replace(second=0, microsecond=0)
+    start += timedelta(minutes=(-start.minute) % 15)
+    if start < moment:
+        start += timedelta(minutes=15)
+    end = start + timedelta(minutes=30)
+    days = (start.date() - now.date()).days
+    day = 'today' if days == 0 else 'tomorrow' if days == 1 else f'on {start:%A}'
+    return f'between {_clock(start.time())} and {_clock(end.time())} {day}'
 
 # ── Prices ─────────────────────────────────────────────────────────────
 # Words that say nothing about which service ("size", "please"), and the

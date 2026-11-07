@@ -51,6 +51,11 @@ class Branch(AuditModel):
         default=timezone.datetime.strptime('19:30', '%H:%M').time(),
         help_text='Branch closing time — default 19:30',
     )
+    # Saturday's own hours (7 Nov 2026): Westland opens 9:00am to 5:30pm on
+    # Saturdays. Empty means Saturday keeps the weekday hours. Read through
+    # organization/services/hours.py, never directly.
+    saturday_opening_time = models.TimeField(null=True, blank=True)
+    saturday_closing_time = models.TimeField(null=True, blank=True)
 
     # ── Location coordinates ──────────────────────────────────
     latitude  = models.DecimalField(
