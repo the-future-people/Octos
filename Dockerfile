@@ -12,6 +12,17 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Customers' Word files become PDFs (7 Nov 2026): LibreOffice Writer with no
+# screen, and fonts metric-compatible with Calibri, Cambria, Times and Arial,
+# so pages break where Word breaks them and the page count stays true.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-writer-nogui \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
+    fonts-liberation \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

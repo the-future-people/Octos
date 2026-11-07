@@ -37,6 +37,19 @@ def inspect_file(content, name, content_type, specs):
     from apps.storefront.models import StagedUpload
     from apps.storefront.services.verdicts import file_hash
 
+    # A Word file (or ODT, RTF) becomes a PDF first: from here on it is that
+    # PDF that is measured, judged, staged and printed (7 Nov 2026).
+    from apps.jobs.services.word_to_pdf import ConversionFailed, is_word, pdf_name, to_pdf
+    if is_word(name, content_type):
+        try:
+            content = to_pdf(content, name)
+        except ConversionFailed as failed:
+            refused = {'verdict': 'refuse', 'checks': [{
+                'name': 'file', 'verdict': 'refuse',
+                'message': f'{failed} Please send it as a PDF instead.'}]}
+            return file_hash(SimpleUploadedFile(name, content, content_type=content_type)), {}, refused, None
+        name, content_type = pdf_name(name), 'application/pdf'
+
     # The bytes are needed three times (hashed, measured, stored); each
     # read gets its own fresh file over the same bytes.
     def rewound():
