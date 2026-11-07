@@ -37,18 +37,20 @@ def inspect_file(content, name, content_type, specs):
     from apps.storefront.models import StagedUpload
     from apps.storefront.services.verdicts import file_hash
 
-    # A Word file (or ODT, RTF) becomes a PDF first: from here on it is that
-    # PDF that is measured, judged, staged and printed (7 Nov 2026).
+    # A Word file (or ODT, RTF) is measured through a PDF copy made for the
+    # moment: its pages, size and colour are read from the copy, but the file
+    # hashed, kept, staged and printed is the one the customer sent. The floor
+    # formats Word files themselves (Khofi, 7 Nov 2026).
     from apps.jobs.services.word_to_pdf import ConversionFailed, is_word, pdf_name, to_pdf
+    measured_name, measured_content, measured_type = name, content, content_type
     if is_word(name, content_type):
         try:
-            content = to_pdf(content, name)
+            measured_name, measured_content, measured_type = pdf_name(name), to_pdf(content, name), 'application/pdf'
         except ConversionFailed as failed:
             refused = {'verdict': 'refuse', 'checks': [{
                 'name': 'file', 'verdict': 'refuse',
                 'message': f'{failed} Please send it as a PDF instead.'}]}
             return file_hash(SimpleUploadedFile(name, content, content_type=content_type)), {}, refused, None
-        name, content_type = pdf_name(name), 'application/pdf'
 
     # The bytes are needed three times (hashed, measured, stored); each
     # read gets its own fresh file over the same bytes.
@@ -60,11 +62,11 @@ def inspect_file(content, name, content_type, specs):
     # The same measuring the counter uses. Two implementations of
     # "how many dots per inch is this" would eventually disagree,
     # and a customer would get different answers about one file.
-    found = measure(_Carrier(rewound()))
+    found = measure(_Carrier(SimpleUploadedFile(measured_name, measured_content, content_type=measured_type)))
 
     verdict = check_file(
         metadata_state=found.get('metadata_state'),
-        content_type=content_type or '',
+        content_type=measured_type or '',
         width_px=found.get('width_px'),
         height_px=found.get('height_px'),
         width_mm=found.get('width_mm'),
