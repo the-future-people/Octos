@@ -21,6 +21,12 @@ from decimal import Decimal
 
 MM_PER = {'in': 25.4, 'ft': 304.8, 'cm': 10.0, 'mm': 1.0, 'm': 1000.0}
 PAPER_MM = {'A3': (297, 420), 'A4': (210, 297), 'A5': (148, 210), 'A6': (105, 148), 'LETTER': (216, 279)}
+# One photo's size for each passport service (7 Nov 2026: they were judged as A4).
+PASSPORT_MM = {
+    'PP-US': (50.8, 50.8, '2 × 2 in (American passport)'),
+    'PP-BR': (35.0, 45.0, '35 × 45 mm (British passport)'),
+    'PP-CA': (50.0, 70.0, '50 × 70 mm (Canadian passport)'),
+}
 AREA_UNITS = ('SQFT', 'SQM', 'SQIN', 'AREA')
 
 # What a coordinator may settle a row with. Holding is an action, not a settlement.
@@ -29,6 +35,7 @@ SETTLEMENTS = {
     'FIT':      'Fit to the ordered paper (small margins)',
     'NO_BLEED': 'Print without bleed',
     'CHECKED':  'Checked by eye',
+    'CROP':     'Crop to the photo size',
 }
 SIGNED_CHECKS = {
     'TEXT':  'Text read: names, dates, numbers and spelling',
@@ -42,6 +49,8 @@ def rules_for(service):
     """Bleed, safe margin and minimum dpi for a product. Trade defaults for now."""
     name = (service.name or '').lower()
     unit = (service.unit or '').upper().replace('PER_', '')
+    if 'passport' in name or (getattr(service, 'code', '') or '').upper() in PASSPORT_MM:
+        return {'kind': 'photo', 'bleed_mm': 0, 'safe_mm': 2, 'min_dpi': 250}
     if 'banner' in name or 'flexy' in name or unit in AREA_UNITS:
         return {'kind': 'banner', 'bleed_mm': 0, 'safe_mm': 25, 'min_dpi': 100}
     if 'sticker' in name or 'label' in name:
@@ -64,6 +73,10 @@ def _fmt(value):
 
 def ordered_size(line):
     """(short_mm, long_mm, label) of what was ordered, or None."""
+    code = (getattr(getattr(line, 'service', None), 'code', '') or '').upper()
+    if code in PASSPORT_MM:
+        a, b, label = PASSPORT_MM[code]
+        return a, b, label
     specs = line.specifications or {}
     for unit, mm in MM_PER.items():
         try:
@@ -149,8 +162,13 @@ def compare(job):
                         fixes = ('FIT',)
                         note = 'Nearly the same shape: it can be fitted with small margins.'
                     else:
-                        fixes = ()
-                        note = 'A different shape from the order: ask the customer which they meant.'
+                        # Never hold-only (7 Nov 2026): a phone photo or flyer on A4 or A3
+                        # is fitted with margins every day. Holding stays an option.
+                        fixes = ('FIT',)
+                        note = 'A different shape from the order: fit it with margins, or hold and ask the customer.'
+                    if rules['kind'] == 'photo':
+                        fixes = ('CROP', 'FIT')
+                        note = 'Crop the photo to the passport size, as usual.'
                     rows.append(_row('SIZE', 'Size', olabel, file_label, 'warn', note, fixes))
 
                 if bleed:
@@ -242,6 +260,8 @@ def operator_notes(job, settled):
             lines.append(f"{piece['product']}: print at {size['ordered']} (file is {size['file']}, scale it).")
         if (settled or {}).get(f"{piece['line']}:SIZE") == 'FIT' and size:
             lines.append(f"{piece['product']}: fit to {size['ordered']} with small margins (file is {size['file']}).")
+        if (settled or {}).get(f"{piece['line']}:SIZE") == 'CROP' and size:
+            lines.append(f"{piece['product']}: crop to {size['ordered']}.")
         if (settled or {}).get(f"{piece['line']}:BLEED") == 'NO_BLEED':
             lines.append(f"{piece['product']}: print without bleed, as agreed at intake.")
     return lines

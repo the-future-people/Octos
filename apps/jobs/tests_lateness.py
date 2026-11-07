@@ -34,13 +34,14 @@ class DecideTests(SimpleTestCase):
 
     def test_the_customer_is_not_told_twice_within_two_hours(self):
         d = decide(promise=T, live=T + m(42), now=NOON, state=AT_RISK, last_told=NOON - m(30))
-        self.assertTrue(d.tell_staff)
         self.assertFalse(d.tell_customer)
 
-    def test_but_reaching_late_is_always_told(self):
+    def test_reaching_late_tells_staff_but_the_customer_waits_out_the_gap(self):
+        # 7 Nov 2026: this exception told one customer 24 times in a day.
         d = decide(promise=T, live=T + m(42), now=T + m(5), state=AT_RISK, last_told=T - m(10))
         self.assertEqual(d.state, LATE)
-        self.assertTrue(d.tell_customer)
+        self.assertTrue(d.tell_staff)
+        self.assertFalse(d.tell_customer)
 
     def test_past_the_promise_with_nothing_better_to_say(self):
         d = decide(promise=T, live=None, now=T + m(1), state=ON_TRACK, last_told=None)

@@ -38,7 +38,8 @@ from apps.storefront.services.messages import late_text
 logger = logging.getLogger(__name__)
 
 SLIP = timedelta(minutes=15)          # smaller wobbles are not worth an alarm
-CUSTOMER_GAP = timedelta(hours=2)     # at most one message this often per job
+CUSTOMER_GAP = timedelta(hours=2)     # at most one message this often per customer, across their jobs
+DAILY_LIMIT = 2                       # and at most this many a day for one job
 
 ON_TRACK, AT_RISK, LATE, KEPT, BROKEN = 'ON_TRACK', 'AT_RISK', 'LATE', 'KEPT', 'BROKEN'
 
@@ -70,20 +71,20 @@ def decide(*, promise, live, now, state, last_told):
     # The live estimate has slipped well past the promise: Octos moves it.
     if live is not None and live >= promise + SLIP:
         new_state = LATE if passed else AT_RISK
-        first_late = new_state == LATE and state != LATE
         quiet = last_told is not None and now - last_told < CUSTOMER_GAP
         return Decision(
             state=new_state,
             new_promise=round_up_5(live),
-            tell_staff=True,
-            tell_customer=first_late or not quiet,
+            tell_staff=new_state != state,     # staff hear of a change, not every revision
+            tell_customer=not quiet,
         )
 
     # Past the promise and not ready, with no better time to give.
     if passed:
         if state == LATE:
             return Decision(state=LATE)
-        return Decision(state=LATE, tell_staff=True, tell_customer=True)
+        quiet = last_told is not None and now - last_told < CUSTOMER_GAP
+        return Decision(state=LATE, tell_staff=True, tell_customer=not quiet)
 
     # Back within the promise: quietly on track again. Never announced:
     # earlier is not a promise worth making.
@@ -142,6 +143,9 @@ def check(job, now=None):
     promise = job.estimated_ready_at
     if promise is None or job.work_state == 'DONE' or job.handover_state == 'HANDED_OVER':
         return None
+    from apps.organization.services import hours
+    if job.branch_id and not hours.is_open(job.branch, now):
+        return None
 
     fields = []
     if job.first_promise_at is None:
@@ -150,6 +154,8 @@ def check(job, now=None):
 
     d = decide(promise=promise, live=job_ready_at(job, now), now=now,
                state=job.promise_state, last_told=job.promise_told_at)
+    if d.tell_customer and not _may_tell(job, now):
+        d.tell_customer = False
 
     if d.new_promise is not None and d.new_promise > promise:
         reason = _reason(job)
@@ -231,3 +237,24 @@ def restart_for_customer(job, now=None):
                  f'Thanks for the change to {job.job_number}. New time: about {when}.',
                  sms_text=late_text(order, when))
     return fresh
+
+
+
+def _may_tell(job, now):
+    """
+    At most one lateness message per customer every CUSTOMER_GAP, across
+    all their jobs, and DAILY_LIMIT a day for one job. One honest "running
+    late" is a service; twenty-four is spam (7 Nov 2026).
+    """
+    from apps.jobs.models import Job, PromiseRevision
+    from apps.storefront.models import OnlineOrder
+
+    order = OnlineOrder.objects.filter(job=job).first()
+    if order is None or not order.lead_id:
+        return False
+    theirs = OnlineOrder.objects.filter(lead_id=order.lead_id).exclude(job=None).values_list('job_id', flat=True)
+    if Job.objects.filter(pk__in=list(theirs), promise_told_at__gte=now - CUSTOMER_GAP).exists():
+        return False
+    midnight = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
+    told_today = PromiseRevision.objects.filter(job=job, customer_told=True, created_at__gte=midnight).count()
+    return told_today < DAILY_LIMIT

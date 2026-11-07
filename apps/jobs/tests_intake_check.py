@@ -61,9 +61,10 @@ class IntakeCheckTests(JobsFixtureMixin, TestCase):
         self.assertEqual(rows['QUANTITY']['status'], 'ok')
         self.assertEqual(rows['EDGES']['status'], 'sign')
 
-    def test_a_different_shape_cannot_be_scaled_only_held(self):
+    def test_a_different_shape_can_be_fitted_or_held(self):
+        # 7 Nov 2026: never hold-only. Fitting with margins is everyday work.
         job, _ = self._job(self.banner, {'width_in': '6', 'height_in': '6'}, file_mm=(1016, 508))
-        self.assertEqual(self._rows(job)['SIZE']['fixes'], [])
+        self.assertEqual(self._rows(job)['SIZE']['fixes'], ['FIT'])
 
     def test_sheet_work_without_bleed_is_amber_and_with_bleed_is_fine(self):
         bare, _ = self._job(self.flyer, file_mm=(210, 297), file_px=(2480, 3508))
