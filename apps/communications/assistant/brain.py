@@ -127,6 +127,28 @@ TOOL_SPECS = [
             'order': {'type': 'string', 'description': 'The order number prepare_order returned.'},
         }, 'required': ['order']},
     },
+    {
+        'name': 'send_proforma',
+        'description': "Issue a proforma (a formal quotation) for the lines agreed in this chat and send its "
+                       "PDF here. Lines as for prepare_order (service_code, quantity, specifications with "
+                       "pages or width_in/height_in, addon_codes), no files needed. Finds the customer's "
+                       "record; if there is none it returns needs_customer_details, and you ask for exactly "
+                       "that and call again with customer: first_name and last_name for a person, or "
+                       "company_name and contact_person for a business. Returns the proforma number, "
+                       "lines, total and the date it is valid until.",
+        'input_schema': {'type': 'object', 'properties': {
+            'lines': {'type': 'array', 'items': {'type': 'object', 'properties': {
+                'service_code': {'type': 'string'},
+                'quantity': {'type': 'integer', 'minimum': 1},
+                'specifications': {'type': 'object'},
+                'addon_codes': {'type': 'array', 'items': {'type': 'string'}},
+            }, 'required': ['service_code']}},
+            'customer': {'type': 'object', 'properties': {
+                'first_name': {'type': 'string'}, 'last_name': {'type': 'string'},
+                'company_name': {'type': 'string'}, 'contact_person': {'type': 'string'},
+            }},
+        }, 'required': ['lines']},
+    },
 ]
 
 
@@ -405,6 +427,9 @@ def _run_tool(name, args, ctx):
     if name == 'send_payment_link':
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
+    if name == 'send_proforma':
+        from apps.communications.assistant import proformas
+        return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
     if name == 'hand_to_person':
         ctx.handoff = args.get('reason') or 'Octos asked for a person.'
         return {'ok': True}

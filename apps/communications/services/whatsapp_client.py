@@ -163,3 +163,11 @@ def send_image(phone, content, filename, caption=''):
     if caption:
         image['caption'] = caption
     return _send(phone, {'type': 'image', 'image': image})
+
+
+def send_document(phone, content, filename, caption='', mime='application/pdf'):
+    """A document (a proforma), uploaded then sent, with its file name and a caption."""
+    document = {'id': upload_media(content, filename, mime), 'filename': filename}
+    if caption:
+        document['caption'] = caption
+    return _send(phone, {'type': 'document', 'document': document})

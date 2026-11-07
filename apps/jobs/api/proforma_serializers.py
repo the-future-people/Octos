@@ -22,6 +22,12 @@ class ProformaLineSerializer(serializers.Serializer):
     is_color    = serializers.BooleanField(default=False)
     output_mode = serializers.CharField(required=False, allow_null=True, default=None)
     ring_size   = serializers.IntegerField(required=False, allow_null=True, default=None)
+    # Banner sizes, a product's other choices, and finishing (7 Nov 2026):
+    # priced by the engine like everything else, never by the client.
+    width_in       = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True, default=None)
+    height_in      = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True, default=None)
+    specifications = serializers.DictField(required=False, default=dict)
+    addons         = serializers.ListField(required=False, default=list)
 
 
 class ProformaCreateSerializer(serializers.Serializer):

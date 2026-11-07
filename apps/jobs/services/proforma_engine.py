@@ -43,7 +43,9 @@ VALIDITY_DAYS = 21
 
 # Roles permitted to issue, revise and convert. Deliberately narrow: this
 # is a price commitment made on behalf of the branch.
-PROFORMA_ROLES = {'BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN'}
+# OCTOS (7 Nov 2026): Octos's own account. Its prices come only from the
+# engine, never typed, which is what this rule guards against.
+PROFORMA_ROLES = {'BRANCH_MANAGER', 'REGIONAL_MANAGER', 'BELT_MANAGER', 'SUPER_ADMIN', 'OCTOS'}
 
 
 class ProformaEngine:
@@ -68,58 +70,74 @@ class ProformaEngine:
 
     def _price_lines(self, raw_lines):
         """
-        Price each requested line through PricingEngine and return the
-        stored line_items shape plus the subtotal.
+        Price each requested line and return the stored line_items shape
+        plus the subtotal.
+
+        Through quote_line() and price_addons(), the path every other quote
+        takes (7 Nov 2026): both sides counted in sheets, banner sizes made
+        into an area, a product's minimum, and add-ons. A proforma and a
+        quote for the same job always agree.
 
         A pricing failure raises rather than defaulting to zero. Six real
         jobs were once recorded as free because a conditional service
         returned success=False and the caller wrote the zero anyway.
         """
         from apps.jobs.models import Service
-        from apps.jobs.pricing_engine import PricingEngine
+        from apps.jobs.pricing_engine import quote_line
+        from apps.jobs.services.availability import price_addons
 
         priced   = []
         subtotal = Decimal('0.00')
 
         for line in raw_lines:
-            service = Service.objects.get(pk=line['service'])
+            service  = Service.objects.get(pk=line['service'])
+            quantity = int(line.get('quantity') or 1)
+            pages    = int(line.get('pages') or 1)
 
-            condition_params = {}
-            if line.get('output_mode'):
-                condition_params['output_mode'] = line['output_mode']
-            if line.get('ring_size'):
-                condition_params['ring_size'] = line['ring_size']
+            specs = dict(line.get('specifications') or {})
+            specs['pages'] = pages
+            for key in ('width_in', 'height_in', 'ring_size', 'output_mode'):
+                if line.get(key) not in (None, ''):
+                    specs[key] = line[key]
+            if line.get('is_color'):
+                specs['is_color'] = True
 
-            quantity = int(line.get('quantity', 1))
-            pages    = int(line.get('pages', 1))
+            result = quote_line(service, self.branch, specs, quantity)
+            if not result.get('success'):
+                raise ValueError(result.get('error') or f"Could not price {service.name}.")
+            own = Decimal(str(result['total']))
 
-            result = PricingEngine.get_price(
-                service          = service,
-                branch           = self.branch,
-                quantity         = quantity,
-                is_color         = bool(line.get('is_color', False)),
-                pages            = pages,
-                condition_params = condition_params or None,
-            )
-            if not result['success']:
-                raise ValueError(
-                    result.get('error')
-                    or f"Could not price {service.name}."
-                )
+            addons, addons_total = [], Decimal('0.00')
+            if line.get('addons'):
+                extras, extras_total, problem = price_addons(service, list(line['addons']), quantity, specs)
+                if problem:
+                    raise ValueError(problem)
+                addons = [{'service': e['service'], 'service_name': e['service_name'],
+                           'quantity': e['quantity'], 'detail': e.get('detail'),
+                           'unit_price': e['unit_price'], 'total': e['total']} for e in extras]
+                addons_total = Decimal(str(extras_total))
 
-            line_total = Decimal(str(result['total']))
+            line_total = own + addons_total
             subtotal  += line_total
+            name = service.name
+            if addons:
+                name += ' + ' + ', '.join(
+                    a['service_name'] + (f" ({a['detail']})" if a.get('detail') else '') for a in addons)
 
             priced.append({
-                'service_id'   : service.pk,
-                'service_name' : service.name,
-                'quantity'     : quantity,
-                'pages'        : pages,
-                'is_color'     : bool(line.get('is_color', False)),
-                'output_mode'  : line.get('output_mode'),
-                'ring_size'    : line.get('ring_size'),
-                'unit_price'   : str(result.get('base_price', line_total)),
-                'total'        : str(line_total),
+                'service_id'     : service.pk,
+                'service_name'   : name,
+                'quantity'       : quantity,
+                'pages'          : pages,
+                'is_color'       : bool(specs.get('is_color')),
+                'output_mode'    : line.get('output_mode'),
+                'ring_size'      : line.get('ring_size'),
+                'specifications' : {k: (str(v) if isinstance(v, Decimal) else v)
+                                    for k, v in specs.items() if k != 'pages'},
+                'addons'         : addons,
+                'own_total'      : str(own),
+                'unit_price'     : str((line_total / quantity).quantize(Decimal('0.01'))),
+                'total'          : str(line_total),
             })
 
         return priced, subtotal
@@ -335,16 +353,34 @@ class ProformaEngine:
         )
 
         for i, li in enumerate(proforma.line_items):
-            JobLineItem.objects.create(
-                job        = job,
-                service    = Service.objects.get(pk=li['service_id']),
-                quantity   = li['quantity'],
-                pages      = li['pages'],
-                is_color   = li['is_color'],
-                unit_price = Decimal(li['unit_price']),
-                line_total = Decimal(li['total']),
-                position   = i,
+            # The line's own price, and its add-ons as finishing on it (child
+            # lines, as the counter records them), with its sizes, so the
+            # floor gets what was quoted (7 Nov 2026). Older proformas carry
+            # no add-ons and their total is the line's own.
+            own = Decimal(li.get('own_total') or li['total'])
+            line = JobLineItem.objects.create(
+                job            = job,
+                service        = Service.objects.get(pk=li['service_id']),
+                quantity       = li['quantity'],
+                pages          = li['pages'],
+                is_color       = li['is_color'],
+                specifications = li.get('specifications') or {},
+                unit_price     = (own / max(1, int(li['quantity']))).quantize(Decimal('0.01')),
+                line_total     = own,
+                position       = i,
             )
+            for a in li.get('addons') or []:
+                JobLineItem.objects.create(
+                    job        = job,
+                    parent     = line,
+                    service    = Service.objects.get(pk=a['service']),
+                    quantity   = a['quantity'],
+                    pages      = 1,
+                    is_color   = False,
+                    unit_price = Decimal(str(a['unit_price'])),
+                    line_total = Decimal(str(a['total'])),
+                    position   = i,
+                )
 
         proforma.status       = ProformaInvoice.Status.CONVERTED
         proforma.job          = job

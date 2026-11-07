@@ -53,7 +53,7 @@ class WindowClosed(Exception):
         )
 
 
-def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png'):
+def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png', document=None):
     """
     Queue free text to the customer. Returns the QUEUED Message.
     sent_by is the staff member, or None when Octos is the sender.
@@ -72,12 +72,20 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
         conversation=conversation,
         direction=Message.OUTBOUND,
         channel=Message.WHATSAPP,
-        message_type=Message.IMAGE if image else Message.TEXT,
+        message_type=Message.IMAGE if image else (Message.DOCUMENT if document else Message.TEXT),
         status=Message.QUEUED,
         body=body,
         sent_by=sent_by,
         kind=kind,
     )
+
+    if document:
+        # A document (a proforma): kept with the message, the body as its caption.
+        message.media_file.save(filename, ContentFile(document), save=False)
+        Message.objects.filter(pk=message.pk).update(
+            media_file=message.media_file.name, media_name=filename,
+            media_mime='application/pdf', media_size=len(document),
+        )
 
     if image:
         # A card: kept with the message (so the inbox shows it), the body as
@@ -140,7 +148,13 @@ def deliver(message_id):
 
     try:
         phone = message.conversation.contact_phone
-        if message.message_type == Message.IMAGE and message.media_file:
+        if message.message_type == Message.DOCUMENT and message.media_file:
+            with message.media_file.open('rb') as handle:
+                content = handle.read()
+            wamid = whatsapp_client.send_document(
+                phone, content, message.media_name or os.path.basename(message.media_file.name),
+                caption=message.body, mime=message.media_mime or 'application/pdf')
+        elif message.message_type == Message.IMAGE and message.media_file:
             with message.media_file.open('rb') as handle:
                 content = handle.read()
             wamid = whatsapp_client.send_image(phone, content, os.path.basename(message.media_file.name),
