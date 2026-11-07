@@ -18,11 +18,17 @@ class ServiceSerializer(serializers.ModelSerializer):
             'id', 'name', 'code', 'category', 'unit',
             'description', 'requires_design', 'requires_file_upload',
             'is_active', 'spec_template', 'smart_defaults', 'image',
-            'addons',
+            'addons', 'variant_of', 'variant_label', 'base_price',
         ]
 
     # The finishing this service offers, for the counter's tick-boxes.
     addons = serializers.SerializerMethodField()
+    # The base rate, shown beside each version (one side, both sides).
+    base_price = serializers.SerializerMethodField()
+
+    def get_base_price(self, obj):
+        from apps.jobs.services.availability import display_price
+        return display_price(obj)
 
     def get_addons(self, obj):
         from apps.jobs.services.availability import can_make, is_packing
