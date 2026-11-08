@@ -1,3 +1,4 @@
+import re
 """
 Inbound WhatsApp: one stored webhook delivery from Meta becomes
 Conversations and Messages.
@@ -132,6 +133,7 @@ def _receive(message, profile_name):
     # After the message, not before: a retry must not reopen a thread
     # that staff resolved after the original arrived.
     _refresh(conversation, phone, profile_name)
+    _opt_out_if_asked(conversation, body)
     wake_octos(conversation, message, pause=8)
     if message.media_id:
         _keep_media(message)
@@ -300,3 +302,26 @@ def _quoted(conversation, context):
     if not wamid:
         return None
     return Message.objects.filter(conversation=conversation, external_id=wamid).first()
+
+
+# A customer saying no to messages, in their own words (8 Nov 2026). It has to
+# be the whole message: "stop the printing, I'll change the file" or "not
+# interested in the A3" is about a job, never a no to being messaged.
+OPT_OUT = re.compile(
+    r"^\W*(please\s+)?(stop|unsubscribe|opt\s*out|no more (messages|msgs|texts)|"
+    r"(do not|don'?t|dont) (message|text|contact|send)( me)?( again| anymore| any more)?|"
+    r"stop (messaging|texting|sending)( me)?( messages)?|not interested|remove me)"
+    r"(\s*,?\s*(please|thanks|thank you|sorry))?\W*$",
+    re.IGNORECASE)
+
+
+def _opt_out_if_asked(conversation, body):
+    """Mark the chat no-marketing when the customer asks not to be messaged like this."""
+    text = (body or '').strip()
+    if not text or len(text) > 60 or not OPT_OUT.search(text):
+        return False
+    if not getattr(conversation, 'marketing_opt_out', False):
+        type(conversation).objects.filter(pk=conversation.pk).update(marketing_opt_out=True)
+        conversation.marketing_opt_out = True
+        logger.info('Conversation %s asked not to receive marketing', conversation.pk)
+    return True

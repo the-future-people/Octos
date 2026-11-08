@@ -20,6 +20,8 @@ EXAMPLES = {
     'order_ready': ['Ama', 'FP-WLB-05812'],
     'job_question': ['Ama', 'FP-WLB-05812'],
     'proforma_ready': ['Ama', 'PFI-WLB-2026-00030'],
+    'general_followup': ['Ama'],
+    'reconnect': ['Ama'],
 }
 
 
@@ -30,7 +32,7 @@ class Command(BaseCommand):
         parser.add_argument('--submit', action='store_true', help='Submit the templates Meta does not have yet.')
 
     def handle(self, *args, submit=False, **options):
-        from apps.communications.api.views import START_TEMPLATES
+        from apps.communications.api.views import MARKETING_TEMPLATES, START_TEMPLATES
         from apps.communications.services.whatsapp_client import API_VERSION
 
         token = settings.WHATSAPP_ACCESS_TOKEN
@@ -57,7 +59,8 @@ class Command(BaseCommand):
                 continue
             body = re.sub(r'\{(\d+)\}', r'{{\1}}', text)
             payload = {
-                'name': name, 'language': 'en', 'category': 'UTILITY',
+                'name': name, 'language': 'en',
+                'category': 'MARKETING' if name in MARKETING_TEMPLATES else 'UTILITY',
                 'components': [{'type': 'BODY', 'text': body,
                                 'example': {'body_text': [EXAMPLES.get(name, ['Ama', 'FP-WLB-05812'])]}}],
             }

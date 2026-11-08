@@ -433,7 +433,17 @@ START_TEMPLATES = {
     'order_ready': 'Hello {1}, your order {2} is ready to collect at Farhat Printing Press, Westland.',
     'job_question': 'Hello {1}, about your job {2}: please reply when you can.',
     'proforma_ready': 'Hello {1}, your proforma {2} is ready. Reply to receive it here.',
+    # Checking in after a past job (utility), and reaching customers who have
+    # gone quiet (marketing), in Farhat's own warm voice (Khofi, 8 Nov 2026).
+    'general_followup': ('Hello {1}, it\u2019s Farhat Printing Press at Westland. We were thinking about the '
+                         'last job we did for you and wanted to check in. How did it all turn out? We\u2019d love '
+                         'to hear from you whenever you have a moment.'),
+    'reconnect': ('Hello {1}! It\u2019s the team at Farhat Printing Press, Westland. We haven\u2019t seen you in a '
+                  'while and just wanted to say we\u2019re still here for you, from a single copy to a big order. '
+                  'Send us a message anytime. If you\u2019d prefer not to hear from us, just let us know.'),
 }
+# Marketing, by WhatsApp's rules: never sent to a customer who asked not to be.
+MARKETING_TEMPLATES = {'reconnect'}
 
 
 def _e164(phone):
@@ -455,7 +465,8 @@ class ConversationStartView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({'templates': [{'name': k, 'text': v, 'params': v.count('{')}
+        return Response({'templates': [{'name': k, 'text': v, 'params': v.count('{'),
+                                        'kind': 'marketing' if k in MARKETING_TEMPLATES else 'service'}
                                        for k, v in START_TEMPLATES.items()]})
 
     def post(self, request):
@@ -483,6 +494,10 @@ class ConversationStartView(APIView):
                 channel=Conversation.WHATSAPP, contact_phone=phone,
                 contact_name=(request.data.get('name') or '').strip())
 
+        if name in MARKETING_TEMPLATES and getattr(conversation, 'marketing_opt_out', False):
+            return Response({'detail': 'This customer asked not to receive messages like this, so it won\u2019t be '
+                                       'sent. Messages about their jobs still can be.'},
+                            status=status.HTTP_400_BAD_REQUEST)
         try:
             wamid = whatsapp_client.send_template(conversation.contact_phone, name, params=params)
         except Exception:

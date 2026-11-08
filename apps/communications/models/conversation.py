@@ -102,6 +102,9 @@ class Conversation(AuditModel):
     reminded_at = models.DateTimeField(null=True, blank=True)
     # A counter visit (assistant/counter.py): while it lasts the customer
     # is at a branch and Octos stays quiet. Temporary, never a label.
+    # Asked not to receive marketing (8 Nov 2026): set when the customer says so,
+    # in their own words; marketing templates are never sent to them again.
+    marketing_opt_out = models.BooleanField(default=False)
     counter_until  = models.DateTimeField(null=True, blank=True)
     counter_branch = models.ForeignKey('organization.Branch', on_delete=models.SET_NULL,
                                        null=True, blank=True, related_name='+')
