@@ -22,7 +22,7 @@ class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Notification.objects.filter(recipient=request.user)
+        qs = Notification.objects.exclude(category='REMINDER').filter(recipient=request.user)
 
         if request.query_params.get('unread') == 'true':
             qs = qs.filter(is_read=False)

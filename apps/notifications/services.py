@@ -94,7 +94,7 @@ def notify_many(
 
 def get_unread_count(user) -> int:
     """Return the number of unread notifications for a user."""
-    return Notification.objects.filter(recipient=user, is_read=False).count()
+    return Notification.objects.exclude(category='REMINDER').filter(recipient=user, is_read=False).count()
 
 
 def mark_all_read(user) -> int:

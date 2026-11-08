@@ -158,10 +158,14 @@ class InventoryEngine:
                 return
             from apps.notifications.services import notify
             from apps.accounts.models import CustomUser
-            bm = CustomUser.objects.filter(branch=self.branch).first()
-            if not bm:
-                return
-            notify(recipient=bm, verb='stock_low', message=f"{stock.consumable.name} is low at {self.branch.name} - {float(stock.quantity):.0f} {stock.consumable.unit_label} remaining.", actor=actor)
+            # Stock is the Branch Manager's: every BM of the branch (main and
+            # deputy), never just its first staff member, who was often the
+            # cashier (8 Nov 2026).
+            managers = CustomUser.objects.filter(
+                branch=self.branch, role__name='BRANCH_MANAGER', is_active=True)
+            for bm in managers:
+                notify(recipient=bm, verb='stock_low', link='inventory', actor=actor,
+                       message=f"{stock.consumable.name} is low at {self.branch.name} - {float(stock.quantity):.0f} {stock.consumable.unit_label} remaining.")
         except Exception:
             pass
 
