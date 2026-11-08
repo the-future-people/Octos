@@ -1,4 +1,4 @@
-﻿from celery import shared_task
+from celery import shared_task
 import logging
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def expire_proformas():
         )
     )
 
-    count = ProformaEngine.expire_stale_quotes()
+    count = ProformaEngine.expire_stale_proformas()
 
     for q in stale:
         if not q.issued_by:
