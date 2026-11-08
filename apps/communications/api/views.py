@@ -496,3 +496,30 @@ class ConversationStartView(APIView):
             external_id=wamid if isinstance(wamid, str) else '',
         )
         return Response({'conversation': conversation.id}, status=status.HTTP_201_CREATED)
+
+
+class MessageFileView(APIView):
+    """
+    GET /api/v1/communications/messages/<id>/file/   (?download=1 to save it)
+
+    A chat message's file, for someone who may see that chat (8 Nov 2026).
+    Nothing is served straight from the bucket: customers' files at an
+    address anyone could open would be a real exposure, so every file goes
+    through a view that checks who is asking (see settings.py).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from django.http import FileResponse
+        message = Message.objects.filter(pk=pk).only('id', 'conversation_id', 'media_file', 'media_name',
+                                                    'media_mime').first()
+        if message is None or not message.media_file or _visible(request, message.conversation_id) is None:
+            return _not_found()
+        name = message.media_name or message.media_file.name.rsplit('/', 1)[-1]
+        response = FileResponse(message.media_file.open('rb'),
+                                as_attachment=bool(request.query_params.get('download')),
+                                filename=name,
+                                content_type=message.media_mime or 'application/octet-stream')
+        # Private: never kept by a shared cache, only the asker's browser.
+        response['Cache-Control'] = 'private, max-age=3600'
+        return response
