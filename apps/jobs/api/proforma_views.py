@@ -1,4 +1,4 @@
-﻿"""
+"""
 Proforma API.
 
 Every endpoint here is Branch Manager and above — issuing, revising and
@@ -52,6 +52,11 @@ class ProformaListView(generics.ListAPIView):
         branch = getattr(self.request.user, 'branch', None)
         if not branch:
             return ProformaInvoice.objects.none()
+
+        # Past their date means expired, now, not only when the nightly job runs:
+        # with no scheduler on Railway they stayed 'issued' and counted below zero.
+        from apps.jobs.services.proforma_engine import ProformaEngine
+        ProformaEngine.expire_stale_proformas()
 
         qs = ProformaInvoice.objects.select_related(
             'customer', 'issued_by', 'job',
