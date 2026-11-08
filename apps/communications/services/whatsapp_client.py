@@ -32,12 +32,16 @@ class WhatsAppError(Exception):
         super().__init__(f'{self.code}: {message}' + (f' ({details})' if details else ''))
 
 
-def send_text(phone, body):
-    """Free text. Meta accepts it only inside the customer's 24-hour window."""
-    return _send(phone, {
-        'type': 'text',
-        'text': {'preview_url': False, 'body': body},
-    })
+def send_text(phone, body, reply_to=None):
+    """
+    Free text. Meta accepts it only inside the customer's 24-hour window.
+    reply_to, a message's WhatsApp id, sends it as a quoted reply to that
+    message, shown quoted on the customer's phone.
+    """
+    message = {'type': 'text', 'text': {'preview_url': False, 'body': body}}
+    if reply_to:
+        message['context'] = {'message_id': reply_to}
+    return _send(phone, message)
 
 
 def send_template(phone, name, language='en', params=()):

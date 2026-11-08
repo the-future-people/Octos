@@ -4,6 +4,25 @@ from apps.communications.models import Conversation, Message
 
 class MessageSerializer(serializers.ModelSerializer):
     sent_by_name = serializers.CharField(source='sent_by.full_name', read_only=True)
+    # The message this one quotes, and Octos's report on its own messages (8 Nov 2026).
+    reply_preview = serializers.SerializerMethodField()
+    report = serializers.SerializerMethodField()
+
+    def get_reply_preview(self, obj):
+        q = obj.reply_to
+        if q is None:
+            return None
+        if q.direction == Message.INBOUND:
+            who = (q.conversation.contact_name or 'The customer').title()
+        elif q.sent_by_id:
+            who = q.sent_by.full_name or 'Staff'
+        else:
+            who = 'Octos'
+        return {'id': q.id, 'who': who, 'body': (q.body or '')[:200], 'media_name': q.media_name}
+
+    def get_report(self, obj):
+        from apps.communications.services.reports import octos_report
+        return octos_report(obj)
 
     class Meta:
         model = Message
@@ -11,6 +30,7 @@ class MessageSerializer(serializers.ModelSerializer):
             'id', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
             'body', 'media_url', 'media_file', 'media_id', 'media_name', 'media_mime',
             'media_size', 'media_pages', 'media_info', 'sent_by', 'sent_by_name',
+            'reply_to', 'reply_preview', 'report',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',
         ]

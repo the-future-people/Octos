@@ -123,6 +123,7 @@ def _receive(message, profile_name):
                 media_name=media_name,
                 media_mime=media_mime,
                 external_id=wamid,
+                reply_to=_quoted(conversation, message.get('context')),
             )
     except IntegrityError:
         logger.info('WhatsApp message %s already recorded', wamid)
@@ -291,3 +292,11 @@ def _keep_media(message):
     """Fetch the customer's file once the message is committed, before WhatsApp deletes it."""
     from apps.communications.tasks import fetch_whatsapp_media
     transaction.on_commit(lambda: fetch_whatsapp_media.delay(message.pk))
+
+
+def _quoted(conversation, context):
+    """The message a customer quoted when they swiped to reply on WhatsApp (8 Nov 2026)."""
+    wamid = context.get('id') if isinstance(context, dict) else None
+    if not wamid:
+        return None
+    return Message.objects.filter(conversation=conversation, external_id=wamid).first()

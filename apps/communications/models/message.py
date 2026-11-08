@@ -145,6 +145,12 @@ class Message(AuditModel):
     )
 
     # Read tracking
+    # The message this one answers (8 Nov 2026): a quoted reply, both ways on
+    # WhatsApp. Set when staff reply to a particular message, or when a
+    # customer swipes to reply to one of ours.
+    reply_to = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies',
+    )
     read_by = models.ManyToManyField(
         'accounts.CustomUser',
         blank=True,

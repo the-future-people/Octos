@@ -110,12 +110,13 @@ class ConversationReplyView(APIView):
 
         data = serializer.validated_data
         is_note = data.get('is_internal_note', False)
+        quoted = _quoted_in(conversation, request.data.get('reply_to'))
 
         if conversation.channel == Conversation.WHATSAPP and not is_note:
             from apps.communications.services import whatsapp_outbound
             try:
                 message = whatsapp_outbound.send_text(
-                    conversation, data.get('body', ''), sent_by=request.user,
+                    conversation, data.get('body', ''), sent_by=request.user, reply_to=quoted,
                 )
             except whatsapp_outbound.WindowClosed:
                 return Response({'detail': WINDOW_CLOSED}, status=status.HTTP_400_BAD_REQUEST)
@@ -129,6 +130,7 @@ class ConversationReplyView(APIView):
                 direction=Message.OUTBOUND,
                 channel=channel,
                 sent_by=request.user,
+                reply_to=quoted,
                 **data
             )
 
@@ -413,7 +415,8 @@ def _reply_with_files(request, conversation, files):
             else:
                 made.append(_send_file(conversation, request.user, content, name, mime))
         if text and not is_note:
-            made.append(whatsapp_outbound.send_text(conversation, text, sent_by=request.user))
+            made.append(whatsapp_outbound.send_text(conversation, text, sent_by=request.user,
+                                                    reply_to=_quoted_in(conversation, request.data.get('reply_to'))))
     except whatsapp_outbound.WindowClosed:
         return Response({'detail': WINDOW_CLOSED}, status=status.HTTP_400_BAD_REQUEST)
     except ValueError as exc:
@@ -523,3 +526,12 @@ class MessageFileView(APIView):
         # Private: never kept by a shared cache, only the asker's browser.
         response['Cache-Control'] = 'private, max-age=3600'
         return response
+
+
+def _quoted_in(conversation, pk):
+    """The message being replied to, if it belongs to this very conversation."""
+    try:
+        pk = int(pk)
+    except (TypeError, ValueError):
+        return None
+    return Message.objects.filter(pk=pk, conversation=conversation).first()

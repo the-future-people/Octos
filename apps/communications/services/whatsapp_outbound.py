@@ -54,7 +54,7 @@ class WindowClosed(Exception):
 
 
 def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png', document=None,
-              document_mime='application/pdf'):
+              document_mime='application/pdf', reply_to=None):
     """
     Queue free text to the customer. Returns the QUEUED Message.
     sent_by is the staff member, or None when Octos is the sender.
@@ -74,6 +74,7 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
         direction=Message.OUTBOUND,
         channel=Message.WHATSAPP,
         message_type=Message.IMAGE if image else (Message.DOCUMENT if document else Message.TEXT),
+        reply_to=reply_to,
         status=Message.QUEUED,
         body=body,
         sent_by=sent_by,
@@ -161,7 +162,9 @@ def deliver(message_id):
             wamid = whatsapp_client.send_image(phone, content, os.path.basename(message.media_file.name),
                                                caption=message.body)
         else:
-            wamid = whatsapp_client.send_text(phone, message.body)
+            quoted = message.reply_to.external_id if message.reply_to_id and message.reply_to else None
+            wamid = (whatsapp_client.send_text(phone, message.body, reply_to=quoted) if quoted
+                     else whatsapp_client.send_text(phone, message.body))
     except whatsapp_client.WhatsAppError as exc:
         if exc.code == OUTSIDE_WINDOW:
             logger.warning('Meta says the window is closed for message %s', message_id)
