@@ -18,7 +18,8 @@ class MessageSerializer(serializers.ModelSerializer):
             who = q.sent_by.full_name or 'Staff'
         else:
             who = 'Octos'
-        return {'id': q.id, 'who': who, 'body': (q.body or '')[:200], 'media_name': q.media_name}
+        return {'id': q.id, 'who': who, 'body': (q.body or '')[:200], 'media_name': q.media_name,
+                'media_mime': q.media_mime}
 
     def get_report(self, obj):
         from apps.communications.services.reports import octos_report
