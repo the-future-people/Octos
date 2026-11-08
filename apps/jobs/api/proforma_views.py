@@ -63,7 +63,11 @@ class ProformaListView(generics.ListAPIView):
         ).filter(branch=branch)
 
         status_param = self.request.query_params.get('status')
-        if status_param:
+        if status_param == 'open':
+            # Still live: drafts and issued, filtered here so a page of ten
+            # is ten open proformas, not ten of anything.
+            qs = qs.filter(status__in=[ProformaInvoice.Status.DRAFT, ProformaInvoice.Status.ISSUED])
+        elif status_param:
             qs = qs.filter(status=status_param)
         else:
             qs = qs.exclude(status=ProformaInvoice.Status.SUPERSEDED)
