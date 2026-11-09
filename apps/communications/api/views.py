@@ -572,3 +572,53 @@ class ConversationLinkCustomerView(APIView):
             return Response({'detail': 'That customer could not be found.'}, status=status.HTTP_400_BAD_REQUEST)
         identity.link_customer(conversation, customer)
         return Response({'customer': customer.pk, 'phone': conversation.contact_phone})
+
+
+class ConversationPhotosPdfView(APIView):
+    """
+    POST /api/v1/communications/<id>/photos-pdf/  { messages: [ids] }
+
+    Photos a customer sent together, as one PDF to print once (9 Nov 2026):
+    one photo per A4 page, turned upright and fitted, the page turned to suit
+    the photo. Up to 40 photos, all from this chat.
+    """
+    permission_classes = [IsAuthenticated]
+    DPI = 150
+    A4 = (1240, 1754)          # A4 at 150 dpi
+    MARGIN = 45
+
+    def post(self, request, pk):
+        import io
+        from django.http import HttpResponse
+        from PIL import Image, ImageOps
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        ids = [int(i) for i in (request.data.get('messages') or []) if str(i).isdigit()][:40]
+        chosen = {m.pk: m for m in Message.objects.filter(conversation=conversation, pk__in=ids)
+                  if m.media_file and (m.media_mime or '').startswith('image/')}
+        photos = [chosen[i] for i in ids if i in chosen]
+        if not photos:
+            return Response({'detail': 'None of those photos is ready yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pages = []
+        for message in photos:
+            with message.media_file.open('rb') as handle:
+                image = ImageOps.exif_transpose(Image.open(handle))
+                image = image.convert('RGB')
+            width, height = self.A4 if image.height >= image.width else self.A4[::-1]
+            room = (width - 2 * self.MARGIN, height - 2 * self.MARGIN)
+            image.thumbnail(room, Image.LANCZOS) if image.width > room[0] or image.height > room[1] else None
+            if image.width < room[0] and image.height < room[1]:
+                scale = min(room[0] / image.width, room[1] / image.height)
+                image = image.resize((int(image.width * scale), int(image.height * scale)), Image.LANCZOS)
+            page = Image.new('RGB', (width, height), 'white')
+            page.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
+            pages.append(page)
+
+        out = io.BytesIO()
+        pages[0].save(out, 'PDF', save_all=True, append_images=pages[1:], resolution=self.DPI)
+        name = f'{(conversation.contact_name or "Photos").strip()[:40]}, {len(pages)} photos.pdf'
+        response = HttpResponse(out.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{name}"'
+        return response

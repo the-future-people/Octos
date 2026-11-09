@@ -16,6 +16,7 @@ urlpatterns = [
     path('<int:pk>/hand-back/', views.ConversationHandBackView.as_view(), name='conversation-hand-back'),
     path('<int:pk>/at-counter/', views.ConversationAtCounterView.as_view(), name='conversation-at-counter'),
     path('<int:pk>/link-customer/', views.ConversationLinkCustomerView.as_view(), name='conversation-link-customer'),
+    path('<int:pk>/photos-pdf/', views.ConversationPhotosPdfView.as_view(), name='conversation-photos-pdf'),
 
     # Webhooks
     path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='webhook-whatsapp'),
