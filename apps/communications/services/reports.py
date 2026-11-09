@@ -28,12 +28,32 @@ def _result(call):
     return {}
 
 
-def octos_report(message):
+def is_octos_message(message):
+    """Said by Octos to the customer: outbound, no person, not a note, some words."""
     from apps.communications.models import Message
-    if (message.direction != Message.OUTBOUND or message.sent_by_id or message.is_internal_note
-            or not message.body):
+    return (message.direction == Message.OUTBOUND and not message.sent_by_id
+            and not message.is_internal_note and bool(message.body))
+
+
+def runs_by_reply(conversation_id):
+    """A chat's runs, in one query, by what Octos said (the latest wins)."""
+    from apps.communications.models import AssistantRun
+    runs = {}
+    for run in (AssistantRun.objects.filter(conversation_id=conversation_id)
+                .only('id', 'reply', 'tool_calls', 'decision', 'reason').order_by('id')):
+        if run.reply:
+            runs[run.reply] = run
+    return runs
+
+
+_NOT_GIVEN = object()
+
+
+def octos_report(message, run=_NOT_GIVEN):
+    if not is_octos_message(message):
         return None
-    run = message.conversation.assistant_runs.filter(reply=message.body).order_by('-id').first()
+    if run is _NOT_GIVEN:   # one message on its own; a whole chat passes its runs in
+        run = runs_by_reply(message.conversation_id).get(message.body)
     if run is None:
         return None
 

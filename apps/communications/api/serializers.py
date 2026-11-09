@@ -22,8 +22,15 @@ class MessageSerializer(serializers.ModelSerializer):
                 'media_mime': q.media_mime}
 
     def get_report(self, obj):
-        from apps.communications.services.reports import octos_report
-        return octos_report(obj)
+        # A chat's runs are read once for all its messages (9 Nov 2026): one
+        # search per message, every 3 seconds, slowed the whole server.
+        from apps.communications.services.reports import is_octos_message, octos_report, runs_by_reply
+        if not is_octos_message(obj):
+            return None
+        cache = self.context.setdefault('_octos_runs', {}) if hasattr(self.context, 'setdefault') else {}
+        if obj.conversation_id not in cache:
+            cache[obj.conversation_id] = runs_by_reply(obj.conversation_id)
+        return octos_report(obj, cache[obj.conversation_id].get(obj.body))
 
     class Meta:
         model = Message
