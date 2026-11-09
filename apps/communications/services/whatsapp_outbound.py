@@ -149,7 +149,8 @@ def deliver(message_id):
         return
 
     try:
-        phone = message.conversation.contact_phone
+        # No number (a WhatsApp username): reply to their user id instead.
+        phone = message.conversation.contact_phone or message.conversation.contact_user_id
         if message.message_type == Message.DOCUMENT and message.media_file:
             with message.media_file.open('rb') as handle:
                 content = handle.read()

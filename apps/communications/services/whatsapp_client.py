@@ -64,7 +64,9 @@ def _send(phone, message):
     payload = {
         'messaging_product': 'whatsapp',
         'recipient_type': 'individual',
-        'to': _recipient(phone),
+        # A customer with a WhatsApp username may have no number: then Meta's
+        # user id goes in 'recipient' instead of a phone in 'to' (9 Nov 2026).
+        **({'recipient': phone} if _is_user_id(phone) else {'to': _recipient(phone)}),
         **message,
     }
     try:
@@ -175,3 +177,9 @@ def send_document(phone, content, filename, caption='', mime='application/pdf'):
     if caption:
         document['caption'] = caption
     return _send(phone, {'type': 'document', 'document': document})
+
+
+def _is_user_id(value):
+    """Meta's business-scoped user id (GH.1114480144784115), not a phone number."""
+    import re
+    return bool(re.match(r'^[A-Z]{2}\.[A-Za-z0-9]+$', value or ''))

@@ -105,6 +105,11 @@ class Conversation(AuditModel):
     # Asked not to receive marketing (8 Nov 2026): set when the customer says so,
     # in their own words; marketing templates are never sent to them again.
     marketing_opt_out = models.BooleanField(default=False)
+    # WhatsApp usernames (9 Nov 2026): Meta's business-scoped user id, sent for
+    # everyone. A customer with a username may come with no phone number, so a
+    # chat is also recognised by this id.
+    contact_user_id = models.CharField(max_length=64, blank=True, db_index=True)
+    contact_username = models.CharField(max_length=64, blank=True)
     counter_until  = models.DateTimeField(null=True, blank=True)
     counter_branch = models.ForeignKey('organization.Branch', on_delete=models.SET_NULL,
                                        null=True, blank=True, related_name='+')
@@ -125,7 +130,7 @@ class Conversation(AuditModel):
         constraints = [
             models.UniqueConstraint(
                 fields=['contact_phone', 'channel'],
-                condition=models.Q(branch__isnull=True),
+                condition=(models.Q(branch__isnull=True)) & ~models.Q(contact_phone=''),
                 name='uniq_company_conversation_per_phone',
             ),
         ]

@@ -149,6 +149,15 @@ TOOL_SPECS = [
             }},
         }, 'required': ['lines']},
     },
+    {
+        'name': 'use_phone_number',
+        'description': ("Save the phone number a customer gave you, for a chat that has none (they use a "
+                        "WhatsApp username, so WhatsApp hides their number). Only a number they typed in "
+                        "this chat. Then carry on with the order or payment link."),
+        'input_schema': {'type': 'object', 'properties': {
+            'phone': {'type': 'string', 'description': 'As they wrote it, e.g. 024 400 0776.'},
+        }, 'required': ['phone']},
+    },
 ]
 
 
@@ -427,6 +436,23 @@ def _run_tool(name, args, ctx):
     if name == 'send_payment_link':
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
+    if name in ('prepare_order', 'send_payment_link') and not ctx.conversation.contact_phone:
+        return {'error': 'needs_phone', 'say': ("This customer uses a WhatsApp username, so their number is "
+                "hidden. Ask politely for the phone number they'd like for this order and its receipt, "
+                "then save it with use_phone_number and try again.")}
+    if name == 'use_phone_number':
+        from django.db import IntegrityError, transaction
+        from apps.core.phones import to_international
+        phone = to_international(str(args.get('phone') or ''))
+        if not phone:
+            return {'error': "That doesn't look like a phone number. Ask them to check it."}
+        try:
+            with transaction.atomic():
+                type(ctx.conversation).objects.filter(pk=ctx.conversation.pk).update(contact_phone=phone)
+                ctx.conversation.contact_phone = phone
+        except IntegrityError:
+            return {'error': 'That number already has its own chat with us. Hand this to a person to join them.'}
+        return {'saved': phone}
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})

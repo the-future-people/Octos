@@ -63,15 +63,23 @@ def process(event):
                 logger.warning('WhatsApp delivery for another number (%s) ignored', number_id)
                 continue
 
-            names = {
-                c.get('wa_id'): (c.get('profile') or {}).get('name', '')
-                for c in value.get('contacts') or []
-            }
+            # Who wrote: by phone (wa_id) or, for a customer with a WhatsApp
+            # username, by Meta's user id (9 Nov 2026).
+            people = {}
+            for c in value.get('contacts') or []:
+                profile = c.get('profile') or {}
+                who = {'name': profile.get('name', ''), 'username': profile.get('username', ''),
+                       'user_id': c.get('user_id') or ''}
+                for key in (c.get('wa_id'), c.get('user_id')):
+                    if key:
+                        people[key] = who
+            names = {key: who['name'] for key, who in people.items()}
 
             for message in value.get('messages') or []:
                 try:
                     with transaction.atomic():
-                        if _receive(message, names.get(message.get('from'), '')):
+                        who = people.get(message.get('from')) or people.get(message.get('from_user_id')) or {}
+                        if _receive(message, who.get('name', ''), who):
                             recorded += 1
                 except Exception as exc:
                     logger.exception(
@@ -84,11 +92,13 @@ def process(event):
 
     event.processed_at = timezone.now()
     event.error = '\n'.join(failures)
+    if failures:
+        _tell_managers(event)
     event.save(update_fields=['processed_at', 'error'])
     return recorded
 
 
-def _receive(message, profile_name):
+def _receive(message, profile_name, who=None):
     """
     Record one inbound message. True if new, False if already recorded.
 
@@ -96,17 +106,17 @@ def _receive(message, profile_name):
     what lets a number from abroad parse; without it, Ghana as the
     default region would misread it.
     """
+    who = who or {}
     wamid = message.get('id') or ''
     sender = message.get('from') or ''
+    user_id = message.get('from_user_id') or message.get('user_id') or who.get('user_id') or ''
+    if USER_ID.match(sender):          # a username user's 'from' is their user id
+        user_id, sender = user_id or sender, ''
     phone = to_international('+' + sender) if sender else None
-    if not wamid or not phone:
+    if not wamid or not (phone or user_id):
         raise ValueError(f'unusable message {wamid!r} from {sender!r}')
 
-    conversation, _ = Conversation.objects.get_or_create(
-        branch=None,
-        contact_phone=phone,
-        channel=Conversation.WHATSAPP,
-    )
+    conversation = _conversation_for(phone, user_id, who.get('username', ''))
 
     message_type, body, media_id = _content(message)
     media_name, media_mime = _media_details(message)
@@ -173,7 +183,7 @@ def _refresh(conversation, phone, profile_name):
         changed.append('contact_name')
 
     if conversation.customer_id is None:
-        customer = CustomerProfile.objects.filter(phone__in=lookup_forms(phone)).first()
+        customer = CustomerProfile.objects.filter(phone__in=lookup_forms(phone)).first() if phone else None
         if customer:
             conversation.customer = customer
             changed.append('customer')
@@ -325,3 +335,61 @@ def _opt_out_if_asked(conversation, body):
         conversation.marketing_opt_out = True
         logger.info('Conversation %s asked not to receive marketing', conversation.pk)
     return True
+
+
+# Meta's business-scoped user id: a country, a dot, then letters and digits.
+USER_ID = re.compile(r'^[A-Z]{2}\.[A-Za-z0-9]+$')
+
+
+def _conversation_for(phone, user_id, username=''):
+    """
+    The chat for this sender (9 Nov 2026): by user id first (it survives a
+    hidden number), else by phone, else a new chat with no number. The user
+    id, username and phone are kept up to date on it.
+    """
+    from django.db import IntegrityError
+    chat = None
+    if user_id:
+        chat = (Conversation.objects.filter(channel=Conversation.WHATSAPP, contact_user_id=user_id)
+                .order_by('-id').first())
+    if chat is None and phone:
+        chat, _ = Conversation.objects.get_or_create(branch=None, contact_phone=phone, channel=Conversation.WHATSAPP)
+    if chat is None:
+        chat = Conversation.objects.create(branch=None, contact_phone='', channel=Conversation.WHATSAPP,
+                                           contact_user_id=user_id, contact_username=username or '')
+    changed = []
+    if user_id and chat.contact_user_id != user_id:
+        chat.contact_user_id = user_id; changed.append('contact_user_id')
+    if username and chat.contact_username != username:
+        chat.contact_username = username; changed.append('contact_username')
+    if changed:
+        chat.save(update_fields=changed)
+    if phone and not chat.contact_phone:
+        try:
+            with transaction.atomic():
+                type(chat).objects.filter(pk=chat.pk).update(contact_phone=phone)
+                chat.contact_phone = phone
+        except IntegrityError:
+            logger.info('Phone %s already has its own chat; chat %s keeps its user id', phone, chat.pk)
+    return chat
+
+
+def _tell_managers(event):
+    """A customer's message that couldn't be recorded is never silent: every BM is told."""
+    try:
+        from apps.accounts.models import CustomUser
+        from apps.notifications.services import notify
+        names = set()
+        for entry in event.payload.get('entry') or []:
+            for change in entry.get('changes') or []:
+                for c in (change.get('value') or {}).get('contacts') or []:
+                    name = (c.get('profile') or {}).get('name')
+                    if name:
+                        names.add(name)
+        who = ', '.join(sorted(names)) or 'a customer'
+        for bm in CustomUser.objects.filter(role__name='BRANCH_MANAGER', is_active=True):
+            notify(recipient=bm, verb='system', link='inbox',
+                   message=f"A WhatsApp message from {who} couldn't be recorded (delivery {event.pk}). "
+                           f"It has been kept, so it can be replayed.")
+    except Exception:
+        logger.exception('Could not tell the managers about delivery %s', getattr(event, 'pk', None))
