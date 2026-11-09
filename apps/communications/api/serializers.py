@@ -117,11 +117,17 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
             'handled_by', 'handled_since', 'handoff_reason', 'counter_until',
             'unread_count', 'last_message_at', 'jobs',
             'messages', 'created_at', 'updated_at',
-            'job_card', 'window_closes_at',
+            'job_card', 'window_closes_at', 'octos_writing',
         ]
 
     job_card = serializers.SerializerMethodField()
     window_closes_at = serializers.SerializerMethodField()
+    # Octos is working on a reply right now (9 Nov 2026).
+    octos_writing = serializers.SerializerMethodField()
+
+    def get_octos_writing(self, obj):
+        from django.core.cache import cache
+        return bool(cache.get(f'octos_writing:{obj.pk}'))
 
     def get_job_card(self, obj):
         """

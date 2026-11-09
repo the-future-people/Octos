@@ -576,3 +576,31 @@ def _natural_pause(since, trigger):
         time.sleep(MIN_DOTS - elapsed)
     elif elapsed > DOTS_LAST:
         _show_typing(trigger)
+
+
+# ── "Octos is writing" (9 Nov 2026) ───────────────────────────────────────
+# While Octos works on a reply, the chat is marked writing in the shared cache
+# and the portals are told at once; cleared when it's done, however it ends.
+WRITING_SECONDS = 120
+
+
+def _writing(conversation_id, on):
+    try:
+        from django.core.cache import cache
+        key = f'octos_writing:{conversation_id}'
+        cache.set(key, True, WRITING_SECONDS) if on else cache.delete(key)
+        from apps.communications.live import announce
+        announce(conversation_id)
+    except Exception:
+        logger.exception('Could not mark chat %s writing=%s', conversation_id, on)
+
+
+_respond_unmarked = respond
+
+
+def respond(conversation_id, *args, **kwargs):
+    _writing(conversation_id, True)
+    try:
+        return _respond_unmarked(conversation_id, *args, **kwargs)
+    finally:
+        _writing(conversation_id, False)
