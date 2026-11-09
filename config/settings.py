@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
 
@@ -449,3 +449,12 @@ CORS_ALLOWED_ORIGINS = [
     'https://localhost',
     'capacitor://localhost',
 ]
+
+# Files and sending have their own fast lane (9 Nov 2026): fetching a customer's
+# file and sending a message never wait behind Octos's replies or scheduled jobs.
+# The worker runs 8 at once and listens to both: -Q celery,fast.
+CELERY_TASK_ROUTES = {
+    'apps.communications.tasks.fetch_whatsapp_media': {'queue': 'fast'},
+    'apps.communications.tasks.deliver_whatsapp': {'queue': 'fast'},
+}
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
