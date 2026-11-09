@@ -33,14 +33,22 @@ def announce(conversation_id, branch_id=None):
 
 @receiver(post_save, sender='communications.Message')
 def _message_saved(sender, instance, **kwargs):
+    # Every save of a message matters to the screen: new, its file ready, a tick.
     try:
         announce(instance.conversation_id, instance.conversation.branch_id)
     except Exception:
         logger.exception('Could not announce message %s', instance.pk)
 
 
+# Saves that change nothing anyone sees (reading a chat) are never announced:
+# announcing them made every open portal fetch again, which read it again... a loop.
+QUIET = {'unread_count', 'updated_at'}
+
+
 @receiver(post_save, sender='communications.Conversation')
-def _conversation_saved(sender, instance, **kwargs):
+def _conversation_saved(sender, instance, update_fields=None, **kwargs):
+    if update_fields and set(update_fields) <= QUIET:
+        return
     try:
         announce(instance.pk, instance.branch_id)
     except Exception:

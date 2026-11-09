@@ -70,10 +70,20 @@ class ConversationDetailView(generics.RetrieveAPIView):
 
     def get_object(self):
         obj = super().get_object()
-        # Reset unread count when opened
-        obj.unread_count = 0
-        obj.save(update_fields=['unread_count'])
+        # Reset the unread count when opened: only if there is one, and without
+        # a save (9 Nov 2026). Saving on every fetch, every 3 seconds, made
+        # every portal fetch again once chats were announced: a loop.
+        if obj.unread_count:
+            type(obj).objects.filter(pk=obj.pk).update(unread_count=0)
+            obj.unread_count = 0
         return obj
+
+    def get_serializer_context(self):
+        # ?after=<message id>: only what's new since then (9 Nov 2026).
+        context = super().get_serializer_context()
+        after = self.request.query_params.get('after', '')
+        context['after'] = int(after) if after.isdigit() else None
+        return context
 
 
 class ConversationReplyView(APIView):

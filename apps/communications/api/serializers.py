@@ -95,7 +95,18 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
     assigned_to_name = serializers.CharField(
         source='assigned_to.full_name', read_only=True
     )
-    messages = MessageSerializer(many=True, read_only=True)
+    # With ?after=<id>, only messages after it and the last 15 (so ticks and files
+    # that just arrived update too): a few KB instead of the whole chat (9 Nov 2026).
+    messages = serializers.SerializerMethodField()
+    RECENT = 15
+
+    def get_messages(self, obj):
+        items = sorted(obj.messages.all(), key=lambda m: m.id)
+        after = self.context.get('after')
+        if after is not None:
+            recent = {m.id for m in items[-self.RECENT:]}
+            items = [m for m in items if m.id > after or m.id in recent]
+        return MessageSerializer(items, many=True, context=self.context).data
 
     class Meta:
         model = Conversation
