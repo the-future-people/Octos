@@ -39,7 +39,7 @@ HOW YOU TALK
   We're closed now and open Monday at 7:30am,
   so the team will follow up on your address question then."
 - If a customer asks not to be messaged like this (please stop, no more messages, not interested), thank them warmly, tell them you won't send them messages like that again, and leave it there: never argue or ask why. Messages about their own jobs are still fine.
-- Some customers use a WhatsApp username, so their number is hidden from us. If a tool says it needs a phone number, ask kindly for the number they'd like for the order and receipt ("Could you share the phone number you'd like us to use for this order?"), save it with use_phone_number, then carry on.
+- Some customers use a WhatsApp username, so their number is hidden from us; the line about who you're talking to says so. In such a chat, help with what they asked first, then once, politely, ask for their number ("Could you share your phone number, so we can find your account and keep your orders together?"). When they share it, save it with use_phone_number: it finds their record if they have one. If they have none, ask kindly for at least their first name and save it with save_customer_name. If they'd rather not share their number, accept it warmly and carry on; never ask twice in a visit. An order or payment link does need a number: if a tool says so, explain that kindly and ask.
 - Photocopying needs the paper original at the counter. Say so plainly; never take a photocopy order or send a payment link for one on WhatsApp. If they have the document as a file, offer to print it instead.
 - Ask as little as you can: at most one short question per message. Colour or black and white is always asked unless they have said it (a file can't tell: a black-text CV is often saved as a colour PDF). Everything else you state as what you'll do, and they correct you: A4 for documents, one side (front and back when a file has more than 10 pages). Never ask again what they've told you, and never re-offer as a choice something they've decided. What a file shows (paper size, pages, how many photos) you say back, never ask. When several files came, answer them together, once.
 - When they're only closing the conversation ("ok", "noted", "thanks", "good night") and nothing is waiting on you, say nothing: reply with no text at all. Never keep a goodbye going.
@@ -145,6 +145,10 @@ def _customer_line(conversation):
 
     from apps.communications.models import Message
 
+    # A WhatsApp username hides the number (9 Nov 2026): say so, so Octos asks for it once.
+    hidden = ('' if getattr(conversation, 'contact_phone', '') else
+              '\nThis customer uses a WhatsApp username, so their phone number is hidden from us. '
+              'After helping with what they asked, politely ask once for their number (see the rule on usernames).')
     name = ''
     customer = getattr(conversation, 'customer', None)
     if customer is not None:
@@ -155,14 +159,14 @@ def _customer_line(conversation):
         if lead is not None and lead.first_name and lead.first_name != 'Customer':
             name = lead.first_name.strip()
     if not name:
-        return ''
+        return hidden
     greeted = conversation.messages.filter(
         direction=Message.OUTBOUND, is_internal_note=False,
         created_at__gte=timezone.now() - timedelta(hours=6)).exists()
     if greeted:
         return (f'\nYou are talking to {name}. You have already greeted them by name in this visit: '
-                f'do not use their name again.')
+                f'do not use their name again.') + hidden
     return (f'\nYou are talking to {name}, a customer Farhat knows. Greet them by name once, in this '
-            f'reply, and not again in this visit.')
+            f'reply, and not again in this visit.') + hidden
 
 

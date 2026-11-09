@@ -550,3 +550,25 @@ def _quoted_in(conversation, pk):
     except (TypeError, ValueError):
         return None
     return Message.objects.filter(pk=pk, conversation=conversation).first()
+
+
+class ConversationLinkCustomerView(APIView):
+    """
+    POST /api/v1/communications/<id>/link-customer/  { customer }
+
+    Staff link a chat to the customer they recognise (9 Nov 2026), e.g. a
+    WhatsApp username chat with no number: the chat takes the record's number.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import identity
+        from apps.customers.models import CustomerProfile
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        customer = CustomerProfile.objects.filter(pk=request.data.get('customer')).first()
+        if customer is None:
+            return Response({'detail': 'That customer could not be found.'}, status=status.HTTP_400_BAD_REQUEST)
+        identity.link_customer(conversation, customer)
+        return Response({'customer': customer.pk, 'phone': conversation.contact_phone})

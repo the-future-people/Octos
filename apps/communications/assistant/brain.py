@@ -158,6 +158,14 @@ TOOL_SPECS = [
             'phone': {'type': 'string', 'description': 'As they wrote it, e.g. 024 400 0776.'},
         }, 'required': ['phone']},
     },
+    {
+        'name': 'save_customer_name',
+        'description': ("Start a customer record for a chat whose number you just saved and that has no "
+                        "record yet. Only the name they gave you in this chat."),
+        'input_schema': {'type': 'object', 'properties': {
+            'first_name': {'type': 'string'}, 'last_name': {'type': 'string'},
+        }, 'required': ['first_name']},
+    },
 ]
 
 
@@ -441,18 +449,29 @@ def _run_tool(name, args, ctx):
                 "hidden. Ask politely for the phone number they'd like for this order and its receipt, "
                 "then save it with use_phone_number and try again.")}
     if name == 'use_phone_number':
-        from django.db import IntegrityError, transaction
+        # Their number finds their customer record; with none, ask for a name (9 Nov 2026).
+        from apps.communications.services import identity
         from apps.core.phones import to_international
         phone = to_international(str(args.get('phone') or ''))
         if not phone:
-            return {'error': "That doesn't look like a phone number. Ask them to check it."}
+            return {'error': "That doesn't look like a phone number. Ask them kindly to check it."}
+        customer = identity.match_phone(ctx.conversation, phone)
+        if customer is not None:
+            return {'saved': phone, 'found_their_record': customer.display_name,
+                    'say': 'Thank them; you found their account. Carry on with what they wanted.'}
+        return {'saved': phone, 'no_record': True,
+                'say': ('Thank them. They have no account with us yet: ask kindly for at least their first '
+                        'name (and surname if they like), then save it with save_customer_name.')}
+    if name == 'save_customer_name':
+        from apps.communications.services import identity
+        first = str(args.get('first_name') or '').strip()
+        if not first:
+            return {'error': 'A first name is needed. Ask for it kindly.'}
         try:
-            with transaction.atomic():
-                type(ctx.conversation).objects.filter(pk=ctx.conversation.pk).update(contact_phone=phone)
-                ctx.conversation.contact_phone = phone
-        except IntegrityError:
-            return {'error': 'That number already has its own chat with us. Hand this to a person to join them.'}
-        return {'saved': phone}
+            customer = identity.register_from_chat(ctx.conversation, first, str(args.get('last_name') or ''))
+        except ValueError:
+            return {'error': 'Ask for their phone number first, and save it with use_phone_number.'}
+        return {'saved': customer.display_name, 'say': 'Thank them warmly: they are now known to us.'}
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
