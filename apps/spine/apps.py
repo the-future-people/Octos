@@ -9,3 +9,8 @@ class SpineConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'apps.spine'
     verbose_name = 'Spine (event log)'
+
+    def ready(self):
+        # Connect the one signal the spine listens to (a Job being created).
+        # Everything else calls record() explicitly; see apps/spine/jobs.py.
+        from apps.spine import jobs  # noqa: F401

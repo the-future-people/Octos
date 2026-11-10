@@ -744,12 +744,12 @@ class PaystackWebhookView(APIView):
             )
 
         try:
-            with transaction.atomic():
+                with transaction.atomic():
                 # The write is the check. A "have we seen this?" lookup
                 # followed by a write would let two simultaneous
                 # deliveries both pass; the unique constraint lets only
                 # one through, and the refusal is how we know.
-                PaystackEvent.objects.create(
+                 PaystackEvent.objects.create(
                     reference=reference,
                     event_type=event_type,
                     provider_id=str(data.get('id') or ''),
@@ -758,6 +758,16 @@ class PaystackWebhookView(APIView):
                     payload=body,
                     order=order,
                 )
+                # The spine, in the same transaction and keyed by the same
+                # reference: a retried webhook is refused above and records nothing.
+                from apps.spine import kinds
+                from apps.spine.models import Event
+                from apps.spine.recorder import record
+                record(kinds.PAYMENT_SUCCEEDED, actor=Event.PROVIDER,
+                       branch=order.branch, key=f'paystack:{reference}',
+                       payload={'order_number': order.order_number, 'amount': str(paid),
+                                'channel': data.get('channel') or ''},
+                       reason=f'Paystack confirmed {order.order_number}.')
         except IntegrityError:
             return Response({'status': 'already recorded'})
 

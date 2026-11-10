@@ -43,8 +43,14 @@ QUOTE_GIVEN = 'quote.given'
 PAYMENT_LINK_SENT = 'payment.link_sent'
 PAYMENT_SUCCEEDED = 'payment.succeeded'
 JOB_CREATED = 'job.created'
-JOB_READY = 'job.ready'
-JOB_COLLECTED = 'job.collected'
+JOB_STATUS_CHANGED = 'job.status_changed'    # any move without a more meaningful name
+JOB_DEPOSIT_PAID = 'job.deposit_paid'
+JOB_PAID = 'job.paid'                        # payment settled in full
+JOB_READY = 'job.ready'                      # work reached DONE
+JOB_COLLECTED = 'job.collected'              # handed over to the customer
+JOB_CANCELLED = 'job.cancelled'
+JOB_HALTED = 'job.halted'
+JOB_RESUMED = 'job.resumed'
 
 # Customers
 CUSTOMER_REGISTERED = 'customer.registered'

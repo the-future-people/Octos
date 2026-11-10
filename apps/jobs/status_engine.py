@@ -239,7 +239,7 @@ class JobStatusEngine:
         if to_status == 'COMPLETE':
             self._deduct_inventory(actor)
 
-        JobStatusLog.objects.create(
+        log = JobStatusLog.objects.create(
             job             = self.job,
             axis            = JobStatusLog.Axis.RECORD,
             from_status     = from_status,
@@ -248,6 +248,8 @@ class JobStatusEngine:
             notes           = notes,
             transitioned_at = now,
         )
+        from apps.spine.jobs import record_job_move
+        record_job_move(self.job, 'RECORD', from_status, to_status, actor, notes, log)
 
         return {
             'success'     : True,
@@ -325,13 +327,16 @@ class JobStatusEngine:
                 f"{self.job.job_number} is already finished — nothing to halt."
             )
 
-        return JobHalt.objects.create(
+        halt = JobHalt.objects.create(
             job                = self.job,
             reason             = reason,
             note               = note,
             work_state_at_halt = self.job.work_state,
             halted_by          = actor,
         )
+        from apps.spine.jobs import record_halt
+        record_halt(self.job, halt, actor)
+        return halt
 
     @transaction.atomic
     def resume(self, actor):
@@ -353,6 +358,8 @@ class JobStatusEngine:
         halt.resumed_at = timezone.now()
         halt.resumed_by = actor
         halt.save(update_fields=['resumed_at', 'resumed_by', 'updated_at'])
+        from apps.spine.jobs import record_resume
+        record_resume(self.job, halt, actor)
         return halt
 
     def active_halt(self):
@@ -574,7 +581,7 @@ class JobStatusEngine:
 
         self.job.save(update_fields=update_fields)
 
-        JobStatusLog.objects.create(
+        log = JobStatusLog.objects.create(
             job             = self.job,
             axis            = axis,
             from_status     = from_state,
@@ -583,6 +590,8 @@ class JobStatusEngine:
             notes           = notes,
             transitioned_at = now,
         )
+        from apps.spine.jobs import record_job_move
+        record_job_move(self.job, axis, from_state, to_state, actor, notes, log)
 
         return {
             'success'     : True,
