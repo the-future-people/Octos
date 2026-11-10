@@ -124,13 +124,18 @@ from apps.hr.api.serializers import ApplicantListSerializer
 from apps.hr.api.views import DecideApplicationView
 
 
+@override_settings(CACHES=TEST_CACHES)   # the global per-user throttle counts in the cache
 class DecideTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     def _decide(self, applicant, decision, reason=''):
         request = APIRequestFactory().post(
             f'/api/v1/recruitment/applications/{applicant.id}/decide/',
             {'decision': decision, 'rejection_reason': reason}, format='json',
         )
-        force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+        # Stand-in HR user: the view only needs someone signed in; the throttle needs a pk
+        force_authenticate(request, user=SimpleNamespace(is_authenticated=True, pk=1))
         return DecideApplicationView.as_view()(request, pk=applicant.id)
 
     def _applicant(self, status):
