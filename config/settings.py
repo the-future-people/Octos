@@ -71,6 +71,7 @@ LOCAL_APPS = [
     'apps.analytics',
     'apps.personal_notes',
     'apps.eye',
+    'apps.spine',
     # The public-facing side. Imports from jobs, customers and finance;
     # nothing imports back, so the storefront stays separable from the
     # staff platform it sits in front of.

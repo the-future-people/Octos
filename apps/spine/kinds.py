@@ -1,0 +1,50 @@
+"""
+The vocabulary of the spine: every kind of event Octos knows.
+
+An event's kind is written as noun.verb_in_past_tense, because an event is a
+fact that already happened ("message.received", never "receive_message").
+record() refuses any kind not listed here, so a typo is an error, not a
+silent new kind nobody will ever query.
+
+Add a kind here first, in the same change that starts recording it.
+"""
+
+# WhatsApp and other channels
+MESSAGE_RECEIVED = 'message.received'        # a customer's message reached us
+MESSAGE_SENT = 'message.sent'                # we sent a message (Octos or staff)
+MESSAGE_DELIVERED = 'message.delivered'      # the provider says it arrived on the phone
+MESSAGE_READ = 'message.read'
+MESSAGE_FAILED = 'message.failed'            # the provider refused or never answered
+FILE_RECEIVED = 'file.received'              # a customer's file was saved
+FILE_MEASURED = 'file.measured'              # pages, size, DPI etc. worked out
+
+# Who is handling a conversation
+STAFF_TOOK_OVER = 'staff.took_over'
+STAFF_HANDED_BACK = 'staff.handed_back'
+OCTOS_TOOK_BACK = 'octos.took_back'          # the handover watcher took it back
+STAFF_REMINDED = 'staff.reminded'
+
+# The counter (Layer 2 starts recording these)
+PRESENCE_COUNTER = 'presence.counter'        # verified: the customer is at a counter
+COUNTER_CLAIMED = 'counter.claimed'          # an attendant picked the customer up
+
+# Octos's own decisions
+OCTOS_REPLIED = 'octos.replied'
+OCTOS_STAYED_SILENT = 'octos.stayed_silent'
+
+# Jobs, quotes and money
+QUOTE_GIVEN = 'quote.given'
+PAYMENT_LINK_SENT = 'payment.link_sent'
+PAYMENT_SUCCEEDED = 'payment.succeeded'
+JOB_CREATED = 'job.created'
+JOB_READY = 'job.ready'
+JOB_COLLECTED = 'job.collected'
+
+# Customers
+CUSTOMER_REGISTERED = 'customer.registered'
+CUSTOMER_MATCHED = 'customer.matched'        # a sender was linked to an existing customer
+
+ALL = {
+    value for name, value in globals().items()
+    if name.isupper() and isinstance(value, str)
+}
