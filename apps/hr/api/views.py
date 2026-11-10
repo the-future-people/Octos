@@ -1002,6 +1002,32 @@ class ServeCVView(View):
         if not applicant.cv:
             raise Http404('No CV on file.')
 
+        # ?as=pdf on a Word CV: show it as a PDF. Converted once with the same
+        # LibreOffice converter the counter uses, then kept beside the original.
+        from apps.jobs.services.word_to_pdf import is_word, to_pdf, pdf_name, ConversionFailed
+        if request.GET.get('as') == 'pdf' and is_word(applicant.cv.name):
+            from django.conf import settings
+            from django.core.files.base import ContentFile
+            from django.core.files.storage import default_storage
+            from django.http import HttpResponse
+
+            key = f'recruitment/cv_previews/{applicant.pk}.pdf'
+            if not default_storage.exists(key):
+                try:
+                    with applicant.cv.open('rb') as handle:
+                        pdf = to_pdf(handle.read(), applicant.cv.name)
+                except ConversionFailed as exc:
+                    return HttpResponse(str(exc), status=422, content_type='text/plain; charset=utf-8')
+                default_storage.save(key, ContentFile(pdf))
+
+            response = FileResponse(default_storage.open(key, 'rb'), content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{pdf_name(applicant.cv.name)}"'
+            ancestors = ' '.join(o for o in settings.CORS_ALLOWED_ORIGINS if o.startswith('http'))
+            response['Content-Security-Policy'] = f"frame-ancestors 'self' {ancestors}"
+            response.xframe_options_exempt = True
+            response['Cache-Control'] = 'private, no-store'
+            return response
+
         try:
             import mimetypes, os
             filename     = os.path.basename(applicant.cv.name)
