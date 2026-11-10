@@ -29,6 +29,9 @@ from django.core.files.base import ContentFile
 
 from apps.communications.services.window import window_closes_at, window_open
 from apps.core.phones import to_international
+from apps.spine import kinds
+from apps.spine.models import Event
+from apps.spine.recorder import record
 
 logger = logging.getLogger(__name__)
 
@@ -180,9 +183,28 @@ def deliver(message_id):
         _fail(message, f'internal: {exc!r}')
         return
 
-    Message.objects.filter(pk=message_id, status=Message.QUEUED).update(
+    sent = Message.objects.filter(pk=message_id, status=Message.QUEUED).update(
         status=Message.SENT, external_id=wamid,
     )
+    if sent:
+        _record_sent(message, wamid)
+
+
+def _actor(message):
+    """Who spoke: a staff member, Octos, or the system (paid, ready, welcome...)."""
+    if message.sent_by_id:
+        return Event.STAFF
+    return Event.SYSTEM if message.kind else Event.OCTOS
+
+
+def _record_sent(message, wamid):
+    """The spine: Meta accepted this message. Once per message, whoever sent it."""
+    conversation = message.conversation
+    record(kinds.MESSAGE_SENT, actor=_actor(message), actor_user=message.sent_by,
+           conversation=conversation, customer=conversation.customer,
+           key=f'wa-sent:{message.pk}',
+           payload={'message_id': message.pk, 'wamid': wamid, 'system_kind': message.kind,
+                    'type': message.message_type})
 
 
 def _fail(message, reason):
@@ -196,6 +218,13 @@ def _fail(message, reason):
     failed = Message.objects.filter(pk=message.pk, status=Message.QUEUED).update(
         status=Message.FAILED, error=reason[:500],
     )
+    if failed:
+        conversation = message.conversation
+        record(kinds.MESSAGE_FAILED, actor=Event.PROVIDER if not reason.startswith('internal') else Event.SYSTEM,
+               conversation=conversation, customer=conversation.customer,
+               key=f'wa-fail:{message.pk}',
+               payload={'message_id': message.pk, 'system_kind': message.kind},
+               reason=reason[:300])
     if not failed or not message.kind or message.kind in NO_SMS_FALLBACK:
         return
     try:

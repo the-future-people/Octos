@@ -33,6 +33,10 @@ COUNTER_CLAIMED = 'counter.claimed'          # an attendant picked the customer 
 # Octos's own decisions
 OCTOS_REPLIED = 'octos.replied'
 OCTOS_STAYED_SILENT = 'octos.stayed_silent'
+OCTOS_HANDED_OVER = 'octos.handed_over'      # replied (or not) and brought a person in
+OCTOS_SHADOWED = 'octos.shadowed'            # shadow mode: wrote a note, sent nothing
+OCTOS_BLOCKED = 'octos.blocked'              # a reply was stopped by a check (e.g. an unlooked-up price)
+OCTOS_FAILED = 'octos.failed'                # Octos itself errored; a person was brought in
 
 # Jobs, quotes and money
 QUOTE_GIVEN = 'quote.given'

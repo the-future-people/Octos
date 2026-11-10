@@ -554,11 +554,37 @@ def _act(mode, conversation, run, text, handoff, note=''):
 
 
 def _finish(run, decision, started, reason='', reply=''):
+    """
+    Every run ends here, whichever way it went: the one place its decision is
+    written, to AssistantRun and to the spine, in the same transaction.
+    """
+    from django.db import transaction
+    from apps.spine import kinds
+    from apps.spine.models import Event
+    from apps.spine.recorder import record
+
     run.decision = decision
     run.reason = (reason or '')[:300]
     run.reply = reply or run.reply
     run.duration_ms = int((time.monotonic() - started) * 1000)
-    run.save()
+    kind = {
+        AssistantRun.REPLIED: kinds.OCTOS_REPLIED,
+        AssistantRun.SKIPPED: kinds.OCTOS_STAYED_SILENT,
+        AssistantRun.HANDED_OVER: kinds.OCTOS_HANDED_OVER,
+        AssistantRun.SHADOWED: kinds.OCTOS_SHADOWED,
+        AssistantRun.BLOCKED: kinds.OCTOS_BLOCKED,
+        AssistantRun.FAILED: kinds.OCTOS_FAILED,
+    }.get(decision)
+    with transaction.atomic():
+        run.save()
+        if kind:
+            conversation = run.conversation
+            record(kind, actor=Event.OCTOS,
+                   conversation=conversation, customer=conversation.customer,
+                   key=f'run:{run.pk}',
+                   payload={'run_id': run.pk, 'mode': run.mode, 'duration_ms': run.duration_ms,
+                            'trigger_message_id': run.trigger_id},
+                   reason=run.reason)
     return run
 
 
