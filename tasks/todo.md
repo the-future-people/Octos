@@ -254,3 +254,39 @@ WhatsApp's ~30 days), catalogue availability, promise engine
 - run-tests.ps1 is the full suite: 897 tests, all green
 - Noted for later: a test reaches a real weather API; Kings Hub's auto-reply
   showed the bot-loop risk for Step 5
+
+# Website upgrade — farhatprintingpress.com
+
+## 0. Decide (before any code)
+- [ ] Stack & hosting of the current site (and repo: octos-web or separate?)
+- [ ] Pages: mock has Home, Services, Solutions, Our Work, About, Contact.
+      Tender, Partners, Careers: drop, fold in (Tender → Solutions?), or keep in footer?
+- [ ] "Send a print job" → Print Octos storefront, WhatsApp, or a form?
+- [ ] Contact form → lands where (Octos inbox as a lead, email, WhatsApp)?
+- [ ] Facts sheet: phone, WhatsApp, email, address + GPS, hours, branches, real stats
+- [ ] Services list + availability (match the catalogue, Ghanaian names)
+- [ ] Imagery: real photo shoot list vs generic mockups; Our Work — launch now or later
+
+## 1. Mock
+- [ ] Design tokens (red, neutrals, type: heavy geometric sans like the mock)
+- [ ] Home mock → confirm
+- [ ] Remaining pages mock → confirm
+
+## 2. Build (one file at a time)
+- [ ] Shared header/footer, UTF-8, mobile nav
+- [ ] Pages in order: Home → Services → Contact → About → Solutions → Our Work
+- [ ] Wire CTAs (storefront/WhatsApp), contact form endpoint
+
+## 3. Verify
+- [ ] Mobile + desktop check, Lighthouse, no "?" characters, every link/number works
+- [ ] SEO basics: titles, meta, Google Business consistency (same address/hours)
+
+## Review
+
+## 0. Decide (before any code)
+- [x] Current site: Django template (templates/public/home.html, 524 lines, JS page-switching), Octos-1 on Railway
+- [x] Move to React on Vercel
+- [ ] Own app (farhat-web) vs inside octos-web
+- [ ] Prerendering for link previews (WhatsApp/Google)
+- [ ] Map Django routes still needed on the domain (careers, onboarding, HR/PDF links) → rewrites or subdomain
+- [ ] Pages, CTAs, contact form destination, facts sheet, services availability, imagery

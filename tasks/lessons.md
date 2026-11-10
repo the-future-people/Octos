@@ -1108,3 +1108,13 @@ Internal detail belongs in the log, not on the screen.
   here-strings showed no error and changed nothing. For edits across several
   files, use one Python script run in the container: it prints what it did,
   per file, and can be deleted after.
+
+- Never write HTML/text files with Windows PowerShell `Set-Content`/`Out-File` defaults (ANSI) — em dashes become "?". Save via the editor, or `-Encoding utf8`.
+
+- Every command block starts with an explicit `cd` to the repo it's for — "from X" in prose isn't enough when several repos are open in one terminal.
+
+- Run a single app's tests by module (`manage.py test apps.hr.tests`), not by app (`apps.hr`) — `apps/` is a namespace package and discovery from it crashes.
+
+- Before Expand-Archive, check the prompt ends in the target repo — farhat-web's vite.config.js once landed in octos-web unnoticed. `git status` after every unzip catches files that shouldn't have changed.
+
+- CORS origins are hard-coded in config/settings.py (CORS_ALLOWED_ORIGINS list), not a Railway variable — a new frontend needs a settings.py change and a push.
