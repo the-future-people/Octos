@@ -275,7 +275,33 @@ class ApplicationListView(APIView):
                 Q(branch_assigned_id=branch_filter)
             )
 
-        return Response(ApplicantListSerializer(qs, many=True).data)
+        return Response(ApplicantListSerializer(
+            qs, many=True, context={'also_applied': _also_applied()},
+        ).data)
+
+    def _also_applied():
+    """
+    {applicant id: [other roles the same person applied for]}. The same person is
+    the same email or the same phone (international form). One pass over everyone.
+    """
+    from apps.core.phones import to_international
+
+    groups = {}
+    for a in Applicant.objects.select_related('vacancy').only('id', 'email', 'phone', 'vacancy__title'):
+        keys = {(a.email or '').strip().lower(), to_international(a.phone or '')} - {''}
+        for key in keys:
+            groups.setdefault(key, []).append(a)
+
+    also = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        for a in members:
+            titles = also.setdefault(a.id, set())
+            for b in members:
+                if b.id != a.id:
+                    titles.add(b.vacancy.title if b.vacancy else 'General application')
+    return {k: sorted(v) for k, v in also.items()}
 
 
 class ApplicationDetailView(APIView):
