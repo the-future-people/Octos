@@ -13,14 +13,20 @@ ignored for 10 more minutes, Octos takes the conversation back. Any reply
 from staff clears the clock.
 
 Every switch leaves an internal note in the thread, so anyone opening it
-can see who had it and why.
+can see who had it and why, and an event on the spine (10 Nov 2026), so
+Octos itself knows what happened. The switch, its note and its event are
+written in one transaction: all three are saved, or none.
 """
 import logging
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.communications.models import Conversation, Message
+from apps.spine import kinds
+from apps.spine.models import Event
+from apps.spine.recorder import record
 
 logger = logging.getLogger(__name__)
 
@@ -30,29 +36,48 @@ TAKE_BACK_AFTER = timedelta(minutes=10)
 
 def take_over(conversation, user):
     """A person answers from now on; Octos goes quiet in this thread."""
-    _switch(conversation, Conversation.STAFF, reason='')
-    if not conversation.assigned_to_id:
-        conversation.assigned_to = user
-        conversation.save(update_fields=['assigned_to'])
-    _note(conversation, f'{user.full_name} took over from Octos.', user)
+    with transaction.atomic():
+        _switch(conversation, Conversation.STAFF, reason='')
+        if not conversation.assigned_to_id:
+            conversation.assigned_to = user
+            conversation.save(update_fields=['assigned_to'])
+        _note(conversation, f'{user.full_name} took over from Octos.', user)
+        record(kinds.STAFF_TOOK_OVER, actor=Event.STAFF, actor_user=user,
+               conversation=conversation, customer=conversation.customer,
+               reason=f'{user.full_name} took over from Octos.')
 
 
 def hand_back(conversation, user=None, why=''):
     """Octos answers from now on, handed back by a person or taking back after silence."""
-    _switch(conversation, Conversation.OCTOS, reason='')
-    who = user.full_name if user else 'Octos'
-    _note(conversation, f'{who} handed the conversation back to Octos.' if user else f'Octos took the conversation back: {why}', user)
-    # A customer still waiting gets an answer now, not at their next message.
-    waiting = conversation.messages.filter(is_internal_note=False).order_by('-created_at').first()
-    if waiting is not None and waiting.direction == Message.INBOUND:
-        from apps.communications.services.whatsapp_inbound import wake_octos
-        wake_octos(conversation, waiting)
+    with transaction.atomic():
+        _switch(conversation, Conversation.OCTOS, reason='')
+        who = user.full_name if user else 'Octos'
+        _note(conversation, f'{who} handed the conversation back to Octos.' if user else f'Octos took the conversation back: {why}', user)
+        if user:
+            record(kinds.STAFF_HANDED_BACK, actor=Event.STAFF, actor_user=user,
+                   conversation=conversation, customer=conversation.customer,
+                   reason=f'{user.full_name} handed the conversation back to Octos.')
+        else:
+            record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
+                   conversation=conversation, customer=conversation.customer,
+                   reason=f'Octos took the conversation back: {why}')
+        # A customer still waiting gets an answer now, not at their next message.
+        waiting = conversation.messages.filter(is_internal_note=False).order_by('-created_at').first()
+        if waiting is not None and waiting.direction == Message.INBOUND:
+            from apps.communications.services.whatsapp_inbound import wake_octos
+            wake_octos(conversation, waiting)
 
 
 def octos_hands_over(conversation, reason):
     """Octos needs a person: hand over, say why, and alert whoever should come."""
-    _switch(conversation, Conversation.STAFF, reason=_clip(reason, 200))
-    _note(conversation, f'Octos asked for a person: {reason}', None)
+    with transaction.atomic():
+        _switch(conversation, Conversation.STAFF, reason=_clip(reason, 200))
+        _note(conversation, f'Octos asked for a person: {reason}', None)
+        record(kinds.OCTOS_ASKED_FOR_PERSON, actor=Event.OCTOS,
+               conversation=conversation, customer=conversation.customer,
+               reason=f'Octos asked for a person: {reason}')
+    # Outside the transaction: an alert is a side effect, and one that fails
+    # must not undo the hand-over itself.
     _alert(conversation, verb='needs_you', message=f'Needs you: {reason}')
 
 
@@ -100,8 +125,13 @@ def watch(now=None):
                 minutes = int((now - since).total_seconds() // 60)
                 _alert(conversation, verb='customer_waiting',
                        message=f'{conversation.display_name} has waited {minutes} minutes for a reply.')
-                conversation.reminded_at = now
-                conversation.save(update_fields=['reminded_at'])
+                with transaction.atomic():
+                    conversation.reminded_at = now
+                    conversation.save(update_fields=['reminded_at'])
+                    record(kinds.STAFF_REMINDED, actor=Event.SYSTEM,
+                           conversation=conversation, customer=conversation.customer,
+                           payload={'waited_minutes': minutes},
+                           reason=f'The customer had waited {minutes} minutes for a person.')
                 reminded += 1
         elif now - conversation.reminded_at >= TAKE_BACK_AFTER:
             hand_back(conversation, why='no reply 10 minutes after the reminder.')
@@ -147,12 +177,16 @@ def _alert(conversation, verb, message):
 
 
 
-def resolved(conversation):
+def resolved(conversation, user=None):
     """A resolved conversation is handled: no longer 'needs you', and Octos answers what comes next."""
-    conversation.handled_by = Conversation.OCTOS
-    conversation.handoff_reason = ''
-    conversation.reminded_at = None
-    conversation.save(update_fields=['handled_by', 'handoff_reason', 'reminded_at'])
+    with transaction.atomic():
+        conversation.handled_by = Conversation.OCTOS
+        conversation.handoff_reason = ''
+        conversation.reminded_at = None
+        conversation.save(update_fields=['handled_by', 'handoff_reason', 'reminded_at'])
+        record(kinds.CONVERSATION_RESOLVED, actor=Event.STAFF if user else Event.SYSTEM,
+               actor_user=user, conversation=conversation, customer=conversation.customer,
+               reason='Marked resolved.')
 
 
 def _clip(text, limit):

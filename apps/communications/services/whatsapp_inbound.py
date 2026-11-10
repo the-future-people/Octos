@@ -10,6 +10,10 @@ not stop the others, and what went wrong is written onto the event.
 Running process() twice on the same event is safe: a message already
 recorded is recognised by its wamid and skipped. That makes any failed
 event replayable once the cause is fixed.
+
+Every new message and every delivery receipt is also written to the spine
+(10 Nov 2026), inside the same transaction as the message itself, keyed by
+WhatsApp's own id so a retried delivery is recorded once.
 """
 import logging
 
@@ -21,6 +25,9 @@ from django.utils import timezone
 from apps.communications.models import Conversation, Message
 from apps.core.phones import lookup_forms, to_international
 from apps.customers.models.customer import CustomerProfile
+from apps.spine import kinds
+from apps.spine.models import Event
+from apps.spine.recorder import record
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +151,16 @@ def _receive(message, profile_name, who=None):
     # that staff resolved after the original arrived.
     _refresh(conversation, phone, profile_name)
     _opt_out_if_asked(conversation, body)
+
+    # The spine: what arrived, from whom, keyed by WhatsApp's id. The words
+    # stay on the Message; the event carries only what describes it.
+    record(kinds.MESSAGE_RECEIVED, actor=Event.CUSTOMER,
+           conversation=conversation, customer=conversation.customer,
+           key=f'wa:{wamid}',
+           payload={'message_id': message.pk, 'type': message_type,
+                    'has_file': bool(media_id), 'mime': media_mime,
+                    'quoted': message.reply_to_id})
+
     wake_octos(conversation, message, pause=8)
     if message.media_id:
         _keep_media(message)
@@ -253,6 +270,14 @@ STATUS_MAP = {
 }
 PROGRESS = [Message.QUEUED, Message.SENT, Message.DELIVERED, Message.READ]
 
+# Receipts worth an event on the spine. "sent" only means Meta accepted it,
+# which the outbound side records itself.
+STATUS_EVENTS = {
+    'delivered': kinds.MESSAGE_DELIVERED,
+    'read':      kinds.MESSAGE_READ,
+    'failed':    kinds.MESSAGE_FAILED,
+}
+
 
 def _apply_status(status):
     """
@@ -271,7 +296,9 @@ def _apply_status(status):
     ours = Message.objects.filter(
         channel=Message.WHATSAPP, direction=Message.OUTBOUND, external_id=wamid,
     )
+    sent = ours.select_related('conversation').first()
 
+    reason = ''
     if new == Message.FAILED:
         reason = '; '.join(
             f"{e.get('code')}: {e.get('title') or e.get('message') or ''}".strip()
@@ -288,6 +315,16 @@ def _apply_status(status):
             'WhatsApp status %s for %s matched nothing (unknown, or already further along)',
             word, wamid,
         )
+        return
+
+    # The spine: only receipts that changed something, once each.
+    kind = STATUS_EVENTS.get(word)
+    if kind and sent is not None:
+        record(kind, actor=Event.PROVIDER,
+               conversation=sent.conversation, customer=sent.conversation.customer,
+               key=f'wa-status:{wamid}:{word}',
+               payload={'message_id': sent.pk},
+               reason=reason)
 
 
 

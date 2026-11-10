@@ -22,7 +22,9 @@ FILE_MEASURED = 'file.measured'              # pages, size, DPI etc. worked out
 STAFF_TOOK_OVER = 'staff.took_over'
 STAFF_HANDED_BACK = 'staff.handed_back'
 OCTOS_TOOK_BACK = 'octos.took_back'          # the handover watcher took it back
-STAFF_REMINDED = 'staff.reminded'
+OCTOS_ASKED_FOR_PERSON = 'octos.asked_for_person'   # Octos handed over and said why
+STAFF_REMINDED = 'staff.reminded'            # a customer waited 30 minutes on a person
+CONVERSATION_RESOLVED = 'conversation.resolved'
 
 # The counter (Layer 2 starts recording these)
 PRESENCE_COUNTER = 'presence.counter'        # verified: the customer is at a counter
