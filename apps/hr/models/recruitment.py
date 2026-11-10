@@ -26,6 +26,19 @@ class JobPosition(AuditModel):
         (APPOINTMENT,    'CEO Direct Appointment'),
     ]
 
+    # Groups vacancies on the public careers page
+    FRONT_OF_HOUSE = 'FRONT_OF_HOUSE'
+    PRODUCTION     = 'PRODUCTION'
+    OPERATIONS     = 'OPERATIONS'
+    FINISHING      = 'FINISHING'
+
+    TEAM_CHOICES = [
+        (FRONT_OF_HOUSE, 'Front of house'),
+        (PRODUCTION,     'Production'),
+        (OPERATIONS,     'Operations'),
+        (FINISHING,      'Finishing'),
+    ]
+
     title               = models.CharField(max_length=150)
     branch              = models.ForeignKey(
         'organization.Branch',
@@ -41,7 +54,15 @@ class JobPosition(AuditModel):
     )
     track               = models.CharField(max_length=20, choices=TRACK_CHOICES, default=PUBLIC)
     description         = models.TextField(blank=True)
-    requirements        = models.TextField(blank=True)
+    requirements        = models.TextField(blank=True)   # one per line
+    # ── Public careers page details ──────────────────────────
+    team             = models.CharField(max_length=20, choices=TEAM_CHOICES, blank=True)
+    responsibilities = models.TextField(blank=True)       # one per line
+    # Shown publicly as written; blank shows "Discussed at interview".
+    # base_salary stays internal (budgeting), never public.
+    pay_text         = models.CharField(max_length=150, blank=True)
+    working_hours    = models.CharField(max_length=150, blank=True)
+    benefits         = models.TextField(blank=True)       # one per line
     positions_available = models.PositiveIntegerField(default=1)
     employment_type     = models.CharField(
         max_length=20,
@@ -145,7 +166,8 @@ class Applicant(AuditModel):
     date_of_birth = models.DateField(null=True, blank=True)
     gender        = models.CharField(max_length=20, blank=True)
 
-    preferred_channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default=WHATSAPP)
+    # WHATSAPP kept for existing rows; the public careers form rejects it (applications never go via WhatsApp)
+    preferred_channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default=SMS)
 
     vacancy           = models.ForeignKey(
         'hr.JobPosition',

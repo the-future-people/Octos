@@ -7,29 +7,59 @@ from apps.hr.models import (
 
 
 # ── Public (careers) serializers ──────────────────────────────────────────────
+
+# CVs and cover letters from the public careers form: PDF or Word, 5 MB max,
+# and the file's first bytes must match its extension (a renamed .exe is refused).
+DOCUMENT_SIGNATURES = {
+    '.pdf' : b'%PDF-',
+    '.docx': b'PK\x03\x04',
+    '.doc' : b'\xd0\xcf\x11\xe0',
+}
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+
+
+def validate_public_document(file, label):
+    import os
+    ext = os.path.splitext(file.name or '')[1].lower()
+    if ext not in DOCUMENT_SIGNATURES:
+        raise serializers.ValidationError(f'{label} must be a PDF or Word document.')
+    if file.size > MAX_DOCUMENT_BYTES:
+        raise serializers.ValidationError(f'{label} must be 5 MB or smaller.')
+    file.seek(0)
+    head = file.read(8)
+    file.seek(0)
+    if not head.startswith(DOCUMENT_SIGNATURES[ext]):
+        raise serializers.ValidationError(f'{label} does not look like a real {ext[1:].upper()} file.')
+    return file
+
+
 class PublicVacancySerializer(serializers.ModelSerializer):
+    """
+    What anyone on the internet can see. No applicant counts, no base_salary —
+    pay is shown only as HR wrote it in pay_text (blank = discussed at interview).
+    """
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     branch_code  = serializers.CharField(source='branch.code', read_only=True)
     role_name    = serializers.CharField(source='role.name', read_only=True)
+    team_label   = serializers.CharField(source='get_team_display', read_only=True)
     is_open      = serializers.BooleanField(read_only=True)
-    applicant_count = serializers.SerializerMethodField()
 
     class Meta:
         model  = JobPosition
         fields = [
             'id', 'title', 'branch', 'branch_name', 'branch_code',
-            'role', 'role_name', 'description', 'requirements',
+            'role', 'role_name', 'team', 'team_label',
+            'description', 'responsibilities', 'requirements',
+            'pay_text', 'working_hours', 'benefits',
             'positions_available', 'employment_type', 'status',
             'opens_at', 'closes_at', 'is_open',
-            'applicant_count',
         ]
-
-    def get_applicant_count(self, obj):
-        return obj.applicants.count()
 
 
 class PublicApplicationSerializer(serializers.ModelSerializer):
     """Used by the public /careers/apply/ endpoint."""
+
+    cv = serializers.FileField()   # required on the public form (nullable on the model for HR tracks)
 
     class Meta:
         model  = Applicant
@@ -40,6 +70,20 @@ class PublicApplicationSerializer(serializers.ModelSerializer):
             'vacancy', 'branch_preference', 'role_interest',
             'cv', 'cover_letter',
         ]
+
+    def validate_preferred_channel(self, value):
+        # Applications and HR follow-ups never go through WhatsApp
+        if value == Applicant.WHATSAPP:
+            raise serializers.ValidationError('Choose SMS or email for HR to contact you.')
+        return value
+
+    def validate_cv(self, value):
+        return validate_public_document(value, 'CV')
+
+    def validate_cover_letter(self, value):
+        if value:
+            validate_public_document(value, 'Cover letter')
+        return value
 
     def validate(self, data):
         email   = data.get('email')
@@ -107,7 +151,8 @@ class JobPositionSerializer(serializers.ModelSerializer):
         model  = JobPosition
         fields = [
             'id', 'title', 'branch', 'branch_name', 'role', 'role_name',
-            'track', 'description', 'requirements',
+            'track', 'team', 'description', 'responsibilities', 'requirements',
+            'pay_text', 'working_hours', 'benefits',
             'positions_available', 'employment_type', 'base_salary',
             'status', 'opens_at', 'closes_at', 'is_open',
             'applicant_count',

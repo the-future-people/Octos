@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.throttling import AnonRateThrottle
 from django.http import FileResponse, Http404
 from rest_framework.authentication import SessionAuthentication
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -41,6 +42,15 @@ from apps.hr.api.serializers import (
 # ══════════════════════════════════════════════════════════════════════════════
 # PUBLIC — /api/v1/careers/
 # ══════════════════════════════════════════════════════════════════════════════
+
+class CareersApplyThrottle(AnonRateThrottle):
+    """Public apply form: at most 5 applications an hour from one address."""
+    scope = 'careers_apply'
+    rate  = '5/hour'
+
+
+# Hidden field on the public form. People never see it; bots fill every field.
+HONEYPOT_FIELD = 'website'
 
 class PublicVacancyListView(APIView):
     """
@@ -94,10 +104,12 @@ class PublicVacancyDetailView(APIView):
 
     def get(self, request, pk):
         vacancy = get_object_or_404(
-            JobPosition,
+            JobPosition.objects.select_related('branch', 'role'),
             pk=pk,
             status=JobPosition.OPEN,
         )
+        if not vacancy.is_open:   # outside its opens_at–closes_at window
+            raise Http404('This vacancy is no longer open.')
         return Response(PublicVacancySerializer(vacancy).data)
 
 
@@ -108,8 +120,15 @@ class PublicApplyView(APIView):
     """
     permission_classes = [AllowAny]
     parser_classes     = [MultiPartParser, FormParser, JSONParser]
+    throttle_classes   = [CareersApplyThrottle]
 
     def post(self, request):
+        if request.data.get(HONEYPOT_FIELD):
+            # Bot: answer like a success, store nothing
+            return Response({
+                'message': 'Application submitted successfully. We will be in touch.',
+            }, status=status.HTTP_201_CREATED)
+
         serializer = PublicApplicationSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -954,11 +973,14 @@ class ServeCVView(View):
             raise Http404('No CV on file.')
 
         try:
+            import mimetypes, os
+            filename     = os.path.basename(applicant.cv.name)
+            content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
             response = FileResponse(
                 applicant.cv.open('rb'),
-                content_type='application/pdf',
+                content_type=content_type,
             )
-            response['Content-Disposition'] = 'inline; filename="cv.pdf"'
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
             response['X-Frame-Options']     = 'SAMEORIGIN'
             response['Cache-Control']       = 'private, no-store'
             return response
