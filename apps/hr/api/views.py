@@ -981,7 +981,12 @@ class ServeCVView(View):
                 content_type=content_type,
             )
             response['Content-Disposition'] = f'inline; filename="{filename}"'
-            response['X-Frame-Options']     = 'SAMEORIGIN'
+            # The React HR portal (octos-web, another site) shows the CV in a frame.
+            # Allow framing by our own frontends only (the CORS list), never by anyone else.
+            from django.conf import settings
+            ancestors = ' '.join(o for o in settings.CORS_ALLOWED_ORIGINS if o.startswith('http'))
+            response['Content-Security-Policy'] = f"frame-ancestors 'self' {ancestors}"
+            response.xframe_options_exempt = True   # the CSP above replaces X-Frame-Options
             response['Cache-Control']       = 'private, no-store'
             return response
         except FileNotFoundError:
