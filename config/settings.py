@@ -444,6 +444,14 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:5180',
     'http://127.0.0.1:5180',
     'https://print-octos.vercel.app',
+    # The public website (farhat-web): careers page reads vacancies and posts
+    # applications. Local dev runs on 5174 because the staff portal holds 5173.
+    # The real domain is listed ahead of the cutover so careers keeps working then.
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+    'https://farhat-web.vercel.app',
+    'https://farhatprintingpress.com',
+    'https://www.farhatprintingpress.com',
     # The Print Octos app. Its pages are served from inside the phone,
     # under these addresses: Android's, then iPhone's.
     'https://localhost',
