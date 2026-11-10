@@ -31,4 +31,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 EXPOSE 8000
-CMD ["sh", "-c", "python manage.py migrate --noinput && daphne -b 0.0.0.0 -p ${PORT:-8000} config.asgi:application"]
+# collectstatic at start-up (not build): Railway's variables are only certain to exist at runtime.
+# Without it staticfiles/ is empty and WhiteNoise serves nothing — the template portals load unstyled.
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p ${PORT:-8000} config.asgi:application"]
