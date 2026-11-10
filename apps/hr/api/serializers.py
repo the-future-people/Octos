@@ -71,11 +71,8 @@ class PublicApplicationSerializer(serializers.ModelSerializer):
             'cv', 'cover_letter',
         ]
 
-    def validate_preferred_channel(self, value):
-        # Applications and HR follow-ups never go through WhatsApp
-        if value == Applicant.WHATSAPP:
-            raise serializers.ValidationError('Choose SMS or email for HR to contact you.')
-        return value
+    # preferred_channel: SMS, WhatsApp or email. It only says how HR may reach the
+    # applicant; HR does that outside Octos, and applications only arrive through this form.
 
     def validate_cv(self, value):
         return validate_public_document(value, 'CV')
@@ -86,12 +83,31 @@ class PublicApplicationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        email   = data.get('email')
+        """
+        One application per person per vacancy, and one open general application.
+        "Same person" means the same email or the same phone number, compared in
+        international form, so 024… and +23324… match.
+        """
+        from apps.core.phones import to_international
+
+        email   = (data.get('email') or '').strip().lower()
+        phone   = to_international(data.get('phone') or '')
         vacancy = data.get('vacancy')
-        if vacancy and Applicant.objects.filter(email=email, vacancy=vacancy).exists():
-            raise serializers.ValidationError(
-                'You have already applied for this position.'
+
+        if vacancy:
+            earlier = Applicant.objects.filter(vacancy=vacancy)
+            message = "You've already applied for this role. Our HR team has your application."
+        else:
+            earlier = Applicant.objects.filter(vacancy__isnull=True).exclude(
+                status__in=(Applicant.REJECTED, Applicant.WITHDRAWN, Applicant.DECLINED),
             )
+            message = 'You already have a general application with us. Our HR team has it on file.'
+
+        for a in earlier.only('email', 'phone'):
+            same_email = email and (a.email or '').strip().lower() == email
+            same_phone = phone and to_international(a.phone or '') == phone
+            if same_email or same_phone:
+                raise serializers.ValidationError(message)
         return data
 
     def create(self, validated_data):
@@ -226,6 +242,8 @@ class ApplicantListSerializer(serializers.ModelSerializer):
     screening_score  = serializers.SerializerMethodField()
     screening_passed = serializers.SerializerMethodField()
     interview_score  = serializers.SerializerMethodField()
+    # Other roles the same person (same email or phone) applied for; filled by the list view
+    also_applied     = serializers.SerializerMethodField()
 
     class Meta:
         model  = Applicant
@@ -235,7 +253,11 @@ class ApplicantListSerializer(serializers.ModelSerializer):
             'track', 'status', 'preferred_channel',
             'is_priority', 'created_at',
             'screening_score', 'screening_passed', 'interview_score',
+            'also_applied',
         ]
+
+    def get_also_applied(self, obj):
+        return self.context.get('also_applied', {}).get(obj.id, [])
 
     def _score(self, obj, stage):
         # stage_scores is prefetched by the list view
