@@ -7,6 +7,7 @@ with Meta's own code and reason. No window rules, no database: those
 belong to whoever calls this, so this file stays small enough to trust.
 """
 import logging
+import time
 
 import requests
 from django.conf import settings
@@ -20,6 +21,12 @@ logger = logging.getLogger(__name__)
 # purpose, after reading Meta's changelog, never as a side effect.
 API_VERSION = 'v26.0'
 TIMEOUT = 20
+
+# A dropped connection to Meta (10 Nov 2026: 'Connection reset by peer' lost an
+# Octos reply) gets two more tries before the message is marked failed. Only when
+# the connection itself broke: an error from Meta, or a slow answer that Meta may
+# already have acted on, is never retried — that could message the customer twice.
+NETWORK_RETRY_DELAYS = (2, 5)   # seconds before the 2nd and 3rd try
 
 
 class WhatsAppError(Exception):
@@ -69,15 +76,26 @@ def _send(phone, message):
         **({'recipient': phone} if _is_user_id(phone) else {'to': _recipient(phone)}),
         **message,
     }
-    try:
-        response = requests.post(
-            f'https://graph.facebook.com/{API_VERSION}/{number_id}/messages',
-            headers={'Authorization': f'Bearer {token}'},
-            json=payload,
-            timeout=TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        raise WhatsAppError('network', str(exc)) from exc
+    attempts = len(NETWORK_RETRY_DELAYS) + 1
+    for attempt in range(attempts):
+        try:
+            response = requests.post(
+                f'https://graph.facebook.com/{API_VERSION}/{number_id}/messages',
+                headers={'Authorization': f'Bearer {token}'},
+                json=payload,
+                timeout=TIMEOUT,
+            )
+            break
+        except (requests.ConnectionError, requests.ConnectTimeout) as exc:
+            if attempt == attempts - 1:
+                raise WhatsAppError('network', str(exc)) from exc
+            logger.warning(
+                'WhatsApp send: connection broke (%s); trying again, %s of %s',
+                exc, attempt + 2, attempts,
+            )
+            time.sleep(NETWORK_RETRY_DELAYS[attempt])
+        except requests.RequestException as exc:
+            raise WhatsAppError('network', str(exc)) from exc
 
     try:
         data = response.json()
