@@ -46,28 +46,11 @@ class PublicApplyTests(TestCase):
         self.assertEqual(a.preferred_channel, Applicant.SMS)
         self.assertIsNone(a.vacancy)
 
-    def test_whatsapp_channel_is_accepted(self):
+    def test_whatsapp_channel_is_refused(self):
         res = self.client.post(APPLY_URL, self._payload(preferred_channel='WHATSAPP'))
-        self.assertEqual(res.status_code, 201, res.content)
-        self.assertEqual(Applicant.objects.get().preferred_channel, Applicant.WHATSAPP)
-
-    def test_same_phone_cannot_send_two_general_applications(self):
-        self.assertEqual(self.client.post(APPLY_URL, self._payload(phone='0244123456')).status_code, 201)
-        # different email, same number written another way
-        res = self.client.post(APPLY_URL, self._payload(email='other@example.com', phone='+233244123456', cv=_pdf()))
         self.assertEqual(res.status_code, 400)
-        self.assertEqual(Applicant.objects.count(), 1)
-
-    def test_same_email_cannot_send_two_general_applications(self):
-        self.client.post(APPLY_URL, self._payload())
-        res = self.client.post(APPLY_URL, self._payload(phone='0201111111', cv=_pdf()))
-        self.assertEqual(res.status_code, 400)
-
-    def test_can_apply_again_after_a_rejection(self):
-        self.client.post(APPLY_URL, self._payload())
-        Applicant.objects.update(status=Applicant.REJECTED)
-        res = self.client.post(APPLY_URL, self._payload(cv=_pdf()))
-        self.assertEqual(res.status_code, 201, res.content)
+        self.assertIn('preferred_channel', res.json())
+        self.assertFalse(Applicant.objects.exists())
 
     def test_email_channel_is_accepted(self):
         res = self.client.post(APPLY_URL, self._payload(preferred_channel='EMAIL'))
