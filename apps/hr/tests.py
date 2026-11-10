@@ -114,3 +114,59 @@ class PublicVacancyContractTests(TestCase):
                   'pay_text', 'working_hours', 'benefits',
                   'positions_available', 'employment_type', 'closes_at'):
             self.assertIn(f, fields)
+
+
+
+# ── Decisions: who can be hired or rejected, and when ──────────────────────────
+from types import SimpleNamespace
+from rest_framework.test import APIRequestFactory, force_authenticate
+from apps.hr.api.serializers import ApplicantListSerializer
+from apps.hr.api.views import DecideApplicationView
+
+
+class DecideTests(TestCase):
+    def _decide(self, applicant, decision, reason=''):
+        request = APIRequestFactory().post(
+            f'/api/v1/recruitment/applications/{applicant.id}/decide/',
+            {'decision': decision, 'rejection_reason': reason}, format='json',
+        )
+        force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+        return DecideApplicationView.as_view()(request, pk=applicant.id)
+
+    def _applicant(self, status):
+        return Applicant.objects.create(
+            first_name='Ama', last_name='Mensah', email='ama@example.com',
+            phone='0244123456', status=status,
+        )
+
+    def test_reject_straight_after_screening(self):
+        a = self._applicant(Applicant.SCREENING)
+        res = self._decide(a, 'REJECT', 'Not enough experience')
+        self.assertEqual(res.status_code, 200, res.data)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Applicant.REJECTED)
+        self.assertEqual(a.rejection_reason, 'Not enough experience')
+
+    def test_reject_a_new_application(self):
+        a = self._applicant(Applicant.RECEIVED)
+        self.assertEqual(self._decide(a, 'REJECT').status_code, 200)
+
+    def test_cannot_hire_without_an_interview(self):
+        a = self._applicant(Applicant.SCREENING)
+        self.assertEqual(self._decide(a, 'HIRE').status_code, 400)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Applicant.SCREENING)
+
+    def test_hire_after_the_interview(self):
+        a = self._applicant(Applicant.INTERVIEW_DONE)
+        self.assertEqual(self._decide(a, 'HIRE').status_code, 200)
+        a.refresh_from_db()
+        self.assertEqual(a.status, Applicant.AWAITING_ACCEPTANCE)
+
+    def test_cannot_reject_after_the_offer(self):
+        a = self._applicant(Applicant.AWAITING_ACCEPTANCE)
+        self.assertEqual(self._decide(a, 'REJECT').status_code, 400)
+
+    def test_list_carries_the_scores_the_lanes_need(self):
+        for f in ('screening_score', 'screening_passed', 'interview_score'):
+            self.assertIn(f, ApplicantListSerializer.Meta.fields)

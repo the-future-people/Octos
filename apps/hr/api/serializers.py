@@ -221,6 +221,11 @@ class ApplicantListSerializer(serializers.ModelSerializer):
     full_name      = serializers.CharField(read_only=True)
     vacancy_title  = serializers.CharField(source='vacancy.title', read_only=True)
     branch_name    = serializers.SerializerMethodField()
+    # The HR portal's task lanes need these: a screened applicant who passed waits
+    # to be scheduled; one who didn't waits to be rejected or re-scored.
+    screening_score  = serializers.SerializerMethodField()
+    screening_passed = serializers.SerializerMethodField()
+    interview_score  = serializers.SerializerMethodField()
 
     class Meta:
         model  = Applicant
@@ -229,7 +234,24 @@ class ApplicantListSerializer(serializers.ModelSerializer):
             'vacancy', 'vacancy_title', 'branch_name',
             'track', 'status', 'preferred_channel',
             'is_priority', 'created_at',
+            'screening_score', 'screening_passed', 'interview_score',
         ]
+
+    def _score(self, obj, stage):
+        # stage_scores is prefetched by the list view
+        return next((s for s in obj.stage_scores.all() if s.stage == stage), None)
+
+    def get_screening_score(self, obj):
+        s = self._score(obj, StageQuestionnaire.SCREENING)
+        return s.raw_score if s else None
+
+    def get_screening_passed(self, obj):
+        s = self._score(obj, StageQuestionnaire.SCREENING)
+        return s.passed if s else None
+
+    def get_interview_score(self, obj):
+        s = self._score(obj, StageQuestionnaire.INTERVIEW)
+        return s.raw_score if s and s.raw_score else None
 
     def get_branch_name(self, obj):
         if obj.branch_assigned:

@@ -255,7 +255,7 @@ class ApplicationListView(APIView):
         qs = Applicant.objects.select_related(
             'vacancy', 'vacancy__branch', 'vacancy__role',
             'branch_assigned', 'role_interest', 'assigned_hr',
-        ).all()
+        ).prefetch_related('stage_scores')
 
         status_filter  = request.query_params.get('status')
         track_filter   = request.query_params.get('track')
@@ -445,21 +445,22 @@ class DecideApplicationView(APIView):
     def post(self, request, pk):
         applicant = get_object_or_404(Applicant, pk=pk)
 
-        if applicant.status not in (
-            Applicant.INTERVIEW_DONE,
-            Applicant.FINAL_REVIEW,
-            Applicant.APPOINTED,
-        ):
-            return Response(
-                {'detail': f'Cannot decide application in status: {applicant.status}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = DecideSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         decision = serializer.validated_data['decision']
+
+        # Hiring needs a scored interview. Rejecting is allowed at any stage before
+        # an offer, including straight after a failed CV screening.
+        can_hire   = (Applicant.INTERVIEW_DONE, Applicant.FINAL_REVIEW, Applicant.APPOINTED)
+        can_reject = (Applicant.RECEIVED, Applicant.SCREENING, Applicant.INTERVIEW_SCHEDULED) + can_hire
+        allowed = can_hire if decision == 'HIRE' else can_reject
+        if applicant.status not in allowed:
+            return Response(
+                {'detail': f'Cannot {decision.lower()} an application in status: {applicant.status}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if decision == 'HIRE':
             applicant.status = Applicant.AWAITING_ACCEPTANCE
@@ -475,12 +476,14 @@ class DecideApplicationView(APIView):
             applicant.rejected_at      = timezone.now()
             applicant.save(update_fields=['status', 'rejection_reason', 'rejected_at', 'updated_at'])
 
-            if applicant.vacancy:
+            # Only a vacancy marked Filled reopens; rejecting never reopens a
+            # vacancy HR closed or paused on purpose.
+            if applicant.vacancy and applicant.vacancy.status == JobPosition.FILLED:
                 applicant.vacancy.status = JobPosition.OPEN
                 applicant.vacancy.save(update_fields=['status', 'updated_at'])
 
             return Response({
-                'message' : 'Applicant rejected. Vacancy reopened.',
+                'message' : 'Applicant rejected.',
                 'status'  : applicant.status,
             })
 
