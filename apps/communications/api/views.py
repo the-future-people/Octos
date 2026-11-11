@@ -309,6 +309,30 @@ class ConversationTakeOverView(APIView):
             handover.take_over(conversation, request.user)
         return Response({'handled_by': conversation.handled_by})
 
+class ArrivalsView(APIView):
+    """
+    GET /api/v1/communications/arrivals/
+    Customers with files nobody has picked up yet, oldest first: the
+    attendant's Claim strip (11 Nov 2026). The tap itself is at-counter.
+    A thin wrapper: the answer comes from apps/spine/arrivals.py.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.spine.arrivals import arrivals
+        branch = getattr(request.user, 'branch', None)
+        rows = arrivals(branch=branch)
+        return Response([{
+            'conversation_id': row['conversation'].pk,
+            'name': row['name'],
+            'number_tail': row['number_tail'],
+            'since': row['since'],
+            'presence': row['presence'],
+            'p': row['p'],
+            'files': MessageSerializer(row['files'], many=True, context={'request': request}).data,
+        } for row in rows])
+
+
 class ConversationHandBackView(APIView):
     """
     POST /api/v1/communications/<id>/hand-back/
