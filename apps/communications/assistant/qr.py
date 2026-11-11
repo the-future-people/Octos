@@ -42,8 +42,21 @@ def _secret():
     return getattr(settings, 'COUNTER_QR_SECRET', '') or settings.SECRET_KEY
 
 
-def _signature(branch_id):
-    key = hashlib.sha256(('counter-qr:' + _secret()).encode()).digest()
+def _accepted_secrets():
+    """
+    Key rotation with a grace period: sign with the newest secret only, but
+    verify against it and the one before. Signs printed on 11 Nov 2026 were
+    signed with SECRET_KEY, minutes before COUNTER_QR_SECRET existed; they keep
+    working until they are reprinted. Drop SECRET_KEY from this list then.
+    """
+    secrets = [_secret()]
+    if settings.SECRET_KEY not in secrets:
+        secrets.append(settings.SECRET_KEY)
+    return secrets
+
+
+def _signature(branch_id, secret=None):
+    key = hashlib.sha256(('counter-qr:' + (secret or _secret())).encode()).digest()
     digest = hmac.new(key, f'counter:{branch_id}'.encode(), hashlib.sha256).digest()
     return int.from_bytes(digest[:SIG_BITS // 8], 'big')
 
@@ -67,9 +80,12 @@ def decode(text):
     for n in nibbles:
         value = (value << 4) | n
     branch_id = value >> SIG_BITS
-    given = value & ((1 << SIG_BITS) - 1)
-    ok = hmac.compare_digest(given.to_bytes(3, 'big'), _signature(branch_id).to_bytes(3, 'big'))
-    return branch_id, ok
+    given = (value & ((1 << SIG_BITS) - 1)).to_bytes(3, 'big')
+    # Every accepted secret is checked, in constant time, so the answer takes
+    # the same time whichever key (if any) made the signature.
+    matches = [hmac.compare_digest(given, _signature(branch_id, s).to_bytes(3, 'big'))
+               for s in _accepted_secrets()]
+    return branch_id, any(matches)
 
 
 def clean(text):

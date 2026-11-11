@@ -52,6 +52,21 @@ class SignatureTests(TestCase):
         with override_settings(COUNTER_QR_SECRET='another', SECRET_KEY='two'):
             self.assertNotEqual(qr.encode(7), first)
 
+    def test_signs_made_before_the_qr_secret_still_verify(self):
+        # Key rotation with a grace period: printed with SECRET_KEY, read after
+        # COUNTER_QR_SECRET was set (Westland, 11 Nov 2026).
+        with override_settings(COUNTER_QR_SECRET='', SECRET_KEY='the-old-key'):
+            printed = qr.encode(2)
+        with override_settings(COUNTER_QR_SECRET='the-new-secret', SECRET_KEY='the-old-key'):
+            self.assertEqual(qr.decode(qr.GREETING + printed), (2, True))
+            self.assertNotEqual(qr.encode(2), printed)        # new links use the new secret
+
+    def test_a_signature_from_neither_key_fails(self):
+        with override_settings(COUNTER_QR_SECRET='', SECRET_KEY='somebody-else'):
+            forged = qr.encode(2)
+        with override_settings(COUNTER_QR_SECRET='the-new-secret', SECRET_KEY='the-old-key'):
+            self.assertEqual(qr.decode(qr.GREETING + forged), (2, False))
+
     def test_plain_text_has_no_signature(self):
         self.assertEqual(qr.decode('Hi Farhat 👋'), (None, False))
 
