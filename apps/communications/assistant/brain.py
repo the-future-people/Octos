@@ -270,6 +270,8 @@ def _silence(conversation, trigger, now):
     # actually takes over (the button, or replying), it keeps answering.
     if conversation.handled_by == Conversation.STAFF and not conversation.handoff_reason:
         return 'a person has taken over this conversation'
+    if conversation.handled_by == Conversation.COUNTER:
+        return 'a person is serving them at the counter'
 
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
     last = visible.filter(direction=Message.INBOUND).first()
@@ -277,6 +279,15 @@ def _silence(conversation, trigger, now):
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
         return 'a newer message will be answered instead'
+    # Files someone already dealt with (claimed, opened, made into a job) need
+    # no word from Octos: the work was done in person (11 Nov 2026).
+    if last.media_id:
+        from apps.spine.models import Event as SpineEvent
+        from apps.spine.obligations import files_handled
+        received = (SpineEvent.objects.select_related('visit')
+                    .filter(idempotency_key=f'wa:{last.external_id}').first())
+        if received and received.visit and files_handled(received.visit, upto_event_id=received.pk):
+            return 'the files were already handled'
     # Answered already: by a person since, or by a run that saw this message.
     # Not "Octos spoke after it": a customer typing while Octos writes lands
     # messages just after its reply, unseen by it (Mercy, 6 Nov 2026).

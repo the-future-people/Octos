@@ -1,5 +1,5 @@
 """
-Visits: one customer, one sitting (Layer 1, Step 1.2, 11 Nov 2026).
+Visits: one customer, one sitting (Layer 1, Steps 1.2 and 1.3, 11 Nov 2026).
 
 A Visit is a projection: not a fact of its own, but a summary built from the
 events on the spine. record() calls attach() for every new event, so nothing
@@ -63,9 +63,12 @@ def attach(event):
     if event.kind not in NOT_ACTIVITY and event.occurred_at > visit.last_activity_at:
         visit.last_activity_at = event.occurred_at
         changed.append('last_activity_at')
-    if event.kind == kinds.STAFF_TOOK_OVER and event.actor_user_id:
+    if event.kind in (kinds.STAFF_TOOK_OVER, kinds.COUNTER_CLAIMED) and event.actor_user_id:
         visit.attended_by_id = event.actor_user_id
         changed.append('attended_by')
+    if event.kind in (kinds.COUNTER_CLAIMED, kinds.PRESENCE_COUNTER) and visit.presence != Visit.AT_COUNTER:
+        visit.presence = Visit.AT_COUNTER
+        changed.append('presence')
     if event.customer_id and not visit.customer_id:
         visit.customer_id = event.customer_id
         changed.append('customer')
@@ -128,6 +131,13 @@ def close(visit, outcome, at, by_event=None, timed_out=False, reason=''):
            payload={'visit_id': visit.pk, 'outcome': outcome, 'timed_out': timed_out},
            reason=reason or f'Closed: {outcome.replace("_", " ").lower()}.',
            _visit=visit)
+
+    # Serving at the counter ends with the visit: the conversation returns to
+    # Octos for the customer's next visit, without Octos saying anything now.
+    conversation = visit.conversation
+    if conversation is not None and conversation.handled_by == 'COUNTER':
+        from apps.communications.services.handover import counter_done
+        counter_done(conversation, why=f'the visit ended ({outcome.replace("_", " ").lower()})')
 
 
 def _time_out(visit):
