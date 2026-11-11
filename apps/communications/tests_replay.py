@@ -71,6 +71,44 @@ class GoldenScenarios(CommunicationsTestBase):
             self.assertLessEqual(len(said), 1)      # at most the counter acknowledgement
             self.assertEqual(r.visits()[0].outcome, 'JOB_CREATED')
 
+    # ── The presence belief (Step 2.2) ───────────────────────
+
+    def test_the_art_paper_question_long_after_the_qr_is_answered(self):
+        # 45 minutes after the counter: an information question means they left.
+        with Replay() as r:
+            qr = r.customer(QR)
+            r.wait(seconds=8)
+            r.octos_turn(qr)
+            r.wait(minutes=45)
+            ask = r.customer('Hi, please do you guys print on art paper')
+            r.wait(seconds=8)
+            r.octos_turn(ask)
+            self.assertEqual(r.said()[-1], MODEL_REPLY)
+
+    def test_a_bare_hi_with_no_proof_gets_the_not_sure_greeting(self):
+        with Replay() as r:
+            hi = r.customer('Hi')
+            r.wait(seconds=8)
+            r.octos_turn(hi)
+            [said] = r.said()
+            self.assertIn("If you're at the counter", said)
+            self.assertNotIn('ends in', said)
+
+    def test_not_sure_a_question_is_held_for_the_attendant_then_answered(self):
+        # 10 minutes after the QR, "I want 2 copies": maybe still there, maybe not.
+        with Replay() as r:
+            qr = r.customer(QR)
+            r.wait(seconds=8)
+            r.octos_turn(qr)
+            r.wait(minutes=10)
+            want = r.customer('I want 2 copies')
+            r.wait(seconds=8)
+            r.octos_turn(want)
+            self.assertEqual(len(r.said()), 1)          # held: only the counter greeting so far
+            r.wait(minutes=2)
+            r.octos_turn(want)                          # nobody came: Octos answers
+            self.assertEqual(r.said()[-1], MODEL_REPLY)
+
     # ── Files without the QR ─────────────────────────────────
 
     def test_files_handled_after_a_take_over_get_no_message_on_take_back(self):

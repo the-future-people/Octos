@@ -96,7 +96,8 @@ class CounterTests(Base):
         self.assertTrue(counter.in_visit(self.conv))
 
     def test_during_a_visit_octos_is_silent(self):
-        Conversation.objects.filter(pk=self.conv.pk).update(counter_until=timezone.now() + timedelta(minutes=10))
+        # A visit that just started (the belief: fresh counter proof, then a statement, stays at the counter)
+        Conversation.objects.filter(pk=self.conv.pk).update(counter_until=timezone.now() + counter.VISIT)
         run = self.respond(Model(says(text('x'))), self.customer('Please make it A4'))
         self.assertEqual(run.decision, AssistantRun.SKIPPED)
         self.assertFalse(self.sent().exists())

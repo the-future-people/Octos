@@ -59,6 +59,11 @@ class BrainTests(TestCase):
         alerts = patch('apps.notifications.services.notify_many')
         alerts.start()
         self.addCleanup(alerts.stop)
+        # These tests are about the model's behaviour, not the counter: keep the
+        # shop closed so counter rules (and the real clock) never step in.
+        closed = patch('apps.communications.assistant.counter.shop_open', return_value=False)
+        closed.start()
+        self.addCleanup(closed.stop)
 
     def run_with(self, model, trigger=None):
         with patch('anthropic.Anthropic', return_value=model):

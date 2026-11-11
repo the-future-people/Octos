@@ -177,9 +177,22 @@ def step(conversation, trigger, now):
             branch = _branch(named)
             _visit(conversation, branch, now)
             return ack_text(conversation, branch), 'counter visit started'
+    # Where is the customer? A belief, not a timer (Layer 2, Step 2.2).
+    from apps.spine import presence
+    belief = presence.for_message(conversation, trigger, now, opened)
+    if belief.band == presence.AT_COUNTER:
         if in_visit(conversation, now):
-            _visit(conversation, None, now)
-            return None, 'counter visit: the attendant has this customer'
+            _visit(conversation, None, now)        # keeps the inbox's counter strip fresh
+        return None, f'at the counter, the attendant has them ({belief.why})'
+    if belief.band == presence.UNSURE:
+        if belief.texture in ('words', 'info_question', 'status_question', 'on_the_way'):
+            held = _hold(conversation, trigger, belief)
+            if held:
+                return None, held
+        elif belief.texture == 'greeting' and opened:
+            if not _greeted_unsure(conversation, now):
+                return NOT_SURE_GREETING, NOT_SURE_REASON
+            return None, 'not sure where they are: greeted already, waiting for their words'
     if no_words(trigger) and _batch_acknowledged(conversation, trigger):
         return None, 'files already acknowledged: waiting for their words'
     if opened and file_only(trigger):
@@ -190,6 +203,41 @@ def step(conversation, trigger, now):
             return None, 'file only: already asked, waiting for their words'
         return FORK_TEXT, FORK_REASON
     return None
+
+
+NOT_SURE_REASON = 'greeted: not sure where they are'
+NOT_SURE_GREETING = ("Hi \U0001F44B Welcome to Farhat. If you're at the counter, hand your files to the "
+                     "attendant. If not, just tell me what you'd like printed and I'll help you.")
+HOLD_REASON = 'held for the attendant'
+HOLD_SECONDS = 120
+
+
+def _greeted_unsure(conversation, now):
+    from apps.communications.models import AssistantRun
+    return AssistantRun.objects.filter(conversation=conversation, reason=NOT_SURE_REASON,
+                                       created_at__gte=now - FORK_WINDOW).exists()
+
+
+def _hold(conversation, trigger, belief):
+    """
+    Not sure they've left, and they asked something: the attendant gets the
+    first chance. The attendant is alerted, and this same message is looked at
+    again in 2 minutes; if nobody has answered by then, Octos does. Returns the
+    reason when holding, or None when this message was already held once.
+    """
+    from django.db import transaction
+    from apps.communications.models import AssistantRun
+    if AssistantRun.objects.filter(conversation=conversation, trigger=trigger,
+                                   reason__startswith=HOLD_REASON).exists():
+        return None
+    from apps.communications.tasks import answer_whatsapp
+    transaction.on_commit(
+        lambda: answer_whatsapp.apply_async((conversation.pk, trigger.pk), countdown=HOLD_SECONDS))
+    from apps.communications.services.handover import _alert
+    _alert(conversation, verb='customer_waiting',
+           message=f'{conversation.display_name} may be at the counter: "{(trigger.body or "")[:60]}". '
+                   f'Octos answers in 2 minutes if nobody does.')
+    return f'{HOLD_REASON}: not sure where they are ({belief.why})'
 
 
 def ack_text(conversation, branch):
