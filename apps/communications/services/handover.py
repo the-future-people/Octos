@@ -48,7 +48,14 @@ def take_over(conversation, user):
 
 
 def hand_back(conversation, user=None, why=''):
-    """Octos answers from now on, handed back by a person or taking back after silence."""
+    """
+    Octos answers from now on, handed back by a person or taking back after silence.
+
+    Who hands back matters (11 Nov 2026). A person handing back means "I've
+    dealt with everything up to now", sometimes by a phone call Octos never
+    sees, so Octos waits for the customer's next message. Octos taking back
+    after an ignored reminder means nobody answered, so Octos answers now.
+    """
     with transaction.atomic():
         _switch(conversation, Conversation.OCTOS, reason='')
         who = user.full_name if user else 'Octos'
@@ -61,9 +68,10 @@ def hand_back(conversation, user=None, why=''):
             record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
                    conversation=conversation, customer=conversation.customer,
                    reason=f'Octos took the conversation back: {why}')
-        # A customer still waiting gets an answer now, not at their next message.
+        # Only when Octos took back: a customer nobody answered gets an answer
+        # now. After a person's hand-back, what was waiting is theirs, handled.
         waiting = conversation.messages.filter(is_internal_note=False).order_by('-created_at').first()
-        if waiting is not None and waiting.direction == Message.INBOUND:
+        if user is None and waiting is not None and waiting.direction == Message.INBOUND:
             from apps.communications.services.whatsapp_inbound import wake_octos
             wake_octos(conversation, waiting)
 

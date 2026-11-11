@@ -276,6 +276,14 @@ def _silence(conversation, trigger, now):
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
         return 'a newer message will be answered instead'
+    # A person handed back after this message: they dealt with it, sometimes
+    # by a call Octos never sees (Kings Hub, 11 Nov 2026). Only what the
+    # customer writes after the hand-back is Octos's to answer.
+    from apps.spine import kinds as spine_kinds
+    from apps.spine.models import Event as SpineEvent
+    if SpineEvent.objects.filter(conversation=conversation, kind=spine_kinds.STAFF_HANDED_BACK,
+                                 occurred_at__gte=last.created_at).exists():
+        return 'a person dealt with this before handing it back'
     # Files someone already dealt with (claimed, opened, made into a job) need
     # no word from Octos: the work was done in person (11 Nov 2026).
     if last.media_id:
