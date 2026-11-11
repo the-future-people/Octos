@@ -1678,6 +1678,14 @@ class EODSummaryView(APIView):
             )
 
         summary = EODService.get_summary(sheet, sheet.branch)
+        # Files a person opened today with no job made or linked for the chat
+        # (11 Nov 2026): for the BM to look at before closing. Never a gate.
+        from apps.spine.unrecorded import unrecorded_files
+        day = timezone.localtime(sheet.created_at).date()
+        summary['unrecorded_files'] = [
+            {**row, 'first_opened_at': row['first_opened_at'].isoformat()}
+            for row in unrecorded_files(sheet.branch, day)
+        ]
         return Response(summary)
 
 
