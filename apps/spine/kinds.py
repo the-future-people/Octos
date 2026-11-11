@@ -44,6 +44,7 @@ QUOTE_GIVEN = 'quote.given'
 PAYMENT_LINK_SENT = 'payment.link_sent'
 PAYMENT_SUCCEEDED = 'payment.succeeded'
 JOB_CREATED = 'job.created'
+JOB_LINKED = 'job.linked'                    # a job tied to a WhatsApp chat after it was saved
 JOB_STATUS_CHANGED = 'job.status_changed'    # any move without a more meaningful name
 JOB_DEPOSIT_PAID = 'job.deposit_paid'
 JOB_PAID = 'job.paid'                        # payment settled in full

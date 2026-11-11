@@ -247,6 +247,29 @@ class ConversationResolveView(APIView):
         return Response({'success': True, 'status': 'RESOLVED'})
 
 
+class ChatCustomerView(APIView):
+    """
+    POST /api/v1/communications/<id>/customer/
+    The customer behind this chat, for a job at the counter: its own, an
+    existing record with the number, or a light one made from the chat
+    (11 Nov 2026). Returns {customer_id, phone, name, created}, or 404 for a
+    chat with no number (a WhatsApp username).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        from apps.communications.services.chat_customer import customer_for_chat
+        customer, created = customer_for_chat(conversation)
+        if customer is None:
+            return Response({'detail': 'This chat has no number to save a customer by.'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({'customer_id': customer.pk, 'phone': customer.phone,
+                         'name': str(customer), 'created': created})
+
+
 class ConversationLinkJobView(APIView):
     """
     POST /api/v1/communications/<id>/link-job/
@@ -260,7 +283,9 @@ class ConversationLinkJobView(APIView):
         if conversation is None:
             return _not_found()
 
-        job_id = request.data.get('job_id')
+        # 'job' too: the new-job form sent that by mistake until 11 Nov 2026,
+        # and a missing job_id reads as "unlink everything".
+        job_id = request.data.get('job_id', request.data.get('job'))
 
         # Unlink — job_id explicitly null
         if job_id is None:
@@ -277,6 +302,15 @@ class ConversationLinkJobView(APIView):
             )
 
         conversation.jobs.add(job)
+        # On the spine: the visit closes as a job made, and its files are handled.
+        from apps.spine import kinds
+        from apps.spine.models import Event
+        from apps.spine.recorder import record
+        record(kinds.JOB_LINKED, actor=Event.STAFF, actor_user=request.user,
+               conversation=conversation, customer=conversation.customer, job=job,
+               key=f'job-linked:{conversation.pk}:{job.pk}',
+               payload={'job_number': job.job_number},
+               reason=f'{request.user.full_name} linked {job.job_number} to this chat.')
 
         return Response({
             'success'               : True,

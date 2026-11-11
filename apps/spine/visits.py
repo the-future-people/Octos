@@ -38,6 +38,7 @@ NOT_ACTIVITY = {
 # Real outcomes, each backed by the event that proves it.
 OUTCOMES = {
     'job.created': 'JOB_CREATED',
+    'job.linked': 'JOB_CREATED',          # a job tied to this chat after it was saved (Step 2.4b)
     'job.paid': 'PAID',
     'payment.succeeded': 'PAID',
     'job.collected': 'COLLECTED',

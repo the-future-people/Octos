@@ -24,7 +24,8 @@ from apps.spine import kinds
 FILES, REPLY, PAYMENT, READY = 'files', 'reply', 'payment', 'ready'
 
 DISCHARGES = {
-    FILES: {kinds.COUNTER_CLAIMED, kinds.FILE_OPENED, kinds.JOB_CREATED, kinds.STAFF_TOOK_OVER},
+    FILES: {kinds.COUNTER_CLAIMED, kinds.FILE_OPENED, kinds.JOB_CREATED, kinds.JOB_LINKED,
+            kinds.STAFF_TOOK_OVER},
     PAYMENT: {kinds.PAYMENT_SUCCEEDED, kinds.JOB_PAID, kinds.JOB_DEPOSIT_PAID},
 }
 
