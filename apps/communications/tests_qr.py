@@ -24,17 +24,24 @@ class SignatureTests(TestCase):
         self.assertEqual(qr.clean(text), qr.GREETING)
         self.assertTrue(qr.has_invisible(text))
 
+    def _flip_last(self, sig):
+        last = ord(sig[-1]) - qr.BASE
+        return sig[:-1] + chr(qr.BASE + (last ^ 1))
+
     def test_a_tampered_signature_fails(self):
-        sig = qr.encode(7)
-        flipped = sig[:-2] + (qr.ONE if sig[-2] == qr.ZERO else qr.ZERO) + sig[-1]
-        branch, ok = qr.decode(qr.GREETING + flipped)
+        branch, ok = qr.decode(qr.GREETING + self._flip_last(qr.encode(7)))
+        self.assertEqual(branch, 7)
         self.assertFalse(ok)
 
     def test_one_branchs_signature_does_not_prove_another(self):
-        forged = qr.encode(7).replace(qr.encode(7)[1:17], qr.encode(8)[1:17])
+        # Branch 8's number with branch 7's signature
+        forged = qr.encode(8)[:4] + qr.encode(7)[4:]
         branch, ok = qr.decode(forged)
         self.assertEqual(branch, 8)
         self.assertFalse(ok)
+
+    def test_the_signature_is_ten_characters(self):
+        self.assertEqual(len(qr.encode(7)), 10)
 
     def test_plain_text_has_no_signature(self):
         self.assertEqual(qr.decode('Hi Farhat 👋'), (None, False))
@@ -74,7 +81,7 @@ class ArrivalTests(TestCase):
 
     def test_a_forged_signature_is_recorded_but_proves_nothing(self, _open, _media):
         sig = qr.encode(self.branch.pk)
-        broken = sig[:-2] + (qr.ONE if sig[-2] == qr.ZERO else qr.ZERO) + sig[-1]
+        broken = sig[:-1] + chr(qr.BASE + ((ord(sig[-1]) - qr.BASE) ^ 1))
         self._send(qr.GREETING + broken)
         self.assertFalse(counter.in_visit(Conversation.objects.get()))
         self.assertFalse(Event.objects.filter(kind=kinds.PRESENCE_COUNTER, payload__verified=True).exists())
