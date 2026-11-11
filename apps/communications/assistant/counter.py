@@ -89,27 +89,65 @@ def in_visit(conversation, now=None):
 
 def arrived(conversation, message, now=None):
     """
-    The moment a customer's message arrives (11 Nov 2026): a counter phrase
-    starts the visit now, not when Octos's run gets to it. A run can be
-    skipped for a newer message, and the visit must not be skipped with it.
-    Returns True when a visit was started.
+    The moment a customer's message arrives: proof or a phrase that they are
+    at the counter starts the visit now, not when Octos's run gets to it.
+
+    The printed QR's invisible signature (assistant/qr.py, 11 Nov 2026) is
+    proof of the branch, at any hour. Without it, a counter phrase during
+    opening hours still counts, as before. Returns True when a visit started.
     """
+    from apps.communications.assistant import qr
     now = now or timezone.now()
-    if message.direction != Message.INBOUND or not shop_open(now):
+    if message.direction != Message.INBOUND:
+        return False
+
+    if qr.has_invisible(message.body):
+        branch_id, verified = qr.decode(message.body)
+        # Stored as people read it: the proof lives on the spine, not in the text.
+        plain = qr.clean(message.body)
+        Message.objects.filter(pk=message.pk).update(body=plain)
+        message.body = plain
+        if verified:
+            from apps.organization.models import Branch
+            branch = Branch.objects.filter(pk=branch_id).first()
+            _visit(conversation, branch, now)
+            _record_presence(conversation, message, branch, verified=True, how='signed QR')
+            return True
+        if branch_id is not None:
+            import logging
+            logging.getLogger(__name__).warning(
+                'Counter QR signature failed its check on message %s', message.pk)
+
+    if not shop_open(now):
         return False
     named = counter_phrase(message.body)
     if named is None:
         return False
-    _visit(conversation, _branch(named), now)
+    branch = _branch(named)
+    _visit(conversation, branch, now)
+    _record_presence(conversation, message, branch, verified=False, how=named or 'here')
+    return True
+
+
+def _record_presence(conversation, message, branch, verified, how):
     from apps.spine import kinds
     from apps.spine.models import Event
     from apps.spine.recorder import record
     record(kinds.PRESENCE_COUNTER, actor=Event.CUSTOMER, conversation=conversation,
-           customer=conversation.customer, key=f'presence:{message.pk}',
-           payload={'message_id': message.pk, 'phrase': named or 'here'},
-           reason='The customer said they are at the counter.')
-    return True
+           customer=conversation.customer, branch=branch, key=f'presence:{message.pk}',
+           payload={'message_id': message.pk, 'verified': verified, 'how': how},
+           reason=('Scanned the counter QR' if verified else 'Said they are at the counter')
+                  + (f' at {branch.name}.' if branch else '.'))
 
+
+def _verified_qr(message):
+    """The branch whose signed QR this message came from, or None."""
+    from apps.spine import kinds
+    from apps.spine.models import Event
+    event = (Event.objects.select_related('branch')
+             .filter(kind=kinds.PRESENCE_COUNTER, payload__message_id=message.pk,
+                     payload__verified=True).first())
+    return event.branch if event else None
 
 def is_grey(mode):
     return str(mode).strip().lower() in GREY
@@ -127,6 +165,11 @@ def step(conversation, trigger, now):
     """
     if trigger is None:
         return None
+    # The signed QR: proof of the branch, acknowledged like the counter phrase.
+    signed_at = _verified_qr(trigger)
+    if signed_at is not None:
+        _visit(conversation, signed_at, now)
+        return ack_text(conversation, signed_at), 'counter visit started'
     opened = shop_open(now)
     if opened:
         named = counter_phrase(trigger.body)
