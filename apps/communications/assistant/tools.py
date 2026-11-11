@@ -34,13 +34,18 @@ def branch_hours(branch, at=None):
     Whether a branch is open now, today's hours or why it's closed, and
     when it next opens. From the one calendar (organization/services/hours).
     """
-    from apps.organization.services import hours
+    from apps.organization.services import hours, shop_state
 
     at = timezone.localtime(at or timezone.now())
     closed = hours.closed_because(branch, at.date())
+    # Doors shut, cashier still in: the team can still help for a little while.
+    closing_up = shop_state.state(branch, at) == shop_state.CLOSING
+    sort_by = shop_state.sort_by(branch, at) if closing_up else None
     return {
         'branch': _branch_name(branch),
         'open_now': hours.is_open(branch, at),
+        'closing_up': closing_up,
+        'sort_by': _clock(timezone.localtime(sort_by).time()) if sort_by else None,
         'today': (
             {'closed': closed} if closed else
             dict(zip(('opens', 'closes'), map(_clock, hours.hours_on(branch, at.date()))))

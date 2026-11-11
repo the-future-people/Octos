@@ -1,23 +1,27 @@
 """
-The counter after closing time, and files a person opened (11 Nov 2026).
+The shop after closing time, and files a person opened (11 Nov 2026).
+
+Closing up: past closing time, the counter stays alive until a cashier signs
+off (the shop's own ritual), for at most 3 hours.
 """
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from unittest.mock import patch
 
-from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import override_settings
 from django.utils import timezone
 
-from apps.communications.assistant import counter
-from apps.communications.models import Conversation, Message
+from apps.communications.assistant import counter, tools
+from apps.communications.models import Message
 from apps.communications.services.opened import file_opened
 from apps.communications.services.whatsapp_inbound import _receive
 from apps.communications.tests import CommunicationsTestBase
+from apps.organization.services import shop_state
 from apps.spine import kinds
 from apps.spine.models import Event, Visit
 from apps.spine.obligations import files_handled
 
 HOURS = 'apps.organization.services.hours'
+ON_POST = 'apps.organization.services.shop_state.cashier_on_post'
 
 
 def _local(hour, minute):
@@ -27,32 +31,37 @@ def _local(hour, minute):
 
 @patch(f'{HOURS}.hours_on', return_value=(time(7, 30), time(19, 30)))
 @patch(f'{HOURS}.is_open', return_value=False)
-class AttendedTests(CommunicationsTestBase):
+class ClosingUpTests(CommunicationsTestBase):
     def setUp(self):
         super().setUp()
         self.branch.is_trading = True
         self.branch.save()
-        cache.delete(counter.ATTENDED_KEY)
 
-    def test_after_closing_with_an_attendant_at_the_screen_the_counter_is_open(self, _open, _hours):
-        now = _local(19, 40)
-        counter.mark_attended(now)
-        self.assertTrue(counter.shop_open(now))
+    def test_after_closing_with_a_cashier_still_on_post_it_is_closing_up(self, _open, _hours):
+        with patch(ON_POST, return_value=True):
+            self.assertEqual(shop_state.state(self.branch, _local(19, 40)), shop_state.CLOSING)
+            self.assertTrue(counter.shop_open(_local(19, 40)))
 
-    def test_after_closing_with_nobody_at_the_screen_it_is_closed(self, _open, _hours):
-        self.assertFalse(counter.shop_open(_local(19, 40)))
+    def test_once_the_cashier_signs_off_it_is_closed(self, _open, _hours):
+        with patch(ON_POST, return_value=False):
+            self.assertEqual(shop_state.state(self.branch, _local(19, 40)), shop_state.CLOSED)
+            self.assertFalse(counter.shop_open(_local(19, 40)))
 
-    def test_a_heartbeat_goes_stale_after_five_minutes(self, _open, _hours):
-        counter.mark_attended(_local(19, 40))
-        self.assertFalse(counter.shop_open(_local(19, 47)))
+    def test_a_forgotten_sign_off_does_not_keep_the_shop_open_at_night(self, _open, _hours):
+        with patch(ON_POST, return_value=True):
+            self.assertEqual(shop_state.state(self.branch, _local(23, 0)), shop_state.CLOSED)
 
-    def test_a_screen_left_on_overnight_does_not_open_the_counter(self, _open, _hours):
-        counter.mark_attended(_local(23, 30))
-        self.assertFalse(counter.shop_open(_local(23, 31)))
+    def test_branch_hours_tells_octos_it_is_closing_up_and_until_when(self, _open, _hours):
+        with patch(ON_POST, return_value=True):
+            said = tools.branch_hours(self.branch, at=_local(19, 40))
+        self.assertTrue(said['closing_up'])
+        self.assertIn('8', said['sort_by'])
 
-    def test_the_claim_strip_polling_is_the_heartbeat(self, _open, _hours):
-        self.client.get('/api/v1/communications/arrivals/')
-        self.assertTrue(counter.attended())
+    def test_branch_hours_when_closed_says_nothing_of_closing_up(self, _open, _hours):
+        with patch(ON_POST, return_value=False):
+            said = tools.branch_hours(self.branch, at=_local(19, 40))
+        self.assertFalse(said['closing_up'])
+        self.assertIsNone(said['sort_by'])
 
 
 @override_settings(OCTOS_ASSISTANT_MODE='off')

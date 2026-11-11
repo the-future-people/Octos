@@ -332,11 +332,10 @@ def _just_acknowledging(last, before):
 
 
 def _holding():
-    """The holding reply: 'shortly' only when a branch is open, as everywhere else."""
-    from apps.organization.models import Branch
-    from apps.organization.services import hours
-    open_now = any(hours.is_open(b) for b in Branch.objects.filter(is_trading=True, is_active=True))
-    return HOLDING if open_now else HOLDING_CLOSED
+    """The holding reply: 'shortly' while someone is in (open, or closing up), as everywhere else."""
+    from apps.organization.services import shop_state
+    someone_in = shop_state.any_branch() in (shop_state.OPEN, shop_state.CLOSING)
+    return HOLDING if someone_in else HOLDING_CLOSED
 
 
 def _looks_automated(conversation, now):

@@ -320,8 +320,6 @@ class ArrivalsView(APIView):
 
     def get(self, request):
         from apps.spine.arrivals import arrivals
-        from apps.communications.assistant import counter
-        counter.mark_attended()        # the strip's poll is the counter's heartbeat
         branch = getattr(request.user, 'branch', None)
         rows = arrivals(branch=branch)
         return Response([{
