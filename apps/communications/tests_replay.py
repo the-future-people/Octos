@@ -49,7 +49,8 @@ class GoldenScenarios(CommunicationsTestBase):
             r.octos_turn(second)
             said = r.said()
             self.assertEqual(len(said), 1)
-            self.assertIn('will take it from here', said[0])
+            self.assertIn('pick them up', said[0])
+            self.assertNotIn('ends in', said[0])      # no phone digits (11 Nov 2026)
 
     def test_samysela_served_and_job_recorded_gets_no_message_later(self):
         with Replay() as r:

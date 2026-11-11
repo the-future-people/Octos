@@ -43,6 +43,15 @@ class SignatureTests(TestCase):
     def test_the_signature_is_ten_characters(self):
         self.assertEqual(len(qr.encode(7)), 10)
 
+    def test_the_qr_secret_is_its_own(self):
+        # Rotating SECRET_KEY must not change a printed QR; the QR secret does.
+        with override_settings(COUNTER_QR_SECRET='qr-secret', SECRET_KEY='one'):
+            first = qr.encode(7)
+        with override_settings(COUNTER_QR_SECRET='qr-secret', SECRET_KEY='two'):
+            self.assertEqual(qr.encode(7), first)
+        with override_settings(COUNTER_QR_SECRET='another', SECRET_KEY='two'):
+            self.assertNotEqual(qr.encode(7), first)
+
     def test_plain_text_has_no_signature(self):
         self.assertEqual(qr.decode('Hi Farhat 👋'), (None, False))
 
@@ -89,5 +98,7 @@ class ArrivalTests(TestCase):
     def test_octos_acknowledges_a_verified_qr_naming_the_branch(self, _open, _media):
         message = self._send(qr.GREETING + qr.encode(self.branch.pk))
         said, why = counter.step(Conversation.objects.get(), message, timezone.now())
-        self.assertIn('will take it from here', said)
+        self.assertIn('pick them up', said)
+        self.assertIn('Welcome to Farhat', said)
+        self.assertNotIn('ends in', said)
         self.assertEqual(why, 'counter visit started')

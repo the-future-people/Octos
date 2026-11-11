@@ -473,3 +473,7 @@ CELERY_TASK_ROUTES = {
     'apps.communications.tasks.deliver_whatsapp': {'queue': 'fast'},
 }
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
+# The counter QR's own secret (11 Nov 2026): separate from SECRET_KEY so rotating
+# that never invalidates printed QRs. Changing this means reprinting every QR.
+COUNTER_QR_SECRET = os.environ.get('COUNTER_QR_SECRET', '')

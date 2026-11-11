@@ -31,8 +31,8 @@ OPEN_WAIT = 120       # after a file or no words, a branch open (the counter)
 VISIT = timedelta(minutes=30)
 FORK_WINDOW = timedelta(minutes=30)
 FORK_REASON = 'file only: asked once'
-FORK_TEXT = ("Got your file. If you're at the counter, the attendant will take it from here. "
-             "If not, just tell me what you'd like printed.")
+FORK_TEXT = ("Got your file \U0001F44D If you're at the counter, the attendant will pick it up. "
+             "If not, just tell me what you'd like printed and I'll price it for you.")
 MEDIA = (Message.IMAGE, Message.DOCUMENT, Message.VIDEO)
 QR = re.compile(r"\bi(?:'|\u2019)?m at the ([a-z][a-z ]*?) counter\b")
 HERE = re.compile(r"\b(?:i(?:'|\u2019)?m|i am)\s+(?:here|at the (?:shop|counter|desk|front desk)|in the shop)\b"
@@ -193,11 +193,33 @@ def step(conversation, trigger, now):
 
 
 def ack_text(conversation, branch):
+    """
+    The one acknowledgement at the counter (11 Nov 2026): warm, personal when
+    Octos truly knows the name, never the customer's phone digits.
+    """
     name = (branch.name or '') if branch is not None else ''
-    where = name[:-7] if name.endswith(' Branch') else (name or 'the shop')
-    digits = ''.join(c for c in (conversation.contact_phone or '') if c.isdigit())[-2:]
-    tail = f' Your number ends in {digits}.' if digits else ''
-    return f'Got it. The attendant at {where} will take it from here.{tail}'
+    where = name[:-7] if name.endswith(' Branch') else name
+    first = _first_name(conversation)
+    hello = f'Hi {first} \U0001F44B' if first else 'Hi \U0001F44B'
+    shop = f'Farhat {where}' if where else 'Farhat'
+    return (f"{hello} Welcome to {shop}. Hand your files to the attendant, "
+            f"or drop them here and they'll pick them up.")
+
+
+def _first_name(conversation):
+    """
+    A registered customer's first name, from their customer record only.
+    Never the WhatsApp profile name: "PEOPLE'S KOFI" is how "Hi People's"
+    happened. A name we can't trust is worse than no name.
+    """
+    customer = getattr(conversation, 'customer', None)
+    if customer is None:
+        return ''
+    for field in ('first_name', 'full_name', 'name'):
+        value = (getattr(customer, field, '') or '').strip()
+        if value:
+            return value.split()[0].title()
+    return ''
 
 
 def _batch_acknowledged(conversation, trigger):

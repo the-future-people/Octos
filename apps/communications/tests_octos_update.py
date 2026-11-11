@@ -90,8 +90,8 @@ class CounterTests(Base):
         self.respond(model, self.customer("Hi, I'm at the Westland counter"))
         self.assertEqual(model.calls, [])
         said = self.sent().get().body
-        self.assertIn('will take it from here', said)
-        self.assertIn('ends in 94', said)
+        self.assertIn('pick them up', said)
+        self.assertNotIn('ends in', said)      # no phone digits (11 Nov 2026)
         self.conv.refresh_from_db()
         self.assertTrue(counter.in_visit(self.conv))
 

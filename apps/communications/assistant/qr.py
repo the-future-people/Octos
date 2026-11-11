@@ -14,7 +14,7 @@ Tested on a real phone, 11 Nov 2026: WhatsApp strips zero-width characters
 character is a variation selector carrying 4 bits (U+E0100 + 0..15).
 
 The 40 bits are 16 for the branch and 24 of HMAC-SHA256 over the branch, keyed
-from SECRET_KEY: only this server can make a valid one, and a guess passes about
+from COUNTER_QR_SECRET: only this server can make a valid one, and a guess passes about
 once in 16.7 million. A customer who types their own "Hi" simply sends no
 signature, and Octos falls back to the clues and the attendant's tap.
 """
@@ -33,8 +33,17 @@ CHARS = (BRANCH_BITS + SIG_BITS) // 4   # 10
 GREETING = 'Hi Farhat \U0001F44B'       # Hi Farhat 👋
 
 
+def _secret():
+    """
+    The QR's own secret (COUNTER_QR_SECRET), kept apart from SECRET_KEY so that
+    rotating the one never invalidates printed QRs (key separation). Changing
+    it is a decision to reprint every counter QR. Falls back to SECRET_KEY.
+    """
+    return getattr(settings, 'COUNTER_QR_SECRET', '') or settings.SECRET_KEY
+
+
 def _signature(branch_id):
-    key = hashlib.sha256(('counter-qr:' + settings.SECRET_KEY).encode()).digest()
+    key = hashlib.sha256(('counter-qr:' + _secret()).encode()).digest()
     digest = hmac.new(key, f'counter:{branch_id}'.encode(), hashlib.sha256).digest()
     return int.from_bytes(digest[:SIG_BITS // 8], 'big')
 
