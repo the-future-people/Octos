@@ -438,6 +438,13 @@ class ReceiptEngine:
                 job.customer.display_name or 'Customer',
                 getattr(job.customer, 'phone', '') or walk_in_phone,
             )
+        # No record, but the job is linked to a WhatsApp chat (11 Nov 2026):
+        # the chat names them, so the receipt can always be matched to the
+        # person and their chat, never just "Walk-in Customer".
+        from apps.communications.services.chat_customer import chat_identity
+        who = chat_identity(job)
+        if who is not None:
+            return who[0], who[1] or walk_in_phone
         return 'Walk-in Customer', walk_in_phone
 
     def _calc_vat(self, amount) -> tuple:

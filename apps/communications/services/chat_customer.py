@@ -53,3 +53,32 @@ def customer_for_chat(conversation):
         conversation.customer = customer
         conversation.save(update_fields=['customer'])
     return customer, created
+
+
+def chat_label(conversation):
+    """
+    How a chat's person is named on a receipt or a screen: their WhatsApp name,
+    with their number, or their @username when the number is hidden.
+    """
+    name = (conversation.contact_name or '').strip()
+    username = (getattr(conversation, 'contact_username', '') or '').strip()
+    if conversation.contact_phone:
+        return f'{name or "WhatsApp customer"} (WhatsApp)'
+    handle = f'@{username}' if username else 'number hidden'
+    return f'{name or handle} (WhatsApp {handle})' if name else f'{handle} (WhatsApp)'
+
+
+def chat_identity(job):
+    """
+    (name, phone) for a job with no customer record, from the WhatsApp chat it
+    is linked to, or None when it has no chat (11 Nov 2026). So a receipt for a
+    WhatsApp customer is never just "Walk-in Customer": it can always be
+    matched back to the person and their chat.
+    """
+    from apps.communications.models import Conversation
+    if job is None or getattr(job, 'pk', None) is None:
+        return None
+    conversation = Conversation.objects.filter(jobs=job).order_by('-pk').first()
+    if conversation is None:
+        return None
+    return chat_label(conversation), conversation.contact_phone or ''

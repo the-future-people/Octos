@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import override_settings
 
 from apps.communications.models import Conversation
-from apps.communications.services.chat_customer import customer_for_chat
+from apps.communications.services.chat_customer import chat_identity, chat_label, customer_for_chat
 from apps.communications.services.whatsapp_inbound import _receive
 from apps.communications.tests import CommunicationsTestBase, make_conversation
 from apps.customers.models import CustomerProfile
@@ -46,6 +46,18 @@ class ChatCustomerTests(CommunicationsTestBase):
         chat = make_conversation(self.branch, contact_phone='', contact_name='Yaw')
         self.assertEqual(customer_for_chat(chat), (None, False))
 
+    def test_a_username_chat_is_labelled_by_name_and_handle(self):
+        chat = make_conversation(self.branch, contact_phone='', contact_name='Linc')
+        chat.contact_username = 'linc_gh'
+        self.assertEqual(chat_label(chat), 'Linc (WhatsApp @linc_gh)')
+
+    def test_a_chat_with_a_number_is_labelled_by_name(self):
+        chat = make_conversation(self.branch, contact_phone='+233244111226', contact_name='Ama')
+        self.assertEqual(chat_label(chat), 'Ama (WhatsApp)')
+
+    def test_a_job_with_no_chat_has_no_identity(self):
+        self.assertIsNone(chat_identity(None))
+
     def test_the_endpoint_returns_the_customer(self):
         chat = make_conversation(self.branch, contact_phone='+233244111225', contact_name='Abena')
         response = self.client.post(f'/api/v1/communications/{chat.pk}/customer/')
@@ -80,6 +92,14 @@ class LinkJobTests(CommunicationsTestBase):
         self.assertEqual(visit.outcome, 'JOB_CREATED')
         self.assertTrue(files_handled(visit))
         self.assertTrue(Event.objects.filter(kind=kinds.JOB_LINKED, conversation=chat).exists())
+
+    def test_a_linked_jobs_receipt_name_comes_from_the_chat(self, _open, _media):
+        chat = self._chat_with_files()
+        job = self._job()
+        chat.jobs.add(job)
+        name, phone = chat_identity(job)
+        self.assertIn('WhatsApp', name)
+        self.assertEqual(phone, '+' + PHONE)
 
     def test_the_old_job_key_still_links_instead_of_unlinking(self, _open, _media):
         chat = self._chat_with_files()

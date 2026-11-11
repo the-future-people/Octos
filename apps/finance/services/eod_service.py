@@ -2,9 +2,13 @@
 
 import logging
 from decimal import Decimal
-
 logger = logging.getLogger(__name__)
 
+def _chat_name(job):
+    """A job with no customer record: the WhatsApp chat it's linked to, else a dash."""
+    from apps.communications.services.chat_customer import chat_identity
+    who = chat_identity(job)
+    return who[0] if who else '—'
 
 class EODService:
 
@@ -173,7 +177,7 @@ class EODService:
                 'job_number'    : j.job_number,
                 'title'         : j.title,
                 'estimated_cost': str(j.estimated_cost or 0),
-                'customer_name' : j.customer.full_name if j.customer else '—',
+                'customer_name' : j.customer.full_name if j.customer else _chat_name(j),
             }
             for j in credit_jobs
         ]
