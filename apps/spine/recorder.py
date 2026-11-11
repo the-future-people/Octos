@@ -2,7 +2,8 @@
 record(): the one front door to the spine.
 
 Every part of Octos writes events through this function, so the rules
-(known kinds only, one event per idempotency key) live in one place.
+(known kinds only, one event per idempotency key, every new event joined to
+its visit) live in one place.
 
 Use it inside the same transaction as the change it describes:
 
@@ -14,6 +15,8 @@ Use it inside the same transaction as the change it describes:
 
 Then the change and its event are saved together or not at all.
 """
+from django.db import transaction
+
 from apps.spine import kinds
 from apps.spine.models import Event
 
@@ -23,7 +26,8 @@ class UnknownEventKind(ValueError):
 
 
 def record(kind, *, actor=Event.SYSTEM, actor_user=None, customer=None, conversation=None,
-           job=None, branch=None, payload=None, reason='', key=None, occurred_at=None):
+           job=None, branch=None, payload=None, reason='', key=None, occurred_at=None,
+           _visit=None):
     """
     Write one event. Returns (event, created).
 
@@ -31,6 +35,8 @@ def record(kind, *, actor=Event.SYSTEM, actor_user=None, customer=None, conversa
     id: 'wa:<wamid>' for a WhatsApp message, 'paystack:<reference>' for a
     payment. If an event with that key exists, nothing new is written and
     created is False, so a re-delivered webhook is harmless.
+
+    _visit: internal, for visits.close() recording its own closing event.
     """
     if kind not in kinds.ALL:
         raise UnknownEventKind(f'{kind!r} is not in apps/spine/kinds.py')
@@ -48,11 +54,21 @@ def record(kind, *, actor=Event.SYSTEM, actor_user=None, customer=None, conversa
     }
     if occurred_at is not None:
         fields['occurred_at'] = occurred_at
+    if _visit is not None:
+        fields['visit'] = _visit
 
-    if key:
-        # get_or_create relies on the unique constraint: if two workers race
-        # with the same key, the database lets exactly one insert succeed and
-        # the other gets the existing row back.
-        return Event.objects.get_or_create(idempotency_key=key, defaults=fields)
+    with transaction.atomic():
+        if key:
+            # get_or_create relies on the unique constraint: if two workers race
+            # with the same key, the database lets exactly one insert succeed and
+            # the other gets the existing row back.
+            event, created = Event.objects.get_or_create(idempotency_key=key, defaults=fields)
+        else:
+            event, created = Event.objects.create(**fields), True
 
-    return Event.objects.create(**fields), True
+        # A new fact joins its visit. A repeat changes nothing, visits included.
+        if created and _visit is None:
+            from apps.spine.visits import attach
+            attach(event)
+
+    return event, created

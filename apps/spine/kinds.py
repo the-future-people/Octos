@@ -53,6 +53,8 @@ JOB_HALTED = 'job.halted'
 JOB_RESUMED = 'job.resumed'
 
 # Customers
+VISIT_CLOSED = 'visit.closed'                # a visit ended: by an outcome, or quiet for 2 hours
+
 CUSTOMER_REGISTERED = 'customer.registered'
 CUSTOMER_MATCHED = 'customer.matched'        # a sender was linked to an existing customer
 

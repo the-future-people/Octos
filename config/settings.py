@@ -431,6 +431,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.communications.tasks.watch_handovers',
         'schedule': crontab(),
     },
+    # Visits quiet for over 2 hours are closed as NO_ACTION or ABANDONED,
+    # backdated to when they went quiet (apps/spine/visits.py).
+    'close-quiet-visits': {
+        'task': 'apps.spine.tasks.close_quiet_visits',
+        'schedule': crontab(minute='*/10'),
+    },
 }
 
 # CORS
