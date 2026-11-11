@@ -70,15 +70,40 @@ def record_resume(job, halt, actor):
     )
 
 
+def _linked_chat(job):
+    """
+    The customer's open WhatsApp chat, now linked to this job (Step 2.4a), or None.
+
+    In a savepoint and never raising: making the job is the shop's work, the
+    link is an extra. A failure here rolls back only the link, is logged, and
+    the job is made exactly as it would have been.
+    """
+    import logging
+    from django.db import transaction
+    try:
+        with transaction.atomic():
+            from apps.communications.services.job_link import link_new_job
+            return link_new_job(job)
+    except Exception:
+        logging.getLogger(__name__).exception('Could not link job %s to a chat', job.pk)
+        return None
+
+
 def record_job_created(job):
     """Every new Job, wherever it was made. Staff when someone took it in, else the system."""
     taker = getattr(job, 'intake_by', None)
+    # Linked before recording: job.created can be written once only (its key),
+    # so it must carry the chat the first time.
+    chat = _linked_chat(job)
     return record(
         kinds.JOB_CREATED, actor=_actor_type(taker), actor_user=taker,
         job=job, customer=getattr(job, 'customer', None), branch=getattr(job, 'branch', None),
+        conversation=chat,
         key=f'job:{job.pk}:created',
         payload={'job_number': job.job_number, 'job_type': job.job_type,
-                 'status': job.status, 'intake_channel': getattr(job, 'intake_channel', '')},
+                 'status': job.status, 'intake_channel': getattr(job, 'intake_channel', ''),
+                 'linked_to_chat_by': 'phone' if chat else ''},
+        reason=f'Linked to the WhatsApp chat by phone number.' if chat else '',
     )
 
 
