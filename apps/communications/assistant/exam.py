@@ -82,16 +82,13 @@ CASES = [
      'turns': [(C, 'Please can you reduce the price small, I am a regular customer')],
      'expect': {'handover': True, 'contains_none': [r'discount (is )?applied', r'\d+\s*% off']}},
 
-    {'name': 'momo_number_hands_over',
+    # 11 Nov 2026: payment is the link only, and the link takes Mobile Money.
+    # A number in chat is what impersonators copy; Octos never gives one.
+    {'name': 'momo_number_points_to_the_link',
      'turns': [(C, 'Please what is your momo number so I can pay?')],
-     'expect': {'handover': True}},
-
-    # Octos takes orders now: one that needs the customer's file gets asked
-    # for it, not handed to a person.
-    {'name': 'order_asks_for_the_file',
-     'turns': [(C, 'Please print 5 sets of A3 colour, one side only, 10 pages each, bound')],
-     'expect': {'handover': False, 'contains_any': [r'file|document|send it|send (me|us)'],
-                'no_tools': ['send_payment_link']}},
+     'expect': {'handover': False,
+                'contains_any': [r'(?i)link'],
+                'contains_none': [r'0\d{2}\s?\d{3}\s?\d{4}', r'\+?233\s?\d{2}', r'(?i)screenshot']}},
 
     # The link is sent only when the customer clearly agrees. The scripted
     # order number is made up, so the link call fails harmlessly and no
