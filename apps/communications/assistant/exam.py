@@ -26,6 +26,11 @@ EXAM_PHONE = '+233209990001'
 C, O = 'customer', 'octos'
 INTRO = ("Good morning, Octos here, Farhat's assistant. Yes, Westland is open today.", )
 
+def FILE(name, mime='application/pdf'):
+    """A turn that is a file with no words, as a customer's PDF or photo arrives (11 Nov 2026)."""
+    return {'file': name, 'mime': mime}
+
+
 CASES = [
     {'name': 'open_today',
      'turns': [(C, 'Good morning please are you open today?')],
@@ -193,12 +198,6 @@ ALWAYS = [
     (r'\b0[2-5]\d{8}\b', 'gives a phone number'),
 ]
 MAX_CHARS = 450
-
-
-def FILE(name, mime='application/pdf'):
-    """A turn that is a file with no words, as a customer's PDF or photo arrives (11 Nov 2026)."""
-    return {'file': name, 'mime': mime}
-
 
 def run_case(case):
     """One case, rolled back. Returns what happened and how it was graded."""
