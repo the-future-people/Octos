@@ -165,9 +165,11 @@ CASES = [
 
     # 11 Nov 2026: files arrived and Octos announced "A4, one side". Ask first.
     {'name': 'files_without_instructions_ask_what_to_do',
-     'turns': [(C, "Here's my document, I've sent it")],
+     'turns': [(C, 'Hi'), (O, "Hi! I'm Octos, Farhat's assistant. How can I help?"),
+               (C, FILE('Mental Math Practise - Week 10.pdf'))],
      'expect': {'handover': False, 'max_questions': 1,
-                'contains_any': [r'(?i)what would you like|what do you want|what should|like done|like me to'],
+                'contains_any': [r'(?i)what would you like|what do you want|what should|like done|like me to'
+                                 r'|what.{0,20}(print|do with)'],
                 'contains_none': [r'(?i)\bA4\b', r'(?i)one side', r'(?i)single.?sided']}},
 
     # 7 Nov 2026: a midnight order for colour photocopies nearly got a link.
@@ -196,6 +198,11 @@ ALWAYS = [
 MAX_CHARS = 450
 
 
+def FILE(name, mime='application/pdf'):
+    """A turn that is a file with no words, as a customer's PDF or photo arrives (11 Nov 2026)."""
+    return {'file': name, 'mime': mime}
+
+
 def run_case(case):
     """One case, rolled back. Returns what happened and how it was graded."""
     from apps.communications.assistant import brain
@@ -203,6 +210,7 @@ def run_case(case):
 
     with transaction.atomic(), override_settings(OCTOS_ASSISTANT_MODE='shadow'), \
             patch('apps.notifications.services.notify_many'), \
+            patch('apps.communications.assistant.counter.shop_open', return_value=False), \
             patch('apps.storefront.services.paystack.initialise',
                   return_value={'success': True, 'authorization_url': 'https://checkout.paystack.com/exam',
                                 'reference': 'EXAM'}):
@@ -214,10 +222,21 @@ def run_case(case):
         order_number = _exam_order(conv, case['order']) if case.get('order') else ''
         last, count = None, len(case['turns'])
         for i, (who, text) in enumerate(case['turns']):
-            last = Message.objects.create(
-                conversation=conv, channel=Message.WHATSAPP, body=text.replace('{order}', order_number),
-                direction=Message.INBOUND if who == C else Message.OUTBOUND,
-            )
+            direction = Message.INBOUND if who == C else Message.OUTBOUND
+            if isinstance(text, dict):
+                # A file with no words, shaped as WhatsApp delivers one.
+                photo = text['mime'].startswith('image/')
+                last = Message.objects.create(
+                    conversation=conv, channel=Message.WHATSAPP, direction=direction,
+                    message_type=Message.IMAGE if photo else Message.DOCUMENT,
+                    body='' if photo else text['file'], media_name=text['file'],
+                    media_mime=text['mime'], media_id=f'exam-{i}',
+                )
+            else:
+                last = Message.objects.create(
+                    conversation=conv, channel=Message.WHATSAPP, body=text.replace('{order}', order_number),
+                    direction=direction,
+                )
             Message.objects.filter(pk=last.pk).update(created_at=now - timedelta(minutes=count - i))
         run = brain.respond(conv.pk, last.pk, now=now)
         result = grade(case, run)
