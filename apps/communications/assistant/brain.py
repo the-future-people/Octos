@@ -270,9 +270,6 @@ def _silence(conversation, trigger, now):
     # actually takes over (the button, or replying), it keeps answering.
     if conversation.handled_by == Conversation.STAFF and not conversation.handoff_reason:
         return 'a person has taken over this conversation'
-    if conversation.handled_by == Conversation.COUNTER:
-        return 'a person is serving them at the counter'
-
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
     last = visible.filter(direction=Message.INBOUND).first()
     if last is None:

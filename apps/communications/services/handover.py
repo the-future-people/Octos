@@ -12,10 +12,6 @@ the person handling it is reminded after 30 minutes. If the reminder is
 ignored for 10 more minutes, Octos takes the conversation back. Any reply
 from staff clears the clock.
 
-Serving at the counter (COUNTER, 11 Nov 2026) is a third state: a person
-is with the customer in person. Octos is silent, nobody is reminded and
-nothing is taken back; it ends when the visit ends.
-
 Every switch leaves an internal note in the thread, so anyone opening it
 can see who had it and why, and an event on the spine (10 Nov 2026), so
 Octos itself knows what happened. The switch, its note and its event are
@@ -49,39 +45,6 @@ def take_over(conversation, user):
         record(kinds.STAFF_TOOK_OVER, actor=Event.STAFF, actor_user=user,
                conversation=conversation, customer=conversation.customer,
                reason=f'{user.full_name} took over from Octos.')
-
-
-def serve_at_counter(conversation, user=None):
-    """
-    A person is serving this customer in person, at the counter (11 Nov 2026).
-    Octos goes quiet, and unlike STAFF there is no reminder and no take-back:
-    the customer is standing in front of someone. It ends with the visit
-    (counter_done), so nobody has to remember to hand back.
-    """
-    name = user.full_name if user else 'Staff'
-    with transaction.atomic():
-        _switch(conversation, Conversation.COUNTER, reason='')
-        if user and not conversation.assigned_to_id:
-            conversation.assigned_to = user
-            conversation.save(update_fields=['assigned_to'])
-        _note(conversation, f'{name} is serving them at the counter.', user)
-        record(kinds.COUNTER_CLAIMED, actor=Event.STAFF, actor_user=user,
-               conversation=conversation, customer=conversation.customer,
-               reason=f'{name} is serving them at the counter.')
-
-
-def counter_done(conversation, why=''):
-    """
-    Serving at the counter is over: Octos has the conversation again, and
-    says nothing now. The work was done in person; the next thing the
-    customer writes is a new matter, and Octos answers that.
-    """
-    with transaction.atomic():
-        _switch(conversation, Conversation.OCTOS, reason='')
-        _note(conversation, f'Served at the counter; Octos answers from here ({why}).', None)
-        record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
-               conversation=conversation, customer=conversation.customer,
-               reason=f'Served at the counter: {why}.')
 
 
 def hand_back(conversation, user=None, why=''):

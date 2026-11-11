@@ -87,6 +87,30 @@ def in_visit(conversation, now=None):
     return bool(until and until > (now or timezone.now()))
 
 
+def arrived(conversation, message, now=None):
+    """
+    The moment a customer's message arrives (11 Nov 2026): a counter phrase
+    starts the visit now, not when Octos's run gets to it. A run can be
+    skipped for a newer message, and the visit must not be skipped with it.
+    Returns True when a visit was started.
+    """
+    now = now or timezone.now()
+    if message.direction != Message.INBOUND or not shop_open(now):
+        return False
+    named = counter_phrase(message.body)
+    if named is None:
+        return False
+    _visit(conversation, _branch(named), now)
+    from apps.spine import kinds
+    from apps.spine.models import Event
+    from apps.spine.recorder import record
+    record(kinds.PRESENCE_COUNTER, actor=Event.CUSTOMER, conversation=conversation,
+           customer=conversation.customer, key=f'presence:{message.pk}',
+           payload={'message_id': message.pk, 'phrase': named or 'here'},
+           reason='The customer said they are at the counter.')
+    return True
+
+
 def is_grey(mode):
     return str(mode).strip().lower() in GREY
 

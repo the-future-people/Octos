@@ -309,26 +309,6 @@ class ConversationTakeOverView(APIView):
             handover.take_over(conversation, request.user)
         return Response({'handled_by': conversation.handled_by})
 
-
-class ConversationServeAtCounterView(APIView):
-    """
-    POST /api/v1/communications/<id>/serve-at-counter/
-    A person is serving this customer in person. Octos goes quiet; no
-    reminder, no take-back; it ends when the visit ends (11 Nov 2026).
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        conversation = _visible(request, pk)
-        if conversation is None:
-            return _not_found()
-
-        from apps.communications.services import handover
-        if conversation.handled_by != Conversation.COUNTER:
-            handover.serve_at_counter(conversation, request.user)
-        return Response({'handled_by': conversation.handled_by})
-
-
 class ConversationHandBackView(APIView):
     """
     POST /api/v1/communications/<id>/hand-back/
@@ -363,6 +343,12 @@ class ConversationAtCounterView(APIView):
             return _not_found()
         from apps.communications.assistant import counter
         counter.start_visit(conversation)
+        from apps.spine import kinds
+        from apps.spine.models import Event
+        from apps.spine.recorder import record
+        record(kinds.COUNTER_CLAIMED, actor=Event.STAFF, actor_user=request.user,
+               conversation=conversation, customer=conversation.customer,
+               reason=f'{request.user.full_name} marked the customer at the counter.')
         Message.objects.create(
             conversation=conversation, direction=Message.OUTBOUND, channel=Message.SYSTEM,
             message_type=Message.NOTE, is_internal_note=True, sent_by=request.user,

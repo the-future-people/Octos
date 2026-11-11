@@ -84,11 +84,9 @@ class Conversation(AuditModel):
     # hands over itself when a person is needed, and says why.
     OCTOS = 'OCTOS'
     STAFF = 'STAFF'
-    COUNTER = 'COUNTER'   # serving the customer in person at the counter (11 Nov 2026)
     HANDLER_CHOICES = [
         (OCTOS, 'Octos'),
         (STAFF, 'Staff'),
-        (COUNTER, 'Serving at the counter'),
     ]
     handled_by = models.CharField(max_length=10, choices=HANDLER_CHOICES, default=OCTOS)
     handled_since = models.DateTimeField(null=True, blank=True)

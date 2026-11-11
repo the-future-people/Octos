@@ -1,77 +1,73 @@
 """
-Serving at the counter, and the obligations ledger (Layer 1, Step 1.3, 11 Nov 2026).
+One "at the counter" (Layer 1, Step 1.3, merged 11 Nov 2026).
+
+The QR message starts the counter visit the moment it arrives; the attendant's
+tap starts it too; both reach the spine; an outcome ends the quiet early; and
+files someone already handled get no reply.
 """
-from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.communications.assistant import brain
+from apps.communications.assistant import brain, counter
 from apps.communications.models import Conversation, Message
-from apps.communications.services import handover
+from apps.communications.services.whatsapp_inbound import _receive
 from apps.spine import kinds
 from apps.spine.models import Event, Visit
 from apps.spine.obligations import FILES, REPLY, files_handled, ledger
 from apps.spine.recorder import record
 
 
+def _wa(wamid, body='', file=False):
+    if file:
+        return {'id': wamid, 'from': '233244123456', 'type': 'document',
+                'document': {'id': 'media-1', 'filename': 'cv.pdf', 'mime_type': 'application/pdf'}}
+    return {'id': wamid, 'from': '233244123456', 'type': 'text', 'text': {'body': body}}
+
+
 @override_settings(OCTOS_ASSISTANT_MODE='off', ANTHROPIC_API_KEY='test')
-class CounterTests(TestCase):
-    def setUp(self):
-        self.chat = Conversation.objects.create(
-            branch=None, contact_phone='+233244123456', channel=Conversation.WHATSAPP)
-
-    def _inbound(self, wamid, media=False, minutes_ago=0):
-        message = Message.objects.create(
-            conversation=self.chat, direction=Message.INBOUND, channel=Message.WHATSAPP,
-            message_type=Message.DOCUMENT if media else Message.TEXT,
-            body='' if media else 'How much?', external_id=wamid, media_id='m1' if media else '')
-        if minutes_ago:
-            Message.objects.filter(pk=message.pk).update(created_at=timezone.now() - timedelta(minutes=minutes_ago))
-            message.refresh_from_db()
-        record(kinds.MESSAGE_RECEIVED, actor=Event.CUSTOMER, conversation=self.chat,
-               key=f'wa:{wamid}', payload={'message_id': message.pk, 'has_file': media})
-        return message
-
-    def test_serving_at_the_counter_quiets_octos_and_opens_a_counter_visit(self):
-        handover.serve_at_counter(self.chat)
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.handled_by, Conversation.COUNTER)
-        self.assertTrue(Event.objects.filter(kind=kinds.COUNTER_CLAIMED).exists())
+@patch('apps.communications.services.whatsapp_inbound._keep_media')
+@patch('apps.communications.assistant.counter.shop_open', return_value=True)
+class CounterArrivalTests(TestCase):
+    def test_the_qr_message_starts_the_visit_on_arrival(self, _open, _media):
+        _receive(_wa('wamid.Q1', "Hi, I'm at the Westland counter"), 'Priscilla')
+        chat = Conversation.objects.get()
+        self.assertTrue(counter.in_visit(chat))
+        self.assertTrue(Event.objects.filter(kind=kinds.PRESENCE_COUNTER).exists())
         self.assertEqual(Visit.objects.get().presence, Visit.AT_COUNTER)
 
-    def test_nobody_is_reminded_or_taken_back_at_the_counter(self):
-        self._inbound('wamid.C1', minutes_ago=45)
-        handover.serve_at_counter(self.chat)
-        self.assertEqual(handover.watch(), (0, 0))
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.handled_by, Conversation.COUNTER)
+    def test_a_photo_seconds_after_the_qr_gets_no_stock_reply(self, _open, _media):
+        # Priscilla, 9 Nov: the QR's own run is skipped for the newer photo,
+        # and the visit must already exist when the photo's run looks.
+        _receive(_wa('wamid.Q2', "Hi, I'm at the Westland counter"), 'Priscilla')
+        _receive(_wa('wamid.P2', file=True), 'Priscilla')
+        chat = Conversation.objects.get()
+        photo = Message.objects.get(external_id='wamid.P2')
+        said, why = counter.step(chat, photo, timezone.now())
+        self.assertIsNone(said)
+        self.assertIn('attendant', why)
 
-    def test_the_visit_ending_returns_the_chat_to_octos_quietly(self):
-        handover.serve_at_counter(self.chat)
-        record(kinds.JOB_CREATED, actor=Event.STAFF, conversation=self.chat)
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.handled_by, Conversation.OCTOS)
-        # Nothing was said to the customer: only internal notes were written
-        self.assertFalse(self.chat.messages.filter(is_internal_note=False,
-                                                   direction=Message.OUTBOUND).exists())
+    def test_an_ordinary_message_is_not_a_counter_visit(self, _open, _media):
+        _receive(_wa('wamid.O1', 'How much is A4 colour?'), 'Ama')
+        self.assertFalse(counter.in_visit(Conversation.objects.get()))
+        self.assertFalse(Event.objects.filter(kind=kinds.PRESENCE_COUNTER).exists())
 
-    def test_octos_is_silent_while_someone_serves_at_the_counter(self):
-        trigger = self._inbound('wamid.C2')
-        handover.serve_at_counter(self.chat)
-        self.chat.refresh_from_db()
-        self.assertIn('counter', brain._silence(self.chat, trigger, timezone.now()))
+    def test_an_outcome_ends_the_quiet_early(self, _open, _media):
+        _receive(_wa('wamid.Q3', "Hi, I'm at the Westland counter"), 'Ama')
+        chat = Conversation.objects.get()
+        record(kinds.JOB_CREATED, actor=Event.STAFF, conversation=chat)
+        chat.refresh_from_db()
+        self.assertFalse(counter.in_visit(chat))
+        self.assertEqual(Visit.objects.get().outcome, 'JOB_CREATED')
 
-    def test_files_already_turned_into_a_job_get_no_reply(self):
-        trigger = self._inbound('wamid.F1', media=True)
-        record(kinds.JOB_CREATED, actor=Event.STAFF, conversation=self.chat)
-        self.chat.refresh_from_db()
-        self.assertEqual(brain._silence(self.chat, trigger, timezone.now()),
-                         'the files were already handled')
-
-    def test_unhandled_files_are_still_octos_to_consider(self):
-        trigger = self._inbound('wamid.F2', media=True)
-        self.assertIsNone(brain._silence(self.chat, trigger, timezone.now()))
+    def test_files_made_into_a_job_get_no_reply(self, _open, _media):
+        _receive(_wa('wamid.F1', file=True), 'Ama')
+        chat = Conversation.objects.get()
+        record(kinds.JOB_CREATED, actor=Event.STAFF, conversation=chat)
+        trigger = Message.objects.get(external_id='wamid.F1')
+        chat.refresh_from_db()
+        self.assertEqual(brain._silence(chat, trigger, timezone.now()), 'the files were already handled')
 
 
 class LedgerTests(TestCase):
@@ -97,7 +93,8 @@ class LedgerTests(TestCase):
         self.assertFalse(question.open)
 
     def test_the_owner_is_the_attendant_at_the_counter(self):
+        record(kinds.PRESENCE_COUNTER, conversation=self.chat)
         record(kinds.MESSAGE_RECEIVED, conversation=self.chat, key='wa:L3', payload={'has_file': True})
         visit = Visit.objects.get()
-        [files] = ledger(visit, handled_by='COUNTER')
+        [files] = ledger(visit)
         self.assertEqual((files.what, files.owner), (FILES, 'attendant'))

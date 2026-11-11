@@ -161,6 +161,13 @@ def _receive(message, profile_name, who=None):
                     'has_file': bool(media_id), 'mime': media_mime,
                     'quoted': message.reply_to_id})
 
+    # At the counter: known the moment the message arrives, not when Octos
+    # gets round to it. A run can be skipped for a newer message (a photo sent
+    # seconds after the QR), and the visit must not be skipped with it
+    # (Priscilla, 9 Nov 2026).
+    from apps.communications.assistant import counter
+    counter.arrived(conversation, message)
+
     wake_octos(conversation, message, pause=8)
     if message.media_id:
         _keep_media(message)

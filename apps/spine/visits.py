@@ -132,12 +132,13 @@ def close(visit, outcome, at, by_event=None, timed_out=False, reason=''):
            reason=reason or f'Closed: {outcome.replace("_", " ").lower()}.',
            _visit=visit)
 
-    # Serving at the counter ends with the visit: the conversation returns to
-    # Octos for the customer's next visit, without Octos saying anything now.
+    # A counter visit ends with the visit: the quiet window (counter_until) is
+    # cleared, so a question typed afterwards is answered. The customer who
+    # types after the work is done has most likely left the counter.
     conversation = visit.conversation
-    if conversation is not None and conversation.handled_by == 'COUNTER':
-        from apps.communications.services.handover import counter_done
-        counter_done(conversation, why=f'the visit ended ({outcome.replace("_", " ").lower()})')
+    if conversation is not None and getattr(conversation, 'counter_until', None):
+        type(conversation).objects.filter(pk=conversation.pk).update(counter_until=None)
+        conversation.counter_until = None
 
 
 def _time_out(visit):
