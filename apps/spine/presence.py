@@ -5,8 +5,8 @@ Is the customer at the counter right now? Not a switch with a timer, but a
 probability, worked out fresh for each message from three things:
 
   1. The anchor: the strongest recent proof, with a starting belief P0
-     (the attendant's tap 0.99, a signed QR 0.97, "I'm at the counter" 0.90;
-     no proof 0.40 while open, 0.02 when closed).
+     (the attendant's tap 0.99, a signed QR 0.97, "I'm at the counter" 0.90,
+     a person opened their file 0.85; no proof 0.40 while open, 0.02 closed).
   2. Time: people leave counters. P(t) = P0 * exp(-t / TAU), TAU = 25 minutes.
      This is the solution of dP/dt = -P / TAU: the belief fades in proportion
      to itself, like cooling tea.
@@ -29,7 +29,7 @@ from datetime import timedelta
 TAU_MINUTES = 25.0
 LOOK_BACK = timedelta(hours=3)
 
-ANCHOR_PRIOR = {'claimed': 0.99, 'signed_qr': 0.97, 'phrase': 0.90}
+ANCHOR_PRIOR = {'claimed': 0.99, 'signed_qr': 0.97, 'phrase': 0.90, 'opened': 0.85}
 NO_ANCHOR_OPEN = 0.40
 SHOP_CLOSED = 0.02
 
@@ -131,7 +131,7 @@ def for_message(conversation, message, now, shop_open):
 
     anchor_event = (Event.objects
                     .filter(conversation=conversation,
-                            kind__in=[kinds.PRESENCE_COUNTER, kinds.COUNTER_CLAIMED],
+                            kind__in=[kinds.PRESENCE_COUNTER, kinds.COUNTER_CLAIMED, kinds.FILE_OPENED],
                             occurred_at__gte=now - LOOK_BACK, occurred_at__lte=now)
                     .order_by('-occurred_at').first())
     anchor, minutes, since = None, 0.0, None
@@ -139,6 +139,8 @@ def for_message(conversation, message, now, shop_open):
         since = anchor_event.occurred_at
         if anchor_event.kind == kinds.COUNTER_CLAIMED:
             anchor = 'claimed'
+        elif anchor_event.kind == kinds.FILE_OPENED:
+            anchor = 'opened'                  # a person has their files
         else:
             anchor = 'signed_qr' if anchor_event.payload.get('verified') else 'phrase'
     else:

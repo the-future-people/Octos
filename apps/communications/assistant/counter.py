@@ -40,11 +40,52 @@ HERE = re.compile(r"\b(?:i(?:'|\u2019)?m|i am)\s+(?:here|at the (?:shop|counter|
 GREY = {'l', '1', 'la', 'gray', 'grey', 'grayscale', 'greyscale', 'bw', 'black and white'}
 
 
+ATTENDED_KEY = 'octos:counter-attended'
+ATTENDED_WITHIN = timedelta(minutes=5)
+AFTER_CLOSING = timedelta(hours=3)
+
+
+def mark_attended(now=None):
+    """An attendant's screen is open right now (the Claim strip's poll is the heartbeat)."""
+    from django.core.cache import cache
+    cache.set(ATTENDED_KEY, (now or timezone.now()).timestamp(), timeout=3600)
+
+
+def attended(now=None):
+    """Someone has had the attendant portal open in the last 5 minutes."""
+    from django.core.cache import cache
+    seen = cache.get(ATTENDED_KEY)
+    return bool(seen) and (now or timezone.now()).timestamp() - seen <= ATTENDED_WITHIN.total_seconds()
+
+
 def shop_open(now=None):
-    """A branch Octos speaks for is open right now."""
+    """
+    Someone is at a counter Octos speaks for. During opening hours, yes. After
+    closing, only while an attendant's screen is alive, and for at most 3
+    hours past closing (11 Nov 2026: customers were served at 19:40, after the
+    timetable said closed, and Octos treated them as away).
+    """
     from apps.organization.models import Branch
     from apps.organization.services import hours
-    return any(hours.is_open(b, now) for b in Branch.objects.filter(is_trading=True, is_active=True))
+    now = now or timezone.now()
+    branches = list(Branch.objects.filter(is_trading=True, is_active=True))
+    if any(hours.is_open(b, now) for b in branches):
+        return True
+    return attended(now) and any(_just_closed(b, now) for b in branches)
+
+
+def _just_closed(branch, now):
+    """Within AFTER_CLOSING of this branch's closing time today."""
+    from apps.organization.services import hours
+    local = timezone.localtime(now)
+    try:
+        closes = hours.hours_on(branch, local.date())[1]
+    except Exception:
+        return False
+    if not closes:
+        return False
+    closing = local.replace(hour=closes.hour, minute=closes.minute, second=0, microsecond=0)
+    return closing <= local <= closing + AFTER_CLOSING
 
 
 def has_words(text):

@@ -320,6 +320,8 @@ class ArrivalsView(APIView):
 
     def get(self, request):
         from apps.spine.arrivals import arrivals
+        from apps.communications.assistant import counter
+        counter.mark_attended()        # the strip's poll is the counter's heartbeat
         branch = getattr(request.user, 'branch', None)
         rows = arrivals(branch=branch)
         return Response([{
@@ -572,6 +574,10 @@ class MessageFileView(APIView):
                                                     'media_mime').first()
         if message is None or not message.media_file or _visible(request, message.conversation_id) is None:
             return _not_found()
+        if request.query_params.get('download'):
+            # The inbox's Open: a person is taking this file to work on (11 Nov 2026).
+            from apps.communications.services.opened import file_opened
+            file_opened(message, request.user)
         name = message.media_name or message.media_file.name.rsplit('/', 1)[-1]
         response = FileResponse(message.media_file.open('rb'),
                                 as_attachment=bool(request.query_params.get('download')),

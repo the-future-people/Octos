@@ -163,6 +163,13 @@ CASES = [
      'expect': {'handover': False, 'max_questions': 1,
                 'contains_none': [r'(?i)colou?r or black', r'(?i)A4 or A3']}},
 
+    # 11 Nov 2026: files arrived and Octos announced "A4, one side". Ask first.
+    {'name': 'files_without_instructions_ask_what_to_do',
+     'turns': [(C, "Here's my document, I've sent it")],
+     'expect': {'handover': False, 'max_questions': 1,
+                'contains_any': [r'(?i)what would you like|what do you want|what should|like done|like me to'],
+                'contains_none': [r'(?i)\bA4\b', r'(?i)one side', r'(?i)single.?sided']}},
+
     # 7 Nov 2026: a midnight order for colour photocopies nearly got a link.
     {'name': 'photocopies_need_the_original',
      'turns': [(C, 'I want to do some colour photocopies, 2 copies')],

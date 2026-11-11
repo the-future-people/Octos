@@ -39,6 +39,12 @@ class BeliefArithmeticTests(SimpleTestCase):
         after = believe('signed_qr', 10, 'words', outcome_since=True).p
         self.assertLess(after, before)
 
+    def test_a_file_someone_opened_keeps_octos_quiet_on_more_files(self):
+        self.assertEqual(believe('opened', 2, 'file_no_words').band, AT_COUNTER)
+
+    def test_a_question_after_a_file_was_opened_goes_to_the_attendant_first(self):
+        self.assertEqual(believe('opened', 2, 'info_question').band, UNSURE)
+
     def test_the_reasons_say_why(self):
         b = believe('signed_qr', 3, 'file_no_words')
         self.assertIn('signed qr 3 min ago', b.why)
