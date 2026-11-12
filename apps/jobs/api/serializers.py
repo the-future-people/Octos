@@ -215,6 +215,11 @@ class JobListSerializer(serializers.ModelSerializer):
     customer_credit  = serializers.SerializerMethodField()
     customer_wallet_balance = serializers.SerializerMethodField()
     intake_by_name   = serializers.SerializerMethodField()
+    # One answer for every screen (jobs/services/labels.py, 12 Nov 2026).
+    for_whom         = serializers.SerializerMethodField()
+    from_chat        = serializers.SerializerMethodField()
+    recorded_by      = serializers.SerializerMethodField()
+    contact_phone    = serializers.SerializerMethodField()
     deposit_due      = serializers.SerializerMethodField()
     line_items       = JobLineItemSerializer(many=True, read_only=True)
     line_item_count  = serializers.SerializerMethodField()
@@ -227,6 +232,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'id', 'job_number', 'title', 'job_type', 'status',
             'priority', 'branch', 'branch_name', 'assigned_to',
             'assigned_to_name', 'customer_name', 'intake_by_name',
+            'for_whom', 'from_chat', 'recorded_by', 'contact_phone',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
             'customer', 'customer_phone', 'customer_credit',
@@ -249,6 +255,22 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_intake_by_name(self, obj):
         return obj.intake_by.full_name if obj.intake_by else None
+
+    def get_for_whom(self, obj):
+        from apps.jobs.services.labels import for_whom
+        return for_whom(obj)[0]
+
+    def get_from_chat(self, obj):
+        from apps.jobs.services.labels import for_whom
+        return for_whom(obj)[1]
+
+    def get_recorded_by(self, obj):
+        from apps.jobs.services.labels import recorded_by
+        return recorded_by(obj)
+
+    def get_contact_phone(self, obj):
+        from apps.jobs.services.labels import contact_phone
+        return contact_phone(obj)
 
     def get_is_halted(self, obj):
         return any(h.resumed_at is None for h in obj.halts.all())

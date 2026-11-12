@@ -28,27 +28,14 @@ def workload_filter(view, now):
     raise ValueError(f'Unknown workload view: {view}')
 
 
-CHANNEL_LABEL = {
-    'ONLINE': 'Print Octos (online)',
-    'WHATSAPP': 'WhatsApp order',
-    'EMAIL': 'Email order',
-    'PHONE': 'Phone order',
-}
+def _for_whom(job):
+    from apps.jobs.services.labels import for_whom
+    return for_whom(job)
 
 
 def _recorded_by(job):
-    """The attendant who recorded it, else how it came in, else a dash."""
-    name = getattr(job.intake_by, 'full_name', '') if job.intake_by_id else ''
-    return name or CHANNEL_LABEL.get(job.intake_channel, '—')
-
-
-def _for_whom(job):
-    """The same rule as receipts: the record, else the WhatsApp chat, else Walk-in."""
-    if job.customer_id:
-        return job.customer.display_name or 'Customer', False
-    from apps.communications.services.chat_customer import chat_identity
-    who = chat_identity(job)
-    return (who[0], True) if who else ('Walk-in', False)
+    from apps.jobs.services.labels import recorded_by
+    return recorded_by(job)
 
 
 def get_workload_list(branch, view, now=None, limit=200) -> dict:
