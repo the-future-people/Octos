@@ -1118,3 +1118,12 @@ Internal detail belongs in the log, not on the screen.
 - Before Expand-Archive, check the prompt ends in the target repo — farhat-web's vite.config.js once landed in octos-web unnoticed. `git status` after every unzip catches files that shouldn't have changed.
 
 - CORS origins are hard-coded in config/settings.py (CORS_ALLOWED_ORIGINS list), not a Railway variable — a new frontend needs a settings.py change and a push.
+
+- Printing files in Windows PowerShell: use `Get-Content -Encoding UTF8 <file>`. Without it, UTF-8 characters (—, ─, ✓, emoji) print garbled (â”€, ðŸ“) and can swallow the rest of the output. The file itself is fine.
+
+- Running tests: always name test MODULES (apps.spine.tests, apps.communications.tests_spine). Discovering by app label (apps.spine) crashes on the namespace package; discovering by path (apps/jobs) imports models as `jobs.models` and reports 2 fake loader ERRORs. Errors named `_FailedTest` are loader problems, not failing tests.
+
+- Never set a default Content-Type on the axios client. axios picks JSON or multipart per request; a JSON default makes it convert FormData to JSON and silently drop every file (11 Nov 2026: inbox attachments never reached the server).
+- Fix the root cause, not the symptom: a per-call header would have fixed one upload and left every other one broken.
+
+- A test that reads the real clock (shop_open(), "now") is flaky: it passes or fails depending on the hour. Patch the time-dependent input in setUp. The brain tests failed at 18:40 and would have passed at 21:00.

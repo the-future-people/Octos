@@ -1195,6 +1195,26 @@ class ActiveWorkloadView(APIView):
         return Response(get_active_workload(branch))
     
     
+class WorkloadListView(APIView):
+    """
+    GET /api/v1/jobs/workload/<view>/
+    The jobs behind one Overview tile (12 Nov 2026), from the same definition
+    the tile counts with. view: pending_payment, in_production,
+    ready_for_pickup, awaiting_feedback, overdue.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, view):
+        from apps.jobs.selectors.workload_selectors import WORKLOAD_VIEWS, get_workload_list
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+        if view not in WORKLOAD_VIEWS:
+            return Response({'detail': 'No such workload page.'}, status=404)
+        return Response(get_workload_list(branch, view))
+
+
 class JobHistoryView(APIView):
     """
     GET /api/v1/jobs/history/

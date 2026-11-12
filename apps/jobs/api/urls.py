@@ -88,6 +88,7 @@ urlpatterns = [
     path('reports/services/', views.ServicePerformanceView.as_view(), name='service-performance'),
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
     path('workload/',         views.ActiveWorkloadView.as_view(),     name='job-workload'),
+    path('workload/<str:view>/', views.WorkloadListView.as_view(),    name='job-workload-list'),
     path('performance/',      views.BranchPerformanceView.as_view(),  name='branch-performance'),
     path('history/', views.JobHistoryView.as_view(), name='job-history'),
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),

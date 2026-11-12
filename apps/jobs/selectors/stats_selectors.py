@@ -339,28 +339,16 @@ def get_active_workload(branch) -> dict:
 
     qs = Job.objects.filter(branch=branch)
 
-    agg = qs.aggregate(
-        pending_payment    = Count('id', filter=Q(status='PENDING_PAYMENT')),
-        in_production      = Count('id', filter=Q(
-            status__in=['CONFIRMED', 'IN_PROGRESS'],
-            job_type__in=['PRODUCTION', 'DESIGN'],
-        )),
-        ready_for_pickup   = Count('id', filter=Q(
-            status='READY',
-            job_type__in=['PRODUCTION', 'DESIGN'],
-        )),
-        awaiting_feedback  = Count('id', filter=Q(
-            status__in=['SAMPLE_SENT', 'REVISION_REQUESTED'],
-        )),
-        overdue            = Count('id', filter=Q(
-            deadline__lt=now,
-            status__in=['CONFIRMED', 'IN_PROGRESS', 'READY', 'SAMPLE_SENT', 'REVISION_REQUESTED'],
-        )),
-    )
+    # The same definitions each workload page lists with (workload_selectors),
+    # so a tile and its page can never disagree (12 Nov 2026).
+    from apps.jobs.selectors.workload_selectors import WORKLOAD_VIEWS, workload_filter
+    agg = qs.aggregate(**{
+        view: Count('id', filter=workload_filter(view, now)) for view in WORKLOAD_VIEWS
+    })
 
     # Oldest pending payment job age in minutes
     oldest_pending = qs.filter(
-        status='PENDING_PAYMENT'
+        workload_filter('pending_payment', now)
     ).order_by('created_at').values_list('created_at', flat=True).first()
 
     oldest_pending_mins = None
