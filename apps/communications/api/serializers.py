@@ -117,10 +117,11 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
             'handled_by', 'handled_since', 'handoff_reason', 'counter_until',
             'unread_count', 'last_message_at', 'jobs',
             'messages', 'created_at', 'updated_at',
-            'job_card', 'window_closes_at', 'octos_writing',
+            'job_card', 'window_closes_at', 'octos_writing', 'visit_started_at',
         ]
 
     job_card = serializers.SerializerMethodField()
+    visit_started_at = serializers.SerializerMethodField()
     window_closes_at = serializers.SerializerMethodField()
     # Octos is working on a reply right now (9 Nov 2026).
     octos_writing = serializers.SerializerMethodField()
@@ -141,6 +142,15 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
         if job is None:
             return None
         return {'id': job.pk, **_job_facts(job, timezone.localtime())}
+
+    def get_visit_started_at(self, obj):
+        """
+        When this customer's current visit began (the spine's 2-hour rule), so
+        a job recorded from the chat offers this visit's files only (12 Nov 2026).
+        """
+        from apps.spine.models import Visit
+        visit = Visit.objects.filter(conversation=obj).order_by('-opened_at').first()
+        return visit.opened_at if visit else None
 
     def get_window_closes_at(self, obj):
         """When free replies stop being allowed: the same rule the sender uses."""
