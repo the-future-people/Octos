@@ -89,6 +89,7 @@ urlpatterns = [
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
     path('workload/',         views.ActiveWorkloadView.as_view(),     name='job-workload'),
     path('workload/<str:view>/', views.WorkloadListView.as_view(),    name='job-workload-list'),
+    path('<int:pk>/mark-collected/', views.JobMarkCollectedView.as_view(), name='job-mark-collected'),
     path('performance/',      views.BranchPerformanceView.as_view(),  name='branch-performance'),
     path('history/', views.JobHistoryView.as_view(), name='job-history'),
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),

@@ -1195,6 +1195,29 @@ class ActiveWorkloadView(APIView):
         return Response(get_active_workload(branch))
     
     
+class JobMarkCollectedView(APIView):
+    """
+    POST /api/v1/jobs/<id>/mark-collected/   Body: { reason, note? }
+    From the BM's Ready for pickup page (12 Nov 2026): clears a backlog of jobs
+    collected long ago or made as tests. Through the status engine, so only an
+    allowed role, never a job with money owing, always logged with who and why.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.jobs.services.mark_collected import Refused, mark_collected
+
+        branch = getattr(request.user, 'branch', None)
+        job = Job.objects.filter(pk=pk, branch=branch).first() if branch else None
+        if job is None:
+            return Response({'detail': 'Job not found.'}, status=404)
+        try:
+            mark_collected(job, request.user, request.data.get('reason', ''), request.data.get('note', ''))
+        except Refused as refused:
+            return Response({'detail': str(refused)}, status=400)
+        return Response({'job_number': job.job_number, 'handover_state': job.handover_state})
+
+
 class WorkloadListView(APIView):
     """
     GET /api/v1/jobs/workload/<view>/
