@@ -1686,6 +1686,13 @@ class EODSummaryView(APIView):
             {**row, 'first_opened_at': row['first_opened_at'].isoformat()}
             for row in unrecorded_files(sheet.branch, day)
         ]
+        # Jobs recorded after closing time, with when, by whom, for whom, and
+        # where the files came from; amber where a chat's job says otherwise.
+        from apps.spine.unrecorded import after_hours_jobs
+        summary['after_hours_jobs'] = [
+            {**row, 'recorded_at': row['recorded_at'].isoformat()}
+            for row in after_hours_jobs(sheet.branch, day)
+        ]
         return Response(summary)
 
 

@@ -49,3 +49,55 @@ def unrecorded_files(branch=None, day=None):
             'visit_outcome': visit.outcome or 'open',
         })
     return rows
+
+
+# ── Jobs recorded after closing time (12 Nov 2026) ─────────────────────────
+
+OTHER_SOURCES = {'USB', 'HARDCOPY', 'EMAIL', 'TYPING'}
+
+
+def mismatch(sources, from_chat):
+    """A WhatsApp chat's job whose items say the files came another way."""
+    return bool(from_chat) and bool(set(sources) & OTHER_SOURCES)
+
+
+def after_hours_jobs(branch, day=None):
+    """
+    Every job at this branch recorded after today's closing time, with when,
+    by whom, for whom, and where its files came from. The hours after closing
+    are when work most often goes unrecorded or mis-recorded, so the BM sees
+    them with their times before closing the day. Never a gate.
+    """
+    from datetime import datetime
+    from apps.communications.models import Conversation
+    from apps.communications.services.chat_customer import chat_identity
+    from apps.jobs.models import Job, JobLineItem
+    from apps.organization.services import shop_state
+
+    day = day or timezone.localdate()
+    noon = timezone.make_aware(datetime.combine(day, datetime.min.time())).replace(hour=12)
+    closing = shop_state.closing_time(branch, noon)
+    if closing is None:
+        return []
+
+    rows = []
+    for job in (Job.objects.filter(branch=branch, created_at__gte=closing, created_at__date=day)
+                .select_related('customer', 'intake_by').order_by('created_at')):
+        sources = list(JobLineItem.objects.filter(job=job).values_list('file_source', flat=True))
+        chat = Conversation.objects.filter(jobs=job).first()
+        if job.customer_id:
+            for_whom = job.customer.display_name or 'Customer'
+        else:
+            who = chat_identity(job)
+            for_whom = who[0] if who else 'Walk-in'
+        taker = getattr(job, 'intake_by', None)
+        rows.append({
+            'job_number': job.job_number,
+            'recorded_at': job.created_at,
+            'recorded_by': getattr(taker, 'full_name', '') or '—',
+            'for': for_whom,
+            'conversation_id': chat.pk if chat else None,
+            'sources': sorted(set(sources)),
+            'mismatch': mismatch(sources, chat is not None),
+        })
+    return rows

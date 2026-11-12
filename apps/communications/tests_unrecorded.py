@@ -50,3 +50,22 @@ class UnrecordedTests(CommunicationsTestBase):
         _receive({'id': 'wamid.U2', 'from': PHONE, 'type': 'image',
                   'image': {'id': 'media-U2', 'mime_type': 'image/jpeg'}}, 'Ama')
         self.assertEqual(unrecorded_files(), [])
+
+
+from django.test import SimpleTestCase
+
+from apps.spine.unrecorded import mismatch
+
+
+class MismatchTests(SimpleTestCase):
+    def test_a_chats_job_recorded_as_pendrive_is_a_mismatch(self):
+        self.assertTrue(mismatch(['USB'], from_chat=True))
+
+    def test_a_chats_job_recorded_as_whatsapp_is_fine(self):
+        self.assertFalse(mismatch(['WHATSAPP', 'UPLOAD'], from_chat=True))
+
+    def test_a_walk_ins_pendrive_job_is_fine(self):
+        self.assertFalse(mismatch(['USB'], from_chat=False))
+
+    def test_unstated_sources_are_not_a_mismatch(self):
+        self.assertFalse(mismatch(['NA'], from_chat=True))
