@@ -94,6 +94,20 @@ class GoldenScenarios(CommunicationsTestBase):
             self.assertIn("If you're at the counter", said)
             self.assertNotIn('ends in', said)
 
+    def test_after_the_not_sure_greeting_a_file_gets_no_second_message(self):
+        # Chat 431, 12 Nov: "Hi", the not-sure greeting, then a file two
+        # minutes later got the file line too: the same thing said twice.
+        with Replay() as r:
+            hi = r.customer('Hi')
+            r.wait(seconds=8)
+            r.octos_turn(hi)
+            r.wait(minutes=2)
+            photo = r.customer(file=True)
+            r.wait(minutes=2)
+            r.octos_turn(photo)
+            self.assertEqual(len(r.said()), 1)
+            self.assertIn("If you're at the counter", r.said()[0])
+
     def test_not_sure_a_question_is_held_for_the_attendant_then_answered(self):
         # 10 minutes after the QR, "I want 2 copies": maybe still there, maybe not.
         with Replay() as r:

@@ -204,6 +204,10 @@ def step(conversation, trigger, now):
                                             created_at__gte=now - FORK_WINDOW).exists()
         if asked:
             return None, 'file only: already asked, waiting for their words'
+        # The not-sure greeting already said where files go (chat 431, 12 Nov
+        # 2026): a file after it gets no second message saying the same.
+        if _greeted_unsure(conversation, now):
+            return None, 'file only: the not-sure greeting already covered it'
         return FORK_TEXT, FORK_REASON
     return None
 
