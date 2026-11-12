@@ -67,6 +67,10 @@ class SignatureTests(TestCase):
         with override_settings(COUNTER_QR_SECRET='the-new-secret', SECRET_KEY='the-old-key'):
             self.assertEqual(qr.decode(qr.GREETING + forged), (2, False))
 
+    def test_signs_printed_with_the_old_greeting_still_verify(self):
+        # The signature never depends on the words around it (12 Nov 2026).
+        self.assertEqual(qr.decode('Hi Farhat \U0001F44B' + qr.encode(7)), (7, True))
+
     def test_plain_text_has_no_signature(self):
         self.assertEqual(qr.decode('Hi Farhat 👋'), (None, False))
 

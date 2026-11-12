@@ -1,12 +1,12 @@
 """
 The counter QR's invisible signature (Layer 2, Step 2.1, 11 Nov 2026).
 
-The printed QR opens WhatsApp with "Hi Farhat 👋" ready to send. Customers keep
+The printed QR opens WhatsApp with "Hi 👋" ready to send. Customers keep
 a greeting that sounds like them, and delete anything that looks like a form,
 so the proof travels inside the greeting, invisibly:
 
-    what the customer sees:  Hi Farhat 👋
-    what Octos receives:     Hi Farhat 👋 + 10 variation selectors
+    what the customer sees:  Hi 👋
+    what Octos receives:     Hi 👋 + 10 variation selectors
 
 Tested on a real phone, 11 Nov 2026: WhatsApp strips zero-width characters
 (U+200B and friends), but keeps the variation selectors that belong to emoji
@@ -30,7 +30,11 @@ SELECTORS = range(BASE, BASE + 240)     # the whole supplement, stripped on clea
 ZERO_WIDTH = {'\u200b', '\u200c', '\u200d', '\u2060', '\ufeff'}
 BRANCH_BITS, SIG_BITS = 16, 24
 CHARS = (BRANCH_BITS + SIG_BITS) // 4   # 10
-GREETING = 'Hi Farhat \U0001F44B'       # Hi Farhat 👋
+# What the customer sees, and keeps. "Hi Farhat 👋" read like a script, and
+# 32 customers at the Westland counter deleted it on 12 Nov 2026 to type their
+# own "Hi". The signature sits after the emoji and never depends on these
+# words, so signs printed with the old greeting keep verifying.
+GREETING = 'Hi \U0001F44B'              # Hi 👋
 
 
 def _secret():
