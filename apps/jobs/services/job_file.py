@@ -28,6 +28,7 @@ STATE_WORDS = {
     'RECEIVED': 'Received', 'IN_PRODUCTION': 'In production', 'FINISHING': 'Finishing',
     'QUALITY_CHECK': 'Quality check', 'DONE': 'Done',
     'AWAITING_COLLECTION': 'Awaiting collection', 'HANDED_OVER': 'Handed over',
+    'OUT_FOR_DELIVERY': 'Out for delivery',
 }
 # Spine kinds that only mirror a status log: the log already tells it, with its actor.
 MIRRORS = {'job.status_changed', 'job.deposit_paid', 'job.paid', 'job.ready', 'job.collected',
@@ -93,7 +94,9 @@ def build(job, now=None):
             'id': r.pk, 'receipt_number': r.receipt_number,
             'label': payment_label(i, len(receipts), settled),
             'method': r.payment_method,
-            'method_label': 'Card (POS)' if r.payment_method == 'POS' else r.get_payment_method_display(),
+            'method_label': ('Card (POS)' if r.payment_method == 'POS'
+                             else 'Online (Paystack)' if 'online' in r.get_payment_method_display().lower()
+                             else r.get_payment_method_display()),
             'amount': f'{r.amount_paid or 0:.2f}',
             'reference': getattr(r, 'momo_reference', '') or getattr(r, 'pos_approval_code', '') or '',
             'by': _name(r.cashier), 'at': r.created_at,
@@ -110,7 +113,10 @@ def build(job, now=None):
         history.append(entry(l.transitioned_at, phrase(l.axis, l.to_status), l.notes or '', _name(l.actor), tone))
     for p in payments:
         ref = f" · Ref {p['reference']}" if p['reference'] else ''
-        history.append(entry(p['at'], f"{p['label']}: GHS {p['amount']} by {p['method_label']}",
+        # "paid online (Paystack)", not "by Paid Online" (13 Nov 2026).
+        online = 'online' in (p['method_label'] or '').lower()
+        how = 'paid online (Paystack)' if online else f"by {p['method_label']}"
+        history.append(entry(p['at'], f"{p['label']}: GHS {p['amount']} {how}",
                              f"Receipt {p['receipt_number']}{ref}", p['by'], 'money'))
         if p['whatsapp_sent_at']:
             history.append(entry(p['whatsapp_sent_at'], 'Receipt sent on WhatsApp', p['receipt_number'], '', 'chat'))
