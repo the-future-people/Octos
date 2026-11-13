@@ -285,12 +285,22 @@ class CashierFloat(AuditModel):
         expected_cash = opening_float + cash_collected - petty_cash_out
         Call this before sign-off.
         """
-        from apps.finance.models import Receipt, PettyCash
-        from django.db.models import Sum
-
         if not self.daily_sheet:
             self.variance = self.closing_cash - self.opening_float
             return
+
+        self.expected_cash = self.expected_now()['expected']
+        self.variance = self.closing_cash - self.expected_cash
+
+    def expected_now(self) -> dict:
+        """
+        What should be in the drawer right now: opening float + this cashier's
+        non-void cash receipts on this sheet - petty cash taken from this float.
+        The one rule: sign-off (compute_variance) and My shift both ask here,
+        so the figure watched all day is the figure counted against (13 Nov 2026).
+        """
+        from apps.finance.models import Receipt, PettyCash
+        from django.db.models import Sum
 
         cash_collected = Receipt.objects.filter(
             daily_sheet    = self.daily_sheet,
@@ -304,12 +314,12 @@ class CashierFloat(AuditModel):
             cashier_float = self,
         ).aggregate(t=Sum('amount'))['t'] or 0
 
-        self.expected_cash = (
-            self.opening_float +
-            cash_collected -
-            petty_cash_out
-        )
-        self.variance = self.closing_cash - self.expected_cash
+        return {
+            'opening_float':  self.opening_float,
+            'cash_collected': cash_collected,
+            'petty_cash_out': petty_cash_out,
+            'expected':       self.opening_float + cash_collected - petty_cash_out,
+        }
 
     # ── Denomination helpers ───────────────────────────────────
 

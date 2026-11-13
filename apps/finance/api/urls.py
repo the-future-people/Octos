@@ -19,6 +19,7 @@ from .views import (
     CashierFloatCloseView,
     CashierSignOffView,
     CashierShiftStatusView,
+    CashierMyNumbersView,
     CashierHistoryView,
     EODSummaryView,
     PettyCashCreateView,
@@ -104,6 +105,7 @@ urlpatterns = [
 
     # ── Cashier ───────────────────────────────────────────────────────────────
     path('cashier/shift-status/',                CashierShiftStatusView.as_view(),            name='cashier-shift-status'),
+    path('cashier/my-numbers/',                  CashierMyNumbersView.as_view(),              name='cashier-my-numbers'),
     path('cashier/history/',                     CashierHistoryView.as_view(),                name='cashier-history'),
     path('cashier/receipts/',                    CashierReceiptListView.as_view(),            name='cashier-receipts'),
     path('wallets/',                             WalletBalanceListView.as_view(),             name='wallet-list'),

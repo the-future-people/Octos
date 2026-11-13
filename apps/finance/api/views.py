@@ -580,6 +580,21 @@ def _compute_expected_cash(float_record):
     return float_record.opening_float + cash_collected
 
 
+class CashierMyNumbersView(APIView):
+    """
+    GET /api/v1/finance/cashier/my-numbers/?period=today|30d
+    My shift (12 Nov 2026): the drawer (the sign-off rule), takings by method,
+    drawer accuracy, wait to pay, busiest hours, WhatsApp receipts. The
+    signed-in cashier's own numbers only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.finance.services.my_numbers import my_numbers
+        period = '30d' if request.query_params.get('period') == '30d' else 'today'
+        return Response(my_numbers(request.user, period))
+
+
 class CashierShiftStatusView(APIView):
     """
     GET /api/v1/finance/cashier/shift-status/
