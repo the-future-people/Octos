@@ -644,14 +644,20 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 if item_data.get('ring_size'):
                     condition_params['ring_size'] = item_data['ring_size']
 
-                pricing    = PricingEngine.get_price(
-                    service          = svc,
-                    branch           = branch,
-                    quantity         = sets,
-                    is_color         = color,
-                    pages            = pg,
-                    condition_params = condition_params or None,
-                )
+                # Priced by area: through quote_line, so the size is used and
+                # the price saved is the price shown (13 Nov 2026). Others: as before.
+                from apps.jobs.services.line_pricing import is_area, price_area_line
+                if is_area(svc):
+                    pricing = price_area_line(svc, branch, item_data, sets)
+                else:
+                    pricing = PricingEngine.get_price(
+                        service          = svc,
+                        branch           = branch,
+                        quantity         = sets,
+                        is_color         = color,
+                        pages            = pg,
+                        condition_params = condition_params or None,
+                    )
                 # A pricing failure must not become a zero-priced job. The
                 # engine already reports what went wrong — usually a missing
                 # condition, such as a passport photo arriving without its

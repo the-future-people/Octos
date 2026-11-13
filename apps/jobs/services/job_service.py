@@ -172,14 +172,21 @@ def _price_line_items(
             condition_params['ring_size'] = int(item['ring_size'])
 
         try:
-            pricing = PricingEngine.get_price(
-                service=svc,
-                branch=branch,
-                quantity=sets,
-                is_color=is_color,
-                pages=pg,
-                condition_params=condition_params or None,
-            )
+            # Priced by area: through quote_line, so the size is used and the
+            # price saved is the price shown (13 Nov 2026: 300 stickers 4x2in
+            # were saved at GHS 840 instead of 46.67). Others: as before.
+            from apps.jobs.services.line_pricing import is_area, price_area_line
+            if is_area(svc):
+                pricing = price_area_line(svc, branch, item, sets)
+            else:
+                pricing = PricingEngine.get_price(
+                    service=svc,
+                    branch=branch,
+                    quantity=sets,
+                    is_color=is_color,
+                    pages=pg,
+                    condition_params=condition_params or None,
+                )
 
             if not pricing or 'total' not in pricing:
                 errors.append(f'Failed to calculate price for {svc.name}.')

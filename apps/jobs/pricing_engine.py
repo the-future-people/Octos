@@ -106,16 +106,6 @@ def quote_line(service, branch, specifications=None, quantity=1) -> dict:
         )
         result.setdefault('minimum_applied', False)
     return result
-    """
-    (width" × height") ÷ 144 — the area basis every large-format job is
-    priced on. Dimensions are taken in inches because that is what the
-    customer gives and what the machine cuts.
-
-    The area is not rounded. Only the money is, at the end.
-    """
-    return (
-        Decimal(str(width_in)) * Decimal(str(height_in))
-    ) / Decimal('144')
 
 
 class PricingEngine:
