@@ -1070,6 +1070,34 @@ class ReceiptSendWhatsAppView(APIView):
         return Response({'detail': reason}, status=status.HTTP_400_BAD_REQUEST)
 
 
+class ReceiptPdfView(APIView):
+    """
+    GET /api/v1/finance/receipts/<id>/pdf/
+    The receipt picture (Farhat's colours) as a PDF, to download or share (13 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from io import BytesIO
+
+        from django.http import HttpResponse
+        from PIL import Image
+
+        from apps.finance.services.receipt_image import receipt_data, render
+
+        branch = getattr(request.user, 'branch', None)
+        receipt = (Receipt.objects.select_related('job', 'cashier')
+                   .filter(pk=pk, daily_sheet__branch=branch).first()) if branch else None
+        if receipt is None:
+            return Response({'detail': 'Receipt not found.'}, status=404)
+        picture = Image.open(BytesIO(render(receipt_data(receipt)))).convert('RGB')
+        out = BytesIO()
+        picture.save(out, format='PDF', resolution=150)
+        response = HttpResponse(out.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{receipt.receipt_number}.pdf"'
+        return response
+
+
 class ReceiptThermalView(APIView):
     """
     GET /api/v1/finance/receipts/<id>/thermal/
@@ -1113,6 +1141,12 @@ class ReceiptListView(generics.ListAPIView):
         ).filter(
             daily_sheet__branch=branch
         ).order_by('-created_at')
+
+        # One job's receipts (13 Nov 2026): without this, ?job= was ignored and
+        # the job page showed the branch's newest receipt as the job's own.
+        job_id = self.request.query_params.get('job')
+        if job_id:
+            qs = qs.filter(job_id=job_id)
 
         period = self.request.query_params.get('period')
         now = timezone.now()
