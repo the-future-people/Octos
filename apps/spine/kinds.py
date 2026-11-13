@@ -53,11 +53,15 @@ JOB_COLLECTED = 'job.collected'              # handed over to the customer
 JOB_CANCELLED = 'job.cancelled'
 JOB_HALTED = 'job.halted'
 JOB_RESUMED = 'job.resumed'
+JOB_PICKUP_REMINDED = 'job.pickup_reminded'      # reminded to collect (day 2, day 7)
+JOB_FEEDBACK_NUDGED = 'job.feedback_nudged'      # nudged about a design sample
 
 # Customers
 VISIT_CLOSED = 'visit.closed'                # a visit ended: by an outcome, or quiet for 2 hours
 
 CUSTOMER_REGISTERED = 'customer.registered'
+OCTOS_ASKED_DETAILS = 'octos.asked_details'      # a regular was asked for their details
+CUSTOMER_DECLINED_DETAILS = 'customer.declined_details'   # said no: wait 30 days
 CUSTOMER_MATCHED = 'customer.matched'        # a sender was linked to an existing customer
 
 ALL = {

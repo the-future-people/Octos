@@ -345,6 +345,11 @@ CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL = 25
 # rather than left half-done.
 CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
 CELERY_BEAT_SCHEDULE = {
+    # Pickup reminders and design-feedback nudges, mornings, shop days (13 Nov 2026).
+    'customer-reminders': {
+        'task': 'apps.jobs.tasks.send_customer_reminders',
+        'schedule': crontab(hour=9, minute=0, day_of_week='mon-sat'),
+    },
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
         'schedule': crontab(hour=5, minute=0),

@@ -143,3 +143,11 @@ def check_promise(job_id):
     job = Job.objects.filter(pk=job_id).first()
     if job is not None:
         check(job)
+
+
+@shared_task
+def send_customer_reminders():
+    """Mornings, shop days: pickup reminders and design-feedback nudges (13 Nov 2026)."""
+    from apps.jobs.services.reminders import send_feedback_nudges, send_pickup_reminders
+    picked, nudged = send_pickup_reminders(), send_feedback_nudges()
+    logger.info('Customer reminders: %s pickup, %s feedback', picked, nudged)
