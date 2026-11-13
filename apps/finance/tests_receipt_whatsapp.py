@@ -77,3 +77,15 @@ class ReceiptWhatsAppTests(RecoveryFixtureMixin, TestCase):
         self.assertFalse(sent)
         self.assertIn("couldn't be prepared", reason)
         self.assert_untouched()
+
+    def test_a_picture_that_cannot_be_drawn_sends_the_text_receipt(self):
+        # The picture is a nicety: if it fails, the customer still gets a receipt (13 Nov 2026).
+        self.open_window()
+        with patch(FORMAT, return_value='Receipt text'), \
+                patch('apps.finance.services.receipt_image.render', side_effect=RuntimeError('no font')):
+            sent, reason = self.engine.send_whatsapp(self.receipt)
+        self.assertTrue(sent, reason)
+        msg = Message.objects.get(direction=Message.OUTBOUND)
+        msg.refresh_from_db()
+        self.assertEqual(msg.body, 'Receipt text')
+        self.assertFalse(msg.media_mime)
