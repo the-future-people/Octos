@@ -23,7 +23,7 @@ class ItemLineTests(SimpleTestCase):
                           template=PAGES), 2)
         self.assertEqual(d['name'], 'A4 Colour Printing')
         self.assertEqual(d['count'], '13 pages × 2 copies')
-        self.assertEqual(d['tags'], ['One side'])          # the name already says colour
+        self.assertEqual(d['tags'], ['Colour', 'One side'])   # always, even when the name says colour
         self.assertEqual(d['sum'], '13 pages × 2 copies × GHS 2.00')
 
     def test_colour_is_a_tag_when_the_name_does_not_say_it(self):
@@ -57,21 +57,33 @@ class ItemLineTests(SimpleTestCase):
             item(2, 'Lamination', qty=12, unit='3.00', total='36.00', size='A3', specs={'finish': 'gloss'}),
         ], 40)
         self.assertEqual(lines[0], '2 items')
-        # Name and choices fit on one line here; longer ones drop the choices below, never cut off.
-        self.assertTrue(lines[2].startswith('1. A4 Colour Printing'))
-        self.assertTrue(lines[2].endswith('52.00'))
-        self.assertEqual(lines[2], '1. A4 Colour Printing  one side    52.00')
+        # The modal's order: the item and amount, its breakdown, its choices.
+        self.assertEqual(lines[2], '1. A4 Colour Printing'.ljust(35) + '52.00')
         self.assertEqual(lines[3], '   13 pages x 2 copies x 2.00')
+        self.assertEqual(lines[4], '   Colour, one side')
         self.assertTrue(all(len(l) <= 40 for l in lines))
         self.assertTrue(all('×' not in l and '·' not in l for l in lines))
+
+    def test_an_add_on_name_wraps_whole_words(self):
+        lines = thermal([
+            item(1, 'A4 Colour Printing', pages=6, colour=True, unit='2.50', total='15.00', template=PAGES),
+            item(9, 'Brown Envelope (packed with your order)', unit='2.00', total='2.00', parent=1),
+        ], 40)
+        self.assertEqual(lines[5], '   + Brown Envelope (packed with'.ljust(36) + '2.00')
+        self.assertEqual(lines[6], '     your order)')
 
     def test_whatsapp_lists_the_same_items(self):
         out = whatsapp([item(1, 'A4 Photocopy', pages=11, unit='1.00', total='11.00', template=PAGES)])
         self.assertEqual(out[0], '  1. A4 Photocopy · B&W, One side — GHS 11.00')
         self.assertEqual(out[1], '     11 pages × GHS 1.00')
 
-    def test_a_long_name_keeps_its_amount_and_drops_its_choices_below(self):
-        lines = thermal([item(1, 'Black and White Laser Printing Extra', pages=3, unit='1.00', total='3.00',
+    def test_a_long_name_keeps_its_amount(self):
+        lines = thermal([item(1, 'Black and White Laser Printing Extra Large Format', pages=3, unit='1.00', total='3.00',
                               template=PAGES, specs={'finish': 'stapled corner'})], 40)
         self.assertTrue(lines[2].endswith('3.00'))
-        self.assertEqual(lines[3], '   One side, Stapled corner')
+        self.assertEqual(len(lines[2]), 40)
+        # Wrapped by whole words, nothing cut: every word of the name is printed.
+        printed = ' '.join(l.strip() for l in lines[2:4]).replace('3.00', '')
+        for word in 'Black and White Laser Printing Extra Large Format'.split():
+            self.assertIn(word, printed)
+        self.assertEqual(lines[-1], '   B&W, one side, Stapled corner')

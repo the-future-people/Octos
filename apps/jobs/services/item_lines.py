@@ -9,9 +9,9 @@ items through here, so they can never disagree about the same item.
   name       the service, with its paper size when the name has none
   count      "13 pages × 2 copies", "11 pages", "12" (pages, sets = copies,
              quantity = pieces, as JobLineItem documents them)
-  tags       the choices: paper size, Colour or B&W, one side or two sides,
-             and finishes from specifications. Colour and sides only for
-             page work, since is_color defaults to False on everything.
+  tags       the choices: Colour or B&W and one side or two sides (always,
+             for page work only, since is_color defaults to False on
+             everything), then finishes from specifications.
   sum        "13 pages × 2 copies × GHS 2.00", shown only when it really
              equals the line total: a receipt never shows arithmetic that
              does not add up to the price charged.
@@ -67,10 +67,9 @@ def describe(li, number=None):
 
     tags = []
     if page_work:
-        upper = name.upper()
-        says_colour = any(w in upper for w in ('COLOUR', 'COLOR', 'BLACK', 'B&W', 'MONO'))
-        if not says_colour:                         # each fact once
-            tags.append('Colour' if li.is_color else 'B&W')
+        # Colour mode and sides always, side by side under the breakdown: a
+        # fixed column of facts the cashier never has to read the name for.
+        tags.append('Colour' if li.is_color else 'B&W')
         if li.sides in SIDES:
             tags.append(SIDES[li.sides])
     for key, value in (li.specifications or {}).items():
@@ -143,28 +142,43 @@ def thermal(items, width):
             left = left[:room]
         return f"{left}{' ' * (width - len(left) - len(right))}{right}" if right else left
 
-    def head(prefix, r, indent):
-        # Name and choices on one line with the amount when they fit;
-        # otherwise the choices drop to their own line, never cut off.
-        choices = ', '.join(t.lower() if t in ('Colour', 'One side', 'Two sides') else t for t in r['tags'])
-        whole = f"{prefix}{r['name']}" + (f"  {choices}" if choices else '')
-        if len(_plain(whole)) <= width - len(r['amount']) - 1:
-            return [line(whole, r['amount'])]
-        rows_ = [line(f"{prefix}{r['name']}", r['amount'])]
-        if choices:                                  # starting a line: a capital
-            rows_.append(line(f"{indent}{choices[:1].upper()}{choices[1:]}"))
-        return rows_
+    def heading(left, right, indent):
+        # A long name wraps by whole words onto the next lines; the amount
+        # stays on the first. Never cut mid-word on a receipt. The indent
+        # counts toward the width, so nothing is trimmed afterwards.
+        lead = left[: len(left) - len(left.lstrip(' '))]
+        words = _plain(left.strip()).split()
+        room = width - len(right) - 1 - len(lead)
+        first, rest = '', []
+        for w in words:
+            if not rest and len(f"{first} {w}".strip()) <= room:
+                first = f"{first} {w}".strip()
+            elif rest and len(f"{rest[-1]} {w}") <= width:
+                rest[-1] = f"{rest[-1]} {w}"
+            else:
+                rest.append(f"{indent}{w}")
+        return [line(lead + first, right)] + [line(r_) for r_ in rest]
 
+    def choices_of(r):
+        text = ', '.join(t.lower() if t in ('Colour', 'One side', 'Two sides') else t for t in r['tags'])
+        return text[:1].upper() + text[1:] if text else ''
+
+    # The same order as the payment modal: the item and its amount, then its
+    # breakdown, then its choices (13 Nov 2026).
     for i, r in enumerate(rows):
-        if r['is_addon']:
-            out.extend(head('   + ', r, '     '))
-            continue
-        if i:
-            out.append('')
-        out.extend(head(f"{r['number']}. ", r, '   '))
         detail = r['sum'] or (r['count'] if r['count'] != '1' else '')
+        if r['is_addon']:
+            out.extend(heading(f"   + {r['name']}", r['amount'], '     '))
+            indent = '     '
+        else:
+            if i:
+                out.append('')
+            out.extend(heading(f"{r['number']}. {r['name']}", r['amount'], '   '))
+            indent = '   '
         if detail:
-            out.append(line(f"   {detail.replace('GHS ', '')}"))
+            out.append(line(f"{indent}{detail.replace('GHS ', '')}"))
+        if r['tags']:
+            out.append(line(f"{indent}{choices_of(r)}"))
     return out
 
 
