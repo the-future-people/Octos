@@ -14,6 +14,7 @@ from .monthly_close import MonthlyClose
 from .public_holiday import PublicHoliday
 from .customer_wallet import CustomerWalletTransaction
 from .day_note import DaySheetNote
+from .attendant_signoff import AttendantSignOff, AttendantSignOffItem
 
 __all__ = [
     'DailySalesSheet',
@@ -33,4 +34,6 @@ __all__ = [
     'PublicHoliday',
     'CustomerWalletTransaction',
     'DaySheetNote',
+    'AttendantSignOff',
+    'AttendantSignOffItem',
 ]
