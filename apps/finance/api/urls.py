@@ -20,6 +20,7 @@ from .views import (
     CashierSignOffView,
     CashierShiftStatusView,
     CashierMyNumbersView,
+    ReceiptPdfView,
     CashierHistoryView,
     EODSummaryView,
     PettyCashCreateView,
@@ -119,6 +120,7 @@ urlpatterns = [
     path('receipts/<int:pk>/',                   ReceiptDetailView.as_view(),                 name='receipt-detail'),
     path('receipts/<int:pk>/send-whatsapp/',     ReceiptSendWhatsAppView.as_view(),           name='receipt-whatsapp'),
     path('receipts/<int:pk>/thermal/',           ReceiptThermalView.as_view(),                name='receipt-thermal'),
+    path('receipts/<int:pk>/pdf/',               ReceiptPdfView.as_view(),                    name='receipt-pdf'),
 
     # ── Credit Accounts ───────────────────────────────────────────────────────
     path('credit/',                              CreditAccountListView.as_view(),             name='credit-list'),

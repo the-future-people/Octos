@@ -1280,6 +1280,42 @@ class JobMarkCollectedView(APIView):
         return Response({'job_number': job.job_number, 'handover_state': job.handover_state})
 
 
+class JobFileView(APIView):
+    """
+    GET /api/v1/jobs/<id>/file/
+    The job's complete file for the BM's job page (13 Nov 2026): owner, facts,
+    items, every payment and receipt, and its history with who and when.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.jobs.services.job_file import build
+
+        branch = getattr(request.user, 'branch', None)
+        job = Job.objects.filter(pk=pk, branch=branch).select_related('customer', 'intake_by').first() if branch else None
+        if job is None:
+            return Response({'detail': 'Job not found.'}, status=404)
+        return Response(build(job))
+
+
+class JobRemindView(APIView):
+    """POST /api/v1/jobs/<id>/remind/  The pickup reminder, now (13 Nov 2026)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.jobs.services.job_file import remind_now
+
+        branch = getattr(request.user, 'branch', None)
+        job = Job.objects.filter(pk=pk, branch=branch).first() if branch else None
+        if job is None:
+            return Response({'detail': 'Job not found.'}, status=404)
+        try:
+            how = remind_now(job, request.user)
+        except ValueError as refused:
+            return Response({'detail': str(refused)}, status=400)
+        return Response({'detail': f'Reminder sent by {"WhatsApp" if how == "whatsapp" else "SMS"}.'})
+
+
 class WorkloadListView(APIView):
     """
     GET /api/v1/jobs/workload/<view>/
