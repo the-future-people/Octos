@@ -32,6 +32,14 @@ PAD = 24                         # inside the ticket
 
 FONT_DIR = Path(__file__).resolve().parent.parent / 'assets' / 'fonts'
 
+TAG_COLOURS = {                  # the modal's tag colours: background, text
+    'Colour':    ((252, 231, 243), (157, 23, 77)),
+    'B&W':       ((228, 228, 231), (39, 39, 42)),
+    'One side':  ((238, 242, 255), (55, 48, 163)),
+    'Two sides': ((224, 242, 254), (7, 89, 133)),
+    '_':         ((241, 241, 239), (63, 63, 70)),
+}
+
 METHOD_STYLE = {                 # chip background, icon square, label
     'CASH':   ((220, 252, 231), (22, 163, 74), 'Cash'),
     'MOMO':   ((255, 244, 214), (255, 204, 0), 'Mobile Money'),
@@ -43,6 +51,17 @@ METHOD_STYLE = {                 # chip background, icon square, label
 
 def _font(weight, size):
     return ImageFont.truetype(str(FONT_DIR / f'DMSans-{weight}.ttf'), size * S)
+
+
+LOGO = Path(__file__).resolve().parent.parent / 'assets' / 'farhat-logo.png'
+
+
+def _logo():
+    """Farhat's logo for the red header (a white mark on transparent), if present."""
+    try:
+        return Image.open(LOGO).convert('RGBA') if LOGO.exists() else None
+    except Exception:
+        return None
 
 
 def _wrap(draw, text, font, width):
@@ -102,15 +121,29 @@ def render(data) -> bytes:
     body_top = t.y
     d.rounded_rectangle((t.x0, body_top, t.x1, body_top + px(3800)), radius=px(16), fill=WHITE)
 
-    # Header: red band, FARHAT / PRINTING PRESS, branch and phone.
-    header_h = px(66)
+    # Header: the logo on the red band; beside it, at the top, the date and
+    # time, the address, the phone and the website (13 Nov 2026).
+    header_h = px(96)
     d.rounded_rectangle((t.x0, t.y, t.x1, t.y + header_h + px(16)), radius=px(16), fill=RED)
     d.rectangle((t.x0, t.y + header_h, t.x1, t.y + header_h + px(16)), fill=WHITE)
-    t.text((t.x0 + px(PAD), t.y + px(18)), 'FARHAT', _font(700, 18), WHITE)
-    t.text((t.x0 + px(PAD), t.y + px(41)), 'PRINTING PRESS', _font(700, 10), WHITE)
-    t.text((t.x1 - px(PAD), t.y + px(20)), data.get('branch', ''), _font(700, 12), WHITE, 'ra')
-    t.text((t.x1 - px(PAD), t.y + px(38)), data.get('branch_phone', ''), _font(400, 12), WHITE, 'ra')
-    t.y += header_h + px(22)
+    # The Farhat bird in white, with the name beside it.
+    logo = _logo()
+    lx = t.x0 + px(PAD)
+    if logo is not None:
+        h = px(46)
+        w = int(logo.width * h / logo.height)
+        mark = logo.resize((w, h), Image.LANCZOS)
+        t.img.paste(mark, (lx, t.y + (header_h - h) // 2), mark)
+        lx += w + px(8)
+    mid = t.y + header_h // 2
+    t.text((lx, mid - px(2)), 'FARHAT', _font(700, 17), WHITE, 'ls')
+    t.text((lx, mid + px(13)), 'PRINTING PRESS', _font(700, 9), WHITE, 'ls')
+    rx, ry = t.x1 - px(PAD), t.y + px(14)
+    t.text((rx, ry), f"{data.get('date', '')}  ·  {data.get('time', '')}", _font(700, 13), WHITE, 'ra')
+    for k, ln in enumerate((data.get('address', ''), data.get('contact', ''), data.get('website', ''))):
+        if ln:
+            t.text((rx, ry + px(22) + k * px(16)), ln, _font(500 if k < 2 else 700, 11), WHITE, 'ra')
+    t.y += header_h + px(24)
 
     # The tick and the thank-you.
     cx = (t.x0 + t.x1) // 2
@@ -134,8 +167,9 @@ def render(data) -> bytes:
         t.text((right, t.y + px(14)), val_r, _font(700, 19) if red_right else f_value, RED if red_right else INK, 'ra')
         t.y += px(44)
 
+    # The receipt and what was paid; the job itself is described by its items
+    # below, as on the printed receipt, not by its number (13 Nov 2026).
     pair('RECEIPT', data.get('receipt_number', ''), 'AMOUNT PAID', f"GHS {data.get('amount_paid', '0.00')}", red_right=True)
-    pair('DATE & TIME', data.get('when', ''), 'JOB', data.get('job_number', ''))
 
     # How it was paid.
     chip_bg, square, method_label = METHOD_STYLE.get(data.get('method', ''), METHOD_STYLE['SPLIT'])
@@ -169,13 +203,25 @@ def render(data) -> bytes:
             last = k
         t.y += px(20) + last * px(19)
         detail = it.get('sum') or (it.get('count') if it.get('count') not in (None, '', '1') else '')
-        tags = ' · '.join(it.get('tags') or [])
-        for extra in (detail, tags):
-            if extra:
-                for ln in _wrap(d, extra, f_small, right - text_x):
-                    t.text((text_x, t.y + px(2)), ln, f_small, GREY)
-                    t.y += px(17)
-        t.y += px(10)
+        if detail:
+            for ln in _wrap(d, detail, f_small, right - text_x):
+                t.text((text_x, t.y + px(2)), ln, f_small, GREY)
+                t.y += px(17)
+        # The choices as coloured tags, side by side, as in the payment modal.
+        tags = it.get('tags') or []
+        if tags:
+            f_tag = _font(700, 10)
+            tx, ty = text_x, t.y + px(5)
+            for tag in tags:
+                bg, fg = TAG_COLOURS.get(tag, TAG_COLOURS['_'])
+                w = int(d.textlength(tag, font=f_tag)) + px(12)
+                if tx + w > right and tx > text_x:
+                    tx, ty = text_x, ty + px(22)
+                d.rounded_rectangle((tx, ty, tx + w, ty + px(18)), radius=px(5), fill=bg)
+                t.text((tx + w // 2, ty + px(9)), tag, f_tag, fg, 'mm')
+                tx += w + px(5)
+            t.y = ty + px(18)
+        t.y += px(12)
 
     d.line((left, t.y, right, t.y), fill=RULE, width=px(1))
     t.y += px(12)
@@ -190,7 +236,7 @@ def render(data) -> bytes:
     # Footer.
     t.text((cx, t.y), 'Keep this receipt for reprints and collection.', f_small, GREY, 'ma')
     t.y += px(20)
-    t.text((cx, t.y), 'farhatprintingpress.com', _font(700, 12), RED, 'ma')
+    t.text((cx, t.y), data.get('website') or 'farhatprintingpress.com', _font(700, 12), RED, 'ma')
     t.y += px(48)                    # room above the scalloped edge
 
     # Scalloped bottom edge: page-coloured circles bite into the ticket.
@@ -208,6 +254,13 @@ def render(data) -> bytes:
     return buf.getvalue()
 
 
+# Farhat's official details. Calls and WhatsApp share one number for every
+# branch; the address comes from the branch when it has one.
+OFFICIAL_PHONE = '055 196 9777'
+WEBSITE = 'farhatprintingpress.com'
+WESTLAND = ('63 Westlands Ave, Accra', 'GE-328-6296')
+
+
 def receipt_data(receipt) -> dict:
     """The facts render() draws, gathered from a Receipt."""
     from django.utils import timezone
@@ -216,28 +269,34 @@ def receipt_data(receipt) -> dict:
 
     job = receipt.job
     when = timezone.localtime(receipt.created_at)
-    first = (receipt.customer_name or '').split(' (')[0].split()
-    branch = getattr(job, 'branch', None)
+    branch = getattr(job, 'branch', None) or getattr(receipt, 'branch', None)
+    address = (getattr(branch, 'address', '') or '').strip() or WESTLAND[0]
+    gps = (getattr(branch, 'gps_address', '') or getattr(branch, 'ghana_post_gps', '') or '').strip() or WESTLAND[1]
+
+    words = (receipt.customer_name or '').split(' (')[0].split()
+    titles = {'MR', 'MRS', 'MS', 'DR', 'MISS', 'PROF', 'REV'}
+    while words and words[0].rstrip('.').upper() in titles:
+        words = words[1:]
+    first = words[0] if words and words[0].lower() not in ('walk-in', 'walk') else ''
+
     method = receipt.payment_method
     ref = getattr(receipt, 'momo_reference', '') or getattr(receipt, 'pos_approval_code', '') or ''
     cashier = getattr(getattr(receipt, 'cashier', None), 'full_name', '') or ''
     note = ' · '.join(p for p in (f'Ref {ref}' if ref else '', f'received by {cashier}' if cashier else '') if p)
-    items = describe_job(job.line_items.select_related('service').order_by('position')) if job else []
-    title = {'MR', 'MRS', 'MS', 'DR', 'MISS', 'PROF', 'REV'}
-    while first and first[0].rstrip('.').upper() in title:
-        first = first[1:]
+
     return {
-        'branch': f"{branch.name} Branch" if branch and 'branch' not in branch.name.lower() else (branch.name if branch else ''),
-        'branch_phone': getattr(branch, 'phone', '') or '055 196 9777',
-        'first_name': first[0] if first and first[0].lower() not in ('walk-in', 'walk') else '',
+        'date': when.strftime('%d %b %Y').upper(),
+        'time': when.strftime('%I:%M %p').lstrip('0'),
+        'address': address,
+        'contact': f'GPS {gps} · {OFFICIAL_PHONE}',
+        'website': WEBSITE,
+        'first_name': first,
         'receipt_number': receipt.receipt_number,
         'amount_paid': f"{receipt.amount_paid:.2f}",
-        'when': when.strftime('%d %b %Y | %H:%M').upper(),
-        'job_number': job.job_number if job else '',
         'method': method,
-        'method_label': receipt.get_payment_method_display() if method != 'POS' else 'Card (POS)',
+        'method_label': 'Card (POS)' if method == 'POS' else receipt.get_payment_method_display(),
         'method_note': note,
-        'items': items,
+        'items': describe_job(job.line_items.select_related('service').order_by('position')) if job else [],
         'total': f"{(job.estimated_cost if job else receipt.amount_paid):.2f}",
         'balance': f"{(receipt.balance_due or 0):.2f}",
     }

@@ -70,7 +70,7 @@ class ReceiptWhatsAppTests(RecoveryFixtureMixin, TestCase):
         self.assertEqual(msg.kind, 'receipt')
         self.assertEqual(msg.media_mime, 'image/png')
         self.assertTrue(msg.body.startswith('Your receipt'))
-        self.assertNotIn(' for .', msg.body)
+        self.assertTrue(msg.body.startswith("Here's your receipt"))
 
     def test_a_receipt_that_cannot_be_written_out_says_so(self):
         self.open_window()

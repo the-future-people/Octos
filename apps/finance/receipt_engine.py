@@ -185,8 +185,8 @@ class ReceiptEngine:
             data = receipt_data(receipt)
             image = render(data)
             name = data.get('first_name')
-            job_part = f" for {data['job_number']}" if data.get('job_number') else ' from Farhat Printing Press'
-            caption = f"Your receipt{job_part}. Thank you{', ' + name if name else ''} 🙏"
+            # No digits in the caption: WhatsApp turns digit runs into phone links.
+            caption = f"Here's your receipt{', ' + name if name else ''}. Thank you for choosing Farhat 🙏"
         except Exception:
             logger.exception(
                 'ReceiptEngine: receipt %s picture could not be drawn; sending the text receipt',
