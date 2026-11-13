@@ -106,8 +106,13 @@ def build(job, now=None):
     history = [entry(job.created_at, 'Job recorded',
                      f"{humanise(job.job_type)} · came in by {humanise(job.intake_channel) or 'the counter'}",
                      recorded_by(job))]
+    pay_times = [l.transitioned_at for l in logs if l.axis == 'PAYMENT']
     for l in logs:
         if l.axis not in ('PAYMENT', 'WORK', 'HANDOVER', 'RECORD'):
+            continue
+        # The system's own note of a payment ("Payment confirmed: 100% deposit")
+        # is the payment itself, told twice: folded into it (13 Nov 2026).
+        if l.axis == 'RECORD' and any(abs((l.transitioned_at - t).total_seconds()) < 60 for t in pay_times):
             continue
         tone = {'PAYMENT': 'money', 'WORK': 'work', 'HANDOVER': 'done', 'RECORD': 'ink'}[l.axis]
         history.append(entry(l.transitioned_at, phrase(l.axis, l.to_status), l.notes or '', _name(l.actor), tone))
