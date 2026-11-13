@@ -1127,3 +1127,41 @@ Internal detail belongs in the log, not on the screen.
 - Fix the root cause, not the symptom: a per-call header would have fixed one upload and left every other one broken.
 
 - A test that reads the real clock (shop_open(), "now") is flaky: it passes or fails depending on the hour. Patch the time-dependent input in setUp. The brain tests failed at 18:40 and would have passed at 21:00.
+
+## 10–13 November 2026: the spine, the counter, the cashier
+
+### Before building
+- Search for a concept before building it: "at the counter" was built twice (a COUNTER state beside the existing counter_until) and had to be merged.
+- Test the platform's real behaviour before building on it: WhatsApp strips zero-width characters but keeps emoji variation selectors, which is what the signed QR rests on.
+- Read the code before deciding: "Take balance" looked like a button and turned out to be a missing payment path (DEPOSIT_PAID could never become SETTLED).
+- Keep one value per meaning: file_source, not a second intake field; one shop_state; one rule for "who a job is for" (jobs/services/labels.py); one way of describing items (jobs/services/item_lines.py).
+- Share a calculation, never copy it: what should be in the drawer is CashierFloat.expected_now(), used by sign-off and My shift alike.
+
+### Writing it
+- Module-level code runs top to bottom: define a name (FILE) before the list that uses it (CASES).
+- After hand-editing a list, check the count (27 exam cases became 26).
+- A test must set up the situation it claims to test (the exam needed a real file).
+- A receipt never shows arithmetic that does not add up: the sum line appears only when it equals the line total.
+- A component file (.jsx) exports only components; a shared hook or query goes in its own .js file.
+- Prefer derived state to setState inside an effect: work the value out while drawing.
+- Additive changes to a shared serializer: add fields beside the old ones, never change what an existing field means for every screen.
+
+### Checking it
+- `python -m py_compile` checks syntax only: a removed name (Conversation.COUNTER) still fails at run time. Run the tests.
+- `npm run build` does not catch a missing import (useEffect, MyShift): run `npx eslint <changed files>` before every frontend commit.
+- Run tests by module, built from file names, not by app label.
+- Read the whole function after a Find/Change: a leftover block after `return` is dead code.
+- Test a script that edits or deletes code on a stand-in first: the panel-removal script matched the parameters' braces instead of the body's.
+- `git status` before every commit, and read every line: two finished screens sat uncommitted for a day, and a new file once built locally but broke the deploy.
+- Gate commits on the result: a pasted block runs every line after a failure, so tests failed once and the commit still pushed. `if ($LASTEXITCODE -eq 0) { git add …; git commit …; git push }`.
+
+### Shells and tools
+- Never run multi-line Python with nested quotes through `python -c` in PowerShell: write a .py file and run it.
+- In git grep, options go before the pattern (`git grep -n -A 2 "x" -- path`).
+- `PS C:\…>` is this computer; the live data is in the Railway shell (`railway ssh`, prompt `root@…:/app#`).
+- The desktop app has no inspector: reproduce a crash in Chrome with F12 to read the error.
+- A white page is an uncaught crash: roll back on Vercel first, then debug. Error boundaries now catch crashes in the BM and cashier portals and at the top of the app.
+
+### Data
+- A list endpoint that ignores a filter fails quietly: receipts/?job= returned the branch's newest receipt, and the job panel showed another job's receipt for weeks.
+- Key rotation needs a grace period: signs printed before COUNTER_QR_SECRET existed still had to verify.
