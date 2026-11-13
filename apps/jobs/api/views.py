@@ -463,6 +463,64 @@ class CashierSummaryView(APIView):
         data = get_cashier_summary(user.branch, timezone.localdate())
         return Response(data)
        
+class CashierBalancesView(APIView):
+    """
+    GET /api/v1/jobs/cashier/balances/
+    Jobs with a deposit paid and a balance owing, at the cashier's branch:
+    finished ones first, so the balance is taken before the attendant hands
+    over (13 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Case, IntegerField, Value, When
+
+        branch = getattr(request.user, 'branch', None)
+        if not branch:
+            return Response({'detail': 'No branch assigned.'}, status=400)
+        jobs = (Job.objects.filter(branch=branch, payment_state='DEPOSIT_PAID')
+                .exclude(status='CANCELLED')
+                .annotate(finished=Case(When(work_state='DONE', then=Value(0)), default=Value(1),
+                                        output_field=IntegerField()))
+                .select_related('customer', 'intake_by')
+                .order_by('finished', 'created_at'))
+        rows = JobListSerializer(jobs, many=True, context={'request': request, 'items_display': True}).data
+        for row, job in zip(rows, jobs):
+            row['balance_due'] = f"{job.balance_due or 0:.2f}"
+            row['amount_paid'] = f"{job.amount_paid or 0:.2f}"
+            row['work_state'] = job.work_state
+        total = sum((j.balance_due or 0) for j in jobs)
+        return Response({'count': len(rows), 'total': f"{total:.2f}", 'results': rows})
+
+
+class CashierBalanceConfirmView(APIView):
+    """
+    POST /api/v1/jobs/<id>/cashier/balance/   Body: as the payment confirm, without deposit_percentage.
+    Takes exactly the balance on a deposit-paid job and settles it (13 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.jobs.services.balance_service import confirm_balance
+
+        role = getattr(getattr(request.user, 'role', None), 'name', '')
+        if role not in ('CASHIER', 'BRANCH_MANAGER'):
+            return Response({'detail': 'Only the cashier takes payments.'}, status=403)
+        branch = getattr(request.user, 'branch', None)
+        job = Job.objects.filter(pk=pk, branch=branch).first() if branch else None
+        if job is None:
+            return Response({'detail': 'Job not found.'}, status=404)
+
+        data = {**request.data, 'deposit_percentage': 100}
+        serializer = CashierPaymentSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = confirm_balance(job, serializer.validated_data, request.user)
+        except ValueError as refused:
+            return Response({'detail': str(refused)}, status=400)
+        return Response(result)
+
+
 class CashierConfirmPaymentView(APIView):
     """
     POST /api/v1/jobs/<id>/cashier/confirm/

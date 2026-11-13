@@ -70,6 +70,8 @@ urlpatterns = [
     path('cashier/queue/',           views.CashierQueueView.as_view(),          name='cashier-queue'),
     path('cashier/summary/',         views.CashierSummaryView.as_view(),         name='cashier-summary'),
     path('<int:pk>/cashier/confirm/', views.CashierConfirmPaymentView.as_view(), name='cashier-confirm'),
+    path('<int:pk>/cashier/balance/', views.CashierBalanceConfirmView.as_view(), name='cashier-balance'),
+    path('cashier/balances/',        views.CashierBalancesView.as_view(),       name='cashier-balances'),
     
     # Services
     path('services/', views.ServiceListView.as_view(), name='service-list'),

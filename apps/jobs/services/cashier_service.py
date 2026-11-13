@@ -546,7 +546,7 @@ def _apply_wallet_credit(job, requested_amount, wallet_consent, actor):
 
     return result
 
-def _redeem_wallet_credit(job, actor):
+def _redeem_wallet_credit(job, actor, amount=None):
     """
     Redeems wallet balance against THIS job's cost. Job-only redemption
     is the entire point of this feature — there is deliberately no
@@ -562,7 +562,9 @@ def _redeem_wallet_credit(job, actor):
     if not job.customer_id:
         raise ValueError('Wallet redemption requires a registered customer.')
 
-    job_cost = job.estimated_cost or Decimal('0')
+    # amount: a balance being paid from the wallet (13 Nov 2026); otherwise
+    # the whole job, as before.
+    job_cost = Decimal(str(amount)) if amount is not None else (job.estimated_cost or Decimal('0'))
     if job_cost <= 0:
         raise ValueError('Job has no cost — nothing to redeem against.')
 
