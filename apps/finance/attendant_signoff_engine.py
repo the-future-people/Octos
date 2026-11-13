@@ -94,6 +94,7 @@ class AttendantSignOffEngine:
         shift_end = datetime.fromisoformat(schedule['shift_end'])
         deadline = datetime.fromisoformat(schedule['signoff_at'])
         return {
+            'shift_start': datetime.fromisoformat(schedule['shift_start']),
             'warning_at': shift_end - timedelta(minutes=self.WARNING_MINUTES),
             'shift_end': shift_end,
             'recording_closes_at': datetime.fromisoformat(schedule['job_lock_at']),
@@ -123,7 +124,39 @@ class AttendantSignOffEngine:
 
     # ── Status (what the attendant portal polls) ──────────────────────────────
 
+    def is_due(self, attendant, sheet) -> bool:
+        """Only an attendant who recorded something today has a sign-off to do."""
+        from apps.jobs.models import Job
+        return bool(sheet) and Job.objects.filter(daily_sheet=sheet, intake_by=attendant).exists()
+
+    def handover_notes(self, before_date) -> list:
+        """The notes left at the branch's last sign-offs before today, for the morning."""
+        from apps.finance.models import AttendantSignOff, DailySalesSheet
+
+        last = (
+            DailySalesSheet.objects.filter(branch=self.branch, date__lt=before_date)
+            .order_by('-date').first()
+        )
+        if last is None:
+            return []
+        return [
+            {
+                'attendant_name': _name(r.attendant),
+                'note': r.handover_note,
+                'signed_off_at': _iso(r.signed_off_at),
+                'sheet_date': last.date.isoformat(),
+            }
+            for r in AttendantSignOff.objects.filter(daily_sheet=last)
+            .exclude(handover_note='').select_related('attendant').order_by('signed_off_at')
+        ]
+
     def status(self, attendant, now=None) -> dict:
+        """
+        Everything the portal needs about her day. is_locked is the one thing
+        the portal obeys: signed off, the day sheet closed, or past the
+        deadline with nothing to sign off for (nothing recorded, so Octos will
+        never sign off for her and there is no sign-off to wait for).
+        """
         from apps.finance.models import AttendantSignOff
 
         now = now or timezone.now()
@@ -133,17 +166,33 @@ class AttendantSignOffEngine:
             AttendantSignOff.objects.filter(daily_sheet=sheet, attendant=attendant).first()
             if sheet else None
         )
-        phase = self.phase(now, timing, signed_off=record is not None)
+        signed_off = record is not None
+        day_closed = bool(sheet) and not sheet.is_open
+        due = self.is_due(attendant, sheet)
+        past_deadline = now >= timing['deadline']
+
+        phase = self.phase(now, timing, signed_off=signed_off)
+        if not signed_off and day_closed:
+            phase = 'DAY_CLOSED'
+        elif not signed_off and past_deadline and not due:
+            phase = 'ENDED'
+
         can_sign_off = bool(
-            sheet and sheet.is_open and record is None and now >= timing['shift_end']
+            sheet and sheet.is_open and not signed_off and now >= timing['shift_end']
         )
+        is_locked = signed_off or day_closed or (past_deadline and not due)
         return {
             'sheet_id': sheet.pk if sheet else None,
+            'sheet_number': sheet.sheet_number if sheet else None,
             'phase': phase,
+            'is_locked': is_locked,
+            'is_due': due,
+            'handover_notes': self.handover_notes(timezone.localdate()),
             'is_signed_off': record is not None,
             'signed_off_at': _iso(record.signed_off_at) if record else None,
             'is_auto': record.is_auto if record else False,
             'can_sign_off': can_sign_off,
+            'shift_start': _iso(timing['shift_start']),
             'warning_at': _iso(timing['warning_at']),
             'shift_end': _iso(timing['shift_end']),
             'recording_closes_at': _iso(timing['recording_closes_at']),

@@ -143,12 +143,49 @@ class BucketTests(SignOffFixtureMixin, TestCase):
 class TimingTests(SignOffFixtureMixin, TestCase):
 
     def test_phases_follow_the_shift(self):
+        self.job('INSTANT')     # due, so past the deadline reads OVERDUE rather than ENDED
         engine = self.engine()
         expected = [((18, 0), 'OPEN'), ((19, 10), 'CLOSING_SOON'), ((19, 45), 'SIGN_OFF_OPEN'),
                     ((20, 20), 'FINAL_CALL'), ((20, 40), 'OVERDUE')]
         for (h, m), phase in expected:
             with clock(h, m) as now:
                 self.assertEqual(engine.status(self.attendant, now=now)['phase'], phase, f'{h}:{m:02d}')
+
+    def test_a_closed_day_locks_the_portal(self):
+        self.sheet.status = 'CLOSED'
+        self.sheet.save(update_fields=['status'])
+        with clock(19, 45) as now:
+            s = self.engine().status(self.attendant, now=now)
+        self.assertEqual(s['phase'], 'DAY_CLOSED')
+        self.assertTrue(s['is_locked'])
+        self.assertFalse(s['can_sign_off'])
+
+    def test_past_the_deadline_with_nothing_recorded_locks(self):
+        with clock(20, 40) as now:
+            s = self.engine().status(self.attendant, now=now)
+        self.assertEqual(s['phase'], 'ENDED')
+        self.assertTrue(s['is_locked'])
+
+    def test_past_the_deadline_with_jobs_waits_for_sign_off(self):
+        self.job('INSTANT')
+        with clock(20, 40) as now:
+            s = self.engine().status(self.attendant, now=now)
+        self.assertEqual(s['phase'], 'OVERDUE')
+        self.assertFalse(s['is_locked'])
+        self.assertTrue(s['can_sign_off'])
+
+    def test_last_nights_note_is_there_in_the_morning(self):
+        yesterday = DailySalesSheet.objects.create(
+            branch=self.branch, date=DAY - datetime.timedelta(days=1), status='CLOSED',
+        )
+        AttendantSignOff.objects.create(
+            attendant=self.other_attendant, daily_sheet=yesterday,
+            signed_off_at=at(20, 0) - datetime.timedelta(days=1),
+            signed_off_by=self.other_attendant, handover_note='Mr Mensah returns at 9',
+        )
+        with clock(8, 30) as now:
+            notes = self.engine().status(self.attendant, now=now)['handover_notes']
+        self.assertEqual([n['note'] for n in notes], ['Mr Mensah returns at 9'])
 
     def test_sign_off_opens_at_shift_end_not_before(self):
         self.job('INSTANT', status='COMPLETE', payment='SETTLED', work='DONE', handover='HANDED_OVER')
