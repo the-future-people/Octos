@@ -17,13 +17,9 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-OCTOS_ROLE = 'OCTOS'
-
-
-def octos_user():
-    """The account Octos issues as (manage.py setup_octos), or None."""
-    from django.contrib.auth import get_user_model
-    return get_user_model().objects.filter(role__name=OCTOS_ROLE).first()
+# The Octos account now lives in accounts (13 Nov 2026). Imported here under
+# the same names so existing callers and test patches keep working.
+from apps.accounts.system import OCTOS_ROLE, octos_user  # noqa: F401
 
 
 def find_customer(conversation):

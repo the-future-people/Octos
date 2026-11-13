@@ -85,7 +85,8 @@ class AttendantSignOffItem(AuditModel):
         ON_SHELF     = 'ON_SHELF',     'On shelf'
         MISSING      = 'MISSING',      'Missing from shelf'
 
-    NEEDS_BM = {Answer.LEFT_UNPAID, Answer.MISSING}
+    # Plain values: the answer read back from the database is a str.
+    NEEDS_BM = {Answer.LEFT_UNPAID.value, Answer.MISSING.value}
 
     signoff = models.ForeignKey(
         AttendantSignOff,

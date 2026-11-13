@@ -367,6 +367,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.finance.tasks.warn_sheets',
         'schedule': crontab(minute='*/5'),
     },
+    # Attendants who miss their sign-off deadline are signed off by Octos
+    # and the branch manager is told (13 Nov 2026).
+    'attendant-signoff-every-5min': {
+        'task': 'apps.finance.tasks.attendant_signoff',
+        'schedule': crontab(minute='*/5'),
+    },
     'suspend-overdue-daily': {
         'task': 'apps.finance.tasks.suspend_overdue',
         'schedule': crontab(hour=6, minute=0),

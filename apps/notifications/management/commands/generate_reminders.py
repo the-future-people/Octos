@@ -90,20 +90,22 @@ class Command(BaseCommand):
             signoff_at = datetime.fromisoformat(schedule['signoff_at'])
             mins_remaining = int((shift_end - now).total_seconds() / 60)
 
-            # Two phases, and only the cashier has the second.
+            # Two phases. Everyone has the first; the cashier and the
+            # attendant have the second, since both sign off (the attendant
+            # since 13 Nov 2026).
             #
             #   Phase 1, everyone: the half hour before the shift ends.
-            #   Phase 2, cashier only: from the end of the shift until the
-            #   sign-off deadline. She often has nothing left to do but
-            #   sign off, and without this she is not asked until the
-            #   compulsory wizard appears an hour later.
+            #   Phase 2, cashier and attendant: from the end of the shift
+            #   until the sign-off deadline. Often nothing is left to do
+            #   but sign off, and without this nobody asks until the
+            #   deadline passes.
             #
             # Both read the times the shift engine already computes, so
             # there is no second clock to drift from the first.
             phase = None
             if 0 <= mins_remaining <= WINDOW_MINUTES:
                 phase = 'PRE_CLOSE'
-            elif role_name == 'CASHIER' and mins_remaining < 0:
+            elif role_name in ('CASHIER', 'ATTENDANT') and mins_remaining < 0:
                 mins_to_signoff = int((signoff_at - now).total_seconds() / 60)
                 if mins_to_signoff > 0:
                     phase = 'PRE_SIGNOFF'
@@ -124,6 +126,24 @@ class Command(BaseCommand):
                     is_signed_off=True,
                 ).exists()
                 if already_signed_off:
+                    continue
+
+            # Attendant: only someone who recorded jobs today has a sign-off
+            # to do, and once she has signed off there is nothing to remind.
+            if role_name == 'ATTENDANT' and phase == 'PRE_SIGNOFF':
+                from apps.finance.models import AttendantSignOff
+                from apps.jobs.models import Job
+                recorded_today = Job.objects.filter(
+                    daily_sheet__branch=user.branch,
+                    daily_sheet__date=today,
+                    intake_by=user,
+                ).exists()
+                signed_off = AttendantSignOff.objects.filter(
+                    daily_sheet__branch=user.branch,
+                    daily_sheet__date=today,
+                    attendant=user,
+                ).exists()
+                if signed_off or not recorded_today:
                     continue
 
             link = ''

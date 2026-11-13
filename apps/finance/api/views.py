@@ -310,6 +310,14 @@ class DailySalesSheetCloseView(APIView):
                 f"Resolve before closing."
             )
 
+        # Attendant gate: everyone who recorded jobs today has signed off.
+        # Past their deadline Octos signs off for them first, so the manager
+        # is never held up waiting for the scheduled task (13 Nov 2026).
+        from apps.finance.attendant_signoff_engine import AttendantSignOffEngine
+        attendant_gate = AttendantSignOffEngine(sheet.branch).gate(sheet)
+        if not attendant_gate['passed']:
+            errors.extend(attendant_gate['errors'])
+
         # Stage tomorrow's floats BEFORE Gate 3
         floats_data = request.data.get('floats', [])
         tomorrow = sheet.date + timedelta(days=1)
@@ -1727,6 +1735,9 @@ class EODSummaryView(APIView):
             )
 
         summary = EODService.get_summary(sheet, sheet.branch)
+        # Each attendant's sign-off and what still needs the manager (13 Nov 2026).
+        from apps.finance.attendant_signoff_engine import AttendantSignOffEngine
+        summary['attendant_signoffs'] = AttendantSignOffEngine(sheet.branch).sheet_overview(sheet)
         # Files a person opened today with no job made or linked for the chat
         # (11 Nov 2026): for the BM to look at before closing. Never a gate.
         from apps.spine.unrecorded import unrecorded_files

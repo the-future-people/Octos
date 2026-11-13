@@ -16,6 +16,12 @@ def warn_sheets():
     call_command('run_sheet_tasks', 'warn')
 
 @shared_task
+def attendant_signoff():
+    """Every 5 minutes. Octos signs off attendants past their deadline."""
+    from django.core.management import call_command
+    call_command('run_sheet_tasks', 'attendant_signoff')
+
+@shared_task
 def suspend_overdue():
     from django.core.management import call_command
     call_command('run_sheet_tasks', 'suspend')

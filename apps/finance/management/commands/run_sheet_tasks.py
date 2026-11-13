@@ -13,6 +13,7 @@ class Command(BaseCommand):
       open       — Open sheets for all active branches (run at 5:00am daily)
       close      — Auto-close sheets past their BM close window (run every 15min)
       warn       — Check which branches are in warning window (run every 5min)
+      attendant_signoff — Octos signs off attendants past their deadline (every 5min)
 
     Usage:
       python manage.py run_sheet_tasks open
@@ -30,8 +31,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             'mode',
-            choices=['open', 'close', 'warn', 'suspend'],
-            help='Task mode: open | close | warn | suspend',
+            choices=['open', 'close', 'warn', 'suspend', 'attendant_signoff'],
+            help='Task mode: open | close | warn | suspend | attendant_signoff',
         )
 
     def handle(self, *args, **options) -> None:
@@ -45,6 +46,8 @@ class Command(BaseCommand):
             self._run_warn()
         elif mode == 'suspend':
             self._run_suspend()
+        elif mode == 'attendant_signoff':
+            self._run_attendant_signoff()
     # ── Open ──────────────────────────────────────────────────────
 
     def _run_open(self) -> None:
@@ -242,6 +245,40 @@ class Command(BaseCommand):
                 'run_sheet_tasks warn: notification failed for branch %s',
                 branch.code,
             )
+    # ── Attendant automatic sign-off ──────────────────────────────
+
+    def _run_attendant_signoff(self) -> None:
+        """
+        Past each branch's attendant sign-off deadline, Octos signs off any
+        attendant who recorded jobs today and has not signed off. Safe to run
+        as often as wanted: the unique constraint makes a second run a no-op.
+        """
+        from apps.finance.models import DailySalesSheet
+        from apps.finance.attendant_signoff_engine import AttendantSignOffEngine
+
+        today  = timezone.localdate()
+        signed = 0
+
+        open_sheets = DailySalesSheet.objects.filter(
+            date   = today,
+            status = DailySalesSheet.Status.OPEN,
+        ).select_related('branch')
+
+        for sheet in open_sheets:
+            try:
+                signed += len(AttendantSignOffEngine(sheet.branch).auto_signoff(sheet))
+            except Exception as exc:
+                logger.exception(
+                    'run_sheet_tasks attendant_signoff: failed for branch %s', sheet.branch.code
+                )
+                self.stdout.write(
+                    self.style.ERROR(f'  ERROR signing off attendants for {sheet.branch.code}: {exc}')
+                )
+
+        self.stdout.write(
+            self.style.SUCCESS(f'attendant_signoff complete — {signed} attendant(s) signed off by Octos')
+        )
+
     # ── Suspend overdue credit accounts ───────────────────────────
 
     def _run_suspend(self) -> None:

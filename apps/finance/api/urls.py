@@ -75,6 +75,13 @@ from .views import (
     ApproveDisruptionView,
     RejectDisruptionView,
 )
+from .attendant_signoff_views import (
+    AttendantSignOffStatusView,
+    AttendantSignOffPreviewView,
+    AttendantSignOffSubmitView,
+    SheetAttendantSignOffsView,
+    AttendantSignOffItemResolveView,
+)
 
 
 urlpatterns = [
@@ -109,6 +116,13 @@ urlpatterns = [
     path('cashier/my-numbers/',                  CashierMyNumbersView.as_view(),              name='cashier-my-numbers'),
     path('cashier/history/',                     CashierHistoryView.as_view(),                name='cashier-history'),
     path('cashier/receipts/',                    CashierReceiptListView.as_view(),            name='cashier-receipts'),
+
+    # ── Attendant sign-off ────────────────────────────────────────────────────
+    path('attendant/signoff/status/',            AttendantSignOffStatusView.as_view(),        name='attendant-signoff-status'),
+    path('attendant/signoff/preview/',           AttendantSignOffPreviewView.as_view(),       name='attendant-signoff-preview'),
+    path('attendant/signoff/',                   AttendantSignOffSubmitView.as_view(),        name='attendant-signoff-submit'),
+    path('sheets/<int:pk>/attendant-signoffs/',  SheetAttendantSignOffsView.as_view(),        name='sheet-attendant-signoffs'),
+    path('attendant-signoff-items/<int:pk>/resolve/', AttendantSignOffItemResolveView.as_view(), name='attendant-signoff-item-resolve'),
     path('wallets/',                             WalletBalanceListView.as_view(),             name='wallet-list'),
 
     # ── POS Transactions ──────────────────────────────────────────────────────
