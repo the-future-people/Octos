@@ -22,7 +22,13 @@ class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Notification.objects.exclude(category='REMINDER').filter(recipient=request.user)
+        qs = Notification.objects.filter(recipient=request.user)
+        # Reminders show as the pop-up only, never in the bell (8 Nov 2026): kept
+        # out of the bell's list, kept for the pop-up, which asks with
+        # display_mode=INTERRUPTIVE. Leaving them out everywhere silenced the
+        # 5-minute sign-off alerts (13 Nov 2026).
+        if request.query_params.get('display_mode') != 'INTERRUPTIVE':
+            qs = qs.exclude(category='REMINDER')
 
         if request.query_params.get('unread') == 'true':
             qs = qs.filter(is_read=False)
