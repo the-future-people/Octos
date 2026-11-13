@@ -65,7 +65,12 @@ class ReceiptWhatsAppTests(RecoveryFixtureMixin, TestCase):
         self.assertEqual(self.receipt.whatsapp_status, Receipt.DeliveryStatus.SENT)
         self.assertIsNotNone(self.receipt.whatsapp_sent_at)
         msg = conv.messages.get(direction=Message.OUTBOUND)
-        self.assertEqual((msg.kind, msg.body), ('receipt', 'Receipt text'))
+        # Sent as the receipt picture with a one-line caption (13 Nov 2026).
+        msg.refresh_from_db()
+        self.assertEqual(msg.kind, 'receipt')
+        self.assertEqual(msg.media_mime, 'image/png')
+        self.assertTrue(msg.body.startswith('Your receipt'))
+        self.assertNotIn(' for .', msg.body)
 
     def test_a_receipt_that_cannot_be_written_out_says_so(self):
         self.open_window()

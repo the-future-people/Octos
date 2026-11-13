@@ -176,8 +176,29 @@ class ReceiptEngine:
             )
             return False, "This receipt couldn't be prepared for WhatsApp. Print it instead."
 
+        # The receipt as a picture, in Farhat's colours (13 Nov 2026), with a
+        # one-line caption. If it can't be drawn, the text receipt goes
+        # instead: a customer never gets nothing.
+        image, caption = None, text
         try:
-            message = try_send_text(receipt.customer_phone, text, kind='receipt')
+            from apps.finance.services.receipt_image import receipt_data, render
+            data = receipt_data(receipt)
+            image = render(data)
+            name = data.get('first_name')
+            job_part = f" for {data['job_number']}" if data.get('job_number') else ' from Farhat Printing Press'
+            caption = f"Your receipt{job_part}. Thank you{', ' + name if name else ''} 🙏"
+        except Exception:
+            logger.exception(
+                'ReceiptEngine: receipt %s picture could not be drawn; sending the text receipt',
+                receipt.receipt_number,
+            )
+            image, caption = None, text
+
+        try:
+            message = try_send_text(
+                receipt.customer_phone, caption, kind='receipt',
+                image=image, filename=f'{receipt.receipt_number}.png',
+            )
         except Exception:
             logger.exception(
                 'ReceiptEngine: WhatsApp receipt %s could not be queued',
