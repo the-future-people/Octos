@@ -263,38 +263,13 @@ class ReceiptEngine:
         ]
 
         # ── Line items — tabulated downward ───────────────────────────
-        line_items = job.line_items.select_related('service').order_by('position')
-
-        if line_items.exists():
-            # Column headers
-            lines.append(f"{'ITEM':<24} {'QTY':>4} {'AMOUNT':>12}")
-            lines.append(SEP)
-            for li in line_items:
-                full_name = li.label or li.service.name
-                qty  = str(li.sets if li.sets > 1 else li.quantity)
-                amt  = f"GHS {float(li.line_total):,.2f}"
-                # Wrap long names across multiple lines
-                if len(full_name) <= 24:
-                    lines.append(f"{full_name:<24} {qty:>4} {amt:>12}")
-                else:
-                    # First line with qty and amount
-                    lines.append(f"{full_name[:24]:<24} {qty:>4} {amt:>12}")
-                    # Remaining name on next line(s)
-                    remaining = full_name[24:]
-                    while remaining:
-                        lines.append(f"  {remaining[:38]}")
-                        remaining = remaining[38:]
-                        
-                # Show spec detail on next line if multi-page
-                if li.pages and li.pages > 1:
-                    spec = f"  {li.pages}pp × {li.sets} sets"
-                    if li.paper_size:
-                        spec += f" · {li.paper_size}"
-                    spec_color = ' · Colour' if li.is_color else ' · B&W'
-                    spec += spec_color
-                    lines.append(spec[:W])
+        # Items, numbered and described one way everywhere (13 Nov 2026):
+        # jobs/services/item_lines.py, shared with the payment modal.
+        from apps.jobs.services.item_lines import thermal as thermal_items
+        item_rows = thermal_items(job.line_items.select_related('service').order_by('position'), W)
+        if item_rows:
+            lines.extend(item_rows)
         else:
-            # Fallback to job title if no line items
             lines.append(row('Service:', job.title[:30] if job.title else '—'))
 
         lines.append(SEP)
@@ -389,12 +364,12 @@ class ReceiptEngine:
         ]
 
         # Line items
-        line_items = job.line_items.select_related('service').order_by('position')
-        if line_items.exists():
-            lines.append(f"*Services:*")
-            for li in line_items:
-                name = li.label or li.service.name
-                lines.append(f"  • {name} — GHS {float(li.line_total):,.2f}")
+        # The same numbered items as the printed receipt (13 Nov 2026).
+        from apps.jobs.services.item_lines import whatsapp as whatsapp_items
+        item_rows = whatsapp_items(job.line_items.select_related('service').order_by('position'))
+        if item_rows:
+            lines.append("*Services:*")
+            lines.extend(item_rows)
         else:
             lines.append(f"*Service:* {job.title}")
 

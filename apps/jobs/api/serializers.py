@@ -220,6 +220,7 @@ class JobListSerializer(serializers.ModelSerializer):
     from_chat        = serializers.SerializerMethodField()
     recorded_by      = serializers.SerializerMethodField()
     contact_phone    = serializers.SerializerMethodField()
+    items_display    = serializers.SerializerMethodField()
     deposit_due      = serializers.SerializerMethodField()
     line_items       = JobLineItemSerializer(many=True, read_only=True)
     line_item_count  = serializers.SerializerMethodField()
@@ -232,7 +233,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'id', 'job_number', 'title', 'job_type', 'status',
             'priority', 'branch', 'branch_name', 'assigned_to',
             'assigned_to_name', 'customer_name', 'intake_by_name',
-            'for_whom', 'from_chat', 'recorded_by', 'contact_phone',
+            'for_whom', 'from_chat', 'recorded_by', 'contact_phone', 'items_display',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
             'customer', 'customer_phone', 'customer_credit',
@@ -271,6 +272,14 @@ class JobListSerializer(serializers.ModelSerializer):
     def get_contact_phone(self, obj):
         from apps.jobs.services.labels import contact_phone
         return contact_phone(obj)
+
+    def get_items_display(self, obj):
+        # The receipt's own item lines (jobs/services/item_lines.py), for the
+        # payment modal only: other lists skip the extra query (13 Nov 2026).
+        if not self.context.get('items_display'):
+            return None
+        from apps.jobs.services.item_lines import describe_job
+        return describe_job(obj.line_items.select_related('service').order_by('position'))
 
     def get_is_halted(self, obj):
         return any(h.resumed_at is None for h in obj.halts.all())

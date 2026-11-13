@@ -398,6 +398,10 @@ class CashierQueueView(generics.ListAPIView):
     serializer_class   = JobListSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_serializer_context(self):
+        # The payment modal shows the receipt's own item lines (13 Nov 2026).
+        return {**super().get_serializer_context(), 'items_display': True}
+
     KINDS = {
         'instant'  : [Job.INSTANT],
         'processed': [Job.PRODUCTION, Job.DESIGN],
