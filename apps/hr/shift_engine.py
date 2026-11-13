@@ -28,11 +28,17 @@ class ShiftEngine:
     """
 
     # ── Safe fallback constants (used only if no BranchShift is configured) ──
-    FALLBACK_START          = '07:30'
-    FALLBACK_END            = '19:30'
-    FALLBACK_ATTENDANT_LOCK = 50
-    FALLBACK_CASHIER_LOCK   = 40
-    FALLBACK_BM_AUTOCLOSE   = 150
+    FALLBACK_START = '07:30'
+    FALLBACK_END   = '19:30'
+
+    # ── Role buffer defaults — single source of truth ──
+    # Used when no BranchShift exists AND when a shift has no ShiftRoleConfig
+    # row for a role. Mirrors live WLB config (Nov 2026).
+    ROLE_DEFAULTS = {
+        'ATTENDANT'     : {'job_lock_buffer': 0, 'signoff_buffer': 60,  'autoclose_buffer': None},
+        'CASHIER'       : {'job_lock_buffer': 0, 'signoff_buffer': 60,  'autoclose_buffer': None},
+        'BRANCH_MANAGER': {'job_lock_buffer': 0, 'signoff_buffer': 150, 'autoclose_buffer': 150},
+    }
 
     def __init__(self, branch) -> None:
         self.branch = branch
@@ -97,36 +103,27 @@ class ShiftEngine:
             # Use role-specific times if set, else fall back to shift times
             effective_start = config['role_start_time'] or shift.start_time
             effective_end   = config['role_end_time']   or shift.end_time
-
-            start = self._make_aware(target_date, effective_start)
-            end   = self._make_aware(target_date, effective_end)
-
-            job_lock_at  = end + timedelta(minutes=config['job_lock_buffer'])
-            signoff_at   = end + timedelta(minutes=config['signoff_buffer'])
-            autoclose_at = (
-                end + timedelta(minutes=config['autoclose_buffer'])
-                if config['autoclose_buffer'] is not None
-                else None
-            )
-            shift_name     = shift.name
-            using_fallback = False
+            shift_name      = shift.name
+            using_fallback  = False
         else:
-            # Fallback — no shift configured
-            start        = self._make_aware(target_date, self._parse_time(self.FALLBACK_START))
-            end          = self._make_aware(target_date, self._parse_time(self.FALLBACK_END))
-            lock_buffer  = {
-                'ATTENDANT'     : self.FALLBACK_ATTENDANT_LOCK,
-                'CASHIER'       : self.FALLBACK_CASHIER_LOCK,
-                'BRANCH_MANAGER': self.FALLBACK_BM_AUTOCLOSE,
-            }.get(role_name, 0)
-            job_lock_at   = end + timedelta(minutes=lock_buffer)
-            signoff_at    = end + timedelta(minutes=lock_buffer)
-            autoclose_at  = (
-                end + timedelta(minutes=self.FALLBACK_BM_AUTOCLOSE)
-                if role_name == 'BRANCH_MANAGER' else None
-            )
-            shift_name     = 'Default'
-            using_fallback = True
+            # Fallback — no shift configured; same buffers as a missing role row
+            config          = self.ROLE_DEFAULTS.get(role_name, self.ROLE_DEFAULTS['ATTENDANT'])
+            effective_start = self._parse_time(self.FALLBACK_START)
+            effective_end   = self._parse_time(self.FALLBACK_END)
+            shift_name      = 'Default'
+            using_fallback  = True
+
+        # One timing computation for both paths
+        start = self._make_aware(target_date, effective_start)
+        end   = self._make_aware(target_date, effective_end)
+
+        job_lock_at  = end + timedelta(minutes=config['job_lock_buffer'])
+        signoff_at   = end + timedelta(minutes=config['signoff_buffer'])
+        autoclose_at = (
+            end + timedelta(minutes=config['autoclose_buffer'])
+            if config['autoclose_buffer'] is not None
+            else None
+        )
 
         mins_to_end     = int((end - now).total_seconds() / 60)
         is_open         = start <= now < end
@@ -254,12 +251,6 @@ class ShiftEngine:
         """
         from apps.hr.models import ShiftRoleConfig
 
-        DEFAULTS = {
-            'ATTENDANT'     : {'job_lock_buffer': 0, 'signoff_buffer': 50,  'autoclose_buffer': None},
-            'CASHIER'       : {'job_lock_buffer': 0, 'signoff_buffer': 40,  'autoclose_buffer': None},
-            'BRANCH_MANAGER': {'job_lock_buffer': 0, 'signoff_buffer': 150, 'autoclose_buffer': 150},
-        }
-
         try:
             config = ShiftRoleConfig.objects.get(shift=shift, role_name=role_name)
             return {
@@ -270,7 +261,7 @@ class ShiftEngine:
                 'autoclose_buffer': config.autoclose_buffer,
             }
         except ShiftRoleConfig.DoesNotExist:
-            defaults = DEFAULTS.get(role_name, DEFAULTS['ATTENDANT'])
+            defaults = self.ROLE_DEFAULTS.get(role_name, self.ROLE_DEFAULTS['ATTENDANT'])
             return {
                 'role_start_time' : None,
                 'role_end_time'   : None,
