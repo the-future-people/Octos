@@ -59,6 +59,12 @@ ACKNOWLEDGEMENTS = {
 }
 TOOL_SPECS = [
     {
+        'name': 'customer_declined_details',
+        'description': ('Call when a customer says no to us saving their name or number. '
+                        'Octos will not ask them again for 30 days.'),
+        'input_schema': {'type': 'object', 'properties': {}},
+    },
+    {
         'name': 'branch_hours',
         'description': "Whether a branch is open now, today's hours or why it is closed, and when it "
                        'next opens. Leave branch out to get every branch you speak for.',
@@ -386,6 +392,11 @@ def _converse(conversation, ctx, run):
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     system = prompt.system_prompt(conversation, ctx.branches)
+    # Regulars: on a 4th visit in 72 hours, ask once for their details (13 Nov 2026).
+    from apps.communications.assistant import regulars
+    extra = regulars.instruction(conversation)
+    if extra:
+        system = (system + '\n\n' + extra) if isinstance(system, str) else [*system, {'type': 'text', 'text': extra}]
     messages = _history(conversation)
 
     for round_number in range(MAX_ROUNDS):
@@ -490,6 +501,14 @@ def _run_tool(name, args, ctx):
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
+    if name == 'customer_declined_details':
+        # A "no thanks": Octos waits 30 days before asking again (regulars.py).
+        from apps.spine import kinds
+        from apps.spine.models import Event
+        from apps.spine.recorder import record
+        record(kinds.CUSTOMER_DECLINED_DETAILS, actor=Event.CUSTOMER, conversation=ctx.conversation,
+               reason='Said no to saving their details.')
+        return {'ok': True, 'say': 'Accept kindly. Do not ask again.'}
     if name == 'hand_to_person':
         ctx.handoff = args.get('reason') or 'Octos asked for a person.'
         return {'ok': True}
