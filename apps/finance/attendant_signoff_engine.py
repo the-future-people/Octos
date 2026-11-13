@@ -150,6 +150,26 @@ class AttendantSignOffEngine:
             .exclude(handover_note='').select_related('attendant').order_by('signed_off_at')
         ]
 
+    @staticmethod
+    def _unlocked_until(now) -> bool:
+        """
+        Temporary override (13 Nov 2026): ATTENDANT_UNLOCK_UNTIL, an ISO time
+        in the environment, keeps the attendant portal open until then. It
+        locks again by itself at that time; delete the variable afterwards.
+        """
+        import os
+        raw = os.environ.get('ATTENDANT_UNLOCK_UNTIL', '').strip()
+        if not raw:
+            return False
+        try:
+            until = datetime.fromisoformat(raw)
+        except ValueError:
+            logger.warning('ATTENDANT_UNLOCK_UNTIL is not a valid time: %r', raw)
+            return False
+        if timezone.is_naive(until):
+            until = timezone.make_aware(until)
+        return now < until
+
     def status(self, attendant, now=None) -> dict:
         """
         Everything the portal needs about her day. is_locked is the one thing
@@ -181,6 +201,8 @@ class AttendantSignOffEngine:
             sheet and sheet.is_open and not signed_off and now >= timing['shift_end']
         )
         is_locked = signed_off or day_closed or (past_deadline and not due)
+        if is_locked and self._unlocked_until(now):
+            is_locked = False
         return {
             'sheet_id': sheet.pk if sheet else None,
             'sheet_number': sheet.sheet_number if sheet else None,
