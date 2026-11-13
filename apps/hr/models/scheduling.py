@@ -321,13 +321,13 @@ class ShiftRoleConfig(AuditModel):
 
     Buffer times (minutes after effective end_time):
       job_lock_buffer   — when job creation stops for this role
-      signoff_buffer    — when portal forces sign-off prompt for this role
-      autoclose_buffer  — when system auto-closes sheet (BM only)
+      signoff_buffer    — sign-off deadline for this role
+      autoclose_buffer  — when the system auto-closes the sheet (BM only)
 
-    Example for WLB Main Shift:
-      BRANCH_MANAGER — start=07:30, end=20:00, job_lock=60, signoff=60, autoclose=60
-      CASHIER        — start=08:00, end=19:30, job_lock=45, signoff=45, autoclose=None
-      ATTENDANT      — start=08:00, end=19:00, job_lock=0,  signoff=30, autoclose=None
+    Live values sit in the database, not here. WLB as of Nov 2026:
+      BRANCH_MANAGER — end=19:30, job_lock=0, signoff=150, autoclose=150
+      CASHIER        — end=19:30, job_lock=0, signoff=60
+      ATTENDANT      — end=19:30, job_lock=0, signoff=60
     """
 
     ATTENDANT      = 'ATTENDANT'
@@ -374,7 +374,7 @@ class ShiftRoleConfig(AuditModel):
     )
     signoff_buffer     = models.PositiveIntegerField(
         default   = 0,
-        help_text = 'Minutes after shift end when portal forces sign-off',
+        help_text = 'Minutes after shift end by which this role must sign off',
     )
     autoclose_buffer   = models.PositiveIntegerField(
         null      = True,
