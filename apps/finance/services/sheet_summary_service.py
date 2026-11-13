@@ -113,18 +113,15 @@ class SheetSummaryService:
         from apps.jobs.selectors.revenue_selectors import get_method_total
         from django.db.models import Sum
 
-        completed = Job.objects.filter(
-            daily_sheet  = sheet,
-            status       = Job.COMPLETE,
-            amount_paid__isnull=False,
-        )
-
         from apps.finance import payment_methods as pm
+        from apps.jobs.selectors.revenue_selectors import sheet_receipt_totals
 
-        # Money the branch received, per method. Credit is reported
-        # separately below because it is owed, not collected.
+        # Money the branch received, per method, from the sheet's receipts
+        # (13 Nov 2026): completed jobs missed every production payment.
+        # Credit is reported separately below because it is owed, not collected.
         collected = [m for m in pm.METHODS if m.collected]
-        amounts   = {m.code: get_method_total(completed, m.code) for m in collected}
+        taken     = sheet_receipt_totals(sheet)
+        amounts   = {m.code: taken[m.code]['total'] for m in collected}
 
         credit_issued = Job.objects.filter(
             daily_sheet    = sheet,

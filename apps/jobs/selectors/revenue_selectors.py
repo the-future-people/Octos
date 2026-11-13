@@ -63,106 +63,87 @@ def get_revenue_breakdown(jobs_qs) -> dict:
     return out
 
 
+# ── Money taken, from receipts (13 Nov 2026) ────────────────────────────────
+# Money taken is what receipts say was handed over: each non-void receipt by
+# its method, a split receipt by its legs. Totalling jobs instead counted a
+# production payment nowhere (its status is PAID until collected), put a job
+# paid by MoMo deposit and cash balance wholly under one method on one day,
+# and counted an old job as today's money when it was edited today.
+
+def add_rows(out, rows, total_key, method_key='payment_method'):
+    """Add aggregated rows into {code: {'total', 'count'}}; methods not collected are skipped."""
+    for row in rows:
+        code = row[method_key]
+        if code in out:
+            out[code]['total'] += Decimal(str(row[total_key] or 0))
+            out[code]['count'] += row['n'] or 0
+    return out
+
+
+def receipt_totals(receipts):
+    """{method: {'total': Decimal, 'count': int}} for money collected, from receipts."""
+    from django.db.models import Count
+    from apps.finance import payment_methods as pm
+    from apps.finance.models import PaymentLeg
+
+    out = {m.code: {'total': Decimal('0'), 'count': 0} for m in pm.METHODS if m.collected}
+    live = receipts.filter(is_void=False)
+    add_rows(out, live.exclude(payment_method='SPLIT').values('payment_method')
+             .annotate(t=Sum('amount_paid'), n=Count('id')), 't')
+    add_rows(out, PaymentLeg.objects.filter(receipt__in=live.filter(payment_method='SPLIT'))
+             .values('payment_method').annotate(t=Sum('amount'), n=Count('id')), 't')
+    return out
+
+
+def sheet_receipt_totals(sheet):
+    from apps.finance.models import Receipt
+    return receipt_totals(Receipt.objects.filter(daily_sheet=sheet))
+
+
 def get_sheet_live_totals(sheet) -> dict:
     """
-    Compute live revenue totals for an OPEN sheet directly from jobs.
+    Live revenue for an OPEN sheet, from its receipts.
     Called by DailySalesSheetTodayView for open sheets.
     """
-    from apps.jobs.models import Job
+    from apps.finance import payment_methods as pm
+    from apps.finance.models import Receipt
 
-    jobs = Job.objects.filter(
-        daily_sheet=sheet,
-        status=Job.COMPLETE,
-    )
-
-    breakdown = get_revenue_breakdown(jobs)
-
+    totals = sheet_receipt_totals(sheet)
+    get = lambda code: totals.get(code, {'total': Decimal('0')})['total']
+    in_till = sum((totals[m.code]['total'] for m in pm.METHODS if m.collected and m.in_till), Decimal('0'))
+    paid_jobs = (Receipt.objects.filter(daily_sheet=sheet, is_void=False)
+                 .exclude(job__isnull=True).values('job').distinct().count())
     return {
-        'total_cash'        : breakdown['cash'],
-        'total_momo'        : breakdown['momo'],
-        'total_pos'         : breakdown['pos'],
-        'total_collected'   : breakdown['total'],
-        'net_cash_in_till'  : breakdown['cash'],
-        'total_jobs_created': breakdown['job_count'],
+        'total_cash'        : get('CASH'),
+        'total_momo'        : get('MOMO'),
+        'total_pos'         : get('POS'),
+        'total_collected'   : sum((v['total'] for v in totals.values()), Decimal('0')),
+        'net_cash_in_till'  : in_till,
+        'total_jobs_created': paid_jobs,
     }
 
 
 def get_cashier_summary(branch, date) -> dict:
     """
-    Compute today payment totals per method for a branch cashier strip.
-    Called by CashierSummaryView.
+    Today's money taken per method, for the cashier strip: the receipts on
+    the branch's open sheet (or the day's receipts at the branch when no sheet
+    is open), plus credit settlements, which are money in as well.
     """
-    from apps.jobs.models import Job
-    from apps.finance.models import PaymentLeg, CreditPayment, DailySalesSheet
     from django.db.models import Count
-    from apps.finance import payment_methods as pm
+    from apps.finance.models import CreditPayment, DailySalesSheet, Receipt
 
-    # Methods whose money the branch actually received. Credit is owed,
-    # not collected, so it has never belonged in this strip.
-    COLLECTED = [m.code for m in pm.METHODS if m.collected]
+    sheet = DailySalesSheet.objects.filter(branch=branch, date=date, status='OPEN').first()
+    receipts = (Receipt.objects.filter(daily_sheet=sheet) if sheet
+                else Receipt.objects.filter(daily_sheet__branch=branch, created_at__date=date))
+    totals = receipt_totals(receipts)
+    if sheet:
+        add_rows(totals, CreditPayment.objects.filter(daily_sheet=sheet).values('payment_method')
+                 .annotate(t=Sum('amount'), n=Count('id')), 't')
 
-    jobs = Job.objects.filter(
-        branch=branch,
-        status=Job.COMPLETE,
-        updated_at__date=date,
-        amount_paid__isnull=False,
-    )
-
-    def _method_total(method):
-        direct = jobs.filter(payment_method=method).aggregate(
-            total=Sum('amount_paid'),
-            count=Count('id'),
-        )
-        direct_total = Decimal(str(direct['total'] or 0))
-        direct_count = direct['count'] or 0
-
-        split_jobs = jobs.filter(payment_method='SPLIT')
-        leg_total = PaymentLeg.objects.filter(
-            job__in=split_jobs,
-            payment_method=method,
-        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
-
-        return {
-            'total': str(direct_total + Decimal(str(leg_total))),
-            'count': direct_count,
-        }
-
-    try:
-        sheet = DailySalesSheet.objects.get(
-            branch=branch, date=date, status='OPEN'
-        )
-        settlements = CreditPayment.objects.filter(daily_sheet=sheet)
-
-        def _settle(method):
-            r = settlements.filter(payment_method=method).aggregate(
-                total=Sum('amount'),
-                count=Count('id'),
-            )
-            return {'total': Decimal(str(r['total'] or 0)), 'count': r['count'] or 0}
-
-        settled = {code: _settle(code) for code in COLLECTED}
-    except DailySalesSheet.DoesNotExist:
-        settled = {code: {'total': Decimal('0'), 'count': 0} for code in COLLECTED}
-
-    def _combine(job_t, settle_t):
-        return {
-            'total': str(Decimal(job_t['total']) + Decimal(str(settle_t['total']))),
-            'count': job_t['count'] + settle_t['count'],
-        }
-
-    j_cash = _method_total('CASH')
-    j_momo = _method_total('MOMO')
-    j_pos  = _method_total('POS')
-
-    cash  = _combine(j_cash, settled['CASH'])
-    momo  = _combine(j_momo, settled['MOMO'])
-    pos   = _combine(j_pos,  settled['POS'])
-    grand = Decimal(cash['total']) + Decimal(momo['total']) + Decimal(pos['total'])
-    count = cash['count'] + momo['count'] + pos['count']
-
-    return {
-        'CASH' : cash,
-        'MOMO' : momo,
-        'POS'  : pos,
-        'total': {'total': str(grand), 'count': count},
-    }
+    zero = {'total': Decimal('0'), 'count': 0}
+    shown = {code: totals.get(code, zero) for code in ('CASH', 'MOMO', 'POS')}
+    grand = sum((v['total'] for v in shown.values()), Decimal('0'))
+    count = sum(v['count'] for v in shown.values())
+    out = {code: {'total': str(v['total']), 'count': v['count']} for code, v in shown.items()}
+    out['total'] = {'total': str(grand), 'count': count}
+    return out

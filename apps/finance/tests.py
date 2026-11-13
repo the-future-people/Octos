@@ -500,14 +500,25 @@ class RevenueBreakdownTests(RecoveryFixtureMixin, TestCase):
         self.sheet = self.make_sheet(0)
 
     def _job(self, method, amount):
+        # The job and the receipt its payment issues: money taken is read
+        # from receipts (13 Nov 2026), as in the shop. Credit takes no money,
+        # so it issues no receipt here.
         from apps.jobs.models import Job
-        return Job.objects.create(
+        from apps.finance.models import Receipt
+        job = Job.objects.create(
             branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
             title=f'{method} job', intake_by=self.cashier,
             estimated_cost=Decimal(str(amount)),
             amount_paid=Decimal(str(amount)),
             payment_method=method, daily_sheet=self.sheet,
         )
+        if method != 'CREDIT':
+            receipt = self.add_cash_receipt(self.sheet, float(amount))
+            Receipt.objects.filter(pk=receipt.pk).update(
+                payment_method=method, job=job, amount_paid=Decimal(str(amount)),
+                receipt_number=f'TEST-{job.pk}',   # the fixture reuses one number
+            )
+        return job
 
     def test_breakdown_totals_each_method(self):
         from apps.jobs.selectors.revenue_selectors import get_revenue_breakdown
@@ -577,14 +588,25 @@ class LiveRevenueTests(RecoveryFixtureMixin, TestCase):
         self.sheet = self.make_sheet(0)
 
     def _job(self, method, amount):
+        # The job and the receipt its payment issues: money taken is read
+        # from receipts (13 Nov 2026), as in the shop. Credit takes no money,
+        # so it issues no receipt here.
         from apps.jobs.models import Job
-        return Job.objects.create(
+        from apps.finance.models import Receipt
+        job = Job.objects.create(
             branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
             title=f'{method} job', intake_by=self.cashier,
             estimated_cost=Decimal(str(amount)),
             amount_paid=Decimal(str(amount)),
             payment_method=method, daily_sheet=self.sheet,
         )
+        if method != 'CREDIT':
+            receipt = self.add_cash_receipt(self.sheet, float(amount))
+            Receipt.objects.filter(pk=receipt.pk).update(
+                payment_method=method, job=job, amount_paid=Decimal(str(amount)),
+                receipt_number=f'TEST-{job.pk}',   # the fixture reuses one number
+            )
+        return job
 
     def _settlement(self, method, amount):
         from apps.finance.models import CreditPayment, CreditAccount
@@ -680,14 +702,25 @@ class EODSummaryRevenueTests(RecoveryFixtureMixin, TestCase):
         self.sheet = self.make_sheet(0)
 
     def _job(self, method, amount):
+        # The job and the receipt its payment issues: money taken is read
+        # from receipts (13 Nov 2026), as in the shop. Credit takes no money,
+        # so it issues no receipt here.
         from apps.jobs.models import Job
-        return Job.objects.create(
+        from apps.finance.models import Receipt
+        job = Job.objects.create(
             branch=self.branch, job_type='INSTANT', status=Job.COMPLETE,
             title=f'{method} job', intake_by=self.cashier,
             estimated_cost=Decimal(str(amount)),
             amount_paid=Decimal(str(amount)),
             payment_method=method, daily_sheet=self.sheet,
         )
+        if method != 'CREDIT':
+            receipt = self.add_cash_receipt(self.sheet, float(amount))
+            Receipt.objects.filter(pk=receipt.pk).update(
+                payment_method=method, job=job, amount_paid=Decimal(str(amount)),
+                receipt_number=f'TEST-{job.pk}',   # the fixture reuses one number
+            )
+        return job
 
     def _revenue(self):
         from apps.finance.services.eod_service import EODService
