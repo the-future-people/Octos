@@ -246,3 +246,21 @@ Local setup: the docker-compose `frontend` service holds 5173 and serves stale c
 - **Later.** Reprints / complaints flow; attendant start-of-day routine.
 - **Lost UI to rebuild.** The BM close modal's "Worth a look before closing" section (files opened with no job, jobs recorded after closing) was discarded with `git restore` on 13 Nov. The backend still sends `unrecorded_files`.
 - **Cleanup.** DRF warning "min_value should be an integer or Decimal" (a float `min_value` on some serializer).
+
+## Octos on WhatsApp and front-desk work (14 Nov 2026)
+
+### Live
+- **WhatsApp fixes from the chat review.** Crash fixed; no double replies (a lock per conversation, `respond`); reactions recorded but never answered (`Message.REACTION`); stuck chats released when a visit times out (`release_after_visit`). "Understand first, hand over last" in the prompt.
+- **Greeting, then a file.** A bare "Hi" waits 20 s (`GREETING_WAIT`) for a file behind it. If a person has the chat open (`services/opened.py`, `in_focus`, 60 s), Octos stays quiet. Otherwise "Hi 👋 How can I help you today?", and a file gets "Got your file 👍 What would you like done with it?".
+- **End-of-day thank-you** (`storefront/services/thanks.py`, beat every 5 min) replaces the staff-registration welcome. 30 min before each branch closes; customers served today with nothing unpaid; WhatsApp only (never SMS); not if opted out, thanked in the last 7 days, or mid-conversation. The app sign-up greeting stays.
+- **Payment reminder** (`storefront/services/payment_reminder.py`, beat every 10 min). Unpaid orders Octos took on WhatsApp, 2 h after the link, while the branch is open, once (`OnlineOrder.payment_reminded_at`). Skipped if the customer said no after the link. WhatsApp only.
+- **Front-desk jobs** (`jobs/services/front_desk.py`, `jobs/api/desk_views.py`, `Job.front_desk` + `desk_taken_by/at` + `desk_escalated_at`, migration 0054). A converted order whose every line is an INSTANT service goes to the attendants, not the coordinator. Take it → two checks → Start → Done. BM told at 10 min untaken (beat every minute). React: Work tab, `DeskArrival` modal/bar, `api/desk.js`.
+
+### To check
+- Monday: first front-desk order end to end (chime, take, check, start, done, ready message, Pickup); a mixed order still goes to the coordinator; the first thank-yous 30 min before Westland closes.
+- First "yes" to a payment reminder: Octos should resend the link. If not, one line in the prompt.
+
+### Next
+- Front desk Phase 2: walk-in leave-behinds and jobs staff record from a WhatsApp chat into the same queue.
+- Pickup (every ready job in one place); carry-forward wiring; BM workload pages.
+

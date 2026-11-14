@@ -972,3 +972,21 @@ seconds are when people press back or pay twice.
 ## 13 Nov 2026 — Ways of working
 
 - **Larger changes are delivered as a zip with `apply.ps1`:** it checks every file against the last commit (stops if anything changed), copies and deletes files, runs check / migrations / tests / build, and never commits. Small changes still use find / change.
+
+## 14 Nov 2026 — Octos on WhatsApp
+
+- **The welcome became a thank-you.** "Welcome to Farhat Printing Press!" landed while the customer was still at the counter. Thanks after service says the same thing at the right moment. App sign-ups keep their welcome.
+- **Courtesy goes by WhatsApp only.** The thank-you and the payment reminder never fall back to SMS (`NO_SMS_FALLBACK`): inside the 24-hour window they cost nothing; as SMS they are money spent on courtesy.
+- **The reminder asks, it doesn't send a link.** "Would you still like it? Just say yes" — a question gets answered, an old link gets ignored. Once per order, ever.
+- **A person looking at the chat beats Octos.** If staff have the chat open, Octos stays quiet on a bare greeting or a file.
+
+## 14 Nov 2026 — Front-desk jobs
+
+- **No catalogue flag: the category decides.** Khofi's front-desk list turned out to be every INSTANT service, so a second switch would only drift. Add a flag only if an instant service ever needs the coordinator.
+- **Whole jobs, never split.** Any PRODUCTION or DESIGN line sends the whole job to the coordinator.
+- **Decided once, at conversion.** `Job.front_desk` is never recomputed, so a catalogue change can't move a job between queues mid-flight.
+- **Rights by the job, not the role** (`_desk_may_move`), like the operator's move. The attendant who took it checks, starts, holds and finishes it; nothing else, never money.
+- **The check moves with the job, it isn't skipped.** She records the same verification the coordinator would.
+- **Front-desk path: RECEIVED → IN_PRODUCTION → DONE**, no machine steps. Online jobs stay PRODUCTION-typed so they can say "ready".
+- **Hot but never destructive.** Full modal when idle; a bar above everything while she's mid-task; only "Take it"; first to take it owns it; red and louder at 5 min; BM at 10 min (opening hours only, overnight orders count from opening).
+

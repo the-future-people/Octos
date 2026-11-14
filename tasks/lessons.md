@@ -1177,3 +1177,10 @@ Internal detail belongs in the log, not on the screen.
 - Run `git status` on its own; chained with `add` and `commit` it can't stop anything.
 - Changing a Railway variable redeploys the current deployment: check Deployments for the active commit (and wait for the build) before debugging.
 - Don't give an existing field a second meaning; add the meaning where it belongs.
+
+## 14 Nov 2026
+- When sending a new file, always send the copy-from-Downloads command with it. Downloaded files don't move themselves; three runs failed on files still in Downloads.
+- Before removing a function, search for every reference to it, including `mock.patch('...name')` strings in tests. Removing `receivers._queue` broke two test files my search missed.
+- When one Find/Change replaces several occurrences, list each location and give a check command (`Select-String`) that counts them. A Replace All plus a second edit left `halt`'s code inside `verify`.
+- Old tests that encode old behaviour get updated to the new rules, not worked around in the code.
+
