@@ -276,8 +276,13 @@ def _silence(conversation, trigger, now):
     # actually takes over (the button, or replying), it keeps answering.
     if conversation.handled_by == Conversation.STAFF and not conversation.handoff_reason:
         return 'a person has taken over this conversation'
+    if trigger is not None and trigger.kind == Message.REACTION:
+        return 'a reaction needs no reply'
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
-    last = visible.filter(direction=Message.INBOUND).first()
+    # A reaction (a thumbs-up on a receipt) is never the message waiting for
+    # an answer: it neither starts a reply nor hides the question before it
+    # (Henry, 13 Nov 2026).
+    last = visible.filter(direction=Message.INBOUND).exclude(kind=Message.REACTION).first()
     if last is None:
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
@@ -305,8 +310,11 @@ def _silence(conversation, trigger, now):
     if visible.filter(direction=Message.OUTBOUND, sent_by__isnull=False,
                       created_at__gt=last.created_at).exists():
         return 'a person has answered'
+    # A hand-over and a blocked reply both sent the customer a message, so
+    # they count as answered too (Tailee got the same hand-over twice, 13 Nov 2026).
     if AssistantRun.objects.filter(conversation=conversation, trigger__created_at__gte=last.created_at,
-                                   decision__in=[AssistantRun.REPLIED, AssistantRun.SHADOWED]).exists():
+                                   decision__in=[AssistantRun.REPLIED, AssistantRun.SHADOWED,
+                                                 AssistantRun.HANDED_OVER, AssistantRun.BLOCKED]).exists():
         return 'already answered'
     before = visible.exclude(pk=last.pk).first()
     if _just_acknowledging(last, before):
@@ -397,7 +405,16 @@ def _converse(conversation, ctx, run):
     extra = regulars.instruction(conversation)
     if extra:
         system = (system + '\n\n' + extra) if isinstance(system, str) else [*system, {'type': 'text', 'text': extra}]
-    messages = _history(conversation)
+    # The customer must speak last, or the model refuses (Steve, 14 Nov 2026).
+    # Whatever Farhat sent after their latest message comes off the end and
+    # is told to Octos as context instead.
+    messages, sent_since = _split_trailing(_history(conversation))
+    if not messages:
+        return ''
+    if sent_since:
+        note = ("Since the customer's latest message, Farhat has already sent them the following. "
+                "Don't repeat it; answer only what is still unanswered.\n" + sent_since)
+        system = (system + '\n\n' + note) if isinstance(system, str) else [*system, {'type': 'text', 'text': note}]
 
     for round_number in range(MAX_ROUNDS):
         if round_number:
@@ -521,7 +538,7 @@ def _history(conversation):
     # saw; they still count as what Octos "said", or every earlier question
     # looks unanswered and gets answered again. Only in shadow: after
     # switching to live, notes the customer never received don't count.
-    said = Q(is_internal_note=False) & ~Q(channel=Message.SYSTEM)
+    said = Q(is_internal_note=False) & ~Q(channel=Message.SYSTEM) & ~Q(kind=Message.REACTION)
     if settings.OCTOS_ASSISTANT_MODE == 'shadow':
         said |= Q(is_internal_note=True, body__startswith=SHADOW_PREFIX)
     recent = list(
@@ -563,6 +580,19 @@ def _history(conversation):
     while turns and turns[0]['role'] != 'user':
         turns.pop(0)
     return turns
+
+
+def _split_trailing(turns):
+    """
+    (turns ending with the customer, what Farhat sent after them). A welcome,
+    a receipt, or Octos's own reply to an earlier message that crossed this
+    one can land after the customer's latest message; the model must not
+    be asked with Farhat speaking last.
+    """
+    after = []
+    while turns and turns[-1]['role'] == 'assistant':
+        after.insert(0, turns.pop()['content'])
+    return turns, '\n'.join(after)
 
 
 # ── Acting ─────────────────────────────────────────────────────────────
@@ -658,9 +688,27 @@ def _writing(conversation_id, on):
 _respond_unmarked = respond
 
 
+LOCK_SECONDS = 180    # longer than any run; a crashed worker's lock expires by itself
+RETRY_SECONDS = 10
+
+
 def respond(conversation_id, *args, **kwargs):
+    """
+    One run at a time per chat (14 Nov 2026). Two messages landing together
+    each started a run and both answered. Now a run that finds another one
+    working waits and tries again; by then the first has answered, and the
+    guards in _silence see it.
+    """
+    from django.core.cache import cache
+    key = f'octos_run:{conversation_id}'
+    if not cache.add(key, True, LOCK_SECONDS):
+        from apps.communications.tasks import answer_whatsapp
+        trigger_id = args[0] if args else kwargs.get('trigger_id')
+        answer_whatsapp.apply_async((conversation_id, trigger_id), countdown=RETRY_SECONDS)
+        return None
     _writing(conversation_id, True)
     try:
         return _respond_unmarked(conversation_id, *args, **kwargs)
     finally:
         _writing(conversation_id, False)
+        cache.delete(key)

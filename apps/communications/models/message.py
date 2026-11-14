@@ -33,6 +33,11 @@ class Message(AuditModel):
         (SYSTEM, 'System'),
     ]
 
+    # A customer's reaction (👍 on a receipt) is kept so the inbox shows it,
+    # marked with this kind so Octos never treats it as something to answer
+    # (14 Nov 2026).
+    REACTION = 'reaction'
+
     # Message Type
     TEXT = 'TEXT'
     IMAGE = 'IMAGE'
