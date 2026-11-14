@@ -174,6 +174,8 @@ class ProductionBoardView(APIView):
             # but refusing at the Start button means he has already opened
             # it and decided to work on it. Every job he sees is paid.
             .exclude(payment_state='UNPAID')
+            # Front-desk work never reaches the floor: the attendants do it.
+            .exclude(front_desk=True)
             .select_related('customer', 'intake_by')
             .prefetch_related('line_items__service', 'halts', 'verifications')
             .order_by('created_at')
@@ -616,6 +618,7 @@ class SuspendedJobsView(APIView):
             Job.objects
             .filter(branch=branch, work_state='RECEIVED')
             .exclude(status__in=['CANCELLED', 'DRAFT'])
+            .exclude(front_desk=True)
             .select_related('customer', 'intake_by')
             .prefetch_related('line_items__service', 'verifications', 'halts')
             .order_by('created_at')

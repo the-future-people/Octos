@@ -6,6 +6,7 @@ from . import proforma_views
 from . import coordinator_views
 from . import operator_views
 from . import file_views
+from . import desk_views
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 from apps.jobs.api import promise_views
 
@@ -47,6 +48,14 @@ urlpatterns = [
     path('operator/steps/<int:step_id>/done/',  operator_views.OperatorDoneView.as_view(),  name='operator-done'),
     path('operator/steps/<int:step_id>/problem/', operator_views.OperatorProblemView.as_view(), name='operator-problem'),
     path('operator/unlock/',                  operator_views.OperatorUnlockView.as_view(), name='operator-unlock'),
+
+    # Front desk: the attendant's Work tab (14 Nov 2026)
+    path('desk/queue/',             desk_views.DeskQueueView.as_view(),   name='desk-queue'),
+    path('<int:pk>/desk/take/',     desk_views.DeskTakeView.as_view(),    name='desk-take'),
+    path('<int:pk>/desk/start/',    desk_views.DeskStartView.as_view(),   name='desk-start'),
+    path('<int:pk>/desk/done/',     desk_views.DeskDoneView.as_view(),    name='desk-done'),
+    path('<int:pk>/desk/problem/',  desk_views.DeskProblemView.as_view(), name='desk-problem'),
+    path('<int:pk>/desk/resume/',   desk_views.DeskResumeView.as_view(),  name='desk-resume'),
 
     # Lifecycle axes
     path('<int:pk>/move/',   views.JobAxisMoveView.as_view(), name='job-axis-move'),

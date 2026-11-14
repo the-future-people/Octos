@@ -379,6 +379,24 @@ class Job(AuditModel):
     )
     inspecting_since = models.DateTimeField(null=True, blank=True)
 
+    # ── Front desk (14 Nov 2026) ──────────────────────────────────
+    # Work the attendants do themselves, bypassing the coordinator: every
+    # line is instant work (photocopies, printing, binding, passport
+    # photos...). Decided once, when the job is made, so a catalogue change
+    # later never moves a job between queues mid-flight.
+    front_desk = models.BooleanField(default=False, db_index=True)
+    # Who pressed "Take it", and when. The first to take it owns it.
+    desk_taken_by = models.ForeignKey(
+        'accounts.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='desk_jobs',
+        null=True,
+        blank=True,
+    )
+    desk_taken_at = models.DateTimeField(null=True, blank=True)
+    # When the BM was told nobody had taken it. Once per job.
+    desk_escalated_at = models.DateTimeField(null=True, blank=True)
+
     # ── Routing ──────────────────────────────────────────────────
     is_routed      = models.BooleanField(default=False)
     routing_reason = models.TextField(blank=True)

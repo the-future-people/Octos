@@ -100,6 +100,16 @@ WORK_TRANSITION_MAP = {
     'DESIGN'     : WORK_TRANSITIONS_PRODUCTION,
 }
 
+# Front-desk work (14 Nov 2026), done by the attendant who took the job.
+# No machine steps and no separate finishing or quality stage: she checks
+# it, does it, and it is done. Chosen by job.front_desk, not job type: an
+# online order is always PRODUCTION so it can say "ready".
+WORK_TRANSITIONS_FRONT_DESK = {
+    'RECEIVED'      : ['IN_PRODUCTION'],
+    'IN_PRODUCTION' : ['DONE'],
+    'DONE'          : [],
+}
+
 HANDOVER_TRANSITIONS = {
     'AWAITING_COLLECTION' : ['OUT_FOR_DELIVERY', 'HANDED_OVER'],
     'OUT_FOR_DELIVERY'    : ['HANDED_OVER'],
@@ -274,9 +284,8 @@ class JobStatusEngine:
                                to_state, actor, notes)
 
     def move_work(self, to_state, actor, notes=''):
-        """Flow Coordinator only. Back room; never meets a customer."""
-        work_map = WORK_TRANSITION_MAP.get(self.job.job_type, {})
-        return self._move_axis('WORK', work_map, to_state, actor, notes)
+        """Flow Coordinator, or the attendant who took a front-desk job."""
+        return self._move_axis('WORK', self._map_for('WORK'), to_state, actor, notes)
 
     def move_handover(self, to_state, actor, notes=''):
         """Attendant only. The customer-facing release of goods."""
@@ -290,7 +299,8 @@ class JobStatusEngine:
         current  = getattr(self.job, AXIS_FIELD[axis], None)
         raw      = axis_map.get(current, [])
 
-        if actor is not None and not self._may_move_axis(axis, actor):
+        if actor is not None and not (self._may_move_axis(axis, actor)
+                                      or self._desk_may_move(axis, actor)):
             return []
 
         return [s for s in raw if not self._cross_axis_block(axis, s)]
@@ -313,6 +323,7 @@ class JobStatusEngine:
         # they can see from there: the machine, the file, the material.
         operator_reason = reason in ('MACHINE_BREAKDOWN', 'FILE_FAULT', 'MATERIALS_OUT')
         if not (self._may_move_axis('WORK', actor)
+                or self._desk_may_move('WORK', actor)
                 or (operator_reason and self._operates_this_job(actor))):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot halt "
@@ -345,7 +356,9 @@ class JobStatusEngine:
         there is nothing to restore — closing the record is the whole
         operation.
         """
-        if not self._may_move_axis('WORK', actor):
+        if not (self._may_move_axis('WORK', actor)
+                or self._desk_may_move('WORK', actor)
+                or (operator_reason and self._operates_this_job(actor))):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot resume "
                 f"{self.job.job_number}."
@@ -384,7 +397,7 @@ class JobStatusEngine:
         """
         from apps.jobs.models import JobVerification
 
-        if not self._may_move_axis('WORK', actor):
+        if not (self._may_move_axis('WORK', actor) or self._desk_may_move('WORK', actor)):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot verify "
                 f"{self.job.job_number}."
@@ -446,9 +459,12 @@ class JobStatusEngine:
             # Each line's route becomes its steps, each step is given a
             # machine, and whatever can start does. Inside the same
             # transaction: a job is never in press with no steps.
-            from apps.jobs.services.steps import build_steps, sync_stage
-            build_steps(self.job)
-            sync_stage(self.job, actor)
+            # Front-desk work has no machine steps: the attendant who
+            # checked it is the one doing it.
+            if not self.job.front_desk:
+                from apps.jobs.services.steps import build_steps, sync_stage
+                build_steps(self.job)
+                sync_stage(self.job, actor)
 
         return verification
 
@@ -465,7 +481,7 @@ class JobStatusEngine:
         """
         from apps.jobs.models import JobVerification
 
-        if not self._may_move_axis('WORK', actor):
+        if not (self._may_move_axis('WORK', actor) or self._desk_may_move('WORK', actor)):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot verify "
                 f"{self.job.job_number}."
@@ -494,6 +510,7 @@ class JobStatusEngine:
 
         # Guard: role owns this axis, or this is the one move an operator makes
         if not (self._may_move_axis(axis, actor)
+                or self._desk_may_move(axis, actor)
                 or self._operator_may_move(axis, from_state, to_state, actor)):
             raise PermissionError(
                 f"{actor.full_name or actor.email} cannot move the "
@@ -682,6 +699,8 @@ class JobStatusEngine:
         if axis == 'PAYMENT':
             return PAYMENT_TRANSITIONS
         if axis == 'WORK':
+            if self.job.front_desk:
+                return WORK_TRANSITIONS_FRONT_DESK
             return WORK_TRANSITION_MAP.get(self.job.job_type, {})
         if axis == 'HANDOVER':
             return HANDOVER_TRANSITIONS
@@ -737,6 +756,21 @@ class JobStatusEngine:
             operator=actor, active_until__isnull=True,
             machine__job_steps__job=self.job,
         ).exists()
+
+    def _desk_may_move(self, axis, actor):
+        """
+        The attendant who took a front-desk job does its work: checks it,
+        starts it, holds it, finishes it. Granted by the job, not the role,
+        like the operator's move: she gets no production powers over
+        anything else, and never the money.
+        """
+        return bool(
+            axis == 'WORK'
+            and self.job.front_desk
+            and actor is not None
+            and self.job.desk_taken_by_id
+            and self.job.desk_taken_by_id == actor.pk
+        )
 
     @classmethod
     def _is_branch_manager(cls, actor):

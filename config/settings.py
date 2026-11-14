@@ -350,6 +350,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.send_customer_reminders',
         'schedule': crontab(hour=9, minute=0, day_of_week='mon-sat'),
     },
+    # Front-desk work nobody has taken in 10 minutes: tell the BM (14 Nov 2026).
+    'escalate-front-desk': {
+        'task': 'apps.jobs.tasks.escalate_front_desk',
+        'schedule': crontab(minute='*'),
+    },
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
         'schedule': crontab(hour=5, minute=0),

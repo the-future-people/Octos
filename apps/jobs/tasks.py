@@ -151,3 +151,17 @@ def send_customer_reminders():
     from apps.jobs.services.reminders import send_feedback_nudges, send_pickup_reminders
     picked, nudged = send_pickup_reminders(), send_feedback_nudges()
     logger.info('Customer reminders: %s pickup, %s feedback', picked, nudged)
+
+
+
+from celery import shared_task as _desk_task
+
+
+@_desk_task(ignore_result=True)
+def escalate_front_desk():
+    """
+    Every minute: front-desk work nobody has taken in 10 minutes of opening
+    hours tells the BM, once per job (14 Nov 2026).
+    """
+    from apps.jobs.services.front_desk import escalate
+    escalate()

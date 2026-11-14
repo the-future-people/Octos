@@ -77,6 +77,8 @@ def arrival_queue(branch):
         )
         .exclude(status__in=['CANCELLED', 'DRAFT'])
         .exclude(payment_state='UNPAID')
+        # The attendants check and do front-desk work themselves.
+        .exclude(front_desk=True)
         .select_related('customer', 'intake_by', 'inspecting_by')
         .prefetch_related('line_items__service', 'verifications', 'halts')
         # Mirrors current_promise(). When revisions exist, this changes

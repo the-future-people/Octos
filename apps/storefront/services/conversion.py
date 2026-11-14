@@ -111,6 +111,11 @@ def convert(order):
         )
 
         _carry_lines(order, job)
+        # Every line instant work (photocopies, printing, binding...): the
+        # attendants do it and the coordinator never sees it (14 Nov 2026).
+        # After the lines, because they decide it.
+        from apps.jobs.services.front_desk import route
+        route(job)
         _write_receipt(order, job, sheet)
 
         order.job = job
