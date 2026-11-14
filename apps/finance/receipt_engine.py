@@ -159,11 +159,17 @@ class ReceiptEngine:
         the customer's conversation (delivered, read). A receipt never
         falls back to SMS: see NO_SMS_FALLBACK in whatsapp_outbound.
         """
-        from apps.communications.services.whatsapp_outbound import try_send_text
+        from apps.communications.services.chat_customer import chat_for
+        from apps.communications.services.whatsapp_outbound import try_send_text, try_send_to
         from apps.finance.models import Receipt
 
+        # No number: a customer writing from a WhatsApp username (14 Nov 2026).
+        # The job's own chat still reaches them, by their WhatsApp user id.
+        chat = None
         if not receipt.customer_phone:
-            return False, 'This receipt has no phone number to send it to.'
+            chat = chat_for(receipt.job)
+            if chat is None:
+                return False, 'This receipt has no phone number to send it to.'
 
         # Formatting first, on its own: a receipt that can't be written out
         # (one with no job, say) must not be reported as WhatsApp being down.
@@ -195,10 +201,14 @@ class ReceiptEngine:
             image, caption = None, text
 
         try:
-            message = try_send_text(
-                receipt.customer_phone, caption, kind='receipt',
-                image=image, filename=f'{receipt.receipt_number}.png',
-            )
+            if chat is not None:
+                message = try_send_to(chat, caption, kind='receipt',
+                                      image=image, filename=f'{receipt.receipt_number}.png')
+            else:
+                message = try_send_text(
+                    receipt.customer_phone, caption, kind='receipt',
+                    image=image, filename=f'{receipt.receipt_number}.png',
+                )
         except Exception:
             logger.exception(
                 'ReceiptEngine: WhatsApp receipt %s could not be queued',

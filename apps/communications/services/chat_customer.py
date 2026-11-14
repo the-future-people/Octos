@@ -68,6 +68,14 @@ def chat_label(conversation):
     return f'{name or handle} (WhatsApp {handle})' if name else f'{handle} (WhatsApp)'
 
 
+def chat_for(job):
+    """The WhatsApp chat this job is linked to (the newest, if several), or None."""
+    from apps.communications.models import Conversation
+    if job is None or getattr(job, 'pk', None) is None:
+        return None
+    return Conversation.objects.filter(jobs=job, channel=Conversation.WHATSAPP).order_by('-pk').first()
+
+
 def chat_identity(job):
     """
     (name, phone) for a job with no customer record, from the WhatsApp chat it

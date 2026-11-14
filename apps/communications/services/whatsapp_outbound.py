@@ -130,8 +130,17 @@ def try_send_text(phone, body, kind, image=None, filename='card.png'):
     Never raises for the ordinary reasons (no conversation, window shut,
     a number that isn't real): those all mean SMS, as before.
     """
-    conversation = thread_for(phone)
-    if conversation is None or not window_open(conversation):
+    return try_send_to(thread_for(phone), body, kind, image=image, filename=filename)
+
+
+def try_send_to(conversation, body, kind, image=None, filename='card.png'):
+    """
+    A system message into this chat, if its window is open. The way to reach a
+    customer with no number (a WhatsApp username, 14 Nov 2026): deliver()
+    sends to their WhatsApp user id. Returns the queued Message, or None.
+    Never raises for the ordinary reasons; a chat marked spam gets nothing.
+    """
+    if conversation is None or conversation.status == Conversation.SPAM or not window_open(conversation):
         return None
     try:
         return send_text(conversation, body, kind=kind, image=image, filename=filename)
