@@ -59,3 +59,17 @@ class SendingToAUsernameTests(SimpleTestCase):
         sent = post.call_args.kwargs['json']
         self.assertEqual(sent.get('recipient'), 'GH.1114480144784115')
         self.assertNotIn('to', sent)
+
+
+
+class HiddenNumberOrderTests(TestCase):
+    """Clarity, 14 Nov 2026: prepare_order ran with no number and failed twice ("That lookup failed")."""
+
+    def test_order_tools_ask_for_the_number_first(self):
+        from apps.communications.assistant.brain import Context, _run_tool
+        from apps.communications.tests import make_conversation
+        chat = make_conversation(None, contact_phone='')
+        for tool in ('prepare_order', 'send_payment_link'):
+            result = _run_tool(tool, {'lines': [{'service_code': 'A4CLRP2', 'quantity': 20}], 'order': 'ORD-1'},
+                               Context(conversation=chat, branches=[]))
+            self.assertEqual(result.get('error'), 'needs_phone', tool)

@@ -478,6 +478,13 @@ def _run_tool(name, args, ctx):
             args.get('service_code', ''), args.get('specifications') or {},
             args.get('quantity') or 1, args.get('addon_codes') or (), branches=ctx.branches,
         )
+    # Before the order tools, or they run with no number and fail (Clarity,
+    # 14 Nov 2026: "That lookup failed" twice, then a hand-over). This guard
+    # sat below them from 9 Nov and was never reached.
+    if name in ('prepare_order', 'send_payment_link') and not ctx.conversation.contact_phone:
+        return {'error': 'needs_phone', 'say': ("This customer uses a WhatsApp username, so their number is "
+                "hidden. Ask politely for the phone number they'd like for this order and its receipt, "
+                "then save it with use_phone_number and try again.")}
     if name == 'prepare_order':
         from apps.communications.assistant import ordering
         return ordering.prepare_order(
@@ -487,10 +494,6 @@ def _run_tool(name, args, ctx):
     if name == 'send_payment_link':
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
-    if name in ('prepare_order', 'send_payment_link') and not ctx.conversation.contact_phone:
-        return {'error': 'needs_phone', 'say': ("This customer uses a WhatsApp username, so their number is "
-                "hidden. Ask politely for the phone number they'd like for this order and its receipt, "
-                "then save it with use_phone_number and try again.")}
     if name == 'use_phone_number':
         # Their number finds their customer record; with none, ask for a name (9 Nov 2026).
         from apps.communications.services import identity
