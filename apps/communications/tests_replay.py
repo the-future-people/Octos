@@ -9,6 +9,7 @@ Run: docker compose run --rm web python manage.py test apps.communications.tests
 """
 from django.test import override_settings
 
+from apps.communications.assistant import counter
 from apps.communications.replay import MODEL_REPLY, Replay
 from apps.communications.tests import CommunicationsTestBase
 
@@ -85,28 +86,39 @@ class GoldenScenarios(CommunicationsTestBase):
             r.octos_turn(ask)
             self.assertEqual(r.said()[-1], MODEL_REPLY)
 
-    def test_a_bare_hi_with_no_proof_gets_the_not_sure_greeting(self):
+    def test_a_bare_hi_with_no_proof_asks_how_to_help(self):
         with Replay() as r:
             hi = r.customer('Hi')
-            r.wait(seconds=8)
+            r.wait(seconds=20)
             r.octos_turn(hi)
             [said] = r.said()
-            self.assertIn("If you're at the counter", said)
+            self.assertEqual(said, counter.NOT_SURE_GREETING)
             self.assertNotIn('ends in', said)
 
-    def test_after_the_not_sure_greeting_a_file_gets_no_second_message(self):
-        # Chat 431, 12 Nov: "Hi", the not-sure greeting, then a file two
-        # minutes later got the file line too: the same thing said twice.
+    def test_after_the_greeting_a_file_gets_asked_about(self):
+        # Chat 431, 12 Nov: "Hi", then a file two minutes later. The greeting
+        # asked how to help; the file gets its own question, not a repeat (14 Nov 2026).
         with Replay() as r:
             hi = r.customer('Hi')
-            r.wait(seconds=8)
+            r.wait(seconds=20)
             r.octos_turn(hi)
             r.wait(minutes=2)
             photo = r.customer(file=True)
             r.wait(minutes=2)
             r.octos_turn(photo)
-            self.assertEqual(len(r.said()), 1)
-            self.assertIn("If you're at the counter", r.said()[0])
+            self.assertEqual(r.said(), [counter.NOT_SURE_GREETING, counter.FORK_TEXT])
+
+    def test_a_file_seconds_after_hi_gets_one_question(self):
+        # 14 Nov 2026: "Hi" with the file 5 seconds behind: one message, about the file.
+        with Replay() as r:
+            hi = r.customer('Hi')
+            r.wait(seconds=5)
+            photo = r.customer(file=True)
+            r.wait(seconds=15)
+            r.octos_turn(hi)                 # skipped: a newer message
+            r.wait(minutes=2)
+            r.octos_turn(photo)
+            self.assertEqual(r.said(), [counter.FORK_TEXT])
 
     def test_not_sure_a_question_is_held_for_the_attendant_then_answered(self):
         # 10 minutes after the QR, "I want 2 copies": maybe still there, maybe not.

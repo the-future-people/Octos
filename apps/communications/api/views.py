@@ -76,6 +76,11 @@ class ConversationDetailView(generics.RetrieveAPIView):
         if obj.unread_count:
             type(obj).objects.filter(pk=obj.pk).update(unread_count=0)
             obj.unread_count = 0
+        # Someone has this chat open: Octos stays quiet while they're looking
+        # (14 Nov 2026). Cheap on every fetch; the spine hears of it at most
+        # every 10 minutes.
+        from apps.communications.services.opened import chat_opened
+        chat_opened(obj, self.request.user)
         return obj
 
     def get_serializer_context(self):

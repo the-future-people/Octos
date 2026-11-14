@@ -11,7 +11,9 @@ from django.utils import timezone
 
 from apps.communications.assistant import brain, counter, prompt
 from apps.communications.models import AssistantRun, Conversation, Message
-from apps.communications.services import whatsapp_inbound, whatsapp_media
+from django.core.cache import cache
+
+from apps.communications.services import opened, whatsapp_inbound, whatsapp_media
 from apps.communications.tests import CommunicationsTestBase, make_conversation, make_org
 from apps.communications.tests_assistant_brain import Model, says, text
 
@@ -52,7 +54,12 @@ class QuietWindowTests(Base):
 
     def test_words_wait_briefly(self):
         with patch(OPEN, return_value=True):
-            self.assertEqual(counter.quiet_window(self.customer('Hello')), counter.WORDS_WAIT)
+            self.assertEqual(counter.quiet_window(self.customer('How much is A4 colour?')), counter.WORDS_WAIT)
+
+    def test_a_bare_greeting_waits_for_a_file_behind_it(self):
+        # 14 Nov 2026: "Hi" then a file seconds later. Wait, so both are answered as one.
+        with patch(OPEN, return_value=True):
+            self.assertEqual(counter.quiet_window(self.customer('Hello')), counter.GREETING_WAIT)
 
     def test_a_file_waits_45_seconds_when_closed(self):
         with patch(OPEN, return_value=False):
@@ -108,6 +115,16 @@ class CounterTests(Base):
         run = self.respond(Model(says(text('x'))), self.customer(file=True))
         self.assertEqual(run.decision, AssistantRun.SKIPPED)
         self.assertEqual(self.sent().count(), 1)
+
+    def test_a_greeting_and_a_file_are_left_alone_when_staff_have_the_chat_open(self):
+        hi = self.customer('Hi')
+        photo = self.customer(file=True)
+        cache.set(opened._focus_key(self.conv.pk), True, opened.FOCUS_SECONDS)
+        self.addCleanup(cache.delete, opened._focus_key(self.conv.pk))
+        for trigger in (hi, photo):
+            run = self.respond(Model(says(text('x'))), trigger)
+            self.assertEqual(run.decision, AssistantRun.SKIPPED)
+        self.assertFalse(self.sent().exists())
 
     def test_phrases(self):
         self.assertEqual(counter.counter_phrase("Hi, I'm at the Westland counter"), 'westland')

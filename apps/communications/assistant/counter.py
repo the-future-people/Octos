@@ -26,13 +26,14 @@ from django.utils import timezone
 from apps.communications.models import Message
 
 WORDS_WAIT = 8        # seconds after words
+GREETING_WAIT = 20    # after a bare "Hi": a file often follows (14 Nov 2026)
 CLOSED_WAIT = 45      # after a file or no words, branches closed
 OPEN_WAIT = 120       # after a file or no words, a branch open (the counter)
 VISIT = timedelta(minutes=30)
 FORK_WINDOW = timedelta(minutes=30)
 FORK_REASON = 'file only: asked once'
-FORK_TEXT = ("Got your file \U0001F44D If you're at the counter, the attendant will pick it up. "
-             "If not, just tell me what you'd like printed and I'll price it for you.")
+# One plain question (14 Nov 2026): no "if you're at the counter" lines.
+FORK_TEXT = "Got your file \U0001F44D What would you like done with it?"
 MEDIA = (Message.IMAGE, Message.DOCUMENT, Message.VIDEO)
 QR = re.compile(r"\bi(?:'|\u2019)?m at the ([a-z][a-z ]*?) counter\b")
 HERE = re.compile(r"\b(?:i(?:'|\u2019)?m|i am)\s+(?:here|at the (?:shop|counter|desk|front desk)|in the shop)\b"
@@ -69,8 +70,19 @@ def file_only(message):
     return message.message_type in MEDIA and no_words(message)
 
 
+def bare_greeting(message):
+    """'Hi', 'hello', 'good morning' and nothing else: a file often follows."""
+    from apps.spine.presence import GREETING
+    return (message.direction == Message.INBOUND and message.message_type == Message.TEXT
+            and bool(GREETING.match((message.body or '').strip())))
+
+
 def quiet_window(message, now=None):
     """Seconds to wait after this message for the customer to go quiet."""
+    # "Hi" then a file is the commonest opening: give the file a moment to
+    # land, so the two get one reply. The signed QR is acknowledged at once.
+    if bare_greeting(message) and _verified_qr(message) is None:
+        return GREETING_WAIT
     if not no_words(message) and not expects_file(message):
         return WORDS_WAIT
     return OPEN_WAIT if shop_open(now) else CLOSED_WAIT
@@ -180,6 +192,12 @@ def step(conversation, trigger, now):
             branch = _branch(named)
             _visit(conversation, branch, now)
             return ack_text(conversation, branch), 'counter visit started'
+    # Someone at Farhat has this chat open right now: a greeting or a file is
+    # theirs to pick up, so Octos stays quiet (14 Nov 2026). Questions with
+    # words still go on, so nobody is left unanswered by a chat left open.
+    from apps.communications.services.opened import in_focus
+    if (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk):
+        return None, 'a person has this chat open'
     # Where is the customer? A belief, not a timer (Layer 2, Step 2.2).
     from apps.spine import presence
     belief = presence.for_message(conversation, trigger, now, opened)
@@ -204,17 +222,14 @@ def step(conversation, trigger, now):
                                             created_at__gte=now - FORK_WINDOW).exists()
         if asked:
             return None, 'file only: already asked, waiting for their words'
-        # The not-sure greeting already said where files go (chat 431, 12 Nov
-        # 2026): a file after it gets no second message saying the same.
-        if _greeted_unsure(conversation, now):
-            return None, 'file only: the not-sure greeting already covered it'
+        # The greeting no longer says where files go (14 Nov 2026), so a file
+        # after it gets its own short question.
         return FORK_TEXT, FORK_REASON
     return None
 
 
 NOT_SURE_REASON = 'greeted: not sure where they are'
-NOT_SURE_GREETING = ("Hi \U0001F44B Welcome to Farhat. If you're at the counter, hand your files to the "
-                     "attendant. If not, just tell me what you'd like printed and I'll help you.")
+NOT_SURE_GREETING = "Hi \U0001F44B How can I help you today?"
 HOLD_REASON = 'held for the attendant'
 HOLD_SECONDS = 120
 
