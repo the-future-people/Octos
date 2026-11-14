@@ -123,6 +123,12 @@ def arrived(conversation, message, now=None):
         Message.objects.filter(pk=message.pk).update(body=plain)
         message.body = plain
         if verified:
+            # The QR proves which branch, not that anyone is at its counter:
+            # a poster or a saved photo of it can be scanned at home. Only
+            # while the shop is open does it start a visit (Clarity, 14 Nov
+            # 2026: the counter greeting at 9:24pm, then silence).
+            if not shop_open(now):
+                return False
             from apps.organization.models import Branch
             branch = Branch.objects.filter(pk=branch_id).first()
             _visit(conversation, branch, now)
@@ -180,12 +186,13 @@ def step(conversation, trigger, now):
     """
     if trigger is None:
         return None
-    # The signed QR: proof of the branch, acknowledged like the counter phrase.
-    signed_at = _verified_qr(trigger)
+    # The signed QR: proof of the branch, acknowledged like the counter phrase,
+    # and only while the shop is open (see arrived()).
+    opened = shop_open(now)
+    signed_at = _verified_qr(trigger) if opened else None
     if signed_at is not None:
         _visit(conversation, signed_at, now)
         return ack_text(conversation, signed_at), 'counter visit started'
-    opened = shop_open(now)
     if opened:
         named = counter_phrase(trigger.body)
         if named is not None:

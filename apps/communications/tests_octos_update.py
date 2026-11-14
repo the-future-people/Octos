@@ -261,3 +261,38 @@ class JamesTests(Base):
         run = self.respond(model, again)
         self.assertTrue(model.calls)
         self.assertEqual(run.decision, AssistantRun.REPLIED)
+
+
+
+class ClosedShopQRTests(Base):
+    """Clarity, 14 Nov 2026: the counter QR scanned at 9:24pm got the counter greeting, then silence."""
+
+    def setUp(self):
+        super().setUp()
+        closed = patch(OPEN, return_value=False)
+        closed.start()
+        self.addCleanup(closed.stop)
+
+    def signed(self, body):
+        """A message carrying the counter QR's signature, as arrived() records it."""
+        message = self.customer(body)
+        counter._record_presence(self.conv, message, None, verified=True, how='signed QR')
+        return message
+
+    def test_a_signed_qr_at_night_gets_octos_not_the_counter_greeting(self):
+        model = Model(says(text("Hi! We're closed for today. What would you like printed?")))
+        self.respond(model, self.signed('Hi Farhat \U0001F44B'))
+        self.assertTrue(model.calls)
+        self.assertFalse(self.sent().filter(body__contains='Hand your files to the attendant').exists())
+        self.conv.refresh_from_db()
+        self.assertFalse(counter.in_visit(self.conv))
+
+    def test_what_she_wants_next_is_answered(self):
+        self.signed('Hi Farhat \U0001F44B')
+        model = Model(says(text('Sure. What would you like printed?')))
+        run = self.respond(model, self.customer('I want to print'))
+        self.assertEqual(run.decision, AssistantRun.REPLIED)
+
+    def test_no_proof_puts_anyone_at_a_shut_counter(self):
+        from apps.spine import presence
+        self.assertEqual(presence.believe('signed_qr', 0, 'words', shop_open=False).band, presence.AWAY)

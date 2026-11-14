@@ -100,6 +100,10 @@ def believe(anchor, minutes_since, kind, outcome_since=False, shop_open=True):
     tested and explained line by line.
     """
     reasons = []
+    if not shop_open:
+        # Nobody stands at a counter that is shut, whatever proof came before
+        # (14 Nov 2026). Closed means past closing with every cashier signed off.
+        anchor = None
     if anchor in ANCHOR_PRIOR:
         p0 = ANCHOR_PRIOR[anchor]
         p = p0 * math.exp(-max(minutes_since, 0.0) / TAU_MINUTES)
