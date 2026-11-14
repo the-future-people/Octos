@@ -227,3 +227,22 @@ Live in code, unused on the floor: no operator is assigned on production.
 
 Next: an Operator role (lands on /operator, no other portal), registering MachineOperator in admin, a hand test on real data, then Phase 2 (spoilage confirmation and reprints).
 Local setup: the docker-compose `frontend` service holds 5173 and serves stale code. Remove it or put it behind a profile.
+## Attendant portal and end-of-day sign-off (13–14 Nov 2026)
+
+### Live
+- **Attendant sign-off.** Models `AttendantSignOff` / `AttendantSignOffItem` (finance `0035`). Logic in `apps/finance/attendant_signoff_engine.py`. API under `/api/v1/finance/`: `attendant/signoff/status/`, `attendant/signoff/preview/`, `attendant/signoff/` (submit), `sheets/<pk>/attendant-signoffs/`, `attendant-signoff-items/<pk>/resolve/`.
+- **Timing comes from `ShiftRoleConfig`.** Attendant 19:30 / 0 / 60: recording closes 7:30pm, sign-off deadline 8:30pm. `ShiftEngine.ROLE_DEFAULTS` is the single source of defaults for branches with no shift or no role row.
+- **Auto sign-off.** Past the deadline, Octos signs off every attendant who recorded jobs that day (Celery beat every 5 min → `run_sheet_tasks attendant_signoff`), and the BM is told.
+- **BM close.** New gate "Attendants signed off" (runs the auto sign-off first if the deadline has passed). EOD summary carries `attendant_signoffs`; the close modal lists each attendant, flagged items, and Write off / Resolve.
+- **Reminders.** "Minutes left to sign off" from 7:30 to 8:30pm, only for attendants who recorded jobs, stopping once signed off.
+- **Portal shell.** BM-style top bar: sheet pill (status dot, sheet number, shift end), on-shift dot on the avatar, no info strip. The red line is the shift rail (red, amber after recording closes, green when signed off). Sidebar: Today, Pickup, Jobs (Mine / Whole branch), Inbox, Price list. The portal locks on the server's `is_locked` (signed off, day sheet closed, or past the deadline with nothing recorded). Last night's handover notes show on Today in the morning.
+- **System actor.** `octos_user()` / `require_octos_user()` live in `apps/accounts/system.py`; `proformas.py` re-exports them.
+- **Override.** `ATTENDANT_UNLOCK_UNTIL` (ISO time, env) keeps the attendant portal open until then. Variable removed 14 Nov; code kept as a lever.
+
+### Half-built / outstanding
+- **Carry-forward isn't wired.** `SheetEngine.carry_forward_pending_jobs` is never called, and BM close Gate 2 still blocks on any unpaid instant job, so "coming back" jobs must be resolved before close. Before wiring it: check the cashier queue (`apps/jobs/api`) still shows a carried job the next day.
+- **Pickup (next delivery).** One place for every ready job: online PIN/QR, walk-in production, balance owing (send to cashier first), collected by someone else (name and phone).
+- **Work (delivery after).** Front-desk flag on services. Front-desk jobs bypass the coordinator: instant jobs plus photocopies, document printing, scanning, lamination, binding, passport photos. Flow: check → start → done (history, customer ready message and PIN, then Pickup). Arrival: full modal when idle, waiting bar when busy, only "Take it", first to take it owns it, re-alert at 5 min, BM at 10 min. Walk-in leave-behinds go to Work with a promise.
+- **Later.** Reprints / complaints flow; attendant start-of-day routine.
+- **Lost UI to rebuild.** The BM close modal's "Worth a look before closing" section (files opened with no job, jobs recorded after closing) was discarded with `git restore` on 13 Nov. The backend still sends `unrecorded_files`.
+- **Cleanup.** DRF warning "min_value should be an integer or Decimal" (a float `min_value` on some serializer).

@@ -946,3 +946,29 @@ seconds are when people press back or pay twice.
 - **Two signed human checks:** Text (names, dates, numbers, spelling) and Edges (with the margins overlay: safe area, cut, eyelets). Each records who and when.
 - **Clear comes alive** when every computed row is fine or settled and both checks are signed. Until then the button counts what's left ("Clear · 3 checks left"), and pressing it says what's missing.
 - **Hold and contact are one action**, with a drafted message to the customer.
+## 13 Nov 2026 — Attendant end of day
+
+- **Record until 7:30pm, sign off by 8:30pm** (was a hard block at 7pm). Same deadline as the cashier. The 7pm block came from data (`0007` set the attendant's end to 19:00), not code.
+- **Sign-off opens at shift end, together with recording closing.** 7:00pm is a warning only. One event, one rule (`can_signoff = now >= shift end`) for every role.
+- **The sign-off asks only what the attendant still owns tonight:** unpaid instant jobs (printed before payment, so an unpaid one may be paper gone with no money) and the shelf. Deposit-paid production jobs are never asked about; their whereabouts come from the Octos promise, shown read-only.
+- **Testimony, not action.** The sign-off moves no payment, work or handover axis (separation of duties). Only "Not printed" acts, as an ordinary cancel through `JobStatusEngine`, so the engine's rules decide. "Left unpaid" and "missing from shelf" go to the BM.
+- **The BM writes off by cancelling with a note.** Never void: the void rules were never finalised.
+- **Unpaid jobs at close carry to tomorrow** rather than the cashier being made to finish them. (Decided; not yet wired — see continuity.)
+- **Preview derived, record snapshot.** The preview is recomputed every time and stores nothing; the submitted sign-off stores bucket counts as they were at signing. Every job recorded that day lands in exactly one bucket.
+- **Idempotency by database constraint**, not by a Python check: unique (sheet, attendant). The auto sign-off can race a manual one safely.
+- **Automatic actions are signed by the Octos account** and fail loudly if it's missing, never with a blank signer.
+- **Each attendant does the shelf check** when she signs off. Revisit when Westland runs two attendants.
+- **"Coming back" needs no field:** a job's age is derived (today minus the day it was recorded). No `carry_count`.
+- **`abandoned_at` is not reused** for "left unpaid": it means draft expiry, and the assistant's queries rely on that.
+- **The lock rule lives on the server** (`is_locked`), not in the frontend's clock.
+
+## 13 Nov 2026 — Attendant portal
+
+- **Top bar follows the BM's form.** Identity and actions in the bar, no info strip. The pill shows the sheet number then shift end; its dot carries the phase. The brand's red line becomes the shift rail.
+- **Sidebar: Today, Pickup, Jobs, Inbox, Price list.** My Jobs, Branch Jobs and Drafts merged into Jobs. Drafts dropped: New Job never creates a draft. "Pickup" chosen over "Collect": the cashier's "Collections" already means money.
+- **Front-desk jobs bypass the coordinator.** He keeps pure production. "Front desk" is a flag on the service; a job goes to the front desk only if every line is front-desk work (mixed orders go to the coordinator whole). The file check moves with the job. The attendant may move a front-desk job's work by routing, not by role.
+- **Arrival alerts are loud but never destroy work:** full modal when idle, a waiting bar when she's mid New Job; "Take it" is the only way out.
+
+## 13 Nov 2026 — Ways of working
+
+- **Larger changes are delivered as a zip with `apply.ps1`:** it checks every file against the last commit (stops if anything changed), copies and deletes files, runs check / migrations / tests / build, and never commits. Small changes still use find / change.

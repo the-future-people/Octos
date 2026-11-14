@@ -1165,3 +1165,15 @@ Internal detail belongs in the log, not on the screen.
 ### Data
 - A list endpoint that ignores a filter fails quietly: receipts/?job= returned the branch's newest receipt, and the job panel showed another job's receipt for weeks.
 - Key rotation needs a grace period: signs printed before COUNTER_QR_SECRET existed still had to verify.
+
+## 13 Nov 2026
+- `QuerySet.update()` bypasses `save()`: `auto_now` and signals don't fire. Never date a change from `updated_at`; in data migrations set `updated_at` explicitly.
+- Check for `(venv)` in the prompt before any `manage.py` command. Global Python has an unrelated `decouple`, so a missing venv shows up as "cannot import name 'config' from 'decouple'".
+- `apps/` is a namespace package: dotted test labels need `-t .` (`manage.py test apps.hr -t .`).
+- Models live in packages: search `apps\<app>\models\`, not `models.py`.
+- `git archive` only sees committed work: commit (or check `git status`) before zipping code for review.
+- A docstring is not proof code runs: grep for callers (`carry_forward_pending_jobs` was never called).
+- Read a diff before `git restore`: discarded work is gone.
+- Run `git status` on its own; chained with `add` and `commit` it can't stop anything.
+- Changing a Railway variable redeploys the current deployment: check Deployments for the active commit (and wait for the build) before debugging.
+- Don't give an existing field a second meaning; add the meaning where it belongs.
