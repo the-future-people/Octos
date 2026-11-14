@@ -129,6 +129,9 @@ class OnlineOrder(AuditModel):
         max_length=100, blank=True, db_index=True,
     )
     paid_at = models.DateTimeField(null=True, blank=True)
+    # When Octos reminded the customer about an unpaid WhatsApp order:
+    # once per order, ever (storefront/services/payment_reminder).
+    payment_reminded_at = models.DateTimeField(null=True, blank=True)
 
     # What the customer paid is `total` above. These two are what
     # happened to it on the way in: the provider's cut, and what

@@ -1,5 +1,8 @@
 """
 The welcome text, and the text log behind it.
+
+Since 14 Nov 2026 only app sign-ups are welcomed. Customers registered by
+staff are thanked at the end of the day instead (tests_thanks_and_reminder).
 """
 
 from unittest import mock
@@ -29,14 +32,8 @@ def refused(*args, **kwargs):
 @override_settings(MNOTIFY_API_KEY='test-key', MNOTIFY_SENDER_ID='FarhatPrint', WELCOME_TEXTS=True)
 class WelcomeTests(TestCase):
 
-    def make(self, **kw):
-        kw.setdefault('phone', '0556244194')
-        kw.setdefault('first_name', 'ama')
-        with mock.patch('apps.storefront.receivers._queue'):
-            return CustomerProfile.objects.create(**kw)
-
     def test_the_text_fits_one_sms_and_greets_by_name(self):
-        c = self.make()
+        c = CustomerProfile(first_name='ama', phone='0556244194')
         text = w.welcome_text(c)
         self.assertTrue(text.startswith('Hi Ama, welcome to Farhat Printing Press!'))
         self.assertLessEqual(len(text), 160)
@@ -49,9 +46,8 @@ class WelcomeTests(TestCase):
 
     @mock.patch('requests.post', side_effect=accepted)
     def test_sent_once_and_logged(self, post):
-        c = self.make()
-        self.assertTrue(w.welcome(c.pk))
-        self.assertFalse(w.welcome(c.pk))
+        self.assertTrue(w.greet('0556244194', 'ama'))
+        self.assertFalse(w.greet('0556244194', 'ama'))
         self.assertEqual(post.call_count, 1)
         log = TextMessage.objects.get(kind='welcome')
         self.assertTrue(log.accepted)
@@ -60,34 +56,19 @@ class WelcomeTests(TestCase):
 
     @mock.patch('requests.post', side_effect=refused)
     def test_a_refusal_is_logged_and_can_be_retried(self, post):
-        c = self.make()
-        self.assertFalse(w.welcome(c.pk))
+        self.assertFalse(w.greet('0556244194', 'ama'))
         log = TextMessage.objects.get(kind='welcome')
         self.assertFalse(log.accepted)
         self.assertEqual(log.provider_code, '4003')
-        self.assertFalse(w.already_welcomed(c.phone))
+        self.assertFalse(w.already_welcomed('0556244194'))
 
-    def test_registering_a_customer_queues_the_welcome(self):
-        with mock.patch('apps.storefront.receivers._queue') as q:
+    @override_settings(WELCOME_IN_TESTS=True)
+    def test_registering_a_customer_sends_no_welcome(self):
+        # 14 Nov 2026: it arrived at the counter, mid-job. The thank-you replaced it.
+        with mock.patch('apps.storefront.services.welcome.greet') as greet:
             with self.captureOnCommitCallbacks(execute=True):
-                c = CustomerProfile.objects.create(phone='0201112223', first_name='Kofi')
-        q.assert_called_once_with(c.pk)
-
-    def test_walk_ins_and_marked_imports_are_not_welcomed(self):
-        with mock.patch('apps.storefront.receivers._queue') as q:
-            with self.captureOnCommitCallbacks(execute=True):
-                CustomerProfile.objects.create(phone='0201112224', is_walkin=True)
-                imported = CustomerProfile(phone='0201112225', first_name='Imported')
-                imported._skip_welcome = True
-                imported.save()
-        q.assert_not_called()
-
-    @override_settings(WELCOME_TEXTS=False)
-    def test_the_switch_turns_welcomes_off(self):
-        with mock.patch('apps.storefront.receivers._queue') as q:
-            with self.captureOnCommitCallbacks(execute=True):
-                CustomerProfile.objects.create(phone='0201112226', first_name='Esi')
-        q.assert_not_called()
+                CustomerProfile.objects.create(phone='0201112223', first_name='Kofi')
+        greet.assert_not_called()
 
 
 @override_settings(MNOTIFY_API_KEY='test-key', MNOTIFY_SENDER_ID='FarhatPrint', WELCOME_TEXTS=True)
@@ -117,9 +98,7 @@ class AppSignUpWelcomeTests(TestCase):
         self.assertEqual(q.call_count, 1)
 
     @mock.patch('requests.post', side_effect=accepted)
-    def test_one_welcome_per_number_across_both_doors(self, post):
+    def test_one_welcome_per_number_ever(self, post):
         self.assertTrue(w.greet('0558631016', 'Esi'))
-        with mock.patch('apps.storefront.receivers._queue'):
-            c = CustomerProfile.objects.create(phone='0558631016', first_name='Esi')
-        self.assertFalse(w.welcome(c.pk))
+        self.assertFalse(w.greet('0558631016', 'Esi'))
         self.assertEqual(post.call_count, 1)

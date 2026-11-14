@@ -164,10 +164,17 @@ from celery import shared_task as _shared_task
 
 
 @_shared_task(ignore_result=True)
-def send_welcome(customer_id):
-    """The welcome for a newly registered customer. Once per number, ever."""
-    from apps.storefront.services.welcome import welcome
-    welcome(customer_id)
+def send_thanks():
+    """Every 5 minutes: the end-of-day thank-you, for branches half an hour from closing."""
+    from apps.storefront.services.thanks import thank_all
+    thank_all()
+
+
+@_shared_task(ignore_result=True)
+def send_payment_reminders():
+    """Every 10 minutes: one reminder for unpaid orders Octos took on WhatsApp."""
+    from apps.storefront.services.payment_reminder import remind_all
+    remind_all()
 
 
 

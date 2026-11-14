@@ -110,16 +110,3 @@ def greet(phone, name='') -> bool:
     except Exception:
         logger.warning('Welcome not sent to %s', phone, exc_info=True)
         return False
-
-
-def welcome(customer_id) -> bool:
-    """The welcome for a customer registered by staff. Never raises."""
-    from apps.customers.models import CustomerProfile
-
-    try:
-        customer = CustomerProfile.objects.get(pk=customer_id)
-    except CustomerProfile.DoesNotExist:
-        return False
-    if customer.is_walkin:
-        return False
-    return greet(customer.phone, customer.first_name or '')

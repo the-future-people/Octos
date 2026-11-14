@@ -37,8 +37,7 @@ class YearCardTests(TestCase):
                                            is_active=True)
 
     def customer(self, phone, name='Ama'):
-        with mock.patch('apps.storefront.receivers._queue'):
-            return CustomerProfile.objects.create(phone=phone, first_name=name)
+        return CustomerProfile.objects.create(phone=phone, first_name=name)
 
     def job(self, customer, when, service, status='PAID'):
         j = Job.objects.create(branch=self.branch, job_type='PRODUCTION', title='t', customer=customer, status=status)

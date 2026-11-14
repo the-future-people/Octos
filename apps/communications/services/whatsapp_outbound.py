@@ -41,7 +41,7 @@ OUTSIDE_WINDOW = '131047'
 # System messages that must not fall back to SMS when WhatsApp fails.
 # A receipt is long and formatted: as an SMS it would arrive as several
 # Unicode parts at several times the cost. Staff print it instead.
-NO_SMS_FALLBACK = {'receipt'}
+NO_SMS_FALLBACK = {'receipt', 'thanks', 'payment_reminder'}
 
 
 class WindowClosed(Exception):
@@ -106,24 +106,31 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
     return message
 
 
+def thread_for(phone):
+    """
+    This number's WhatsApp chat on the central number, or None: no real
+    number, never wrote to us, or marked spam (never messaged by Octos).
+    """
+    number = to_international(phone or '')
+    if not number:
+        return None
+    return (
+        Conversation.objects
+        .filter(channel=Conversation.WHATSAPP, branch__isnull=True, contact_phone=number)
+        .exclude(status=Conversation.SPAM)
+        .first()
+    )
+
+
 def try_send_text(phone, body, kind, image=None, filename='card.png'):
     """
     A system message by WhatsApp if this number's window is open.
     Returns the queued Message, or None, meaning "send your SMS".
 
     Never raises for the ordinary reasons (no conversation, window shut,
-    a number that isn't real): those all mean SMS, as before. A
-    conversation marked spam never gets WhatsApp from Octos.
+    a number that isn't real): those all mean SMS, as before.
     """
-    number = to_international(phone or '')
-    if not number:
-        return None
-    conversation = (
-        Conversation.objects
-        .filter(channel=Conversation.WHATSAPP, branch__isnull=True, contact_phone=number)
-        .exclude(status=Conversation.SPAM)
-        .first()
-    )
+    conversation = thread_for(phone)
     if conversation is None or not window_open(conversation):
         return None
     try:
