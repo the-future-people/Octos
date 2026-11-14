@@ -32,7 +32,7 @@ OPENING = {kinds.MESSAGE_RECEIVED, kinds.PRESENCE_COUNTER, kinds.COUNTER_CLAIMED
 # Paperwork, not activity: these join an open visit but never keep it alive.
 NOT_ACTIVITY = {
     kinds.MESSAGE_DELIVERED, kinds.MESSAGE_READ, kinds.OCTOS_STAYED_SILENT,
-    kinds.OCTOS_SHADOWED, kinds.STAFF_REMINDED,
+    kinds.OCTOS_SHADOWED, kinds.STAFF_REMINDED, kinds.MESSAGE_REACTED,
 }
 
 # Real outcomes, each backed by the event that proves it.
@@ -148,6 +148,11 @@ def _time_out(visit):
     outcome = 'ABANDONED' if hanging else 'NO_ACTION'
     close(visit, outcome, at=visit.last_activity_at + QUIET_GAP, timed_out=True,
           reason='Quiet for 2 hours' + (' after a quote or payment link.' if hanging else '.'))
+    # A chat a person still holds goes back to Octos with the visit (14 Nov 2026).
+    # Only a quiet close: after a job is created a person may still be talking.
+    if visit.conversation_id:
+        from apps.communications.services.handover import release_after_visit
+        release_after_visit(visit.conversation)
 
 
 def close_quiet(now=None):

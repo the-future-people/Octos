@@ -70,7 +70,8 @@ def hand_back(conversation, user=None, why=''):
                    reason=f'Octos took the conversation back: {why}')
         # Only when Octos took back: a customer nobody answered gets an answer
         # now. After a person's hand-back, what was waiting is theirs, handled.
-        waiting = conversation.messages.filter(is_internal_note=False).order_by('-created_at').first()
+        waiting = (conversation.messages.filter(is_internal_note=False)
+                   .exclude(kind=Message.REACTION).order_by('-created_at').first())
         if user is None and waiting is not None and waiting.direction == Message.INBOUND:
             from apps.communications.services.whatsapp_inbound import wake_octos
             wake_octos(conversation, waiting)
@@ -104,6 +105,7 @@ def waiting_since(conversation):
     """When the customer's unanswered message arrived, or None if nobody is waiting."""
     last = (
         conversation.messages.filter(is_internal_note=False)
+        .exclude(kind=Message.REACTION)
         .order_by('-created_at').first()
     )
     if last is not None and last.direction == Message.INBOUND:
@@ -195,6 +197,44 @@ def resolved(conversation, user=None):
         record(kinds.CONVERSATION_RESOLVED, actor=Event.STAFF if user else Event.SYSTEM,
                actor_user=user, conversation=conversation, customer=conversation.customer,
                reason='Marked resolved.')
+
+
+def release_after_visit(conversation):
+    """
+    The visit went quiet for 2 hours: a chat a person still holds goes back
+    to Octos (14 Nov 2026). Taking over just to send a scan back used to
+    leave the chat with staff for good, and the customer's next message then
+    waited 40 minutes for anyone. Nothing is sent now; Octos simply answers
+    whatever the customer writes next.
+    """
+    if conversation.handled_by != Conversation.STAFF:
+        return False
+    with transaction.atomic():
+        _switch(conversation, Conversation.OCTOS, reason='')
+        _note(conversation, 'Octos took the conversation back: the visit ended (2 quiet hours).', None)
+        record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
+               conversation=conversation, customer=conversation.customer,
+               reason='Octos took the conversation back: the visit ended.')
+    return True
+
+
+def release_after_visit(conversation):
+    """
+    The visit went quiet for 2 hours: a chat a person still holds goes back
+    to Octos (14 Nov 2026). Taking over just to send a scan back used to
+    leave the chat with staff for good, and the customer's next message then
+    waited 40 minutes for anyone. Nothing is sent now; Octos simply answers
+    whatever the customer writes next.
+    """
+    if conversation.handled_by != Conversation.STAFF:
+        return False
+    with transaction.atomic():
+        _switch(conversation, Conversation.OCTOS, reason='')
+        _note(conversation, 'Octos took the conversation back: the visit ended (2 quiet hours).', None)
+        record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
+               conversation=conversation, customer=conversation.customer,
+               reason='Octos took the conversation back: the visit ended.')
+    return True
 
 
 def _clip(text, limit):

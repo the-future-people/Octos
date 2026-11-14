@@ -127,6 +127,8 @@ def _receive(message, profile_name, who=None):
 
     message_type, body, media_id = _content(message)
     media_name, media_mime = _media_details(message)
+    # Read before `message` is reused for the saved Message below.
+    reaction = message.get('type') == 'reaction'
     try:
         with transaction.atomic():
             # The write is the duplicate check: Meta retries, and the
@@ -136,6 +138,7 @@ def _receive(message, profile_name, who=None):
                 direction=Message.INBOUND,
                 channel=Message.WHATSAPP,
                 message_type=message_type,
+                kind=Message.REACTION if reaction else '',
                 body=body,
                 media_id=media_id,
                 media_name=media_name,
@@ -154,7 +157,7 @@ def _receive(message, profile_name, who=None):
 
     # The spine: what arrived, from whom, keyed by WhatsApp's id. The words
     # stay on the Message; the event carries only what describes it.
-    record(kinds.MESSAGE_RECEIVED, actor=Event.CUSTOMER,
+    record(kinds.MESSAGE_REACTED if reaction else kinds.MESSAGE_RECEIVED, actor=Event.CUSTOMER,
            conversation=conversation, customer=conversation.customer,
            key=f'wa:{wamid}',
            payload={'message_id': message.pk, 'type': message_type,
@@ -165,6 +168,11 @@ def _receive(message, profile_name, who=None):
     # gets round to it. A run can be skipped for a newer message (a photo sent
     # seconds after the QR), and the visit must not be skipped with it
     # (Priscilla, 9 Nov 2026).
+    # A reaction is kept for the inbox, and that is all: it never says where
+    # the customer is and never asks for a reply (Henry, 13 Nov 2026).
+    if reaction:
+        return True
+
     from apps.communications.assistant import counter
     counter.arrived(conversation, message)
 

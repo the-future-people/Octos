@@ -15,6 +15,7 @@ MESSAGE_SENT = 'message.sent'                # we sent a message (Octos or staff
 MESSAGE_DELIVERED = 'message.delivered'      # the provider says it arrived on the phone
 MESSAGE_READ = 'message.read'
 MESSAGE_FAILED = 'message.failed'            # the provider refused or never answered
+MESSAGE_REACTED = 'message.reacted'          # a customer reacted (a thumbs-up): joins a visit, never opens one
 FILE_RECEIVED = 'file.received'              # a customer's file was saved
 FILE_MEASURED = 'file.measured'              # pages, size, DPI etc. worked out
 FILE_OPENED = 'file.opened'                  # a person opened a customer's file (wired in Layer 2)
