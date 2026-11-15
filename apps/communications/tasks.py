@@ -52,8 +52,17 @@ def fetch_whatsapp_media(self, message_id):
         whatsapp_media.fetch(message_id)
     except whatsapp_media.MediaError:
         logger.warning('WhatsApp media for message %s cannot be kept', message_id, exc_info=True)
+        whatsapp_media.mark_failed(message_id, 'gone')
     except requests.RequestException as exc:
+        if self.request.retries >= self.max_retries:
+            whatsapp_media.mark_failed(message_id, 'network')
+            raise
         raise self.retry(exc=exc)
+    except Exception:
+        # Anything else (a bug, the database refusing) must never leave staff
+        # watching "Receiving the file..." for ever (15 Nov 2026).
+        whatsapp_media.mark_failed(message_id, 'error')
+        raise
 
 @shared_task
 def show_whatsapp_typing(message_id):

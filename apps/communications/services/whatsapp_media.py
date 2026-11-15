@@ -140,6 +140,27 @@ def count_pages(content, mime):
     return None
 
 
+# The stored name only, kept short: the column holding the whole path is 100
+# characters, and 'communications/media/2026/11/' plus a long title overflowed
+# it (15 Nov 2026: a 100-character PDF name, never saved). The customer's own
+# name stays in media_name, which is what everyone sees.
+STEM_MAX = 50
+
+
+def _short(name):
+    stem, ext = os.path.splitext(name)
+    return f'{stem[:STEM_MAX]}{ext[:10]}'
+
+
+def mark_failed(message_id, why):
+    """The inbox says the file couldn't be saved, instead of 'Receiving...' for ever."""
+    message = Message.objects.filter(pk=message_id, media_file='').first()
+    if message is None:
+        return
+    Message.objects.filter(pk=message_id).update(media_info={'failed': why})
+    _announce(message)
+
+
 def _file_name(message, mime):
     """The customer's own file name, made safe; else one from the type."""
     # Photos, voice notes and videos arrive with no file name, and Django's
@@ -148,7 +169,7 @@ def _file_name(message, mime):
     raw = os.path.basename(message.media_name or '').strip()
     if raw:
         try:
-            return get_valid_filename(raw)[:120]
+            return _short(get_valid_filename(raw))
         except SuspiciousFileOperation:
             pass
     ext = mimetypes.guess_extension((mime or '').split(';')[0].strip()) or ''

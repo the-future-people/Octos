@@ -68,3 +68,33 @@ class OctosWaitsForTheFileTests(TestCase):
             self.assertIsNone(brain.respond(conv.pk, msg.pk))
         again.assert_called_once_with((conv.pk, msg.pk), countdown=brain.RETRY_SECONDS)
         model.assert_not_called()
+
+
+
+class LongNamesAndFailuresTests(TestCase):
+    """15 Nov 2026: a 100-character PDF name overflowed the path column; the inbox said 'Receiving' for ever."""
+
+    def setUp(self):
+        self.conv = make_conversation(None, contact_phone='+233244000613')
+        self.msg = Message.objects.create(
+            conversation=self.conv, direction=Message.INBOUND, channel=Message.WHATSAPP,
+            message_type=Message.DOCUMENT, media_id='m-79', media_mime='application/pdf',
+            media_name='Company Law - Reading Guide - Introduction to governance of companies, membership and general meetings.pdf')
+
+    def test_a_long_file_name_is_saved(self):
+        with patch.object(whatsapp_media, 'download', return_value=(b'%PDF bytes', '')), \
+                patch.object(whatsapp_media, '_measure', return_value=({'page_count': 3}, 3)):
+            whatsapp_media.fetch(self.msg.pk)
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.media_file)
+        self.assertLessEqual(len(self.msg.media_file.name), 100)
+        self.assertTrue(self.msg.media_file.name.endswith('.pdf'))
+        self.assertTrue(self.msg.media_name.startswith('Company Law'))     # the customer's name, kept whole
+
+    def test_a_failure_tells_the_inbox(self):
+        from apps.communications.tasks import fetch_whatsapp_media
+        with patch.object(whatsapp_media, 'fetch', side_effect=ValueError('database said no')):
+            with self.assertRaises(ValueError):
+                fetch_whatsapp_media(self.msg.pk)
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.media_info, {'failed': 'error'})
