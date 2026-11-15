@@ -29,7 +29,8 @@ class SheetEngine:
     - One sheet per branch per day — enforced at DB level
     - Sundays never open
     - Public holidays open but are flagged with name and date
-    - Instant jobs cannot carry past hard lock without CRITICAL flag
+    - Unpaid instant jobs carry to the next day at close (carried_forward); the
+      daily risk report flags a high count
     - Production jobs never block EOD
     - Sheet is immutable once closed — no reopening ever
 
@@ -515,17 +516,12 @@ class SheetEngine:
             self._handle_autoclose_failure(sheet, 'unsigned_floats', count)
             return sheet
 
-        # Auto-close: block if pending instant payments exist
-        if auto and self.has_pending_payments(sheet):
-            count = self.get_pending_payment_count(sheet)
-            logger.warning(
-                'SheetEngine: auto-close blocked for sheet %s — '
-                '%d pending payment(s).',
-                sheet.pk, count,
-            )
-            self._notify_bm_pending_payments(sheet, count)
-            self._handle_autoclose_failure(sheet, 'pending_payments', count)
-            return sheet
+        # Unpaid instant jobs carry to tomorrow rather than holding the day
+        # open (15 Nov 2026). Every one was answered in an attendant's
+        # sign-off (coming back, left unpaid, not printed): the attendant gate
+        # sees to that. They stay payable, and the money counts on the day it
+        # is taken, because a receipt always goes on the open sheet.
+        self.carry_forward_pending_jobs(sheet)
 
         # Freeze totals
         self._snapshot_totals(sheet)
@@ -751,7 +747,7 @@ class SheetEngine:
     def carry_forward_pending_jobs(self, sheet) -> int:
         """
         Mark all remaining PENDING_PAYMENT instant jobs as carried forward.
-        Called at hard lock time by Celery task.
+        Called by close_sheet, manual or automatic, before totals freeze.
         Returns count of jobs carried forward.
         """
         from apps.jobs.models import Job
@@ -826,10 +822,10 @@ class SheetEngine:
                 try:
                     notify(
                         recipient=bm,
-                        verb='SHEET_CLOSE_BLOCKED',
+                        verb='JOBS_CARRIED_FORWARD',
                         message=(
-                            f"{count} instant job(s) still pending payment. "
-                            f"Resolve or carry forward before sheet can close."
+                            f"{count} unpaid instant job(s) carried to tomorrow. Take payment "
+                            f"when the customer returns, or cancel one to write it off."
                         ),
                         link='/portal/dashboard/?tab=jobs&status=PENDING_PAYMENT',
                     )

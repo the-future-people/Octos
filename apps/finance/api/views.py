@@ -297,19 +297,6 @@ class DailySalesSheetCloseView(APIView):
         signoff_gate = FloatEngine.validate_signoff_gate(sheet)
         if not signoff_gate['passed']:
             errors.extend(signoff_gate['errors'])
-
-        # Gate 2: No pending instant payments
-        pending = Job.objects.filter(
-            daily_sheet=sheet,
-            status=Job.PENDING_PAYMENT,
-            job_type='INSTANT',
-        ).count()
-        if pending:
-            errors.append(
-                f"{pending} instant job(s) still pending payment. "
-                f"Resolve before closing."
-            )
-
         # Attendant gate: everyone who recorded jobs today has signed off.
         # Past their deadline Octos signs off for them first, so the manager
         # is never held up waiting for the scheduled task (13 Nov 2026).

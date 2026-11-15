@@ -385,3 +385,22 @@ class ReminderTests(SignOffFixtureMixin, TestCase):
             self.engine().submit(self.attendant, {}, {}, now=now)
         self._run(19, 45)
         self.assertFalse(self._signoff_reminders(self.attendant).exists())
+
+
+
+class CarryForwardTests(SignOffFixtureMixin, TestCase):
+    """15 Nov 2026: an unpaid instant job carries to tomorrow instead of holding the day open."""
+
+    def test_the_close_carries_unpaid_instant_jobs_and_closes(self):
+        from apps.finance.sheet_engine import SheetEngine
+        unpaid = self.job('INSTANT')
+        paid = self.job('INSTANT', status='COMPLETE', payment='SETTLED', work='DONE', handover='HANDED_OVER')
+        with patch('apps.notifications.services.notify'):
+            SheetEngine(self.branch).close_sheet(self.sheet, auto=True)
+        self.sheet.refresh_from_db()
+        unpaid.refresh_from_db()
+        paid.refresh_from_db()
+        self.assertEqual(self.sheet.status, 'AUTO_CLOSED')
+        self.assertTrue(unpaid.carried_forward)
+        self.assertEqual(unpaid.status, 'PENDING_PAYMENT')     # still payable tomorrow
+        self.assertFalse(paid.carried_forward)
