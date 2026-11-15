@@ -616,6 +616,12 @@ class MessageFileView(APIView):
             from apps.communications.services.opened import file_opened
             file_opened(message, request.user)
         name = message.media_name or message.media_file.name.rsplit('/', 1)[-1]
+        if request.query_params.get('link'):
+            # A signed link straight to the file in R2, for the person just
+            # checked above (15 Nov 2026): the browser downloads from R2's
+            # edge, not through this server. None where files are on disk
+            # (a laptop): the screen then asks for the file itself.
+            return Response({'url': _signed_link(message, name, bool(request.query_params.get('download')))})
         response = FileResponse(message.media_file.open('rb'),
                                 as_attachment=bool(request.query_params.get('download')),
                                 filename=name,
@@ -623,6 +629,29 @@ class MessageFileView(APIView):
         # Private: never kept by a shared cache, only the asker's browser.
         response['Cache-Control'] = 'private, max-age=3600'
         return response
+
+
+LINK_SECONDS = 3600
+
+
+def _signed_link(message, name, download):
+    """A link to the file in R2, good for an hour; None where files are on disk."""
+    from urllib.parse import quote
+    storage = message.media_file.storage
+    connection = getattr(storage, 'connection', None)
+    if connection is None:
+        return None
+    disposition = f"{'attachment' if download else 'inline'}; filename*=UTF-8''{quote(name)}"
+    return connection.meta.client.generate_presigned_url(
+        'get_object',
+        Params={
+            'Bucket': storage.bucket_name,
+            'Key': storage._normalize_name(message.media_file.name),
+            'ResponseContentDisposition': disposition,
+            'ResponseContentType': message.media_mime or 'application/octet-stream',
+        },
+        ExpiresIn=LINK_SECONDS,
+    )
 
 
 def _quoted_in(conversation, pk):

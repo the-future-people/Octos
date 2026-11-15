@@ -695,6 +695,19 @@ LOCK_SECONDS = 180    # longer than any run; a crashed worker's lock expires by 
 RETRY_SECONDS = 10
 
 
+def _still_reading(conversation_id):
+    """
+    A file sent in the last 3 minutes is still being measured. Never longer:
+    a measurement that never finished must not hold Octos back for good.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    return Message.objects.filter(
+        conversation_id=conversation_id, direction=Message.INBOUND,
+        created_at__gte=timezone.now() - timedelta(minutes=3), media_info__measuring=True,
+    ).exists()
+
+
 def respond(conversation_id, *args, **kwargs):
     """
     One run at a time per chat (14 Nov 2026). Two messages landing together
@@ -703,6 +716,13 @@ def respond(conversation_id, *args, **kwargs):
     guards in _silence see it.
     """
     from django.core.cache import cache
+    if _still_reading(conversation_id):
+        # A file just sent is openable but not yet measured (pages, paper):
+        # Octos waits for it rather than answer half-informed (15 Nov 2026).
+        from apps.communications.tasks import answer_whatsapp
+        trigger_id = args[0] if args else kwargs.get('trigger_id')
+        answer_whatsapp.apply_async((conversation_id, trigger_id), countdown=RETRY_SECONDS)
+        return None
     key = f'octos_run:{conversation_id}'
     if not cache.add(key, True, LOCK_SECONDS):
         from apps.communications.tasks import answer_whatsapp

@@ -38,7 +38,15 @@ class MediaError(Exception):
 
 
 def fetch(message_id):
-    """Download and keep the file behind one message. Returns the message."""
+    """
+    Download and keep the file behind one message. Returns the message.
+
+    Ready first, read after (15 Nov 2026): the file is saved, openable and
+    every screen told before it is measured. Measuring came first before,
+    and for a Word file that means converting it to PDF (up to 90 seconds):
+    staff watched "Receiving the file..." with a customer at the counter.
+    While measuring, media_info says so, and Octos waits for it (brain).
+    """
     message = Message.objects.get(pk=message_id)
     if message.media_file or not message.media_id:
         return message  # already kept, or nothing to keep
@@ -49,8 +57,34 @@ def fetch(message_id):
     path = default_storage.save(
         f'communications/media/{timezone.now():%Y/%m}/{name}', ContentFile(content),
     )
-    # A Word file is kept as sent; its pages, size and colour are read from a
-    # PDF copy made for the moment and then dropped (Khofi, 7 Nov 2026).
+    photo = (mime or '').startswith('image/')
+    Message.objects.filter(pk=message.pk).update(
+        media_file=path, media_mime=mime, media_size=len(content),
+        media_pages=1 if photo else None, media_info={'measuring': True},
+    )
+    _announce(message)
+
+    info, pages = {}, None
+    try:
+        info, pages = _measure(content, name, mime)
+    finally:
+        # Always, even if measuring failed: "measuring" must never be left
+        # behind, or Octos would wait on it.
+        Message.objects.filter(pk=message.pk).update(
+            media_pages=pages or (1 if photo else None), media_info=info,
+        )
+        _announce(message)
+    message.refresh_from_db()
+    logger.info('Kept WhatsApp media for message %s: %s, %s bytes', message.pk, path, len(content))
+    return message
+
+
+def _measure(content, name, mime):
+    """
+    (info, pages) for a file. A Word file is kept as sent; its pages, size
+    and colour are read from a PDF copy made for the moment and then
+    dropped (Khofi, 7 Nov 2026).
+    """
     from apps.jobs.services.word_to_pdf import ConversionFailed, is_word, pdf_name, to_pdf
     measured, measured_name, measured_mime = content, name, mime
     if is_word(name, mime):
@@ -61,14 +95,14 @@ def fetch(message_id):
     info = describe(measured, measured_name, measured_mime)
     if measured is not content:
         info['word'] = True
-    Message.objects.filter(pk=message.pk).update(
-        media_file=path, media_mime=mime, media_size=len(content),
-        media_pages=info.get('page_count') or count_pages(measured, measured_mime),
-        media_info=info,
-    )
-    message.refresh_from_db()
-    logger.info('Kept WhatsApp media for message %s: %s, %s bytes', message.pk, path, len(content))
-    return message
+    return info, info.get('page_count') or count_pages(measured, measured_mime)
+
+
+def _announce(message):
+    """Every open inbox hears at once. update() skips the save signal that would."""
+    from apps.communications.live import announce
+    conversation = message.conversation
+    announce(conversation.pk, conversation.branch_id)
 
 
 def download(media_id):
