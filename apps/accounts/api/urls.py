@@ -1,8 +1,10 @@
 from django.urls import path
 from . import views
+from .on_shift import OnShiftView
 
 urlpatterns = [
     path('me/', views.MeView.as_view(), name='me'),
+    path('on-shift/', OnShiftView.as_view(), name='on-shift'),
     path('change-password/', views.ChangePasswordView.as_view(), name='change-password'),
     path('pin/set/', views.SetDownloadPinView.as_view(), name='pin-set'),
     path('pin/verify/', views.VerifyDownloadPinView.as_view(), name='pin-verify'),

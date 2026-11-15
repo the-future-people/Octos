@@ -34,10 +34,9 @@ class SessionStartView(APIView):
         portal     = request.data.get('portal', '').upper()
         user_agent = request.data.get('user_agent', '')
 
-        valid_portals = [
-            'ATTENDANT', 'CASHIER', 'BRANCH_MANAGER',
-            'REGIONAL_MANAGER', 'FINANCE', 'BELT_MANAGER',
-        ]
+        from apps.analytics.models import UserSession
+        # The model's list, so a new portal is one line in one place.
+        valid_portals = [code for code, _ in UserSession.PORTAL_CHOICES]
         if portal not in valid_portals:
             return Response(
                 {'detail': f'Invalid portal. Choose from: {valid_portals}'},

@@ -23,6 +23,8 @@ class UserSession(models.Model):
     PORTAL_REGIONAL_MANAGER = 'REGIONAL_MANAGER'
     PORTAL_FINANCE          = 'FINANCE'
     PORTAL_BELT_MANAGER     = 'BELT_MANAGER'
+    PORTAL_OPERATOR         = 'OPERATOR'
+    PORTAL_COORDINATOR      = 'COORDINATOR'
 
     PORTAL_CHOICES = [
         (PORTAL_ATTENDANT,        'Attendant Portal'),
@@ -31,6 +33,8 @@ class UserSession(models.Model):
         (PORTAL_REGIONAL_MANAGER, 'Regional Manager Portal'),
         (PORTAL_FINANCE,          'Finance Portal'),
         (PORTAL_BELT_MANAGER,     'Belt Manager Portal'),
+        (PORTAL_OPERATOR,         'Operator Portal'),
+        (PORTAL_COORDINATOR,      'Coordinator Portal'),
     ]
 
     # ── Identity ──────────────────────────────────────────────
