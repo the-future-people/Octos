@@ -28,7 +28,7 @@ def file_opened(message, user):
     return event
 
 
-FOCUS_SECONDS = 60      # the inbox re-fetches an open chat every few seconds
+FOCUS_SECONDS = 120   # a real open keeps the chat in focus this long (15 Nov 2026)   # the inbox re-fetches an open chat every few seconds
 RECORD_EVERY = 600      # the spine hears of it at most every 10 minutes per person
 
 

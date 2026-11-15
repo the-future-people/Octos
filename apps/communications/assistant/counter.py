@@ -203,7 +203,9 @@ def step(conversation, trigger, now):
     # theirs to pick up, so Octos stays quiet (14 Nov 2026). Questions with
     # words still go on, so nobody is left unanswered by a chat left open.
     from apps.communications.services.opened import in_focus
-    if (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk):
+    # Only while the shop is open (15 Nov 2026): out of hours, whoever has
+    # the chat open is keeping an eye on it, not serving. Octos answers.
+    if opened and (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk):
         return None, 'a person has this chat open'
     # Where is the customer? A belief, not a timer (Layer 2, Step 2.2).
     from apps.spine import presence
@@ -231,8 +233,21 @@ def step(conversation, trigger, now):
             return None, 'file only: already asked, waiting for their words'
         # The greeting no longer says where files go (14 Nov 2026), so a file
         # after it gets its own short question.
+        # They said what it's for just before ("use this one instead"): Octos
+        # answers with the conversation in view, not the stock question.
+        if _words_before(conversation, trigger, now):
+            return None
         return FORK_TEXT, FORK_REASON
     return None
+
+
+def _words_before(conversation, trigger, now):
+    """The customer's last message before this file, in the last 10 minutes, said more than hello."""
+    from datetime import timedelta
+    before = (conversation.messages
+              .filter(direction=Message.INBOUND, pk__lt=trigger.pk, created_at__gte=now - timedelta(minutes=10))
+              .exclude(kind=Message.REACTION).order_by('-pk').first())
+    return bool(before and has_words(before.body or '') and not bare_greeting(before))
 
 
 NOT_SURE_REASON = 'greeted: not sure where they are'

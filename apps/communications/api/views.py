@@ -80,7 +80,12 @@ class ConversationDetailView(generics.RetrieveAPIView):
         # (14 Nov 2026). Cheap on every fetch; the spine hears of it at most
         # every 10 minutes.
         from apps.communications.services.opened import chat_opened
-        chat_opened(obj, self.request.user)
+        # Only a real open counts (15 Nov 2026). The inbox reloads an open
+        # chat by itself, every 20 seconds and on every change, always asking
+        # for what's new 'after' the last message: that's a screen left on,
+        # not a person looking, so it doesn't keep the chat "in focus".
+        if not self.request.query_params.get('after'):
+            chat_opened(obj, self.request.user)
         return obj
 
     def get_serializer_context(self):
