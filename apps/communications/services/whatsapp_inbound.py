@@ -157,9 +157,11 @@ def _receive(message, profile_name, who=None):
 
     # The spine: what arrived, from whom, keyed by WhatsApp's id. The words
     # stay on the Message; the event carries only what describes it.
+    # The message's own time, so a visit it opens starts with it: a file sent
+    # first is "this visit's file" when a job is recorded (Kwabena, 16 Nov 2026).
     record(kinds.MESSAGE_REACTED if reaction else kinds.MESSAGE_RECEIVED, actor=Event.CUSTOMER,
            conversation=conversation, customer=conversation.customer,
-           key=f'wa:{wamid}',
+           key=f'wa:{wamid}', occurred_at=message.created_at,
            payload={'message_id': message.pk, 'type': message_type,
                     'has_file': bool(media_id), 'mime': media_mime,
                     'quoted': message.reply_to_id})
