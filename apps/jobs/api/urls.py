@@ -8,6 +8,7 @@ from . import operator_views
 from . import file_views
 from . import desk_views
 from .pulse_views import BranchPulseView
+from .today_views import AttendantTodayView
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 from apps.jobs.api import promise_views
 
@@ -101,6 +102,7 @@ urlpatterns = [
     path('stats/',            views.JobStatsView.as_view(),           name='job-stats'),
     path('workload/',         views.ActiveWorkloadView.as_view(),     name='job-workload'),
     path('pulse/',            BranchPulseView.as_view(),              name='job-pulse'),
+    path('attendant/today/',  AttendantTodayView.as_view(),           name='attendant-today'),
     path('workload/<str:view>/', views.WorkloadListView.as_view(),    name='job-workload-list'),
     path('<int:pk>/mark-collected/', views.JobMarkCollectedView.as_view(), name='job-mark-collected'),
     path('<int:pk>/file/',           views.JobFileView.as_view(),          name='job-file'),

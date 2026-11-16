@@ -82,6 +82,13 @@ class StatesTests(Base):
         row = on_shift(self.branch, now=NOW)['staff'][0]
         self.assertEqual((row['state'], row['label']), ('idle', 'Seen 11:40am'))
 
+    def test_on_break_shows_how_long(self):
+        session = self.seen(self.kojo, minutes_ago=20)
+        session.on_break_since = NOW - timedelta(minutes=12)
+        session.save()
+        row = on_shift(self.branch, now=NOW)['staff'][0]
+        self.assertEqual((row['state'], row['label']), ('break', 'On break 12m'))
+
     def test_signed_out_is_off(self):
         self.seen(self.kojo, minutes_ago=30, ended=True)   # 2:30pm
         row = on_shift(self.branch, now=NOW)['staff'][0]
@@ -172,9 +179,17 @@ class EndpointTests(Base):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([s['name'] for s in response.data['staff']], ['Abena'])
 
-    def test_nobody_else_may_look(self):
+    def test_staff_at_the_branch_see_it_too(self):
+        # Opened to every staff portal on 16 Nov 2026.
         for user in (self.abena, self.esi, self.kwame):
-            self.assertEqual(self.get(user).status_code, 403)
+            self.assertEqual(self.get(user).status_code, 200)
+
+    def test_someone_with_no_branch_does_not(self):
+        nowhere = CustomUser(employee_id='OS-HQ', first_name='Hq', last_name='Test', email='os-hq@test.local',
+                             employment_status='ACTIVE', is_active=True, branch=None, role=self.roles['ATTENDANT'])
+        nowhere.set_password('test-pass-123')
+        nowhere.save()
+        self.assertEqual(self.get(nowhere).status_code, 403)
 
 
 class PortalTests(Base):

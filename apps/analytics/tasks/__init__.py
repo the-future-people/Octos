@@ -2,6 +2,7 @@ from apps.analytics.tasks.daily import analyse_daily_risk
 from apps.analytics.tasks.weekly import compute_weekly_risk
 from apps.analytics.tasks.monthly import compile_monthly_summary
 from apps.analytics.tasks.weather import refresh_weather_cache
+from apps.analytics.tasks.breaks import alert_long_breaks
 
 # Every task in this package must be imported above. Celery's autodiscovery
 # imports apps.analytics.tasks and registers only what this module exposes —
@@ -12,4 +13,5 @@ __all__ = [
     'compute_weekly_risk',
     'compile_monthly_summary',
     'refresh_weather_cache',
+    'alert_long_breaks',
 ]

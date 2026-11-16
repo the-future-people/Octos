@@ -67,6 +67,11 @@ class UserSession(models.Model):
     last_seen_at = models.DateTimeField(
         help_text = 'Updated by frontend heartbeat every 60s',
     )
+    # On break (16 Nov 2026): set when they answer "Taking a break" to the
+    # are-you-there check, cleared by "I'm back". The Branch Manager is told
+    # once a break passes 30 minutes (break_alerted_at).
+    on_break_since   = models.DateTimeField(null=True, blank=True)
+    break_alerted_at = models.DateTimeField(null=True, blank=True)
 
     # ── Duration breakdown (seconds) ──────────────────────────
     total_duration_seconds  = models.PositiveIntegerField(default=0)

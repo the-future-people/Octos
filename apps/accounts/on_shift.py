@@ -8,8 +8,9 @@ session's last_seen_at is when someone last used Octos, not when a screen
 was last left open, and "active" is the session engine's own 5-minute
 idle rule.
 
-Each person is in one of three states:
+Each person is in one of four states:
   active   used Octos in the last 5 minutes
+  break    said "Taking a break" (16 Nov 2026), until they're back
   idle     signed in today, quiet for longer
   off      signed off today (attendant sign-off, cashier float), or signed out
 
@@ -24,13 +25,14 @@ from django.utils import timezone
 from apps.analytics.engines.session_engine import IDLE_THRESHOLD_MIN
 
 ACTIVE = 'active'
+BREAK = 'break'
 IDLE = 'idle'
 OFF = 'off'
 
 ACTIVE_WITHIN = timedelta(minutes=IDLE_THRESHOLD_MIN)
 # Idle for longer than this reads as "Seen 3:40pm", not "Idle 214m".
 IDLE_IN_MINUTES_UNTIL = timedelta(hours=1)
-ORDER = {ACTIVE: 0, IDLE: 1, OFF: 2}
+ORDER = {ACTIVE: 0, BREAK: 1, IDLE: 2, OFF: 3}
 
 # Where someone works, by role. Operators are named by their machines instead.
 PLACES = {
@@ -46,9 +48,10 @@ def on_shift(branch, now=None, viewer=None):
     """
     {'staff': [...], 'on': n, 'total': n} for the branch, today.
 
-    Sorted active first, then idle, then off; within each, by name. The
+    Sorted active first, then on break, idle, off; within each, by name. The
     viewer is left out: the manager knows they are here.
     """
+    from apps.accounts.profiles import photo_url
     from apps.analytics.models import UserSession
 
     now = now or timezone.now()
@@ -82,6 +85,8 @@ def on_shift(branch, now=None, viewer=None):
             'id': user.pk,
             'name': user.first_name or user.full_name,
             'initial': (user.first_name or user.full_name or '?')[:1].upper(),
+            'initials': ''.join(w[:1] for w in (user.first_name, user.last_name) if w).upper() or '?',
+            'photo_url': photo_url(user),
             'role': role,
             'place': place,
             'state': state,
@@ -99,6 +104,8 @@ def _state(session, off_at, place, now):
         return OFF, f'Off {_clock(off_at)}'
     if session.ended_at is not None:
         return OFF, f'Signed out {_clock(session.ended_at)}'
+    if session.on_break_since is not None:
+        return BREAK, f'On break {int((now - session.on_break_since).total_seconds() // 60)}m'
     quiet = now - session.last_seen_at
     if quiet <= ACTIVE_WITHIN:
         return ACTIVE, place

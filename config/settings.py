@@ -355,6 +355,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.escalate_front_desk',
         'schedule': crontab(minute='*'),
     },
+    # A break past 30 minutes tells the Branch Manager (16 Nov 2026).
+    'alert-long-breaks': {
+        'task': 'apps.analytics.tasks.alert_long_breaks',
+        'schedule': crontab(minute='*/5'),
+    },
     'open-sheets-5am': {
         'task': 'apps.finance.tasks.open_sheets',
         'schedule': crontab(hour=5, minute=0),
