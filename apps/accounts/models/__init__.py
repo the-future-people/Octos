@@ -4,6 +4,7 @@ from .rfid import RFIDAccessLog
 from .assignment import StaffAssignment
 from .activation import PendingActivation
 from .staff_domain import StaffDomain
+from .profile_change import ProfileChange
 
 __all__ = [
     'Permission',
@@ -13,4 +14,5 @@ __all__ = [
     'StaffAssignment',
     'PendingActivation',
     'StaffDomain',
+    'ProfileChange',
 ]
