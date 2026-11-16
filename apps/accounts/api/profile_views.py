@@ -2,14 +2,20 @@
 Staff profiles (15 Nov 2026). See accounts/profiles.py.
 
   GET   /api/v1/accounts/profile/?period=week     your own card and numbers
-  PATCH /api/v1/accounts/profile/                 {phone}
-  POST  /api/v1/accounts/profile/photo/           multipart "photo"
-  DELETE /api/v1/accounts/profile/photo/
+  PATCH /api/v1/accounts/profile/                 {phone, email}: asks the Branch Manager
+  POST  /api/v1/accounts/profile/photo/           multipart "photo": asks the Branch Manager
+  DELETE /api/v1/accounts/profile/photo/          asks to remove it
+  DELETE /api/v1/accounts/profile/changes/<id>/   take back a request still waiting
 
   GET   /api/v1/accounts/staff/?period=week       the branch's cards (Branch Manager)
   PATCH /api/v1/accounts/staff/<id>/              {phone} (Branch Manager, his branch)
   POST  /api/v1/accounts/staff/<id>/photo/        multipart "photo" (Branch Manager, his branch)
   DELETE /api/v1/accounts/staff/<id>/photo/
+  POST  /api/v1/accounts/staff/changes/<id>/approve/
+  POST  /api/v1/accounts/staff/changes/<id>/reject/   {note}
+
+A Branch Manager's own changes apply at once; everyone else's wait for him
+(16 Nov 2026).
 """
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -41,11 +47,15 @@ class ProfileView(APIView):
         return Response(profiles.card(request.user, _period(request)))
 
     def patch(self, request):
+        user = request.user
         try:
-            profiles.set_phone(request.user, request.data.get('phone', ''))
+            for key, field, current in (('phone', 'PHONE', user.phone), ('email', 'EMAIL', user.email)):
+                if key in request.data and (request.data.get(key) or '').strip() != (current or ''):
+                    profiles.ask(user, field, request.data.get(key) or '')
         except profiles.ProfileRefused as exc:
             return _refused(exc)
-        return Response(profiles.card(request.user, _period(request)))
+        user.refresh_from_db()
+        return Response(profiles.card(user, _period(request)))
 
 
 class ProfilePhotoView(APIView):
@@ -53,17 +63,28 @@ class ProfilePhotoView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        upload = request.FILES.get('photo')
-        if upload is None:
-            return Response({'detail': 'Choose a photo first.'}, status=400)
         try:
-            profiles.set_photo(request.user, upload)
+            profiles.ask(request.user, 'PHOTO', upload=request.FILES.get('photo'))
         except profiles.ProfileRefused as exc:
             return _refused(exc)
+        request.user.refresh_from_db()
         return Response(profiles.card(request.user, _period(request)))
 
     def delete(self, request):
-        profiles.remove_photo(request.user)
+        if request.user.photo:
+            profiles.ask(request.user, 'PHOTO', remove=True)
+            request.user.refresh_from_db()
+        return Response(profiles.card(request.user, _period(request)))
+
+
+class ProfileChangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        try:
+            profiles.withdraw(request.user, pk)
+        except profiles.ProfileRefused as exc:
+            return _refused(exc)
         return Response(profiles.card(request.user, _period(request)))
 
 
@@ -109,7 +130,31 @@ class StaffListView(APIView):
             if c['is_active']:
                 counts[c['role_label'] or 'Other'] = counts.get(c['role_label'] or 'Other', 0) + 1
         on = sum(1 for c in cards if c['presence'] and c['presence']['state'] != 'off')
-        return Response({'period': period, 'staff': cards, 'counts': counts, 'on': on})
+        waiting = [{**profiles.pending_row(c), 'full_name': c.user.full_name, 'first_name': c.user.first_name,
+                    'role_label': profiles.ROLE_LABELS.get(c.user.role.name if c.user.role_id else '', ''),
+                    'current': {'PHONE': c.user.phone, 'EMAIL': c.user.email}.get(c.field, ''),
+                    'current_photo_url': profiles.signed_url(c.user.photo) if c.field == 'PHOTO' else None}
+                   for c in profiles.waiting_for(request.user)]
+        return Response({'period': period, 'staff': cards, 'counts': counts, 'on': on, 'waiting': waiting})
+
+
+class StaffChangeDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, decision):
+        if decision not in ('approve', 'reject'):
+            return Response({'detail': 'Approve or reject.'}, status=404)
+        refused = _manager_or_403(request)
+        if refused:
+            return refused
+        try:
+            if decision == 'approve':
+                profiles.approve(request.user, pk)
+            else:
+                profiles.reject(request.user, pk, request.data.get('note', ''))
+        except profiles.ProfileRefused as exc:
+            return _refused(exc)
+        return Response({'ok': True})
 
 
 class StaffMemberView(APIView):
@@ -123,9 +168,13 @@ class StaffMemberView(APIView):
         if member is None:
             return Response({'detail': 'Not someone at your branch.'}, status=404)
         try:
-            profiles.set_phone(member, request.data.get('phone', ''), by=request.user)
+            if 'phone' in request.data and (request.data.get('phone') or '').strip() != (member.phone or ''):
+                profiles.set_phone(member, request.data.get('phone', ''), by=request.user)
+            if 'email' in request.data and (request.data.get('email') or '').strip().lower() != member.email.lower():
+                profiles.set_email(member, request.data.get('email', ''), by=request.user)
         except profiles.ProfileRefused as exc:
             return _refused(exc)
+        member.refresh_from_db()
         return Response(profiles.card(member, _period(request)))
 
 

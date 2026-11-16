@@ -19,7 +19,7 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from apps.accounts import profiles
-from apps.accounts.models import CustomUser, Role
+from apps.accounts.models import CustomUser, ProfileChange, Role
 from apps.communications.tests import make_org
 from apps.finance.models import AttendantSignOff, CashierFloat, DailySalesSheet, Receipt
 from apps.jobs.models import Job, JobLineItem, JobStatusLog, JobStep, Service
@@ -91,49 +91,140 @@ class OwnProfileTests(Base):
         self.assertEqual((data['full_name'], data['role_label'], data['employee_id']), ('Kofi Test', 'Attendant', 'PF-ATT'))
         self.assertEqual([n['label'] for n in data['numbers']], ['Jobs recorded', 'Front desk done', 'Signed off themselves'])
         self.assertIsNone(data['photo_url'])
+        self.assertEqual(data['pending'], [])
+        self.assertFalse(data['approves_own'])
 
-    def test_you_may_change_your_phone_but_nothing_else(self):
+    def test_a_new_phone_waits_for_the_branch_manager(self):
         response = self.api(self.kofi).patch('/api/v1/accounts/profile/',
                                              {'phone': '024 555 0172', 'first_name': 'Boss', 'employee_id': 'X'}, format='json')
         self.assertEqual(response.status_code, 200)
         self.kofi.refresh_from_db()
-        self.assertEqual((self.kofi.phone, self.kofi.first_name, self.kofi.employee_id), ('024 555 0172', 'Kofi', 'PF-ATT'))
-        self.notify.assert_not_called()   # nobody is told about their own change
+        self.assertEqual((self.kofi.phone, self.kofi.first_name, self.kofi.employee_id), ('', 'Kofi', 'PF-ATT'))
+        self.assertEqual([(p['field'], p['value']) for p in response.data['pending']], [('PHONE', '024 555 0172')])
+        # The Branch Manager is asked, with a link to the Staff page.
+        self.assertEqual(self.notify.call_args.kwargs['recipient'], self.manager)
+        self.assertIn('asked to change their phone number to 024 555 0172', self.notify.call_args.kwargs['message'])
+        self.assertEqual(self.notify.call_args.kwargs['link'], '/bm/staff/')
+
+    def test_a_new_email_waits_too(self):
+        self.api(self.kofi).patch('/api/v1/accounts/profile/', {'email': 'Kofi.New@Farhat.com'}, format='json')
+        self.kofi.refresh_from_db()
+        self.assertEqual(self.kofi.email, 'pf-att@test.local')
+        self.assertEqual(ProfileChange.objects.get(user=self.kofi).new_value, 'kofi.new@farhat.com')
+
+    def test_an_email_someone_else_uses_is_refused(self):
+        response = self.api(self.kofi).patch('/api/v1/accounts/profile/', {'email': 'PF-CSH@test.local'}, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_asking_again_replaces_the_request_still_waiting(self):
+        client = self.api(self.kofi)
+        client.patch('/api/v1/accounts/profile/', {'phone': '0241111111'}, format='json')
+        client.patch('/api/v1/accounts/profile/', {'phone': '0242222222'}, format='json')
+        self.assertEqual(list(ProfileChange.objects.filter(user=self.kofi, status='PENDING')
+                              .values_list('new_value', flat=True)), ['0242222222'])
+
+    def test_taking_back_a_request(self):
+        client = self.api(self.kofi)
+        pending = client.patch('/api/v1/accounts/profile/', {'phone': '0241111111'}, format='json').data['pending'][0]
+        response = client.delete(f"/api/v1/accounts/profile/changes/{pending['id']}/")
+        self.assertEqual(response.data['pending'], [])
 
     def test_a_phone_with_letters_is_refused(self):
         response = self.api(self.kofi).patch('/api/v1/accounts/profile/', {'phone': 'call me'}, format='json')
         self.assertEqual(response.status_code, 400)
 
-    def test_a_photo_is_turned_into_a_small_jpeg(self):
+    def test_a_new_photo_waits_as_a_small_jpeg(self):
         response = self.api(self.kofi).post('/api/v1/accounts/profile/photo/', {'photo': photo_file()}, format='multipart')
         self.assertEqual(response.status_code, 200)
         self.kofi.refresh_from_db()
-        with Image.open(self.kofi.photo.path) as saved:
-            self.assertEqual(saved.format, 'JPEG')
-            self.assertLessEqual(max(saved.size), profiles.PHOTO_SIDE)
-        self.assertTrue(response.data['photo_url'])
-
-    def test_a_new_photo_replaces_the_old_file(self):
-        client = self.api(self.kofi)
-        client.post('/api/v1/accounts/profile/photo/', {'photo': photo_file()}, format='multipart')
-        self.kofi.refresh_from_db()
-        first = self.kofi.photo.path
-        client.post('/api/v1/accounts/profile/photo/', {'photo': photo_file('again.jpg', fmt='JPEG')}, format='multipart')
-        self.kofi.refresh_from_db()
-        self.assertNotEqual(self.kofi.photo.path, first)
-        import os
-        self.assertFalse(os.path.exists(first))
+        self.assertFalse(self.kofi.photo)
+        change = ProfileChange.objects.get(user=self.kofi)
+        with Image.open(change.new_photo.path) as waiting:
+            self.assertEqual(waiting.format, 'JPEG')
+            self.assertLessEqual(max(waiting.size), profiles.PHOTO_SIDE)
+        self.assertTrue(response.data['pending'][0]['photo_url'])
 
     def test_a_file_that_isnt_a_photo_is_refused(self):
         fake = SimpleUploadedFile('notes.png', b'not an image at all', content_type='image/png')
         response = self.api(self.kofi).post('/api/v1/accounts/profile/photo/', {'photo': fake}, format='multipart')
         self.assertEqual(response.status_code, 400)
 
-    def test_removing_your_photo(self):
-        client = self.api(self.kofi)
-        client.post('/api/v1/accounts/profile/photo/', {'photo': photo_file()}, format='multipart')
-        response = client.delete('/api/v1/accounts/profile/photo/')
-        self.assertIsNone(response.data['photo_url'])
+    def test_the_branch_managers_own_changes_apply_at_once(self):
+        client = self.api(self.manager)
+        client.patch('/api/v1/accounts/profile/', {'phone': '0559999999'}, format='json')
+        data = client.post('/api/v1/accounts/profile/photo/', {'photo': photo_file()}, format='multipart').data
+        self.manager.refresh_from_db()
+        self.assertEqual(self.manager.phone, '0559999999')
+        self.assertTrue(self.manager.photo)
+        self.assertEqual(data['pending'], [])
+        self.notify.assert_not_called()
+
+
+class ApprovalTests(Base):
+
+    def ask_phone(self, phone='024 555 0172'):
+        return self.api(self.kofi).patch('/api/v1/accounts/profile/', {'phone': phone}, format='json').data['pending'][0]['id']
+
+    def decide(self, change_id, decision, user=None, note=''):
+        return self.api(user or self.manager).post(f'/api/v1/accounts/staff/changes/{change_id}/{decision}/',
+                                                    {'note': note}, format='json')
+
+    def test_the_staff_page_lists_what_is_waiting(self):
+        self.ask_phone()
+        waiting = self.api(self.manager).get('/api/v1/accounts/staff/').data['waiting']
+        self.assertEqual([(w['first_name'], w['field'], w['value'], w['current']) for w in waiting],
+                         [('Kofi', 'PHONE', '024 555 0172', '')])
+
+    def test_approving_applies_it_and_tells_them(self):
+        change_id = self.ask_phone()
+        self.assertEqual(self.decide(change_id, 'approve').status_code, 200)
+        self.kofi.refresh_from_db()
+        self.assertEqual(self.kofi.phone, '024 555 0172')
+        self.assertEqual(self.notify.call_args.kwargs['recipient'], self.kofi)
+        self.assertEqual(self.notify.call_args.kwargs['message'], 'Yaw Test approved your new phone.')
+
+    def test_an_approved_email_becomes_the_sign_in(self):
+        self.api(self.kofi).patch('/api/v1/accounts/profile/', {'email': 'kofi@farhat.com'}, format='json')
+        self.decide(ProfileChange.objects.get(user=self.kofi).pk, 'approve')
+        self.kofi.refresh_from_db()
+        self.assertEqual(self.kofi.email, 'kofi@farhat.com')
+        self.assertIn('Sign in with it from now on.', self.notify.call_args.kwargs['message'])
+
+    def test_an_approved_photo_becomes_theirs_and_the_waiting_copy_goes(self):
+        self.api(self.kofi).post('/api/v1/accounts/profile/photo/', {'photo': photo_file()}, format='multipart')
+        change = ProfileChange.objects.get(user=self.kofi)
+        waiting = change.new_photo.path
+        self.decide(change.pk, 'approve')
+        self.kofi.refresh_from_db()
+        self.assertTrue(self.kofi.photo)
+        import os
+        self.assertFalse(os.path.exists(waiting))
+
+    def test_rejecting_leaves_it_and_says_why(self):
+        change_id = self.ask_phone()
+        self.decide(change_id, 'reject', note='That is not your number')
+        self.kofi.refresh_from_db()
+        self.assertEqual(self.kofi.phone, '')
+        self.assertEqual(self.notify.call_args.kwargs['message'],
+                         "Yaw Test didn't approve your new phone number: That is not your number")
+
+    def test_a_request_is_decided_once(self):
+        change_id = self.ask_phone()
+        self.decide(change_id, 'approve')
+        self.assertEqual(self.decide(change_id, 'reject').status_code, 400)
+
+    def test_only_the_branch_manager_of_their_branch_decides(self):
+        change_id = self.ask_phone()
+        self.assertEqual(self.decide(change_id, 'approve', user=self.ama).status_code, 403)
+        other_bm = self.user('PF-BM2', 'BRANCH_MANAGER', 'Efua', branch=self.other)
+        self.assertEqual(self.decide(change_id, 'approve', user=other_bm).status_code, 400)
+
+    def test_an_email_taken_while_waiting_is_refused_at_approval(self):
+        self.api(self.kofi).patch('/api/v1/accounts/profile/', {'email': 'shared@farhat.com'}, format='json')
+        self.ama.email = 'shared@farhat.com'
+        self.ama.save()
+        response = self.decide(ProfileChange.objects.get(user=self.kofi).pk, 'approve')
+        self.assertEqual(response.status_code, 400)
 
 
 class ManagerTests(Base):
@@ -168,6 +259,13 @@ class ManagerTests(Base):
         self.ama.refresh_from_db()
         self.assertEqual(self.ama.phone, '0201234567')
         self.assertEqual(self.notify.call_args.kwargs['message'], 'Yaw Test updated your phone number.')
+
+    def test_the_manager_changes_an_email_and_they_are_told_to_sign_in_with_it(self):
+        response = self.api(self.manager).patch(f'/api/v1/accounts/staff/{self.ama.pk}/', {'email': 'ama@farhat.com'}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.ama.refresh_from_db()
+        self.assertEqual(self.ama.email, 'ama@farhat.com')
+        self.assertIn('Sign in with it from now on.', self.notify.call_args.kwargs['message'])
 
     def test_not_someone_at_another_branch(self):
         response = self.api(self.manager).patch(f'/api/v1/accounts/staff/{self.stranger.pk}/', {'phone': '0201234567'}, format='json')
