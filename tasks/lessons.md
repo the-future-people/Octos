@@ -1184,3 +1184,6 @@ Internal detail belongs in the log, not on the screen.
 - When one Find/Change replaces several occurrences, list each location and give a check command (`Select-String`) that counts them. A Replace All plus a second edit left `halt`'s code inside `verify`.
 - Old tests that encode old behaviour get updated to the new rules, not worked around in the code.
 
+- Tests must never read the real calendar: pin "now" to a fixed weekday (as tests_attendant_signoff does). On Sunday 15 Nov, 16 jobs tests failed only because the branch is closed on Sundays.
+
+- A FileField's column holds 100 characters by default: keep stored file names short (Octos keeps 50 + extension) and the customer's real name in its own field. A 100-character PDF name silently never saved (15 Nov).
