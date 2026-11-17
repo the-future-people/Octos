@@ -1,4 +1,6 @@
 from rest_framework import generics, filters, status
+from rest_framework.pagination import PageNumberPagination
+from django.db.models import Case, Count, F, IntegerField, Min, Q, Value, When
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -28,11 +30,39 @@ def _not_found():
     return Response({'detail': 'Conversation not found.'}, status=status.HTTP_404_NOT_FOUND)
 
 
+class InboxPage(PageNumberPagination):
+    """
+    The inbox a page at a time (17 Nov 2026): 40 chats, then the next 40 as
+    the list is scrolled, back to the very first chat. It used to stop at the
+    first 20, so older chats were out of reach.
+    """
+    page_size = 40
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+# The inbox's filters, the same as its chips.
+INBOX_FILTERS = {
+    'needs':  Q(handled_by=Conversation.STAFF) & ~Q(handoff_reason=''),
+    'octos':  Q(handled_by=Conversation.OCTOS),
+    'people': Q(handled_by=Conversation.STAFF, handoff_reason=''),
+}
+
+
 class ConversationListView(generics.ListAPIView):
+    """
+    GET /api/v1/communications/?channel=WHATSAPP&filter=needs&search=ama&page=2
+
+    Chats that need a person first, then the newest. Search reaches every
+    chat, not only the ones already loaded.
+    """
     serializer_class = ConversationListSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = InboxPage
     filter_backends = [filters.SearchFilter]
-    search_fields = ['contact_phone', 'contact_email', 'contact_name']
+    search_fields = ['contact_phone', 'contact_email', 'contact_name', 'contact_username',
+                     'last_message_preview', 'customer__first_name', 'customer__last_name',
+                     'jobs__job_number']
 
     def get_queryset(self):
         # The user's branch plus every company (WhatsApp) conversation;
@@ -55,8 +85,40 @@ class ConversationListView(generics.ListAPIView):
             qs = qs.filter(status=status_param)
         if assigned_to:
             qs = qs.filter(assigned_to_id=assigned_to)
+        chip = INBOX_FILTERS.get(self.request.query_params.get('filter') or '')
+        if chip is not None:
+            qs = qs.filter(chip)
 
-        return qs
+        return qs.annotate(
+            needs_person=Case(When(INBOX_FILTERS['needs'], then=Value(1)), default=Value(0),
+                              output_field=IntegerField()),
+        ).order_by('-needs_person', F('last_message_at').desc(nulls_last=True), '-pk')
+
+
+class InboxCountsView(APIView):
+    """
+    GET /api/v1/communications/counts/
+
+    The inbox's numbers over every chat this person can see, not only the
+    ones loaded: unread chats, chats waiting for a person and since when,
+    and per channel how many want attention. For the menu's badge, the
+    window title and the inbox's tabs (17 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        chats = visible_conversations(request.user).exclude(status=Conversation.SPAM)
+        needs = chats.filter(INBOX_FILTERS['needs'])
+        wanting = chats.filter(Q(unread_count__gt=0) | INBOX_FILTERS['needs'])
+        by_channel = {row['channel']: row['n'] for row in
+                      wanting.values('channel').annotate(n=Count('id')).order_by()}
+        oldest = needs.aggregate(since=Min('handled_since'))['since']
+        return Response({
+            'unread': chats.filter(unread_count__gt=0).count(),
+            'needs': needs.count(),
+            'waiting_since': oldest.isoformat() if oldest else None,
+            'by_channel': by_channel,
+        })
 
 
 class ConversationDetailView(generics.RetrieveAPIView):

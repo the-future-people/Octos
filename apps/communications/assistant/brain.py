@@ -227,6 +227,11 @@ def respond(conversation_id, trigger_id=None, now=None):
         reply = _converse(conversation, ctx, run)
         run.tool_calls = ctx.calls
 
+        # A person may have stepped in while Octos was writing (17 Nov 2026).
+        stepped_in = _stepped_in(conversation, trigger)
+        if stepped_in:
+            return _finish(run, AssistantRun.SKIPPED, started, reason=stepped_in, reply=reply)
+
         facts = json.dumps([c['result'] for c in ctx.calls], default=str)
         problems = checker.unverified(reply, facts)
         if problems:
@@ -240,6 +245,10 @@ def respond(conversation_id, trigger_id=None, now=None):
             return _finish(run, AssistantRun.SKIPPED, started, reason='Octos chose not to reply')
 
         _natural_pause(typing_since, trigger)
+        # And once more after the pause: the last moment before it goes.
+        stepped_in = _stepped_in(conversation, trigger)
+        if stepped_in:
+            return _finish(run, AssistantRun.SKIPPED, started, reason=stepped_in, reply=reply)
         _act(mode, conversation, run, text=reply, handoff=ctx.handoff)
         if mode == 'shadow':
             return _finish(run, AssistantRun.SHADOWED, started, reason=ctx.handoff, reply=reply)
@@ -263,6 +272,29 @@ def respond(conversation_id, trigger_id=None, now=None):
 
 
 # ── Guards ─────────────────────────────────────────────────────────────
+
+def _stepped_in(conversation, trigger):
+    """
+    A reason not to send what Octos has just written, or None (17 Nov 2026).
+
+    The guards below run before Octos starts; writing a reply takes several
+    seconds, and a person who took over while the dots were showing still got
+    Octos's reply sent over theirs. So this looks again, just before sending:
+    a person has taken over, a person has replied, or the customer has written
+    again (that newer message gets its own answer, with everything in view).
+    """
+    fresh = Conversation.objects.filter(pk=conversation.pk).values('handled_by', 'handoff_reason').first()
+    if fresh and fresh['handled_by'] == Conversation.STAFF and not fresh['handoff_reason']:
+        return 'a person took over while Octos was writing'
+    if trigger is None:
+        return None
+    later = conversation.messages.filter(created_at__gt=trigger.created_at, is_internal_note=False)
+    if later.filter(direction=Message.OUTBOUND, sent_by__isnull=False).exists():
+        return 'a person replied while Octos was writing'
+    if later.filter(direction=Message.INBOUND).exclude(kind=Message.REACTION).exists():
+        return 'the customer wrote again while Octos was writing; that message will be answered'
+    return None
+
 
 def _silence(conversation, trigger, now):
     """A reason to stay silent, or None."""
@@ -547,8 +579,20 @@ def _history(conversation):
     recent = list(
         conversation.messages.filter(said).order_by('-created_at')[:HISTORY]
     )[::-1]
+    # Where this visit began: the last quiet gap of more than two hours (the
+    # spine's own visit rule). Files from before it were for an earlier
+    # request; on 17 Nov 2026 a file from the day before was priced together
+    # with the day's new one. They stay in view, marked, so Octos can still
+    # use one the customer asks for again.
+    from apps.spine.visits import QUIET_GAP
+    visit_starts = 0
+    for i in range(len(recent) - 1, 0, -1):
+        if recent[i].created_at - recent[i - 1].created_at > QUIET_GAP:
+            visit_starts = i
+            break
     turns = []
-    for m in recent:
+    for index, m in enumerate(recent):
+        earlier = index < visit_starts
         role = 'user' if m.direction == Message.INBOUND else 'assistant'
         text = (m.body or '').strip()
         if m.is_internal_note:
@@ -573,7 +617,13 @@ def _history(conversation):
                 what += ', not saved yet'
             else:
                 what += f', file {m.pk}'
+            if earlier:
+                day = timezone.localtime(m.created_at).strftime('%a %d %b')
+                what += f', sent on {day} in an earlier visit, not part of what they want now unless they ask for it again'
             text = (text + f' [sent a {what}]').strip()
+        if index == visit_starts and visit_starts:
+            when = timezone.localtime(m.created_at).strftime('%a %d %b, %H:%M')
+            text = f'[A new visit began, {when}. Everything before this was an earlier visit.]\n{text}'.strip()
         if not text:
             continue
         if turns and turns[-1]['role'] == role:
