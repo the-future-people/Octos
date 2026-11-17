@@ -88,6 +88,7 @@ class ProformaEngine:
 
         priced   = []
         subtotal = Decimal('0.00')
+        self.bulk_saving = Decimal('0.00')      # what bulk prices took off, for the proforma
 
         for line in raw_lines:
             service  = Service.objects.get(pk=line['service'])
@@ -106,6 +107,7 @@ class ProformaEngine:
             if not result.get('success'):
                 raise ValueError(result.get('error') or f"Could not price {service.name}.")
             own = Decimal(str(result['total']))
+            self.bulk_saving += Decimal(str(result.get('bulk_saving') or 0))
 
             addons, addons_total = [], Decimal('0.00')
             if line.get('addons'):
@@ -174,6 +176,7 @@ class ProformaEngine:
             line_items      = priced,
             subtotal        = subtotal,
             total           = subtotal,
+            bulk_saving     = self.bulk_saving,
             valid_until     = timezone.localdate() + timedelta(days=VALIDITY_DAYS),
             status          = ProformaInvoice.Status.DRAFT,
             issued_by       = actor,
@@ -271,6 +274,7 @@ class ProformaEngine:
             line_items      = priced,
             subtotal        = subtotal,
             total           = subtotal,
+            bulk_saving     = self.bulk_saving,
             issued_at       = timezone.now(),
             valid_until     = timezone.localdate() + timedelta(days=VALIDITY_DAYS),
             status          = ProformaInvoice.Status.ISSUED,
@@ -345,6 +349,12 @@ class ProformaEngine:
             intake_by       = actor,
             intake_channel  = Job.PROFORMA,
             estimated_cost  = proforma.total,
+            # The proforma's savings come with it (17 Nov 2026): the price
+            # agreed is the price paid, and the receipt says what was saved.
+            bulk_saving     = proforma.bulk_saving,
+            discount_amount = proforma.discount_amount,
+            discount_reason = proforma.discount_reason,
+            discount_by     = proforma.discount_by,
             daily_sheet     = sheet,
             payment_state   = 'UNPAID',
             work_state      = 'RECEIVED',
