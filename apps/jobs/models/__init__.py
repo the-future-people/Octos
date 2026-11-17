@@ -12,6 +12,7 @@ from .job_spec_change import JobSpecChange
 from .job_step import JobStep
 from .final_check import FinalCheck
 from apps.jobs.models.promise_revision import PromiseRevision
+from .costing import CostSettings, PriceCut
 
 __all__ = [
     'Job',
@@ -28,4 +29,6 @@ __all__ = [
     'JobStep',
     'FinalCheck',
     'PromiseRevision',
+    'CostSettings',
+    'PriceCut',
 ]

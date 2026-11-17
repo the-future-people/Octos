@@ -343,6 +343,18 @@ class ReceiptEngine:
         else:
             lines.append(row('Service:', job.title[:30] if job.title else '—'))
 
+        # What they saved: the bulk price and any discount (17 Nov 2026).
+        from apps.jobs.services.savings import savings
+        saved = savings(job)
+        if saved:
+            lines.append(SEP)
+            lines.append(row('List price:', f"GHS {saved['list']}"))
+            if saved['bulk']:
+                lines.append(row('Bulk price:', f"-GHS {saved['bulk']}"))
+            if saved['discount']:
+                lines.append(row('Discount:', f"-GHS {saved['discount']}"))
+            lines.append(row('Price:', f"GHS {saved['total']}"))
+
         lines.append(SEP)
 
         # ── Payment ───────────────────────────────────────────────────
@@ -384,6 +396,8 @@ class ReceiptEngine:
         if float(receipt.balance_due) > 0:
             lines.append(row('BALANCE DUE:', f"GHS {float(receipt.balance_due):,.2f}"))
 
+        if saved:
+            lines.append(centre(f"YOU SAVED GHS {saved['saved']}"))
         lines += [
             THICK,
             centre('Thank you for choosing Farhat!'),
@@ -443,6 +457,17 @@ class ReceiptEngine:
             lines.extend(item_rows)
         else:
             lines.append(f"*Service:* {job.title}")
+
+        from apps.jobs.services.savings import savings
+        saved = savings(job)
+        if saved:
+            lines.append(f"")
+            lines.append(f"List price: GHS {saved['list']}")
+            if saved['bulk']:
+                lines.append(f"Bulk price: -GHS {saved['bulk']}")
+            if saved['discount']:
+                lines.append(f"Discount: -GHS {saved['discount']}")
+            lines.append(f"*You saved GHS {saved['saved']}* 🎉")
 
         lines += [
             f"",

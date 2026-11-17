@@ -35,6 +35,22 @@ class Service(AuditModel):
     requires_design      = models.BooleanField(default=False)
     requires_file_upload = models.BooleanField(default=False)
     is_active            = models.BooleanField(default=True)
+
+    # What one priced unit costs to make (17 Nov 2026), from CostSettings:
+    # a colour or black-and-white page (its size as a multiple of A4), or a
+    # fixed amount for things like rings and envelopes. NONE: not known yet.
+    COST_NONE, COST_COLOUR, COST_BW, COST_FIXED = 'NONE', 'COLOUR_PAGE', 'BW_PAGE', 'FIXED'
+    COST_BASIS = [
+        (COST_NONE,   'Not set'),
+        (COST_COLOUR, 'A colour page'),
+        (COST_BW,     'A black and white page'),
+        (COST_FIXED,  'A fixed amount'),
+    ]
+    cost_basis  = models.CharField(max_length=12, choices=COST_BASIS, default=COST_NONE)
+    cost_size   = models.DecimalField(max_digits=4, decimal_places=2, default=1,
+                                      help_text='Paper size as a multiple of A4: A3 is 2.')
+    cost_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+                                      help_text='For a fixed cost: what one unit costs.')
     online               = models.BooleanField(
         default=False,
         help_text='Can be ordered on Print Octos. Counter-only work (photocopy, scanning) stays off.',

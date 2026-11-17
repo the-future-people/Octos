@@ -218,10 +218,22 @@ def build_proforma_pdf(proforma) -> bytes:
     story.append(Spacer(1, 6 * mm))
 
     # ── Totals ───────────────────────────────────────────────────
+    # What the customer saves (17 Nov 2026): list price, bulk price and any
+    # discount, worked out by Octos, never typed onto the document.
+    from apps.jobs.services.savings import savings
+    saved = savings(proforma)
+    right = _style('s', parent=sm, alignment=TA_RIGHT)
+    rows = []
+    if saved:
+        rows.append([Paragraph('List price', sm), Paragraph(f"GHS {saved['list']}", right)])
+        if saved['bulk']:
+            rows.append([Paragraph('Bulk price', sm), Paragraph(f"- GHS {saved['bulk']}", right)])
+        if saved['discount']:
+            rows.append([Paragraph('Discount', sm), Paragraph(f"- GHS {saved['discount']}", right)])
+    else:
+        rows.append([Paragraph('Subtotal', sm), Paragraph(_fmt(proforma.subtotal), right)])
     totals = Table(
-        [
-            [Paragraph('Subtotal', sm),
-             Paragraph(_fmt(proforma.subtotal), _style('s', parent=sm, alignment=TA_RIGHT))],
+        rows + [
             [Paragraph('<b>Total</b>',
                        _style('tl', fontSize=11, fontName='Helvetica-Bold', textColor=CHARCOAL)),
              Paragraph(f'<b>{_fmt(proforma.total)}</b>',
@@ -232,11 +244,15 @@ def build_proforma_pdf(proforma) -> bytes:
         hAlign='RIGHT',
     )
     totals.setStyle(TableStyle([
-        ('LINEABOVE',     (0, 1), (-1, 1), 0.8, colors.HexColor('#DAD8D4')),
+        ('LINEABOVE',     (0, len(rows)), (-1, len(rows)), 0.8, colors.HexColor('#DAD8D4')),
         ('TOPPADDING',    (0, 0), (-1, -1), 5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
     story.append(totals)
+    if saved:
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(f"<b>You save GHS {saved['saved']}</b>",
+                               _style('save', parent=sm, alignment=TA_RIGHT, textColor=colors.HexColor('#27500A'))))
 
     if proforma.notes:
         story.append(Spacer(1, 6 * mm))

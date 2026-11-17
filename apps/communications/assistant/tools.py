@@ -297,6 +297,13 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
         'unit_price': f"GHS {line['unit_price']:.2f}",
         # The item's own total before add-ons, so an itemised answer is verifiable.
         'item_total': f"GHS {line['total']:.2f}",
+        # Bulk prices (17 Nov 2026): already in the price; and the next one up.
+        'bulk_price': (f"includes the bulk price of GHS {line['bulk']['price']} a page from {line['bulk']['from']} pages, "
+                       f"GHS {Decimal(line['bulk_saving']):.2f} less than the list price"
+                       if line.get('bulk') else None),
+        'next_bulk': (f"{line['next_bulk']['more']} more pages (from {line['next_bulk']['from']}) "
+                      f"bring the page price down to GHS {line['next_bulk']['price']}"
+                      if line.get('next_bulk') else None),
         'addons': addons_out,
         'ready': ready,
         'ready_note': ready_note,

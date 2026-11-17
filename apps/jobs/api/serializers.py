@@ -19,7 +19,16 @@ class ServiceSerializer(serializers.ModelSerializer):
             'description', 'requires_design', 'requires_file_upload',
             'is_active', 'spec_template', 'smart_defaults', 'image',
             'addons', 'variant_of', 'variant_label', 'base_price', 'addon_only',
+            'cost_basis', 'cost_size', 'cost_amount', 'unit_cost',
         ]
+
+    # What one priced unit costs to make, from the cost settings (17 Nov 2026).
+    unit_cost = serializers.SerializerMethodField()
+
+    def get_unit_cost(self, obj):
+        from apps.jobs.services.costing import unit_cost
+        cost = unit_cost(obj)
+        return f'{cost:.2f}' if cost is not None else None
 
     # The finishing this service offers, for the counter's tick-boxes.
     addons = serializers.SerializerMethodField()
@@ -53,8 +62,22 @@ class PricingRuleSerializer(serializers.ModelSerializer):
         model  = PricingRule
         fields = [
             'id', 'service', 'service_name', 'branch', 'branch_name',
-            'base_price', 'color_multiplier', 'is_active',
+            'base_price', 'color_multiplier', 'bulk_prices', 'is_active',
         ]
+
+    def validate_bulk_prices(self, value):
+        """[{"from": 200, "price": 2.30}, ...]: each start more than 1, each price a number, kept in order."""
+        from decimal import Decimal, InvalidOperation
+        bands = []
+        for band in value or []:
+            try:
+                start, price = int(band['from']), Decimal(str(band['price']))
+            except (KeyError, TypeError, ValueError, InvalidOperation):
+                raise serializers.ValidationError('Each bulk price needs a starting count and a price.')
+            if start < 2 or price <= 0:
+                raise serializers.ValidationError('A bulk price starts from 2 or more, at a price above zero.')
+            bands.append({'from': start, 'price': f'{price:.2f}'})
+        return sorted(bands, key=lambda b: b['from'])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -235,6 +258,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'assigned_to_name', 'customer_name', 'intake_by_name',
             'for_whom', 'from_chat', 'recorded_by', 'contact_phone', 'items_display',
             'intake_channel', 'is_routed', 'estimated_cost', 'deposit_percentage',
+            'bulk_saving', 'discount_amount', 'discount_reason',
             'amount_paid', 'deposit_due', 'deadline', 'created_at',
             'customer', 'customer_phone', 'customer_credit',
             'customer_wallet_balance',
@@ -384,6 +408,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
             'intake_by', 'intake_by_name',
             'description', 'specifications', 'intake_channel',
             'estimated_time', 'estimated_cost', 'final_cost',
+            'bulk_saving', 'discount_amount', 'discount_reason',
             'deposit_percentage', 'amount_paid', 'deposit_due', 'balance_due',
             'deadline', 'is_routed', 'routing_reason', 'notes',
             'files', 'status_logs', 'allowed_transitions',
@@ -612,6 +637,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
         # ── Multi-line-item path ──────────────────────────────
         if line_items_data:
             total        = 0
+            bulk_saving  = 0
             priced_items = []
             staged_files = []   # each line's checked file, or None
             addon_lines  = []   # each line's priced finishing
@@ -678,6 +704,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 unit_price = float(pricing.get('base_price', pricing.get('total', 0)))
                 line_total = float(pricing['total'])
                 total     += line_total
+                bulk_saving += float(pricing.get('bulk_saving') or 0)
 
                 # Its finishing, priced by the app's own rules: lamination
                 # by the sheet, binding by the copy, an envelope one per
@@ -709,6 +736,7 @@ class JobCreateSerializer(serializers.ModelSerializer):
                 validated_data['title'] = ', '.join(names[:3]) + f' +{len(names)-3} more'
 
             validated_data['estimated_cost'] = total
+            validated_data['bulk_saving'] = round(bulk_saving, 2)
 
         # ── Single-service legacy path ────────────────────────
         else:

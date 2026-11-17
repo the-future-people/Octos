@@ -851,7 +851,13 @@ class PricingRuleDetailView(APIView):
             rule.base_price = request.data['base_price']
         if 'color_multiplier' in request.data:
             rule.color_multiplier = request.data['color_multiplier']
-        rule.save(update_fields=['base_price', 'color_multiplier', 'updated_at'])
+        if 'bulk_prices' in request.data:
+            # Bulk prices, counted on the whole line (17 Nov 2026).
+            checked = PricingRuleSerializer(rule, data={'bulk_prices': request.data['bulk_prices']}, partial=True)
+            if not checked.is_valid():
+                return Response(checked.errors, status=status.HTTP_400_BAD_REQUEST)
+            rule.bulk_prices = checked.validated_data['bulk_prices']
+        rule.save(update_fields=['base_price', 'color_multiplier', 'bulk_prices', 'updated_at'])
 
         return Response(PricingRuleSerializer(rule).data)
 

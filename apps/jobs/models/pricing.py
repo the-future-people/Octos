@@ -65,6 +65,11 @@ class PricingRule(AuditModel):
             'at its area price. 0 means no floor.'
         ),
     )
+    # Bulk prices (17 Nov 2026): [{"from": 200, "price": 2.30}, {"from": 500, "price": 2.20}].
+    # Counted on the whole line, pages x copies, and replacing the base price
+    # from that many on. Separate from pricing_tiers, whose bands count one
+    # document's pages (binding by the document's thickness).
+    bulk_prices = models.JSONField(default=list, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:

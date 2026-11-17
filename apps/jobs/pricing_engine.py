@@ -206,6 +206,14 @@ class PricingEngine:
         # Normalise unit — handle both legacy lowercase and PER_ prefixed formats
         unit_norm = unit.upper().replace('PER_', '')
 
+        # Bulk prices (17 Nov 2026): counted on the whole line, pages x
+        # copies, the price per page drops from each band's start.
+        listed, bulk, next_bulk = base, None, None
+        if unit_norm in ('COPY', 'PIECE', 'PAGE', 'SHEET'):
+            bulk, next_bulk = bulk_band(self.rule, int(pages) * int(quantity))
+            if bulk:
+                base = Decimal(str(bulk['price']))
+
         if unit_norm in ('COPY', 'PIECE', 'PAGE', 'SHEET'):
             # Per-copy/piece services: base × pages × sets × color
             subtotal = base * multiplier * Decimal(str(pages)) * Decimal(str(quantity))
@@ -234,6 +242,10 @@ class PricingEngine:
             subtotal = floor
 
         total = subtotal.quantize(Decimal('0.01'))
+        saving = Decimal('0.00')
+        if bulk:
+            at_list = max(listed * multiplier * Decimal(str(pages)) * Decimal(str(quantity)), floor)
+            saving = max(at_list.quantize(Decimal('0.01')) - total, Decimal('0.00'))
 
         return {
             'success'        : True,
@@ -246,6 +258,10 @@ class PricingEngine:
             'pages'          : pages,
             'is_color'       : is_color,
             'total'          : total,
+            'list_price'     : str(listed),
+            'bulk'           : bulk,
+            'bulk_saving'    : str(saving),
+            'next_bulk'      : next_bulk,
             'pricing_mode'   : 'standard',
             'pricing_source' : 'branch' if self.rule.branch else 'company_default',
         }
@@ -377,6 +393,28 @@ class PricingEngine:
         """Convenience class method for quick price lookups."""
         return cls(service, branch).calculate(quantity, is_color, pages, condition_params)
 
+
+
+def bulk_band(rule, units):
+    """
+    (band, next band) for so many units on the line: the bulk price that
+    applies, and the next one up with how many more units reach it, so a
+    customer can be told "at 500 pages it drops to GHS 2.20".
+    """
+    bands = []
+    for band in rule.bulk_prices or []:
+        try:
+            start, price = int(band.get('from')), Decimal(str(band.get('price')))
+        except (TypeError, ValueError, ArithmeticError, AttributeError):
+            continue
+        if start > 1 and Decimal('0') < price < rule.base_price:
+            bands.append((start, price))
+    bands.sort()
+    reached = [b for b in bands if b[0] <= units]
+    ahead = [b for b in bands if b[0] > units]
+    now = {'from': reached[-1][0], 'price': f'{reached[-1][1]:.2f}'} if reached else None
+    then = {'from': ahead[0][0], 'price': f'{ahead[0][1]:.2f}', 'more': ahead[0][0] - units} if ahead else None
+    return now, then
 
 
 def sheets_of(service, pages):

@@ -225,12 +225,28 @@ def render(data) -> bytes:
 
     d.line((left, t.y, right, t.y), fill=RULE, width=px(1))
     t.y += px(12)
+    # What they saved (17 Nov 2026): the list price, the bulk price and any
+    # discount, above the total.
+    saved = data.get('saved')
+    if saved:
+        for label, value in (('List price', f"GHS {saved['list']}"),
+                             ('Bulk price', f"-GHS {saved['bulk']}" if saved.get('bulk') else None),
+                             ('Discount', f"-GHS {saved['discount']}" if saved.get('discount') else None)):
+            if value:
+                t.text((left, t.y), label, f_body, GREY)
+                t.text((right, t.y), value, f_body, GREY, 'ra')
+                t.y += px(22)
     t.text((left, t.y), 'Total', _font(700, 15), INK)
     t.text((right, t.y), f"GHS {data.get('total', '0.00')}", _font(700, 15), INK, 'ra')
     t.y += px(24)
     t.text((left, t.y), 'Balance', f_body, GREY)
     t.text((right, t.y), f"GHS {data.get('balance', '0.00')}", f_body, GREY, 'ra')
     t.y += px(26)
+    if saved:
+        w = int(d.textlength(f"You saved GHS {saved['saved']}", font=_font(700, 13))) + px(24)
+        d.rounded_rectangle((cx - w // 2, t.y, cx + w // 2, t.y + px(28)), radius=px(8), fill=(234, 243, 222))
+        t.text((cx, t.y + px(14)), f"You saved GHS {saved['saved']}", _font(700, 13), (39, 80, 10), 'mm')
+        t.y += px(40)
     t.rule_with_notches()
 
     # Footer.
@@ -299,4 +315,10 @@ def receipt_data(receipt) -> dict:
         'items': describe_job(job.line_items.select_related('service').order_by('position')) if job else [],
         'total': f"{(job.estimated_cost if job else receipt.amount_paid):.2f}",
         'balance': f"{(receipt.balance_due or 0):.2f}",
+        'saved': _saved(job),
     }
+
+
+def _saved(job):
+    from apps.jobs.services.savings import savings
+    return savings(job)

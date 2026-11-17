@@ -149,6 +149,15 @@ class ProformaInvoice(AuditModel):
         default=0,
     )
 
+    # Savings (17 Nov 2026): the bulk price the lines earned, and a price
+    # lowered by hand (models/costing.py PriceCut). The total already has
+    # both taken off; these say how much, for the receipt and the reports.
+    bulk_saving     = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_reason = models.CharField(max_length=300, blank=True)
+    discount_by     = models.ForeignKey('accounts.CustomUser', null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name='%(class)s_discounts_given')
+
     # ── Staff ─────────────────────────────────────────────────
     issued_by       = models.ForeignKey(
         'accounts.CustomUser',

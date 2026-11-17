@@ -77,13 +77,15 @@ class ProformaListSerializer(serializers.ModelSerializer):
     is_expired     = serializers.BooleanField(read_only=True)
     is_convertible = serializers.BooleanField(read_only=True)
     days_left      = serializers.SerializerMethodField()
+    discount_by_name = serializers.CharField(source='discount_by.full_name', read_only=True, default='')
 
     class Meta:
         model  = ProformaInvoice
         fields = [
             'id', 'proforma_number', 'version', 'status',
             'customer', 'customer_name', 'issued_to',
-            'total', 'issued_at', 'valid_until', 'days_left',
+            'total', 'bulk_saving', 'discount_amount', 'discount_reason', 'discount_by_name',
+            'issued_at', 'valid_until', 'days_left',
             'is_expired', 'is_convertible',
             'issued_by', 'issued_by_name', 'job',
             'created_at',

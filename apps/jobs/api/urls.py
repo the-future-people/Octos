@@ -10,6 +10,8 @@ from . import desk_views
 from .pulse_views import BranchPulseView
 from .today_views import AttendantTodayView
 from .service_photo_views import ServicePhotoView
+from .discount_views import (CostSettingsView, DiscountDecisionView, DiscountView, DiscountWaitingView,
+                             ServiceCostView)
 from .views import BranchPerformanceView, JobHistoryView, JobStatsView, LateJobView, ResolveHandoverView, ServiceListView, ServicePerformanceView
 from apps.jobs.api import promise_views
 
@@ -113,6 +115,12 @@ urlpatterns = [
     path('services/',        views.ServiceListView.as_view(),   name='service-list'),
     path('services/create/', views.ServiceCreateView.as_view(), name='service-create'),
     path('services/<int:pk>/photo/', ServicePhotoView.as_view(),  name='service-photo'),
+    path('services/<int:pk>/cost/',  ServiceCostView.as_view(),   name='service-cost'),
+    path('costs/',                   CostSettingsView.as_view(),  name='cost-settings'),
+    path('discounts/',               DiscountView.as_view(),      name='discounts'),
+    path('discounts/waiting/',       DiscountWaitingView.as_view(), name='discounts-waiting'),
+    path('discounts/<int:pk>/approve/', DiscountDecisionView.as_view(approve=True),  name='discount-approve'),
+    path('discounts/<int:pk>/decline/', DiscountDecisionView.as_view(approve=False), name='discount-decline'),
     path('late/', views.LateJobView.as_view(), name='late-job'),
     path('intake-held/', views.IntakeHeldQueueView.as_view(), name='intake-held-queue'),
     path('<int:pk>/resolve-handover/', views.ResolveHandoverView.as_view(), name='resolve-handover'),
