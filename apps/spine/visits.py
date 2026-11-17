@@ -33,7 +33,7 @@ OPENING = {kinds.MESSAGE_RECEIVED, kinds.PRESENCE_COUNTER, kinds.COUNTER_CLAIMED
 NOT_ACTIVITY = {
     kinds.MESSAGE_DELIVERED, kinds.MESSAGE_READ, kinds.OCTOS_STAYED_SILENT,
     kinds.OCTOS_SHADOWED, kinds.STAFF_REMINDED, kinds.MESSAGE_REACTED,
-    kinds.CHAT_OPENED,
+    kinds.CHAT_OPENED, kinds.OCTOS_FLAGGED_QUIET,
 }
 
 # Real outcomes, each backed by the event that proves it.

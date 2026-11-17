@@ -129,6 +129,7 @@ def _receive(message, profile_name, who=None):
     media_name, media_mime = _media_details(message)
     # Read before `message` is reused for the saved Message below.
     reaction = message.get('type') == 'reaction'
+    unsupported = message.get('type') == 'unsupported'
     try:
         with transaction.atomic():
             # The write is the duplicate check: Meta retries, and the
@@ -138,7 +139,7 @@ def _receive(message, profile_name, who=None):
                 direction=Message.INBOUND,
                 channel=Message.WHATSAPP,
                 message_type=message_type,
-                kind=Message.REACTION if reaction else '',
+                kind=Message.REACTION if reaction else Message.UNSUPPORTED if unsupported else '',
                 body=body,
                 media_id=media_id,
                 media_name=media_name,
@@ -172,7 +173,9 @@ def _receive(message, profile_name, who=None):
     # (Priscilla, 9 Nov 2026).
     # A reaction is kept for the inbox, and that is all: it never says where
     # the customer is and never asks for a reply (Henry, 13 Nov 2026).
-    if reaction:
+    # An album's cover (or a poll) asks nothing either: its photos follow,
+    # and those are what Octos answers (17 Nov 2026).
+    if reaction or unsupported:
         return True
 
     from apps.communications.assistant import counter
@@ -231,6 +234,11 @@ def _refresh(conversation, phone, profile_name):
         conversation.save(update_fields=changed + ['updated_at'])
 
 
+# What WhatsApp sends in place of an album's cover, a poll or a view-once
+# photo: nothing to read. The album's photos arrive on their own.
+ALBUM_NOTE = "[Sent an album or something WhatsApp doesn't pass on, like a poll or a view-once photo]"
+
+
 def _content(message):
     """(message_type, body, media_id) for one WhatsApp message."""
     kind = message.get('type') or ''
@@ -269,6 +277,9 @@ def _content(message):
             phones = ', '.join(p.get('phone', '') for p in contact.get('phones') or [])
             shared.append(' '.join(part for part in (name, phones) if part))
         return Message.TEXT, 'Shared a contact: ' + '; '.join(shared), ''
+
+    if kind == 'unsupported':
+        return Message.TEXT, ALBUM_NOTE, ''
 
     # Never dropped. Staff cannot open WhatsApp on this number to look,
     # so the inbox must at least show that something arrived.

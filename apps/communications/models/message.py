@@ -37,6 +37,11 @@ class Message(AuditModel):
     # marked with this kind so Octos never treats it as something to answer
     # (14 Nov 2026).
     REACTION = 'reaction'
+    # What WhatsApp won't pass on (17 Nov 2026): most often the cover of an
+    # album, arriving just before its photos; also polls and view-once
+    # photos. Shown in the inbox, never answered, never read by Octos.
+    UNSUPPORTED = 'unsupported'
+    QUIET_KINDS = (REACTION, UNSUPPORTED)
 
     # Message Type
     TEXT = 'TEXT'

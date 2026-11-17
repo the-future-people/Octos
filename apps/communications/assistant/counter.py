@@ -225,7 +225,7 @@ def step(conversation, trigger, now):
             return None, 'not sure where they are: greeted already, waiting for their words'
     if no_words(trigger) and _batch_acknowledged(conversation, trigger):
         return None, 'files already acknowledged: waiting for their words'
-    if opened and file_only(trigger):
+    if file_only(trigger):
         from apps.communications.models import AssistantRun
         asked = AssistantRun.objects.filter(conversation=conversation, reason=FORK_REASON,
                                             created_at__gte=now - FORK_WINDOW).exists()
@@ -237,16 +237,43 @@ def step(conversation, trigger, now):
         # answers with the conversation in view, not the stock question.
         if _words_before(conversation, trigger, now):
             return None
+        # Closed (17 Nov 2026): a file sent after hours got no word at all.
+        # Say when we open, and still ask what it's for.
+        if not opened:
+            # Only when they've said nothing lately: words earlier ("3 copies
+            # of this file") mean Octos answers with them in view.
+            if _words_before(conversation, trigger, now, within=timedelta(minutes=30), anywhere=True):
+                return None
+            return closed_fork_text(now), FORK_REASON
         return FORK_TEXT, FORK_REASON
     return None
 
 
-def _words_before(conversation, trigger, now):
-    """The customer's last message before this file, in the last 10 minutes, said more than hello."""
-    from datetime import timedelta
-    before = (conversation.messages
-              .filter(direction=Message.INBOUND, pk__lt=trigger.pk, created_at__gte=now - timedelta(minutes=10))
-              .exclude(kind=Message.REACTION).order_by('-pk').first())
+def closed_fork_text(now):
+    """'Got your file. We're closed now and open again at 8:00am tomorrow. What would you like done with it?'"""
+    from apps.communications.assistant.tools import branch_hours
+    from apps.organization.models import Branch
+    branch = Branch.objects.filter(is_trading=True, is_active=True).order_by('pk').first()
+    when = branch_hours(branch, now).get('next_opening') if branch else None
+    if when:
+        back = f" We're closed now and open again {'at' if ('today' in when or 'tomorrow' in when) else 'on'} {when}."
+    else:
+        back = " We're closed now."
+    return (f"Got your file \U0001F44D{back} What would you like done with it? "
+            "We'll get started as soon as we open.")
+
+
+def _words_before(conversation, trigger, now, within=timedelta(minutes=10), anywhere=False):
+    """
+    The customer's last message before this file, in the last 10 minutes, said
+    more than hello. With anywhere: any of their messages in that time did.
+    """
+    earlier = (conversation.messages
+               .filter(direction=Message.INBOUND, pk__lt=trigger.pk, created_at__gte=now - within)
+               .exclude(kind__in=Message.QUIET_KINDS).order_by('-pk'))
+    if anywhere:
+        return any(has_words(m.body or '') and not bare_greeting(m) for m in earlier[:20])
+    before = earlier.first()
     return bool(before and has_words(before.body or '') and not bare_greeting(before))
 
 

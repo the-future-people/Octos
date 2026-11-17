@@ -26,6 +26,7 @@ STAFF_TOOK_OVER = 'staff.took_over'
 STAFF_HANDED_BACK = 'staff.handed_back'
 OCTOS_TOOK_BACK = 'octos.took_back'          # the handover watcher took it back
 OCTOS_ASKED_FOR_PERSON = 'octos.asked_for_person'   # Octos handed over and said why
+OCTOS_FLAGGED_QUIET = 'octos.flagged_quiet'  # a remote customer sent a file and went quiet, no job: a person should follow up
 STAFF_REMINDED = 'staff.reminded'            # a customer waited 30 minutes on a person
 CONVERSATION_RESOLVED = 'conversation.resolved'
 

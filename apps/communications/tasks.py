@@ -34,6 +34,18 @@ def watch_handovers():
         logger.info('Handover watch: %s reminded, %s taken back', reminded, taken_back)
 
 @shared_task
+def flag_quiet_remote():
+    """
+    Every 5 minutes: a customer who sent a file from outside the shop and went
+    quiet with no job made goes to "Needs you" (services/quiet_remote.py).
+    """
+    from apps.communications.services.quiet_remote import flag_quiet
+
+    flagged = flag_quiet()
+    if flagged:
+        logger.info('Flagged %s quiet remote chat(s) for a person', flagged)
+
+@shared_task
 def answer_whatsapp(conversation_id, trigger_id):
     """Octos considers a customer's message. All the rules are in assistant/brain."""
     from apps.communications.assistant import brain

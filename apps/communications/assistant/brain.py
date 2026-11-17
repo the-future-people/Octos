@@ -57,6 +57,20 @@ ACKNOWLEDGEMENTS = {
     'ok thank you', 'alright thanks', 'noted thanks', 'good night', 'goodnight', 'gn', 'bye',
     'bye bye', '👍', '🙏', '👌', '👍🏾', '🙏🏾', '👍🏽', '🙏🏽',
 }
+# A goodbye in more words (17 Nov 2026): "Thank you too" after a receipt got
+# Octos asking about a file already printed. Every word one of these, and at
+# least one of the core ones, and short: then it only closes the chat.
+GOODBYE_WORDS = {
+    'ok', 'okay', 'okk', 'oki', 'k', 'kk', 'noted', 'alright', 'sure', 'fine', 'cool', 'great',
+    'thanks', 'thank', 'thankyou', 'tnx', 'thx', 'you', 'u', 'too', 'also', 'so', 'very', 'much', 'a', 'lot',
+    'same', 'to', 'appreciated', 'appreciate', 'it', 'god', 'bless', 'boss', 'sir', 'madam', 'maam',
+    'dear', 'bye', 'good', 'night', 'goodnight', 'gn', 'have', 'nice', 'day', 'evening', 'and',
+    'well', 'done', 'received', 'got', 'perfect', 'with',
+}
+GOODBYE_CORE = {
+    'ok', 'okay', 'okk', 'oki', 'k', 'kk', 'noted', 'alright', 'thanks', 'thank', 'thankyou', 'tnx', 'thx',
+    'appreciated', 'appreciate', 'bye', 'goodnight', 'gn', 'received', 'perfect',
+}
 TOOL_SPECS = [
     {
         'name': 'customer_declined_details',
@@ -291,7 +305,7 @@ def _stepped_in(conversation, trigger):
     later = conversation.messages.filter(created_at__gt=trigger.created_at, is_internal_note=False)
     if later.filter(direction=Message.OUTBOUND, sent_by__isnull=False).exists():
         return 'a person replied while Octos was writing'
-    if later.filter(direction=Message.INBOUND).exclude(kind=Message.REACTION).exists():
+    if later.filter(direction=Message.INBOUND).exclude(kind__in=Message.QUIET_KINDS).exists():
         return 'the customer wrote again while Octos was writing; that message will be answered'
     return None
 
@@ -310,11 +324,13 @@ def _silence(conversation, trigger, now):
         return 'a person has taken over this conversation'
     if trigger is not None and trigger.kind == Message.REACTION:
         return 'a reaction needs no reply'
+    if trigger is not None and trigger.kind == Message.UNSUPPORTED:
+        return 'nothing WhatsApp passed on to read'
     visible = conversation.messages.filter(is_internal_note=False).order_by('-created_at')
     # A reaction (a thumbs-up on a receipt) is never the message waiting for
     # an answer: it neither starts a reply nor hides the question before it
     # (Henry, 13 Nov 2026).
-    last = visible.filter(direction=Message.INBOUND).exclude(kind=Message.REACTION).first()
+    last = visible.filter(direction=Message.INBOUND).exclude(kind__in=Message.QUIET_KINDS).first()
     if last is None:
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
@@ -378,11 +394,18 @@ def show_typing_for(message_id):
 def _just_acknowledging(last, before):
     """'Ok' after a statement ends a conversation; after Octos's question it is an answer."""
     text = re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (last.body or '').strip().lower()))
-    if text not in ACKNOWLEDGEMENTS:
+    if text not in ACKNOWLEDGEMENTS and not _goodbye(text):
         return False
     asked = (before is not None and before.direction == Message.OUTBOUND
              and (before.body or '').rstrip().endswith('?'))
     return not asked
+
+
+def _goodbye(text):
+    """'Thank you too', 'ok thanks boss', 'well received, God bless': only closing."""
+    words = re.findall(r"[a-z]+", text.replace("'", ''))
+    return (0 < len(words) <= 8 and all(w in GOODBYE_WORDS for w in words)
+            and any(w in GOODBYE_CORE for w in words))
 
 
 def _holding():
@@ -573,7 +596,7 @@ def _history(conversation):
     # saw; they still count as what Octos "said", or every earlier question
     # looks unanswered and gets answered again. Only in shadow: after
     # switching to live, notes the customer never received don't count.
-    said = Q(is_internal_note=False) & ~Q(channel=Message.SYSTEM) & ~Q(kind=Message.REACTION)
+    said = Q(is_internal_note=False) & ~Q(channel=Message.SYSTEM) & ~Q(kind__in=Message.QUIET_KINDS)
     if settings.OCTOS_ASSISTANT_MODE == 'shadow':
         said |= Q(is_internal_note=True, body__startswith=SHADOW_PREFIX)
     recent = list(
@@ -590,6 +613,11 @@ def _history(conversation):
         if recent[i].created_at - recent[i - 1].created_at > QUIET_GAP:
             visit_starts = i
             break
+    # When the chat's files were dealt with: a job made from it, or a receipt
+    # sent. A file before one of those has been printed or made into a job
+    # (Miss, 16 Nov 2026: asked what to do with a portfolio already printed).
+    done = sorted(list(conversation.jobs.values_list('created_at', flat=True))
+                  + list(conversation.messages.filter(kind='receipt').values_list('created_at', flat=True)))
     turns = []
     for index, m in enumerate(recent):
         earlier = index < visit_starts
@@ -617,6 +645,8 @@ def _history(conversation):
                 what += ', not saved yet'
             else:
                 what += f', file {m.pk}'
+            if any(when > m.created_at for when in done):
+                what += ', already dealt with: made into a job'
             if earlier:
                 day = timezone.localtime(m.created_at).strftime('%a %d %b')
                 what += f', sent on {day} in an earlier visit, not part of what they want now unless they ask for it again'

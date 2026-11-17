@@ -71,7 +71,7 @@ def hand_back(conversation, user=None, why=''):
         # Only when Octos took back: a customer nobody answered gets an answer
         # now. After a person's hand-back, what was waiting is theirs, handled.
         waiting = (conversation.messages.filter(is_internal_note=False)
-                   .exclude(kind=Message.REACTION).order_by('-created_at').first())
+                   .exclude(kind__in=Message.QUIET_KINDS).order_by('-created_at').first())
         if user is None and waiting is not None and waiting.direction == Message.INBOUND:
             from apps.communications.services.whatsapp_inbound import wake_octos
             wake_octos(conversation, waiting)
@@ -105,7 +105,7 @@ def waiting_since(conversation):
     """When the customer's unanswered message arrived, or None if nobody is waiting."""
     last = (
         conversation.messages.filter(is_internal_note=False)
-        .exclude(kind=Message.REACTION)
+        .exclude(kind__in=Message.QUIET_KINDS)
         .order_by('-created_at').first()
     )
     if last is not None and last.direction == Message.INBOUND:

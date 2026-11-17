@@ -472,6 +472,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.communications.tasks.watch_handovers',
         'schedule': crontab(),
     },
+    # A customer who sent a file from outside the shop and went quiet, with
+    # no job made, goes to "Needs you" (communications/services/quiet_remote.py).
+    'flag-quiet-remote-chats': {
+        'task': 'apps.communications.tasks.flag_quiet_remote',
+        'schedule': crontab(minute='*/5'),
+    },
     # Visits quiet for over 2 hours are closed as NO_ACTION or ABANDONED,
     # backdated to when they went quiet (apps/spine/visits.py).
     'close-quiet-visits': {
