@@ -540,6 +540,7 @@ class CashierBalanceConfirmView(APIView):
             result = confirm_balance(job, serializer.validated_data, request.user)
         except ValueError as refused:
             return Response({'detail': str(refused)}, status=400)
+        _queue_whatsapp_receipt(result, serializer.validated_data)
         return Response(result)
 
 
@@ -573,7 +574,28 @@ class CashierConfirmPaymentView(APIView):
         except (ValueError, PermissionError) as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        _queue_whatsapp_receipt(result, serializer.validated_data)
         return Response(result)
+
+
+def _queue_whatsapp_receipt(result, data):
+    """
+    With send_whatsapp: the receipt goes on WhatsApp in the background, and
+    the reply says so, or why it can't (17 Nov 2026). Never fails the payment.
+    """
+    if not data.get('send_whatsapp') or not result.get('receipt_id'):
+        return
+    import logging
+    from apps.finance.models import Receipt
+    from apps.finance.receipt_engine import ReceiptEngine
+    try:
+        receipt = Receipt.objects.select_related('job__branch', 'daily_sheet__branch').get(pk=result['receipt_id'])
+        branch = receipt.job.branch if receipt.job_id else receipt.daily_sheet.branch
+        queued, reason = ReceiptEngine(branch).queue_whatsapp(receipt)
+        result['whatsapp'] = {'queued': queued, 'detail': 'Sending on WhatsApp.' if queued else reason}
+    except Exception:
+        logging.getLogger(__name__).exception('Could not queue the WhatsApp receipt %s', result.get('receipt_id'))
+        result['whatsapp'] = {'queued': False, 'detail': "WhatsApp couldn't be reached just now. Try again, or print it."}
 class JobFileUploadView(APIView):
     """
     POST /api/v1/jobs/<id>/files/

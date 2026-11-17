@@ -1057,11 +1057,12 @@ class ReceiptSendWhatsAppView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        engine = ReceiptEngine(receipt.job.branch)
-        sent, reason = engine.send_whatsapp(receipt)
-
-        if sent:
-            return Response({'detail': 'Receipt sent on WhatsApp.'})
+        # Checked now, sent by the worker (17 Nov 2026): the cashier can close
+        # the receipt or move on, and it still goes.
+        queued, reason = ReceiptEngine(receipt.job.branch).queue_whatsapp(receipt)
+        if queued:
+            return Response({'detail': 'Sending on WhatsApp. You can carry on.', 'queued': True},
+                            status=status.HTTP_202_ACCEPTED)
         return Response({'detail': reason}, status=status.HTTP_400_BAD_REQUEST)
 
 

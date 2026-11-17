@@ -1,4 +1,29 @@
+import logging
+
 from celery import shared_task
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task
+def send_receipt_whatsapp(receipt_id):
+    """
+    The receipt on WhatsApp, drawn and sent by the worker (17 Nov 2026), so it
+    goes even when the cashier has moved on. A failure is marked on the
+    receipt, where it shows; staff can print it or try again.
+    """
+    from apps.finance.models import Receipt
+    from apps.finance.receipt_engine import ReceiptEngine
+
+    receipt = Receipt.objects.select_related('job__branch', 'daily_sheet__branch').filter(pk=receipt_id).first()
+    if receipt is None:
+        return
+    branch = receipt.job.branch if receipt.job_id else receipt.daily_sheet.branch
+    sent, reason = ReceiptEngine(branch).send_whatsapp(receipt)
+    if not sent:
+        logger.warning('Receipt %s not sent on WhatsApp: %s', receipt.receipt_number, reason)
+        Receipt.objects.filter(pk=receipt.pk).update(whatsapp_status=Receipt.DeliveryStatus.FAILED)
+
 
 @shared_task
 def open_sheets():

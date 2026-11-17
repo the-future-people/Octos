@@ -8,6 +8,14 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# Why a receipt can't go on WhatsApp, in words the cashier can act on.
+NO_NUMBER = 'This receipt has no phone number to send it to.'
+NOT_WRITTEN = (
+    "This customer hasn't written to us on WhatsApp in the last 24 hours, "
+    "so WhatsApp won't let us send it. Print the receipt, or ask them to "
+    "send us a message first, then try again."
+)
+
 
 class ReceiptEngine:
     """
@@ -146,6 +154,42 @@ class ReceiptEngine:
 
     # ── WhatsApp delivery ─────────────────────────────────────────────────
 
+    def whatsapp_refusal(self, receipt):
+        """
+        Why WhatsApp can't take this receipt right now, in words the cashier
+        can act on; '' when it can. Quick: nothing is drawn or sent here, so
+        the cashier hears at once, and the slow part goes to the worker
+        (queue_whatsapp, 17 Nov 2026).
+        """
+        from apps.communications.models import Conversation
+        from apps.communications.services.chat_customer import chat_for
+        from apps.communications.services.whatsapp_outbound import thread_for, window_open
+
+        if receipt.customer_phone:
+            chat = thread_for(receipt.customer_phone)
+        else:
+            chat = chat_for(receipt.job)
+            if chat is None:
+                return NO_NUMBER
+        if chat is None or chat.status == Conversation.SPAM or not window_open(chat):
+            return NOT_WRITTEN
+        return ''
+
+    def queue_whatsapp(self, receipt):
+        """
+        Send the receipt on WhatsApp in the background (17 Nov 2026): it goes
+        whatever the cashier does next, closing the receipt included. Returns
+        (queued, reason): a reason when it can't go, said straight away.
+        """
+        from django.db import transaction
+        from apps.finance.tasks import send_receipt_whatsapp
+
+        reason = self.whatsapp_refusal(receipt)
+        if reason:
+            return False, reason
+        transaction.on_commit(lambda: send_receipt_whatsapp.delay(receipt.pk))
+        return True, ''
+
     def send_whatsapp(self, receipt):
         """
         The receipt on WhatsApp. Returns (sent, reason).
@@ -169,7 +213,7 @@ class ReceiptEngine:
         if not receipt.customer_phone:
             chat = chat_for(receipt.job)
             if chat is None:
-                return False, 'This receipt has no phone number to send it to.'
+                return False, NO_NUMBER
 
         # Formatting first, on its own: a receipt that can't be written out
         # (one with no job, say) must not be reported as WhatsApp being down.
@@ -217,11 +261,7 @@ class ReceiptEngine:
             return False, "WhatsApp couldn't be reached just now. Try again, or print the receipt."
 
         if message is None:
-            return False, (
-                "This customer hasn't written to us on WhatsApp in the last 24 hours, "
-                "so WhatsApp won't let us send it. Print the receipt, or ask them to "
-                "send us a message first, then try again."
-            )
+            return False, NOT_WRITTEN
 
         receipt.whatsapp_status = Receipt.DeliveryStatus.SENT
         receipt.whatsapp_sent_at = timezone.now()

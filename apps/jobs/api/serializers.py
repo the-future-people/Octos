@@ -893,6 +893,10 @@ class CashierPaymentSerializer(serializers.Serializer):
     momo_reference    = serializers.CharField(required=False, allow_blank=True)
     pos_approval_code = serializers.CharField(required=False, allow_blank=True)
     customer_phone    = serializers.CharField(required=False, allow_blank=True)
+    # Send the receipt on WhatsApp too (17 Nov 2026): done by the server with
+    # the payment, not by the screen afterwards, so it goes even if the
+    # cashier closes the screen first.
+    send_whatsapp     = serializers.BooleanField(required=False, default=False)
     company_name      = serializers.CharField(required=False, allow_blank=True)
     notes             = serializers.CharField(required=False, allow_blank=True)
     cash_tendered     = serializers.DecimalField(
