@@ -168,6 +168,7 @@ class JobCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         job = serializer.save()
+        self._link_chat(job)
         from apps.core.broadcast import broadcast_invalidation
         broadcast_invalidation(job.branch.id, [
             'paymentQueue', 'jobStats', 'recentJobs',
@@ -175,6 +176,27 @@ class JobCreateView(generics.CreateAPIView):
             'attendant-my-jobs-recent', 'attendant-my-jobs',
             'cashierSummary',
         ])
+
+    def _link_chat(self, job):
+        """
+        Recorded from a chat (17 Nov 2026): { conversation: <id> } with the job.
+        Linked here, not by a second call from the screen afterwards, which
+        could fail unseen. Then the receipt reaches the customer in that chat,
+        even one writing from a WhatsApp username with no number.
+        A chat this person can't see is ignored; a problem never undoes the job.
+        """
+        chat_id = self.request.data.get('conversation')
+        if not chat_id:
+            return
+        import logging
+        try:
+            from apps.communications.services.access import visible_conversations
+            from apps.communications.services.job_link import link_to_chat
+            conversation = visible_conversations(self.request.user).filter(pk=chat_id).first()
+            if conversation is not None:
+                link_to_chat(conversation, job, self.request.user)
+        except Exception:
+            logging.getLogger(__name__).exception('Could not link %s to chat %s', job.job_number, chat_id)
 
 
 class JobTransitionView(APIView):

@@ -46,6 +46,24 @@ def chat_for(customer, now=None):
     return visit.conversation if visit else None
 
 
+def link_to_chat(conversation, job, user):
+    """
+    Link a job to a chat: the chat shows it, its receipt can reach the
+    customer there (even with no number), and on the spine the visit closes
+    as a job made. Safe to repeat: the link and the event are made once.
+    """
+    from apps.spine import kinds
+    from apps.spine.models import Event
+    from apps.spine.recorder import record
+
+    conversation.jobs.add(job)
+    record(kinds.JOB_LINKED, actor=Event.STAFF, actor_user=user,
+           conversation=conversation, customer=conversation.customer, job=job,
+           key=f'job-linked:{conversation.pk}:{job.pk}',
+           payload={'job_number': job.job_number},
+           reason=f'{user.full_name} linked {job.job_number} to this chat.')
+
+
 def link_new_job(job, now=None):
     """Link a new job to its customer's open chat. Returns the chat, or None."""
     conversation = chat_for(getattr(job, 'customer', None), now)

@@ -311,16 +311,9 @@ class ConversationLinkJobView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        conversation.jobs.add(job)
-        # On the spine: the visit closes as a job made, and its files are handled.
-        from apps.spine import kinds
-        from apps.spine.models import Event
-        from apps.spine.recorder import record
-        record(kinds.JOB_LINKED, actor=Event.STAFF, actor_user=request.user,
-               conversation=conversation, customer=conversation.customer, job=job,
-               key=f'job-linked:{conversation.pk}:{job.pk}',
-               payload={'job_number': job.job_number},
-               reason=f'{request.user.full_name} linked {job.job_number} to this chat.')
+        # The chat shows it; on the spine the visit closes as a job made.
+        from apps.communications.services.job_link import link_to_chat
+        link_to_chat(conversation, job, request.user)
 
         return Response({
             'success'               : True,

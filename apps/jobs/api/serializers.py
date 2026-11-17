@@ -498,10 +498,16 @@ class JobCreateSerializer(serializers.ModelSerializer):
     deposit_percentage = serializers.ChoiceField(choices=[70, 100], default=100)
     # One per attempt at the counter: the same key twice is the same job.
     idempotency_key = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=64)
+    # Which job was made (17 Nov 2026). The reply only echoed what was sent,
+    # so the screen never had the id to link a job to its chat, and the
+    # success screen showed "—" for the job number.
+    id         = serializers.IntegerField(read_only=True)
+    job_number = serializers.CharField(read_only=True)
 
     class Meta:
         model  = Job
         fields = [
+            'id', 'job_number',
             'job_type', 'priority', 'branch',
             'customer', 'ordered_by', 'description', 'specifications',
             'intake_channel', 'deadline', 'notes',
