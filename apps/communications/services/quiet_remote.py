@@ -6,8 +6,8 @@ and neither answered. Nobody followed up, and both visits closed with
 nothing. A third sent files that someone opened, then heard nothing back.
 
 Every few minutes, while a branch is open: an open visit that isn't at the
-counter, where the customer sent a file, no job has been made, and nothing
-has happened for QUIET_FOR, goes to "Needs you" with the reason. Once per
+counter, where the customer sent a file, no job has been made and no receipt
+sent, and nothing has happened for QUIET_FOR, goes to "Needs you" with the reason. Once per
 visit. Octos takes it back by itself when the visit closes (handover.watch).
 """
 from datetime import timedelta
@@ -16,6 +16,22 @@ from django.utils import timezone
 
 QUIET_FOR = timedelta(minutes=30)
 REASON = 'Sent a file from outside the shop and went quiet, with no job made. Worth a follow-up.'
+
+
+def dealt_with(chat, visit):
+    """
+    The visit's work is done: a job made or linked (as an event, or a job
+    attached to the chat since the visit began, however it was attached), or
+    a receipt sent. On 17 Nov 2026 Cassy was flagged though her job was made
+    and her receipt sent: the job had been attached by hand, with no event.
+    """
+    from apps.spine import kinds
+
+    if visit.events.filter(kind__in=[kinds.JOB_CREATED, kinds.JOB_LINKED]).exists():
+        return True
+    if chat.jobs.filter(created_at__gte=visit.opened_at).exists():
+        return True
+    return chat.messages.filter(kind='receipt', created_at__gte=visit.opened_at).exists()
 
 
 def flag_quiet(now=None):
@@ -44,9 +60,9 @@ def flag_quiet(now=None):
             continue
         if not visit.events.filter(kind=kinds.MESSAGE_RECEIVED, payload__has_file=True).exists():
             continue
-        if visit.events.filter(kind__in=[kinds.JOB_CREATED, kinds.JOB_LINKED]).exists():
-            continue
         chat = visit.conversation
+        if dealt_with(chat, visit):
+            continue
         record(kinds.OCTOS_FLAGGED_QUIET, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
                key=key, reason=REASON)
         handover.octos_hands_over(chat, REASON)

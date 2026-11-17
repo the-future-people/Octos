@@ -146,6 +146,17 @@ class QuietRemoteTests(TestCase):
                              occurred_at=self.now - timedelta(minutes=38))
         self.assertEqual(flag_quiet(self.now), 0)
 
+    def test_a_job_attached_by_hand_counts(self):
+        self.sent_file(40)
+        self.chat.jobs.add(make_job(self.branch))       # no event, as from the Railway shell
+        self.assertEqual(flag_quiet(self.now), 0)
+
+    def test_a_receipt_sent_counts(self):
+        self.sent_file(40)
+        Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               kind='receipt', body="Here's your receipt.")
+        self.assertEqual(flag_quiet(self.now), 0)
+
     def test_at_the_counter_the_attendant_has_them(self):
         visit = self.sent_file(40)
         Visit.objects.filter(pk=visit.pk).update(presence=Visit.AT_COUNTER)
