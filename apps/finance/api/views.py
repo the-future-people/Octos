@@ -1161,6 +1161,24 @@ class ReceiptListView(generics.ListAPIView):
 
         return qs
 
+    def list(self, request, *args, **kwargs):
+        # The period's takings beside the page (18 Nov 2026): the phone's
+        # Receipts shows the total and the split by method, counted here over
+        # every receipt in the period, not just the page on screen. Voided
+        # receipts are listed but not counted.
+        response = super().list(request, *args, **kwargs)
+        kept = self.filter_queryset(self.get_queryset()).filter(is_void=False).order_by()  # no ordering: it would split the groups
+        rows = kept.values('payment_method').annotate(amount=Sum('amount_paid'), count=Count('id'))
+        by_method = {r['payment_method']: {'amount': f"{r['amount'] or 0:.2f}", 'count': r['count']} for r in rows}
+        total = sum((r['amount'] or Decimal('0')) for r in rows)
+        if isinstance(response.data, dict):
+            response.data['totals'] = {
+                'amount': f'{total:.2f}',
+                'count': sum(r['count'] for r in rows),
+                'by_method': by_method,
+            }
+        return response
+
 
 class CashierReceiptListView(generics.ListAPIView):
     """
