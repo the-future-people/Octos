@@ -22,7 +22,6 @@ from django.utils import timezone
 
 ZERO = Decimal('0')
 DEAD = ('DRAFT', 'CANCELLED', 'VOIDED')
-RULE = '┄' * 20
 SHORT_METHODS = {'Mobile Money': 'MoMo', 'Paid Online': 'Online', 'Credit Account': 'Credit'}
 LEVEL_ICON = {'red': '🔴', 'amber': '🟠', 'green': '🟢'}
 
@@ -46,6 +45,10 @@ def _short_day(day):
 # ── WhatsApp text, designed ────────────────────────────────────────────────
 
 WIDTH = 24     # characters in a fixed-width line: fits the narrowest phone
+# The dashed rule, in the same fixed-width font as the figures: exactly as wide
+# as the tables on every phone (an iPhone drew '┄' three times wider and
+# wrapped it, 18 Nov 2026).
+RULE = '```' + '-' * WIDTH + '```'
 
 
 def table(rows, width=WIDTH):
@@ -289,7 +292,8 @@ def brief(day=None):
         f'_Morning brief · {_short_day(day)}_',
         RULE,
         'Collected yesterday',
-        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        f'*{ghs(collected)}*',
+        trend(note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
@@ -352,7 +356,8 @@ def close(day=None):
         '_Here is how today went_',
         RULE,
         'Collected today',
-        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        f'*{ghs(collected)}*',
+        trend(note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
@@ -422,7 +427,8 @@ def snapshot(now=None):
         f'_{_short_day(day)}_',
         RULE,
         'Collected so far',
-        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        f'*{ghs(collected)}*',
+        trend(note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
