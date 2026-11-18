@@ -6,7 +6,6 @@ from .views import (
     DailySalesSheetListView,
     DailySalesSheetDetailView,
     DailySalesSheetTodayView,
-    DailySalesSheetNotesView,
     DailySalesSheetCloseView,
     DailySalesSheetSummaryView,
     MonthlyCloseRespondClarificationView,
@@ -89,7 +88,8 @@ urlpatterns = [
     path('sheets/',                              DailySalesSheetListView.as_view(),           name='sheet-list'),
     path('sheets/today/',                        DailySalesSheetTodayView.as_view(),          name='sheet-today'),
     path('sheets/<int:pk>/',                     DailySalesSheetDetailView.as_view(),         name='sheet-detail'),
-    path('sheets/<int:pk>/notes/',               DailySalesSheetNotesView.as_view(),          name='sheet-notes'),
+    # sheets/<pk>/notes/ is further down: one route for the sheet's own note
+    # (PATCH) and for the notes that explain a day (POST).
     path('sheets/<int:pk>/close/',               DailySalesSheetCloseView.as_view(),          name='sheet-close'),
     path('sheets/<int:pk>/summary/',             DailySalesSheetSummaryView.as_view(),        name='sheet-summary'),
     path('sheets/<int:pk>/eod-summary/',         EODSummaryView.as_view(),                    name='sheet-eod-summary'),

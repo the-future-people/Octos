@@ -97,6 +97,10 @@ class WeeklyReportService:
         from apps.jobs.models import Job
         from django.db.models import Sum
 
+        # Locked for the length of the filing, so a prepare running at the
+        # same moment (the portal asks for the outstanding week on every
+        # load, and that prepares it) waits, then sees the week is filed.
+        report = WeeklyReport.objects.select_for_update().get(pk=report.pk)
         if report.is_locked:
             return None, ['Already submitted.']
 
@@ -174,7 +178,7 @@ class WeeklyReportService:
 
         # ── Generate PDF ───────────────────────────────────────────────
         try:
-            from apps.finance.api.views import _generate_weekly_pdf
+            from apps.finance.pdf.weekly_report_pdf import _generate_weekly_pdf
             _generate_weekly_pdf(report)
         except Exception:
             logger.exception('WeeklyReportService: PDF generation failed for report %s', report.pk)
@@ -226,13 +230,16 @@ class WeeklyReportService:
             }
         )
 
+        # A filed week is the record and is never re-added up.
+        if report.status != WeeklyReport.Status.DRAFT:
+            return report, False
+
         sheets = DailySalesSheet.objects.filter(
             branch     = branch,
             date__range= [effective_from, effective_to],
         )
         report.date_from = effective_from
         report.date_to   = effective_to
-        report.daily_sheets.set(sheets)
 
         closed = sheets.exclude(status=DailySalesSheet.Status.OPEN)
         report.total_cash           = closed.aggregate(t=Sum('total_cash'))['t']           or 0
@@ -265,5 +272,21 @@ class WeeklyReportService:
         except Exception:
             logger.exception('WeeklyReportService: inventory snapshot failed during prepare')
 
-        report.save()
+        # Only the figures are written, and only while the week is still a
+        # draft. A full save wrote back the status read at the top, so a
+        # week filed while this ran was quietly turned back into a draft:
+        # its lock and its PDF undone, and the manager asked to file again.
+        with transaction.atomic():
+            current = WeeklyReport.objects.select_for_update().get(pk=report.pk)
+            if current.status != WeeklyReport.Status.DRAFT:
+                return current, False
+            report.save(update_fields=[
+                'date_from', 'date_to',
+                'total_cash', 'total_momo', 'total_pos', 'total_petty_cash_out',
+                'total_credit_issued', 'net_cash_in_till',
+                'total_jobs_created', 'total_jobs_complete', 'total_jobs_cancelled',
+                'carry_forward_count', 'total_jobs_registered', 'total_jobs_walkin',
+                'inventory_snapshot', 'updated_at',
+            ])
+            report.daily_sheets.set(sheets)
         return report, created

@@ -1784,13 +1784,6 @@ class InvoiceListView(generics.ListAPIView):
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)
 
-        # One job's invoices (18 Nov 2026): without this, ?job= was ignored and
-        # every job page showed the branch's newest invoice as its own, so
-        # "Make the invoice" never appeared. The same fix as receipts (13 Nov).
-        job_id = self.request.query_params.get('job')
-        if job_id:
-            qs = qs.filter(job_id=job_id)
-
         invoice_type = self.request.query_params.get('type')
         status_param = self.request.query_params.get('status')
         if invoice_type:
@@ -3428,10 +3421,15 @@ class MonthReviewView(APIView):
         return Response(get_month_review(branch, month, year))
 
 
-class DayNoteCreateView(APIView):
+class DayNoteCreateView(DailySalesSheetNotesView):
     """
     POST /api/v1/finance/sheets/<pk>/notes/
     Body: { body, kind? }
+
+    The same address as the sheet's own note, which is a PATCH, so it is
+    inherited from that view. They were two routes with one path, and the
+    first, PATCH only, answered every POST with 405: no explanation written
+    while reviewing a month was ever saved (18 Nov 2026).
 
     Says why a day is the way it is. Usually written while reviewing the
     month, against a day the checks flagged — an explanation given once,
