@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from apps.core.models import AuditModel
 
@@ -117,10 +119,10 @@ class Invoice(AuditModel):
 
     def compute_totals(self):
         """Recompute subtotal, VAT and total from line items."""
-        self.subtotal   = sum(li.line_total for li in self.line_items.all())
-        self.vat_amount = (self.subtotal * self.vat_rate / 100).quantize(
-            self.subtotal
-        )
+        # Decimals throughout (18 Nov 2026): a job with no lines summed to the
+        # int 0, and 0 * 0 / 100 is a float, which has no quantize.
+        self.subtotal   = sum((li.line_total for li in self.line_items.all()), Decimal('0'))
+        self.vat_amount = (self.subtotal * Decimal(str(self.vat_rate or 0)) / 100).quantize(Decimal('0.01'))
         self.total      = self.subtotal + self.vat_amount
 
 

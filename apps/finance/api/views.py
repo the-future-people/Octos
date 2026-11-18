@@ -1784,6 +1784,13 @@ class InvoiceListView(generics.ListAPIView):
         if hasattr(user, 'branch') and user.branch:
             qs = qs.filter(branch=user.branch)
 
+        # One job's invoices (18 Nov 2026): without this, ?job= was ignored and
+        # every job page showed the branch's newest invoice as its own, so
+        # "Make the invoice" never appeared. The same fix as receipts (13 Nov).
+        job_id = self.request.query_params.get('job')
+        if job_id:
+            qs = qs.filter(job_id=job_id)
+
         invoice_type = self.request.query_params.get('type')
         status_param = self.request.query_params.get('status')
         if invoice_type:
