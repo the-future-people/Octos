@@ -75,13 +75,17 @@ def chips(words):
     return CODES.sub(lambda m: f'`{m.group(1)}`', str(words))
 
 
-def trend(note):
-    """'▲ 12% on Monday' as '🟢 ▲ 12% on Monday'; a fall in red."""
-    if note.startswith('▲'):
-        return f'🟢 {note}'
-    if note.startswith('▼'):
-        return f'🔻 {note[1:].strip()}'
-    return note
+def hero(label, value, note):
+    """
+    The big number, with room around it (18 Nov 2026): the label, the amount
+    in bold, the change in light italics under it, then a blank line before
+    the figures. WhatsApp has no text sizes; italics without an emoji is the
+    quietest it gets.
+    """
+    lines = [label, f'*{value}*']
+    if note:
+        lines.append(f'_{note}_')
+    return '\n'.join(lines) + '\n'
 
 
 def needs_you_text(items, limit=5):
@@ -291,9 +295,7 @@ def brief(day=None):
         f'☀️ *Good morning, {name}*',
         f'_Morning brief · {_short_day(day)}_',
         RULE,
-        'Collected yesterday',
-        f'*{ghs(collected)}*',
-        trend(note),
+        hero('Collected yesterday', ghs(collected), note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
@@ -305,7 +307,7 @@ def brief(day=None):
         RULE,
         needs_you_text(alerts),
         RULE,
-        'Reply *today* any time · *card* for a picture',
+        'Reply *today* or *card* any time',
     )
 
     sections = []
@@ -355,9 +357,7 @@ def close(day=None):
         f'🌙 *Day close · {_short_day(day)}*',
         '_Here is how today went_',
         RULE,
-        'Collected today',
-        f'*{ghs(collected)}*',
-        trend(note),
+        hero('Collected today', ghs(collected), note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
@@ -426,9 +426,7 @@ def snapshot(now=None):
         f'📊 *Today so far · {local:%H:%M}*',
         f'_{_short_day(day)}_',
         RULE,
-        'Collected so far',
-        f'*{ghs(collected)}*',
-        trend(note),
+        hero('Collected so far', ghs(collected), note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
