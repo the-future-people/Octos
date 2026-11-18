@@ -2,25 +2,37 @@
 What the owner's line reports (18 Nov 2026): the morning brief, the day's
 close and "today so far". Each one gives:
 
-  card   plain data for the picture (owner_cards.render)
-  text   the words that go under the picture: short, readable at a glance
-  knock  one line for the template when WhatsApp's window is shut
+  text     the report itself, as designed WhatsApp text (the default):
+           a status line, dashed rules, figures lined up in fixed-width
+           blocks, "Needs you" as quotes, emoji for colour
+  card     the same report as plain data for the picture (owner_cards),
+           sent when the owner replies "card"
+  caption  the few words that go under the picture
+  knock    one line for the template when WhatsApp's window is shut
 
 Every figure comes from the Eye's own services (apps/eye/services), so the
 owner's phone and the Eye can never disagree.
 """
+import re
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import Q
 from django.utils import timezone
 
 ZERO = Decimal('0')
 DEAD = ('DRAFT', 'CANCELLED', 'VOIDED')
+RULE = '┄' * 20
+SHORT_METHODS = {'Mobile Money': 'MoMo', 'Paid Online': 'Online', 'Credit Account': 'Credit'}
+LEVEL_ICON = {'red': '🔴', 'amber': '🟠', 'green': '🟢'}
 
 
 def ghs(amount):
     return f'GHS {Decimal(amount or 0):,.2f}'
+
+
+def amount(value):
+    return f'{Decimal(value or 0):,.2f}'
 
 
 def _day_name(day):
@@ -29,6 +41,60 @@ def _day_name(day):
 
 def _short_day(day):
     return f'{day:%a} {day.day} {day:%b}'
+
+
+# ── WhatsApp text, designed ────────────────────────────────────────────────
+
+WIDTH = 24     # characters in a fixed-width line: fits the narrowest phone
+
+
+def table(rows, width=WIDTH):
+    """
+    Rows lined up in a fixed-width block: labels left, values right. Every
+    block is the same width, so the figures line up down the whole message.
+    A long label is shortened rather than pushing its value off the edge.
+    """
+    lines = []
+    for label, value in rows:
+        label, value = str(label), str(value)
+        room = max(width - len(value) - 2, 4)
+        if len(label) > room:
+            label = label[:room - 1] + '…'
+        lines.append(label + ' ' * max(width - len(label) - len(value), 2) + value)
+    return '```' + '\n'.join(lines) + '```' if lines else ''
+
+
+CODES = re.compile(r'\b((?:FP|PFI|JOB)-[A-Z0-9]+(?:-[A-Za-z0-9]+)+)')
+
+
+def chips(words):
+    """Job and proforma numbers as grey chips: readable, and never a phone link."""
+    return CODES.sub(lambda m: f'`{m.group(1)}`', str(words))
+
+
+def trend(note):
+    """'▲ 12% on Monday' as '🟢 ▲ 12% on Monday'; a fall in red."""
+    if note.startswith('▲'):
+        return f'🟢 {note}'
+    if note.startswith('▼'):
+        return f'🔻 {note[1:].strip()}'
+    return note
+
+
+def needs_you_text(items, limit=5):
+    if not items:
+        return '🟢 *Nothing needs you right now*'
+    worst = 'red' if any(level == 'red' for level, _ in items) else 'amber'
+    lines = [f'{LEVEL_ICON[worst]} *Needs you*']
+    lines += [f'> {chips(words)}' for _, words in items[:limit]]
+    if len(items) > limit:
+        lines.append(f'> and {len(items) - limit} more')
+    return '\n'.join(lines)
+
+
+def compose(*parts):
+    """Join the parts that exist, one per line."""
+    return '\n'.join(p for p in parts if p)
 
 
 def _change(now, before, against):
@@ -55,14 +121,23 @@ def _owner_name():
 # ── The figures ────────────────────────────────────────────────────────────
 
 def money_for(ids, start, end):
+    """(collected, [(method label, count, amount)]), biggest first."""
     from apps.eye.services import money
     from apps.finance.payment_methods import BY_CODE
     collected = money.collected(ids, start, end)
     methods = []
     for code, row in sorted(money.by_method(ids, start, end).items(), key=lambda kv: -kv[1]['amount']):
         label = BY_CODE[code].label if code in BY_CODE else (code or 'Other').title()
-        methods.append((f"{label} · {row['count']}", ghs(row['amount'])))
+        methods.append((label, row['count'], row['amount']))
     return collected, methods
+
+
+def _method_rows(methods):
+    return [(f'{label} · {n}', ghs(a)) for label, n, a in methods]
+
+
+def _method_table(methods):
+    return table([(f'{SHORT_METHODS.get(label, label)} · {n}', amount(a)) for label, n, a in methods])
 
 
 def jobs_for(ids, start, end):
@@ -75,38 +150,48 @@ def jobs_for(ids, start, end):
     }
 
 
+def _kept(j):
+    return f"{j['kept_pct']}%" if j['kept_pct'] is not None else '–'
+
+
+def _jobs_table(j):
+    return table([('Jobs taken', j['taken']), ('Finished', j['finished']), ('Promises kept', _kept(j))])
+
+
 def discounts_for(start, end):
-    """Price cuts that took effect in the window: (count, total off, lines)."""
+    """Price cuts that took effect in the window: (count, total off, [(number, amount, reason)])."""
     from apps.jobs.models import PriceCut
     cuts = (PriceCut.objects.filter(status=PriceCut.Status.APPLIED)
             .filter(Q(decided_at__gte=start, decided_at__lt=end)
                     | Q(decided_at__isnull=True, created_at__gte=start, created_at__lt=end))
-            .select_related('job', 'proforma', 'asked_by').order_by('created_at'))
-    total, lines = ZERO, []
+            .select_related('job', 'proforma').order_by('created_at'))
+    total, rows = ZERO, []
     for c in cuts:
         total += c.amount or ZERO
         what = c.job.job_number if c.job_id else c.proforma.proforma_number
-        lines.append(f'{what}: {ghs(c.amount)} off · {c.reason}')
-    return len(lines), total, lines
+        rows.append((what, c.amount or ZERO, c.reason))
+    return len(rows), total, rows
 
 
 def cash_for(ids, day):
-    """Each cashier's sign-off for the day: lines, and the total short."""
+    """Each cashier's sign-off for the day: ([(name, variance)], total short)."""
     from apps.finance.models import CashierFloat
     floats = (CashierFloat.objects.filter(daily_sheet__branch_id__in=ids, daily_sheet__date=day,
                                           is_signed_off=True)
               .select_related('cashier'))
-    lines, short = [], ZERO
+    rows, short = [], ZERO
     for f in floats:
         v = f.variance or ZERO
-        if abs(v) < Decimal('0.01'):
-            lines.append((f'{f.cashier.full_name}', 'Balanced'))
-        elif v < 0:
+        if v < 0:
             short += -v
-            lines.append((f'{f.cashier.full_name}', f'Short {ghs(-v)}'))
-        else:
-            lines.append((f'{f.cashier.full_name}', f'Over {ghs(v)}'))
-    return lines, short
+        rows.append((f.cashier, v))
+    return rows, short
+
+
+def _variance_words(v, money=ghs):
+    if abs(v) < Decimal('0.01'):
+        return 'Balanced'
+    return f'Short {money(-v)}' if v < 0 else f'Over {money(v)}'
 
 
 def needs_you(day):
@@ -132,15 +217,15 @@ def due_on(ids, day):
             .count())
 
 
-def branch_lines(sc, start, end):
+def branch_rows(sc, start, end):
     """Money per branch, only when there is more than one branch with money."""
     from apps.eye.services import money
     from apps.organization.models import Branch
     rows = []
     for b in Branch.objects.filter(pk__in=sc.branch_ids).order_by('name'):
-        amount = money.collected((b.pk,), start, end)
-        if amount:
-            rows.append((b.name.replace(' Branch', ''), ghs(amount)))
+        collected = money.collected((b.pk,), start, end)
+        if collected:
+            rows.append((b.name.replace(' Branch', ''), collected))
     return rows if len(rows) > 1 else []
 
 
@@ -183,45 +268,64 @@ def brief(day=None):
     p_start, p_end = periods.bounds(before, before)
     collected, methods = money_for(ids, start, end)
     prev, _ = money_for(ids, p_start, p_end)
+    note = _change(collected, prev, f'{before:%A}')
     j = jobs_for(ids, start, end)
     n_cuts, off, _ = discounts_for(start, end)
     due = due_on(ids, day)
     up, total = _machines(ids)
     owed = _owed(ids)
     alerts = needs_you(day)
+    branches = branch_rows(sc, start, end)
+    name = _owner_name()
+
+    today_rows = [('Jobs due', due), ('Machines up', f'{up} of {total}')]
+    if owed:
+        today_rows.append(('Owed to us', amount(owed)))
+    if n_cuts:
+        today_rows.append((f'Discounts · {n_cuts}', amount(off)))
+
+    text = compose(
+        f'☀️ *Good morning, {name}*',
+        f'_Morning brief · {_short_day(day)}_',
+        RULE,
+        'Collected yesterday',
+        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        _jobs_table(j),
+        RULE,
+        methods and '💳 *How it was paid* · GHS',
+        methods and _method_table(methods),
+        branches and '🏢 *By branch* · GHS',
+        branches and table([(b, amount(a)) for b, a in branches]),
+        '📅 *Today*',
+        table(today_rows),
+        RULE,
+        needs_you_text(alerts),
+        RULE,
+        'Reply *today* any time · *card* for a picture',
+    )
 
     sections = []
     if methods:
-        sections.append({'title': 'How it was paid', 'rows': methods})
-    lines = branch_lines(sc, start, end)
-    if lines:
-        sections.append({'title': 'By branch', 'rows': lines})
-    today_rows = [('Jobs due today', str(due)), ('Machines up', f'{up} of {total}')]
-    if owed:
-        today_rows.append(('Still owed to us', ghs(owed)))
-    if n_cuts:
-        today_rows.append((f'Discounts yesterday · {n_cuts}', ghs(off)))
-    sections.append({'title': 'Today', 'rows': today_rows})
+        sections.append({'title': 'How it was paid', 'rows': _method_rows(methods)})
+    if branches:
+        sections.append({'title': 'By branch', 'rows': [(b, ghs(a)) for b, a in branches]})
+    sections.append({'title': 'Today', 'rows': [(a if a != 'Owed to us' else 'Still owed to us',
+                                                 f'GHS {b}' if a.startswith(('Owed', 'Discounts')) else str(b))
+                                                for a, b in today_rows]})
     sections.append(_alert_section(alerts))
-
-    name = _owner_name()
     card = {
         'kicker': 'Morning brief', 'date': _day_name(day),
         'greeting': f'Good morning, {name}',
-        'hero': {'label': f'Collected yesterday, {_short_day(yday)}', 'value': ghs(collected),
-                 'note': _change(collected, prev, f'{before:%A}')},
-        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])),
-                  ('Promises kept', f"{j['kept_pct']}%" if j['kept_pct'] is not None else '–')],
+        'hero': {'label': f'Collected yesterday, {_short_day(yday)}', 'value': ghs(collected), 'note': note},
+        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])), ('Promises kept', _kept(j))],
         'sections': sections,
         'footer': 'Reply "today" any time for the latest',
     }
-    text = (f'☀️ Good morning, {name}.\n'
-            f'Yesterday: {ghs(collected)} collected, {j["taken"]} jobs taken, {j["finished"]} finished.\n'
-            f'Today: {due} job{"s" if due != 1 else ""} due, {up} of {total} machines up.\n'
-            f'{_alert_words(alerts)}')
+    caption = (f'☀️ Good morning, {name}. Yesterday {ghs(collected)} collected; '
+               f'{due} job{"s" if due != 1 else ""} due today.')
     knock = (f'Your morning brief for {_short_day(day)} is ready. Yesterday {ghs(collected)} collected, '
              f'{due} jobs due today.')
-    return {'card': card, 'text': text, 'knock': knock}
+    return {'text': text, 'card': card, 'caption': caption, 'knock': knock}
 
 
 def close(day=None):
@@ -235,40 +339,58 @@ def close(day=None):
     p_start, p_end = periods.bounds(yday, yday)
     collected, methods = money_for(ids, start, end)
     prev, _ = money_for(ids, p_start, p_end)
+    note = _change(collected, prev, 'yesterday')
     j = jobs_for(ids, start, end)
-    n_cuts, off, cut_lines = discounts_for(start, end)
+    n_cuts, off, cuts = discounts_for(start, end)
     cash, short = cash_for(ids, day)
     alerts = needs_you(day)
+    branches = branch_rows(sc, start, end)
+
+    cut_lines = [f'> {chips(what)} {amount(a)} · {reason}' for what, a, reason in cuts[:5]]
+    text = compose(
+        f'🌙 *Day close · {_short_day(day)}*',
+        '_Here is how today went_',
+        RULE,
+        'Collected today',
+        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        _jobs_table(j),
+        RULE,
+        methods and '💳 *How it was paid* · GHS',
+        methods and _method_table(methods),
+        branches and '🏢 *By branch* · GHS',
+        branches and table([(b, amount(a)) for b, a in branches]),
+        cash and '💵 *Cash at sign-off*',
+        cash and table([(c.first_name or c.full_name, _variance_words(v, amount).lower()) for c, v in cash]),
+        n_cuts and f'🏷️ *Discounts* · {n_cuts} · {ghs(off)} off',
+        '\n'.join(cut_lines),
+        RULE,
+        needs_you_text(alerts),
+        RULE,
+        'Good night from Octos 🐙',
+    )
 
     sections = []
     if methods:
-        sections.append({'title': 'How it was paid', 'rows': methods})
-    lines = branch_lines(sc, start, end)
-    if lines:
-        sections.append({'title': 'By branch', 'rows': lines})
+        sections.append({'title': 'How it was paid', 'rows': _method_rows(methods)})
+    if branches:
+        sections.append({'title': 'By branch', 'rows': [(b, ghs(a)) for b, a in branches]})
     if cash:
-        sections.append({'title': 'Cash at sign-off', 'rows': cash})
+        sections.append({'title': 'Cash at sign-off', 'rows': [(c.full_name, _variance_words(v)) for c, v in cash]})
     if n_cuts:
         sections.append({'title': f'Discounts · {n_cuts} · {ghs(off)} off',
-                         'items': [('amber', line) for line in cut_lines[:5]]})
+                         'items': [('amber', f'{what}: {ghs(a)} off · {reason}') for what, a, reason in cuts[:5]]})
     sections.append(_alert_section(alerts))
-
     card = {
         'kicker': 'Day close', 'date': _day_name(day),
         'greeting': 'Here is how today went',
-        'hero': {'label': 'Collected today', 'value': ghs(collected),
-                 'note': _change(collected, prev, 'yesterday')},
-        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])),
-                  ('Promises kept', f"{j['kept_pct']}%" if j['kept_pct'] is not None else '–')],
+        'hero': {'label': 'Collected today', 'value': ghs(collected), 'note': note},
+        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])), ('Promises kept', _kept(j))],
         'sections': sections,
         'footer': 'Good night from Octos',
     }
-    cash_words = f' Cash short {ghs(short)}.' if short else ''
-    disc_words = f' {n_cuts} discount{"s" if n_cuts != 1 else ""} ({ghs(off)} off).' if n_cuts else ''
-    text = (f'🌙 Today: {ghs(collected)} collected, {j["taken"]} jobs taken, {j["finished"]} finished.'
-            f'{cash_words}{disc_words}\n{_alert_words(alerts)}')
+    caption = f'🌙 Today: {ghs(collected)} collected.' + (f' Cash short {ghs(short)}.' if short else '')
     knock = f'Your day close for {_short_day(day)} is ready. {ghs(collected)} collected today.'
-    return {'card': card, 'text': text, 'knock': knock}
+    return {'text': text, 'card': card, 'caption': caption, 'knock': knock}
 
 
 def snapshot(now=None):
@@ -284,30 +406,46 @@ def snapshot(now=None):
     collected, methods = money_for(ids, start, now)
     # Yesterday up to the same time, so mid-morning isn't compared with a full day.
     prev, _ = money_for(ids, y_start, y_start + (now - start))
+    note = _change(collected, prev, 'this time yesterday')
     j = jobs_for(ids, start, now)
     n_cuts, off, _ = discounts_for(start, now)
     up, total = _machines(ids)
+    due = due_on(ids, day)
     alerts = needs_you(day)
     local = timezone.localtime(now)
 
+    rows = [('Machines up', f'{up} of {total}'), ('Still due today', due)]
+    if n_cuts:
+        rows.append((f'Discounts · {n_cuts}', amount(off)))
+    text = compose(
+        f'📊 *Today so far · {local:%H:%M}*',
+        f'_{_short_day(day)}_',
+        RULE,
+        'Collected so far',
+        f'*{ghs(collected)}*   {trend(note)}'.rstrip(),
+        _jobs_table(j),
+        RULE,
+        methods and '💳 *How it was paid* · GHS',
+        methods and _method_table(methods),
+        '⚙️ *Right now*',
+        table(rows),
+        RULE,
+        needs_you_text(alerts),
+    )
+
     sections = []
     if methods:
-        sections.append({'title': 'How it was paid', 'rows': methods})
-    rows = [('Machines up', f'{up} of {total}'), ('Still due today', str(due_on(ids, day)))]
-    if n_cuts:
-        rows.append((f'Discounts · {n_cuts}', ghs(off)))
-    sections.append({'title': 'Right now', 'rows': rows})
+        sections.append({'title': 'How it was paid', 'rows': _method_rows(methods)})
+    sections.append({'title': 'Right now', 'rows': [(a, f'GHS {b}' if a.startswith('Discounts') else str(b))
+                                                    for a, b in rows]})
     sections.append(_alert_section(alerts))
     card = {
         'kicker': 'Today so far', 'date': f'{_day_name(day)} · {local:%H:%M}',
         'greeting': '',
-        'hero': {'label': 'Collected so far', 'value': ghs(collected),
-                 'note': _change(collected, prev, 'this time yesterday')},
-        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])),
-                  ('Promises kept', f"{j['kept_pct']}%" if j['kept_pct'] is not None else '–')],
+        'hero': {'label': 'Collected so far', 'value': ghs(collected), 'note': note},
+        'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])), ('Promises kept', _kept(j))],
         'sections': sections,
         'footer': f'As at {local:%H:%M}',
     }
-    text = (f'So far today: {ghs(collected)} collected, {j["taken"]} jobs taken, {j["finished"]} finished.\n'
-            f'{_alert_words(alerts)}')
-    return {'card': card, 'text': text, 'knock': f'Today so far: {ghs(collected)} collected.'}
+    caption = f'So far today: {ghs(collected)} collected. {_alert_words(alerts)}'
+    return {'text': text, 'card': card, 'caption': caption, 'knock': f'Today so far: {ghs(collected)} collected.'}

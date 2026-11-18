@@ -29,6 +29,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.communications.models import OwnerMessage
+from apps.communications.services.owner_reports import RULE, amount, table
 from apps.core.phones import to_international
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ TODAY = {'today', 'now', 'report', 'so far', 'how much', 'sales', 'money', 'how 
 BRIEF = {'brief', 'morning brief', 'yesterday'}
 CLOSE = {'close', 'day close', 'end of day', 'night', 'eod'}
 WAITING_WORDS = {'waiting', 'approve', 'approvals', 'discount', 'discounts', 'pending'}
+CARD_WORDS = {'card', 'picture', 'photo', 'image', 'pic'}
 
 MENU = ('Octos here 🐙 Your business line.\n\n'
         'Send me:\n'
@@ -252,7 +254,8 @@ MENU = ('Octos here 🐙 Your business line.\n\n'
         '• *brief* for this morning\'s brief\n'
         '• *close* for today\'s close so far\n'
         '• *waiting* for anything waiting for your OK\n'
-        '• a *job number* (like 06009) to see where it is\n\n'
+        '• a *job number* (like 06009) to see where it is\n'
+        '• add *card* for a picture: *card*, *brief card*, *close card*\n\n'
         'Urgent things come to you here the moment they happen.')
 
 
@@ -274,6 +277,11 @@ def answer(pk):
     words = re.sub(r'\s+', ' ', words)
     if not words:
         return
+    said = set(words.split())
+    if said & CARD_WORDS:
+        which = 'brief' if said & {'brief', 'morning', 'yesterday'} else 'close' if said & {'close', 'night', 'eod'} \
+            else 'snapshot'
+        return _report(which, as_card=True)
     if words in TODAY:
         return _report('snapshot')
     if words in BRIEF:
@@ -291,16 +299,21 @@ def answer(pk):
          "I didn't catch that. " + MENU.split('\n\n', 1)[1])
 
 
-def _report(which, key=None):
+def _report(which, key=None, as_card=False):
+    """
+    A report as designed text (the default, 18 Nov 2026), or as the picture
+    when the owner asks for a card. A picture that fails to draw goes as text.
+    """
     from apps.communications.services import owner_cards, owner_reports
     report = getattr(owner_reports, which)()
-    try:
-        card = owner_cards.render(report['card'])
-    except Exception:
-        logger.exception("Owner's line: the %s card could not be drawn", which)
-        card = None
     kind = {'brief': OwnerMessage.BRIEF, 'close': OwnerMessage.CLOSE}.get(which, OwnerMessage.ANSWER)
-    return tell(kind, report['text'], card=card, knock=report['knock'], key=key)
+    if as_card:
+        try:
+            card = owner_cards.render(report['card'])
+            return tell(kind, report['caption'], card=card, knock=report['knock'], key=key)
+        except Exception:
+            logger.exception("Owner's line: the %s card could not be drawn", which)
+    return tell(kind, report['text'], knock=report['knock'], key=key)
 
 
 def _waiting():
@@ -321,15 +334,15 @@ def _job(digits):
     if job is None:
         return tell(OwnerMessage.ANSWER, f"I couldn't find a job ending {digits}.")
     customer = job.customer.full_name if job.customer_id else ''
-    ready = timezone.localtime(job.estimated_ready_at).strftime('%a %d %b, %H:%M') if job.estimated_ready_at else ''
-    lines = [f'*{job.job_number}* · {job.title}' + (f' · {customer}' if customer else ''),
-             f'Status: {job.get_status_display()}',
-             f'Paid GHS {job.amount_paid or 0:,.2f} of GHS {job.estimated_cost or 0:,.2f}']
-    if ready:
-        lines.append(f'Promised: {ready}' + (f' ({job.promise_state.replace("_", " ").lower()})'
-                                             if job.promise_state else ''))
+    rows = [('Status', job.get_status_display()),
+            ('Price', amount(job.estimated_cost)), ('Paid', amount(job.amount_paid))]
+    if job.estimated_ready_at:
+        rows.append(('Promised', timezone.localtime(job.estimated_ready_at).strftime('%a %d %b %H:%M')))
+    if job.promise_state in ('AT_RISK', 'LATE', 'BROKEN'):
+        rows.append(('Promise', job.promise_state.replace('_', ' ').lower()))
+    lines = [f'🔎 `{job.job_number}`', job.title + (f' · {customer}' if customer else ''), table(rows)]
     if job.discount_amount:
-        lines.append(f'Discount: GHS {job.discount_amount:,.2f} · {job.discount_reason}')
+        lines.append(f'> 🏷️ {amount(job.discount_amount)} off · {job.discount_reason}')
     return tell(OwnerMessage.ANSWER, '\n'.join(lines))
 
 
@@ -362,15 +375,16 @@ def _cut_message(cut):
     label = cut.job.job_number if cut.job_id else cut.proforma.proforma_number
     customer = target.customer.full_name if getattr(target, 'customer_id', None) else ''
     pct = (cut.before_total - cut.new_total) / cut.before_total * 100 if cut.before_total else 0
-    lines = ['⚠️ *A discount is waiting for you*',
-             f'{label}' + (f' · {customer}' if customer else ''),
-             f'GHS {cut.before_total:,.2f} → *GHS {cut.new_total:,.2f}* ({pct:.1f}% off)']
+    rows = [('Price', amount(cut.before_total)), ('Asked', amount(cut.new_total)), ('Off', f'{pct:.1f}%')]
     if cut.cost is not None and cut.floor_total is not None:
-        lines.append(f'Cost to make GHS {cut.cost:,.2f} · manager\'s floor GHS {cut.floor_total:,.2f}')
+        rows += [('Cost', amount(cut.cost)), ('BM floor', amount(cut.floor_total))]
     else:
-        lines.append('Some items have no cost set yet')
+        rows.append(('Cost', 'not all set'))
     who = cut.asked_by.full_name if cut.asked_by_id else 'The manager'
-    lines.append(f'{who}: "{cut.reason}"')
+    lines = ['⚠️ *A discount is waiting for you*', RULE, f'`{label}`']
+    if customer:
+        lines.append(customer)
+    lines += [table(rows), RULE, f'{who}: _"{cut.reason}"_']
     buttons = [{'id': f'cut:approve:{cut.pk}', 'title': 'Approve'},
                {'id': f'cut:decline:{cut.pk}', 'title': 'Decline'}]
     return '\n'.join(lines), buttons
@@ -388,8 +402,8 @@ def price_cut_waiting(cut):
 def machine_down(machine):
     since = timezone.localtime(machine.unavailable_since or timezone.now())
     branch = machine.branch.name if machine.branch_id else ''
-    body = (f'🛑 *{machine.name} is down*\n{branch} · since {since:%H:%M}\n'
-            f'Reason: {machine.unavailable_reason or "not given"}')
+    body = (f'🛑 *{machine.name} is down*\n_{branch} · since {since:%H:%M}_\n'
+            f'> {machine.unavailable_reason or "No reason given"}')
     return tell(OwnerMessage.URGENT, body, key=f'machine-down:{machine.pk}:{since:%Y%m%d%H%M}',
                 knock=f'{machine.name} at {branch} is down since {since:%H:%M}.')
 
@@ -401,9 +415,11 @@ def cash_short(float_record):
         return None
     who = float_record.cashier.full_name if float_record.cashier_id else 'The cashier'
     note = (float_record.variance_notes or '').strip()
-    body = (f'💸 *Cash short GHS {short:,.2f}* at sign-off\n{who} · expected GHS '
-            f'{float_record.expected_cash or 0:,.2f}, counted GHS {float_record.closing_cash or 0:,.2f}'
-            + (f'\nTheir note: "{note}"' if note else ''))
+    body = '\n'.join(filter(None, [
+        f'💸 *Cash short GHS {short:,.2f}* at sign-off', RULE,
+        table([('Cashier', who), ('Expected', amount(float_record.expected_cash)),
+               ('Counted', amount(float_record.closing_cash)), ('Short', amount(short))]),
+        note and f'> Their note: _"{note}"_']))
     return tell(OwnerMessage.URGENT, body, key=f'cash-short:{float_record.pk}',
                 knock=f'Cash was short GHS {short:,.2f} at {who}\'s sign-off.')
 
@@ -411,8 +427,9 @@ def cash_short(float_record):
 @_safely
 def customer_waiting(conversation, minutes):
     name = conversation.display_name
-    body = (f'⏳ *{name} has waited {minutes} minutes* for a reply\n'
-            'A person took the chat and nobody has answered. Octos takes it back in 10 minutes.')
+    body = (f'⏳ *{name} has waited {minutes} minutes*\n'
+            '_A person took the chat and hasn\'t replied._\n'
+            '> Octos takes it back in 10 minutes if nobody answers.')
     return tell(OwnerMessage.URGENT, body,
                 key=f'waiting:{conversation.pk}:{timezone.now():%Y%m%d%H}',
                 knock=f'{name} has waited {minutes} minutes for a reply on WhatsApp.')
@@ -421,9 +438,9 @@ def customer_waiting(conversation, minutes):
 @_safely
 def job_slipping(job, word, when):
     customer = job.customer.full_name if job.customer_id else ''
-    icon = '🔴' if word == 'late' else '🟠'
-    body = (f'{icon} *{job.job_number} is {word}*\n{job.title}' + (f' · {customer}' if customer else '')
-            + f'\nNow about {when}')
+    heading = '🔴 *Past its promise*' if word == 'late' else '🟠 *At risk of running late*'
+    body = (f'{heading}\n`{job.job_number}` · {job.title}' + (f' · {customer}' if customer else '')
+            + f'\n> Now about {when}')
     return tell(OwnerMessage.URGENT, body, key=f'promise:{job.pk}:{word}:{timezone.localdate():%Y%m%d}',
                 knock=f'{job.job_number} is {word}: now about {when}.')
 

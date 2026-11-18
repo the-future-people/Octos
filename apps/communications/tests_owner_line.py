@@ -139,8 +139,9 @@ class DiscountTests(Base):
             cut = discounts.lower(self.bm, '1200', 'He insists', job=self.job())
         self.assertEqual(cut.status, PriceCut.Status.PENDING)
         body, buttons = m.buttons.call_args.args[1], m.buttons.call_args.args[2]
-        self.assertIn('GHS 2,355.00 → *GHS 1,200.00*', body)
-        self.assertIn('"He insists"', body)
+        self.assertRegex(body, r'Price +2,355\.00')
+        self.assertRegex(body, r'Asked +1,200\.00')
+        self.assertIn('_"He insists"_', body)
         self.assertEqual([b['id'] for b in buttons], [f'cut:approve:{cut.pk}', f'cut:decline:{cut.pk}'])
 
     def test_approve_from_the_phone(self):
@@ -175,13 +176,22 @@ class AnswerTests(Base):
     def setUp(self):
         self.open_window()
 
-    def test_today_is_a_picture_with_words(self):
+    def test_today_is_designed_text(self):
         self.job()
         with meta() as m:
             self.said('Today?')
+        text = m.text.call_args.args[1]
+        self.assertTrue(text.startswith('📊 *Today so far'))
+        self.assertIn('```Jobs taken', text)
+        m.image.assert_not_called()
+
+    def test_card_sends_the_picture(self):
+        self.job()
+        with meta() as m:
+            self.said('brief card')
         content, caption = m.image.call_args.args[1], m.image.call_args.kwargs['caption']
         self.assertTrue(content.startswith(b'\x89PNG'))
-        self.assertIn('So far today', caption)
+        self.assertIn('Good morning, Khofi', caption)
 
     def test_a_job_number(self):
         job = self.job()
@@ -198,6 +208,17 @@ class AnswerTests(Base):
         self.assertTrue(second.startswith("I didn't catch that"))
 
 
+class TextTests(TestCase):
+
+    def test_figures_line_up_in_a_fixed_width_block(self):
+        self.assertEqual(owner_reports.table([('Jobs taken', 30), ('Promises kept', '100%')]),
+                         '```Jobs taken            30\nPromises kept       100%```')
+
+    def test_job_numbers_become_chips_so_they_are_never_phone_links(self):
+        self.assertEqual(owner_reports.chips('FP-WLB-2026-05286 halted over a day'),
+                         '`FP-WLB-2026-05286` halted over a day')
+
+
 class ReportTests(Base):
 
     def test_the_brief_and_close_build_and_draw_from_real_records(self):
@@ -205,7 +226,10 @@ class ReportTests(Base):
         for report in (owner_reports.brief(), owner_reports.close(), owner_reports.snapshot()):
             self.assertTrue(owner_cards.render(report['card']).startswith(b'\x89PNG'))
             self.assertNotIn('\n', report['knock'])
-        self.assertIn('Good morning, Khofi', owner_reports.brief()['text'])
+        brief = owner_reports.brief()['text']
+        self.assertTrue(brief.startswith('☀️ *Good morning, Khofi*'))
+        self.assertIn(owner_reports.RULE, brief)
+        self.assertLess(len(brief), 4096)                 # WhatsApp's limit for a text
 
     def test_the_scheduled_brief_goes_once_a_day(self):
         with meta(), self.captureOnCommitCallbacks(execute=True):
