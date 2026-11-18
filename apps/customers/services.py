@@ -59,20 +59,23 @@ EDITABLE_FIELDS = {
     'INDIVIDUAL': [
         'title', 'title_other', 'first_name', 'last_name',
         'gender', 'date_of_birth', 'phone', 'secondary_phone',
-        'email', 'preferred_contact', 'address',
+        'email', 'preferred_contact', 'address', 'notes',
     ],
     'BUSINESS': [
         'title', 'title_other', 'first_name', 'last_name',
         'gender', 'date_of_birth', 'phone', 'secondary_phone',
-        'email', 'preferred_contact', 'address', 'company_name',
+        'email', 'preferred_contact', 'address', 'company_name', 'notes',
     ],
     'INSTITUTION': [
         'title', 'title_other', 'first_name', 'last_name',
         'gender', 'date_of_birth', 'phone', 'secondary_phone',
         'email', 'preferred_contact', 'address',
-        'company_name', 'institution_subtype',
+        'company_name', 'institution_subtype', 'notes',
     ],
 }
+# The Branch Manager's notes on a customer (18 Nov 2026): the profile has
+# always saved them here, but 'notes' was missing from every list above, so
+# each save was refused and the notes were lost without a word.
 
 
 def edit_customer(*, pk: int, user, data: dict) -> CustomerProfile:
