@@ -39,7 +39,10 @@ class JobListView(generics.ListAPIView):
     serializer_class   = JobListSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [filters.SearchFilter]
-    search_fields = ['job_number', 'title', 'customer__contact_name', 'customer__contact_phone']
+    # The customer's fields are first_name / last_name / phone (18 Nov 2026):
+    # the old contact_name / contact_phone made every search a server error.
+    search_fields = ['job_number', 'title', 'customer__first_name', 'customer__last_name',
+                     'customer__phone', 'customer__company_name']
 
     def get_queryset(self):
         user = self.request.user
