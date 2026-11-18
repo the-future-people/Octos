@@ -280,6 +280,10 @@ WHATSAPP_PHONE_NUMBER_ID     = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
 WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID', '')
 WHATSAPP_APP_SECRET          = os.environ.get('WHATSAPP_APP_SECRET', '')
 WHATSAPP_VERIFY_TOKEN        = os.environ.get('WHATSAPP_VERIFY_TOKEN', '')
+# The owner's private WhatsApp line (18 Nov 2026): reports and urgent matters go
+# to this number, and its messages are handled apart from customers'. Set on
+# Railway, never in the code (the repository is public). Empty: no line.
+OCTOS_OWNER_PHONE            = os.environ.get('OCTOS_OWNER_PHONE', '')
 
 # Octos's assistant. Mode is the kill switch: 'off' (silent, the default),
 # 'shadow' (writes its reply as an internal note, sends nothing) or 'live'.
@@ -345,6 +349,15 @@ CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL = 25
 # rather than left half-done.
 CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
 CELERY_BEAT_SCHEDULE = {
+    # The owner's line: morning brief and day close to his phone (18 Nov 2026).
+    'owner-brief': {
+        'task': 'apps.communications.tasks.owner_brief',
+        'schedule': crontab(hour=7, minute=30),
+    },
+    'owner-close': {
+        'task': 'apps.communications.tasks.owner_close',
+        'schedule': crontab(hour=21, minute=0),
+    },
     # Pickup reminders and design-feedback nudges, mornings, shop days (13 Nov 2026).
     'customer-reminders': {
         'task': 'apps.jobs.tasks.send_customer_reminders',

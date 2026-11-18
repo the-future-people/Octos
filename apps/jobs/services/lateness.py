@@ -177,6 +177,8 @@ def check(job, now=None):
         for person in _staff_for(job):
             notify(person, verb=f'promise_{word.replace(" ", "_")}',
                    message=f'{job.job_number} is {word}: now about {when}.', link=f'/jobs/{job.pk}')
+        from apps.communications.services import owner_line
+        owner_line.job_slipping(job, word, when)
 
     if d.tell_customer:
         order = OnlineOrder.objects.filter(job=job).first()

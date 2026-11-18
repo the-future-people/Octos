@@ -189,6 +189,28 @@ def send_image(phone, content, filename, caption=''):
     return _send(phone, {'type': 'image', 'image': image})
 
 
+def send_buttons(phone, body, buttons, image=None, filename='card.png', footer=''):
+    """
+    A message with up to three reply buttons (the owner's Approve / Decline,
+    18 Nov 2026), optionally under a picture. Inside the window only.
+    buttons: [{'id': 'cut:approve:12', 'title': 'Approve'}]; Meta allows a
+    title of 20 characters and a body of 1,024.
+    """
+    interactive = {
+        'type': 'button',
+        'body': {'text': body[:1024]},
+        'action': {'buttons': [
+            {'type': 'reply', 'reply': {'id': str(b['id'])[:256], 'title': str(b['title'])[:20]}}
+            for b in buttons[:3]
+        ]},
+    }
+    if image:
+        interactive['header'] = {'type': 'image', 'image': {'id': upload_media(image, filename, 'image/png')}}
+    if footer:
+        interactive['footer'] = {'text': footer[:60]}
+    return _send(phone, {'type': 'interactive', 'interactive': interactive})
+
+
 def send_document(phone, content, filename, caption='', mime='application/pdf'):
     """A document (a proforma), uploaded then sent, with its file name and a caption."""
     document = {'id': upload_media(content, filename, mime), 'filename': filename}

@@ -265,6 +265,9 @@ def _ask_owner(cut, target):
                f'from GHS {cut.before_total:,.2f} to GHS {cut.new_total:,.2f}, {below}. Reason: {cut.reason}')
     for owner in CustomUser.objects.filter(is_business_owner=True, is_active=True):
         _tell(owner, cut.asked_by, message, target, link='/eye')
+    # And to the owner's phone, with Approve / Decline (18 Nov 2026).
+    from apps.communications.services import owner_line
+    owner_line.price_cut_waiting(cut)
 
 
 def _tell(recipient, actor, message, target, link=None):

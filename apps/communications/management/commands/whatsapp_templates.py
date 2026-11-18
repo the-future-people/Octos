@@ -22,6 +22,14 @@ EXAMPLES = {
     'proforma_ready': ['Ama', 'PFI-WLB-2026-00030'],
     'general_followup': ['Ama'],
     'reconnect': ['Ama'],
+    'owner_update': ['A discount on PFI-WLB-2026-00036 is waiting for your OK: GHS 1,967.48.'],
+}
+
+# The owner's private line (18 Nov 2026): the knock when his 24-hour window
+# is shut. Not offered in the inbox. Its Open button opens the window, and
+# Octos then sends what was waiting.
+OWNER_TEMPLATES = {
+    'owner_update': ('Octos update for you: {1}\n\nTap Open below to see the full details here.', ['Open']),
 }
 
 
@@ -48,7 +56,9 @@ class Command(BaseCommand):
             raise CommandError(f"Meta refused the list: {listed.json().get('error', {}).get('message', listed.text)}")
         at_meta = {t['name']: t for t in listed.json().get('data', [])}
 
-        for name, text in START_TEMPLATES.items():
+        wanted = [(name, text, []) for name, text in START_TEMPLATES.items()]
+        wanted += [(name, text, buttons) for name, (text, buttons) in OWNER_TEMPLATES.items()]
+        for name, text, buttons in wanted:
             found = at_meta.get(name)
             if found:
                 why = f" ({found['rejected_reason']})" if found.get('rejected_reason') not in (None, '', 'NONE') else ''
@@ -64,6 +74,9 @@ class Command(BaseCommand):
                 'components': [{'type': 'BODY', 'text': body,
                                 'example': {'body_text': [EXAMPLES.get(name, ['Ama', 'FP-WLB-05812'])]}}],
             }
+            if buttons:
+                payload['components'].append({'type': 'BUTTONS', 'buttons': [
+                    {'type': 'QUICK_REPLY', 'text': b} for b in buttons]})
             sent = requests.post(base, headers=headers, json=payload, timeout=30)
             if sent.status_code in (200, 201):
                 self.stdout.write(f"{name:16} submitted: {sent.json().get('status', 'PENDING')}")

@@ -81,6 +81,10 @@ class MachineService:
         halted = cls._halt_jobs_on(machine, actor, note or reason)
         moved  = cls._move_queue_off(machine)
 
+        # The owner hears at once, wherever he is (18 Nov 2026).
+        from apps.communications.services import owner_line
+        owner_line.machine_down(machine)
+
         logger.info(
             'MachineService: %s marked down at %s, %s job(s) halted',
             machine.name, machine.branch.code, len(halted),

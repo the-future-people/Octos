@@ -83,6 +83,18 @@ def process(event):
             names = {key: who['name'] for key, who in people.items()}
 
             for message in value.get('messages') or []:
+                # The owner's own number is his private business line (18 Nov
+                # 2026): handled apart, never a chat in the inbox.
+                if _from_owner(message):
+                    try:
+                        with transaction.atomic():
+                            from apps.communications.services import owner_line
+                            if owner_line.receive(message):
+                                recorded += 1
+                    except Exception as exc:
+                        logger.exception("Owner's message %s could not be recorded", message.get('id'))
+                        failures.append(f'{message.get("id")}: {exc!r}')
+                    continue
                 try:
                     with transaction.atomic():
                         who = people.get(message.get('from')) or people.get(message.get('from_user_id')) or {}
@@ -103,6 +115,13 @@ def process(event):
         _tell_managers(event)
     event.save(update_fields=['processed_at', 'error'])
     return recorded
+
+
+def _from_owner(message):
+    """True when this message comes from the owner's line number."""
+    from apps.communications.services.owner_line import is_owner_number
+    sender = message.get('from') or ''
+    return bool(sender) and not USER_ID.match(sender) and is_owner_number('+' + sender)
 
 
 def _receive(message, profile_name, who=None):
@@ -333,6 +352,9 @@ def _apply_status(status):
             for e in status.get('errors') or []
         ) or 'failed, no reason given'
         updated = ours.update(status=Message.FAILED, error=reason[:500])
+        # A message to the owner's line that never arrived (18 Nov 2026).
+        from apps.communications.models import OwnerMessage
+        OwnerMessage.objects.filter(external_id=wamid).update(status=OwnerMessage.FAILED, error=reason[:500])
         logger.warning('WhatsApp message %s failed: %s', wamid, reason)
     else:
         earlier = PROGRESS[:PROGRESS.index(new)]

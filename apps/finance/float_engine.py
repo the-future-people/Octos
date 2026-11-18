@@ -429,6 +429,10 @@ class FloatEngine:
             'updated_at',
         ])
 
+        # Cash short at sign-off goes straight to the owner's phone (18 Nov 2026).
+        from apps.communications.services import owner_line
+        owner_line.cash_short(float_record)
+
         logger.info(
             'FloatEngine: EOD sign-off by %s — closing GHS %s, variance GHS %s',
             signed_off_by.full_name,

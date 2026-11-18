@@ -135,6 +135,8 @@ def watch(now=None):
                 minutes = int((now - since).total_seconds() // 60)
                 _alert(conversation, verb='customer_waiting',
                        message=f'{conversation.display_name} has waited {minutes} minutes for a reply.')
+                from apps.communications.services import owner_line
+                owner_line.customer_waiting(conversation, minutes)
                 with transaction.atomic():
                     conversation.reminded_at = now
                     conversation.save(update_fields=['reminded_at'])

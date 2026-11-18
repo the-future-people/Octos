@@ -81,3 +81,30 @@ def show_whatsapp_typing(message_id):
     """'typing...' on a customer's message the moment it arrives, if Octos will answer."""
     from apps.communications.assistant import brain
     brain.show_typing_for(message_id)
+
+# ── The owner's private line (18 Nov 2026) ──────────────────────────────────
+
+@shared_task
+def deliver_owner_message(pk):
+    from apps.communications.services import owner_line
+    owner_line.deliver(pk)
+
+
+@shared_task
+def answer_owner(pk):
+    from apps.communications.services import owner_line
+    owner_line.answer(pk)
+
+
+@shared_task
+def owner_brief():
+    """The morning brief, 7:30 every day."""
+    from apps.communications.services import owner_line
+    owner_line.send_brief()
+
+
+@shared_task
+def owner_close():
+    """The day's close, 9:00pm every day, after sign-off."""
+    from apps.communications.services import owner_line
+    owner_line.send_close()
