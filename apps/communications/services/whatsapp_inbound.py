@@ -214,6 +214,9 @@ def _receive(message, profile_name, who=None):
     from apps.communications.assistant import counter
     counter.arrived(conversation, message)
 
+    from apps.communications.services import owner_watch
+    owner_watch.customer_wrote(conversation, message)
+
     wake_octos(conversation, message, pause=8)
     if message.media_id:
         _keep_media(message)

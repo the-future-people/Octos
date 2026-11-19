@@ -1,0 +1,206 @@
+"""
+Octos acting on the boss's word (19 Nov 2026).
+
+He read a "customer waiting" alert and told his line: "Respond to the
+message and see what he wants. Report back." Then: "Check back in a bit."
+Octos could only look. Now it can let Octos answer the customer, tell him
+when the customer replies, and come back later to look again.
+"""
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.test import override_settings
+from django.utils import timezone
+
+from apps.communications.assistant import boss
+from apps.communications.models import Conversation, Message, OwnerWatch
+from apps.communications.services import owner_watch
+from apps.communications.tests_owner_boss import BossBase, looks, model, said, turn
+from apps.communications.tests_owner_line import meta
+from apps.communications.tests_whatsapp import WebhookTestCase, delivery, text
+
+
+class ChatBase(BossBase):
+
+    def setUp(self):
+        super().setUp()
+        self.chat = Conversation.objects.create(
+            channel=Conversation.WHATSAPP, contact_phone='+233244123456', customer=self.ama,
+            handled_by=Conversation.STAFF, assigned_to=self.attendant, handled_since=timezone.now())
+        Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               body='Your quote is GHS 5.00')
+        self.asked = Message.objects.create(conversation=self.chat, direction=Message.INBOUND,
+                                            channel=Message.WHATSAPP, body='How will it come out??')
+
+    def customer(self, words, **extra):
+        return Message.objects.create(conversation=self.chat, direction=Message.INBOUND,
+                                      channel=Message.WHATSAPP, body=words, **extra)
+
+    def octos(self, words):
+        return Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND,
+                                      channel=Message.WHATSAPP, body=words)
+
+
+@override_settings(OCTOS_ASSISTANT_MODE='live')
+class AnswerNowTests(ChatBase):
+
+    def test_from_staff_octos_takes_it_and_answers_at_once(self):
+        with patch('apps.communications.tasks.answer_whatsapp.apply_async') as answer, \
+                self.captureOnCommitCallbacks(execute=True):
+            got = owner_watch.answer_now(self.chat)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.handled_by, Conversation.OCTOS)
+        self.assertEqual((got['answered'], got['was_with']), (True, 'Test Attendant'))
+        answer.assert_called_once()
+        self.assertEqual(answer.call_args.args[0], (self.chat.pk, self.asked.pk))
+
+    def test_already_octos_and_waiting_octos_answers(self):
+        Conversation.objects.filter(pk=self.chat.pk).update(handled_by=Conversation.OCTOS)
+        self.chat.refresh_from_db()
+        with patch('apps.communications.tasks.answer_whatsapp.apply_async') as answer, \
+                self.captureOnCommitCallbacks(execute=True):
+            got = owner_watch.answer_now(self.chat)
+        self.assertTrue(got['answered'])
+        answer.assert_called_once()
+
+    def test_nobody_waiting_nothing_is_sent_and_he_is_told_why(self):
+        self.octos('Here is your preview')
+        with patch('apps.communications.tasks.answer_whatsapp.apply_async') as answer, \
+                self.captureOnCommitCallbacks(execute=True):
+            got = owner_watch.answer_now(self.chat)
+        self.assertFalse(got['answered'])
+        self.assertIn('the last word in the chat is ours', got['say'])
+        answer.assert_not_called()
+
+
+class WatchTests(ChatBase):
+
+    def test_their_reply_is_reported_with_how_it_was_answered(self):
+        owner_watch.watch(self.chat)
+        with patch('apps.communications.tasks.report_watched_chat.apply_async') as later, \
+                self.captureOnCommitCallbacks(execute=True):
+            reply = self.customer('Whole photo is fine')
+            owner_watch.customer_wrote(self.chat, reply)
+        self.assertEqual(later.call_args.kwargs['countdown'], owner_watch.REPORT_AFTER)
+        self.octos('Great! Here is your payment link')
+        with meta() as m, self.captureOnCommitCallbacks(execute=True):
+            owner_watch.report(self.chat.pk, reply.pk)
+        body = m.text.call_args.args[1]
+        self.assertIn('👀 *Ama Mensah replied*', body)
+        self.assertIn('> Whole photo is fine', body)
+        self.assertIn('_Octos answered:_\n> Great! Here is your payment link', body)
+        self.assertNotIn('How will it come out', body)       # already there before the watch
+        self.assertIsNotNone(OwnerWatch.objects.get().done_at)  # 'next': one report, then done
+
+    def test_every_reply_keeps_watching(self):
+        owner_watch.watch(self.chat, OwnerWatch.KEEP)
+        with meta() as m:          # one fake Meta: its message ids never repeat
+            first = self.customer('ok')
+            with self.captureOnCommitCallbacks(execute=True):
+                owner_watch.report(self.chat.pk, first.pk)
+            w = OwnerWatch.objects.get()
+            self.assertIsNone(w.done_at)
+            self.assertEqual(w.reports, 1)
+            second = self.customer('Sending another photo', message_type=Message.IMAGE)
+            with self.captureOnCommitCallbacks(execute=True):
+                owner_watch.report(self.chat.pk, second.pk)
+        body = m.text.call_args.args[1]
+        self.assertIn('> Sending another photo\n> 📎 1 file', body)
+        self.assertNotIn('> ok', body)
+        self.assertIn("Test has the chat and hasn't answered yet", body)
+
+    def test_a_burst_reports_once_from_the_last_message(self):
+        owner_watch.watch(self.chat)
+        one = self.customer('wait')
+        self.customer('actually make it 6 copies')
+        with meta() as m, self.captureOnCommitCallbacks(execute=True):
+            self.assertIsNone(owner_watch.report(self.chat.pk, one.pk))
+        m.text.assert_not_called()
+
+    def test_no_watch_no_report(self):
+        with patch('apps.communications.tasks.report_watched_chat.apply_async') as later, \
+                self.captureOnCommitCallbacks(execute=True):
+            owner_watch.customer_wrote(self.chat, self.customer('hello'))
+        later.assert_not_called()
+
+    def test_a_watch_runs_out(self):
+        w = owner_watch.watch(self.chat)
+        OwnerWatch.objects.filter(pk=w.pk).update(ends_at=timezone.now() - timedelta(minutes=1))
+        with patch('apps.communications.tasks.report_watched_chat.apply_async') as later, \
+                self.captureOnCommitCallbacks(execute=True):
+            owner_watch.customer_wrote(self.chat, self.customer('hello'))
+        later.assert_not_called()
+
+    def test_watching_again_replaces_the_old_watch(self):
+        owner_watch.watch(self.chat)
+        owner_watch.watch(self.chat, OwnerWatch.KEEP)
+        self.assertEqual(OwnerWatch.objects.filter(done_at__isnull=True).count(), 1)
+        owner_watch.stop(self.chat)
+        self.assertFalse(OwnerWatch.objects.filter(done_at__isnull=True).exists())
+
+
+class CheckLaterTests(ChatBase):
+
+    def test_it_comes_back_in_the_minutes_he_gave_within_limits(self):
+        with patch('apps.communications.tasks.owner_check_later.apply_async') as later:
+            self.assertEqual(owner_watch.check_later(20, 'Kings Hub chat'), 20)
+            self.assertEqual(later.call_args.kwargs['countdown'], 20 * 60)
+            self.assertEqual(owner_watch.check_later(0, 'x'), owner_watch.CHECK_MIN)
+            self.assertEqual(owner_watch.check_later(10_000, 'x'), owner_watch.CHECK_MAX)
+
+    def test_when_the_time_comes_octos_looks_and_reports(self):
+        fake, use = model(
+            turn(looks('read_chat', chat_id=self.chat.pk)),
+            turn(said('Nothing new from Ama, boss. Still waiting on her answer.')),
+        )
+        with meta() as m, use:
+            boss.follow_up('Kings Hub chat', timezone.now().isoformat())
+        self.assertEqual(m.text.call_args.args[1], 'Nothing new from Ama, boss. Still waiting on her answer.')
+        asked = [t['content'] for t in fake.calls[0]['messages']
+                 if t['role'] == 'user' and isinstance(t['content'], str)]
+        self.assertIn('he asked you to check back on this: "Kings Hub chat"', asked[-1])
+
+
+@override_settings(OCTOS_ASSISTANT_MODE='live')
+class OnHisWordTests(ChatBase):
+
+    def test_respond_and_report_back_does_both(self):
+        fake, use = model(
+            turn(said('On it 👀'), looks('answer_now', chat_id=self.chat.pk),
+                 looks('watch_chat', 2, chat_id=self.chat.pk)),
+            turn(said("Done. Octos is answering her now, and I'll tell you when she replies 👍")),
+        )
+        with patch('apps.communications.tasks.answer_whatsapp.apply_async') as answer:
+            m = self.talk('Respond to the message and see what he wants. Report back', use)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.handled_by, Conversation.OCTOS)
+        answer.assert_called_once()
+        self.assertTrue(OwnerWatch.objects.filter(conversation=self.chat, done_at__isnull=True).exists())
+        self.assertIn("I'll tell you when she replies", self.sent(m)[-1][1])
+
+    def test_a_chat_by_the_customers_name(self):
+        fake, use = model(
+            turn(looks('watch_chat', customer='Ama', until='every')),
+            turn(said("I'll tell you each time she writes 👍")),
+        )
+        self.talk('keep an eye on Ama for me', use)
+        self.assertEqual(OwnerWatch.objects.get().mode, OwnerWatch.KEEP)
+
+    def test_the_rules_say_what_he_can_now_ask(self):
+        self.assertIn('answer_now: when he says respond', boss.RULES)
+        self.assertIn('do both: answer_now, then watch_chat', boss.RULES)
+        self.assertIn('cannot write to a customer in your own or his words', boss.RULES)
+        names = {t['name'] for t in boss.TOOL_SPECS}
+        self.assertTrue({'answer_now', 'watch_chat', 'check_later'} <= names)
+
+
+class WebhookWatchTests(WebhookTestCase):
+
+    @override_settings(OCTOS_OWNER_PHONE='+233200000000')
+    def test_a_watched_customer_writing_through_the_webhook_is_reported(self):
+        with patch.object(owner_watch, 'customer_wrote') as wrote, \
+                patch('apps.communications.services.whatsapp_inbound.wake_octos'):
+            self.deliver(delivery(text('Whole photo is fine')))
+        wrote.assert_called_once()
+        conversation, message = wrote.call_args.args
+        self.assertEqual(message.body, 'Whole photo is fine')

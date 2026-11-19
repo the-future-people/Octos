@@ -50,3 +50,35 @@ class OwnerMessage(models.Model):
 
     def __str__(self):
         return f'{self.direction} {self.kind or "message"} {self.status} {self.created_at:%d %b %H:%M}'
+
+
+class OwnerWatch(models.Model):
+    """
+    A customer chat the owner asked Octos to keep an eye on (19 Nov 2026):
+    "respond to the message and see what he wants, report back". When the
+    customer writes again, Octos reports to the owner's line what they said
+    and how it was answered.
+
+    NEXT ends after the first report; KEEP reports every reply until the
+    watch runs out (ends_at) or the owner stops it.
+    """
+    NEXT, KEEP = 'NEXT', 'KEEP'
+    MODES = [(NEXT, 'Their next reply'), (KEEP, 'Every reply')]
+
+    conversation = models.ForeignKey('communications.Conversation', on_delete=models.CASCADE,
+                                     related_name='owner_watches')
+    mode       = models.CharField(max_length=4, choices=MODES, default=NEXT)
+    started_at = models.DateTimeField(auto_now_add=True)
+    ends_at    = models.DateTimeField()
+    # The last message already reported: the next report starts after it.
+    reported_up_to = models.ForeignKey('communications.Message', null=True, blank=True,
+                                       on_delete=models.SET_NULL, related_name='+')
+    reports    = models.PositiveSmallIntegerField(default=0)
+    done_at    = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [models.Index(fields=['conversation', 'done_at'])]
+
+    def __str__(self):
+        return f'Watch on {self.conversation_id} ({self.get_mode_display()})'

@@ -415,11 +415,107 @@ def money_report(period='today', branch=''):
     if count:
         out['discounts'] = {'count': count, 'total_off': ghs(off),
                             'items': [{'on': w, 'off': ghs(a), 'reason': r} for w, a, r in rows[:5]]}
+    same = _same_span(period, start, end)
+    if same:
+        before_start, before_end, words = same
+        before = money.collected(ids, before_start, before_end)
+        before_jobs = owner_reports.jobs_for(ids, before_start, before_end)['taken']
+        out['compared_with'] = {
+            'span': words,
+            'collected': ghs(before), 'jobs_taken': before_jobs,
+            'money_change': _pct(collected, before), 'jobs_change': _pct(jobs['taken'], before_jobs),
+        }
     owed = money.owed(ids)
     out['owed_to_us_now'] = {'job_balances': ghs(owed['job_balances']),
                              'credit_accounts': ghs(owed['credit_owed']),
                              'total': ghs(owed['job_balances'] + owed['credit_owed'])}
     return out
+
+
+def _same_span(period, start, end):
+    """
+    The same stretch of time one period back, so a comparison is fair: this
+    week so far (Monday to now) against last week's Monday to the same hour,
+    not the whole of last week (19 Nov 2026). None for finished periods,
+    which compare with the one before as they stand.
+    """
+    now = timezone.now()
+    if period == 'today':
+        shift, words = timedelta(days=7), 'the same day last week, up to this time'
+    elif period == 'this_week':
+        shift, words = timedelta(days=7), 'last week, from Monday up to this day and time'
+    elif period == 'this_month':
+        local = timezone.localtime(now)
+        prev_last_day = (local.replace(day=1) - timedelta(days=1)).day
+        day = min(local.day, prev_last_day)
+        prev_start = start.replace(month=start.month - 1 if start.month > 1 else 12,
+                                   year=start.year if start.month > 1 else start.year - 1)
+        prev_now = timezone.localtime(now).replace(year=prev_start.year, month=prev_start.month, day=day)
+        return prev_start, prev_now, 'last month, from the 1st up to this day and time'
+    elif period in ('yesterday', 'last_week', 'last_month'):
+        if period == 'yesterday':
+            return start - timedelta(days=7), end - timedelta(days=7), 'the same day the week before'
+        if period == 'last_week':
+            return start - timedelta(days=7), start, 'the week before'
+        prev_end = start
+        prev_start = timezone.localtime(start - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0,
+                                                                         microsecond=0)
+        return prev_start, prev_end, 'the month before'
+    else:
+        return None
+    return start - shift, min(end, now) - shift, words
+
+
+def _pct(now_value, before_value):
+    """'+56%', '-8%', or None when there is nothing to compare with."""
+    from apps.eye.services import periods
+    change = periods.change(now_value, before_value)
+    if change is None:
+        return None
+    return f'{"+" if change > 0 else ""}{change}%'
+
+
+def who_owes(branch=''):
+    """
+    Who owes us right now: customers with a balance left on a job (deposit
+    paid, rest due) and credit accounts carrying a balance, biggest first.
+    The totals match owed_to_us_now in money_report.
+    """
+    from apps.eye.services import money
+    from apps.finance.models import CreditAccount
+    from apps.jobs.models import Job
+    found, error = branches(branch)
+    if error:
+        return error
+    ids, now = _ids(found), timezone.now()
+    live = (Job.objects.filter(branch_id__in=ids, payment_state='DEPOSIT_PAID')
+            .exclude(status__in=['CANCELLED', 'VOIDED']).select_related('customer', 'branch'))
+    people = {}
+    for job in live:
+        due = job.balance_due or ZERO
+        if due <= 0:
+            continue
+        who = job.customer.full_name if job.customer_id else f'walk-in on {job.job_number}'
+        row = people.setdefault(who, {'customer': who, 'owes': ZERO, 'jobs': []})
+        row['owes'] += due
+        row['jobs'].append({'job': job.job_number, 'what': job.title, 'balance': ghs(due),
+                            'stage': job.get_work_state_display() if job.work_state else job.get_status_display(),
+                            'taken': when(job.created_at, now)})
+    rows = sorted(people.values(), key=lambda r: -r['owes'])
+    for r in rows:
+        r['owes'] = ghs(r['owes'])
+        r['jobs'] = r['jobs'][:3]
+    accounts = (CreditAccount.objects.filter(branch_id__in=ids, status='ACTIVE', current_balance__gt=0)
+                .select_related('customer').order_by('-current_balance'))
+    owed = money.owed(ids)
+    return {
+        'total_owed': ghs(owed['job_balances'] + owed['credit_owed']),
+        'job_balances': {'total': ghs(owed['job_balances']), 'customers': len(rows), 'biggest_first': rows[:10]},
+        'credit_accounts': {'total': ghs(owed['credit_owed']),
+                            'accounts': [{'customer': a.customer.full_name if a.customer_id else '',
+                                          'owes': ghs(a.current_balance), 'limit': ghs(a.credit_limit),
+                                          'over_limit': a.is_over_limit} for a in accounts[:10]]},
+    }
 
 
 # ── WhatsApp ───────────────────────────────────────────────────────────────

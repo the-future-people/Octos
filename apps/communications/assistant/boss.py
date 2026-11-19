@@ -19,8 +19,10 @@ own voice and its own tools (boss_tools.py):
   who     only the owner's own number reaches it. owner_line.answer() is
           the only door, and the webhook sends only that number there.
           A customer who writes "I'm the owner" is still a customer.
-  what    it looks things up and reports. It changes nothing on the floor;
-          the only things it sends go to the owner's own line.
+  what    it looks things up and reports, and on his word acts on a
+          customer chat: Octos answers it now, he hears when they reply,
+          or it checks back later (services/owner_watch.py). It changes no
+          job and never writes to a customer in its own words.
   honest  every price and clock time it says must be in what it looked up
           this turn, or in what it already told him (the same checker the
           customers' brain uses). A reply with a figure it can't back is
@@ -108,14 +110,23 @@ He reads you on his phone between other things. A lot at once is hard to digest;
 
 NEVER GUESS
 - Every amount, time and count you say comes from a look-up in this turn, or from something you already told him in this chat. If it isn't there, look it up. If no tool can tell you, say plainly what you can see and what you can't.
-- Don't add up, average or work out figures yourself: the tools give totals. Repeat figures exactly as the tools write them ("GHS 1,240.00", "8:04am").
+- Don't add up, average or work out figures yourself: the tools give totals and changes. Repeat figures exactly as the tools write them ("GHS 1,240.00", "8:04am", "+56%").
+- Compare like with like: a period so far against the same stretch before it (compared_with), never a part-week against a whole week.
+- Say why a figure moved only when a look-up shows the reason. Otherwise report the change and leave the why to him, or offer to look into it.
+- Never talk about your tools, lists or what's "shown to you". If you can't answer, say so in plain words and offer what you can do.
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you).
-- For now you only look and report. You cannot message customers or staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks you to do something, tell him straight that you can only look and report for now, and say what he can do instead. Never pretend you did it.
+- On his word you can act on a customer's WhatsApp chat:
+  • answer_now: when he says respond, answer, handle or "see what they want", take the chat from staff and let Octos answer the customer straight away. Octos answers under its usual customer rules.
+  • watch_chat: when he says report back, let me know or keep an eye on it, you'll tell him when the customer writes again, with what they said and how it was answered. Use "every" only when he wants every reply, not just the next.
+  • check_later: when he says check back in a bit, come back and look. "A bit" is about 15 minutes; use the time he gives if he gives one.
+  When he says "respond and report back", do both: answer_now, then watch_chat.
+  After acting, confirm in one short line what you did and what happens next ("Done. Octos is answering her now, and I'll tell you when she replies 👍").
+- You still cannot write to a customer in your own or his words, message staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks for that, say plainly you can't yet and what he can do instead. Never pretend you did something.
 
 ALERTS YOU SENT HIM
 - You send him alerts (a customer waiting, a job slipping, a machine down, cash short). When he says "she", "he", "that customer" or "that job" without a name, he means the latest alert's, unless the chat makes clear otherwise. Each alert's chat or job is given below, so you can look it up straight away."""
@@ -204,9 +215,15 @@ TOOL_SPECS = [
      'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
     {'name': 'money_report',
      'description': ('Money collected in a period, by payment method and by branch; jobs taken and finished; '
-                     'promises kept; discounts given; and what is owed to us right now.'),
+                     'promises kept; discounts given; what is owed to us right now; and compared_with: the '
+                     'same stretch of time one period back (this week so far against last week up to the '
+                     'same day and hour), with the change already worked out.'),
      'input_schema': {'type': 'object', 'properties': {
          'period': {'type': 'string', 'enum': list(look.PERIODS)}, **BRANCH}, 'required': ['period']}},
+    {'name': 'who_owes',
+     'description': ('Who owes us right now: customers with a balance left on a job, biggest first, with the '
+                     'jobs; and credit accounts carrying a balance.'),
+     'input_schema': {'type': 'object', 'properties': BRANCH}},
     {'name': 'whatsapp_chats',
      'description': ("Customers' WhatsApp chats: 'waiting' (the customer's last message is unanswered), "
                      "'with_staff' (a person has taken the chat) or 'recent' (the last 24 hours). Each with "
@@ -227,6 +244,24 @@ TOOL_SPECS = [
      'input_schema': {'type': 'object', 'properties': {
          'person': {'type': 'string'}, 'period': {'type': 'string', 'enum': list(look.PERIODS)}},
          'required': ['person']}},
+    {'name': 'answer_now',
+     'description': ("On the boss's word: take a customer's WhatsApp chat from staff (if a person has it) "
+                     'and let Octos answer the customer now, under its usual customer rules. Says whether the '
+                     'customer was waiting.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'}}}},
+    {'name': 'watch_chat',
+     'description': ("On the boss's word: tell him when this customer writes again, with what they said and "
+                     "how it was answered. until 'next' (default) reports their next reply; 'every' reports "
+                     "each reply for the next 12 hours. stop true ends watching."),
+     'input_schema': {'type': 'object', 'properties': {
+         'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'},
+         'until': {'type': 'string', 'enum': ['next', 'every']}, 'stop': {'type': 'boolean'}}}},
+    {'name': 'check_later',
+     'description': ('Come back after this many minutes (2 to 360), look at what he asked about, and report. '
+                     'what says what to check, in a few words.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'minutes': {'type': 'integer'}, 'what': {'type': 'string'}}, 'required': ['minutes', 'what']}},
     {'name': 'machines',
      'description': 'Which machines are working and which are down, since when and why.',
      'input_schema': {'type': 'object', 'properties': BRANCH}},
@@ -263,6 +298,15 @@ def _run_tool(name, args, sent):
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
+    if name == 'who_owes':
+        return look.who_owes(args.get('branch', ''))
+    if name in ('answer_now', 'watch_chat'):
+        return _act_on_chat(name, args, sent)
+    if name == 'check_later':
+        from apps.communications.services import owner_watch
+        what = str(args.get('what') or '').strip() or 'how things stand'
+        minutes = owner_watch.check_later(args.get('minutes'), what)
+        return {'done': True, 'minutes': minutes, 'say': f'You will look again in {minutes} minutes and report.'}
     if name == 'staff_activity':
         return look.staff_activity(str(args.get('person') or ''), args.get('period') or 'today')
     if name == 'waiting_for_you':
@@ -285,6 +329,41 @@ def _run_tool(name, args, sent):
     return {'error': f'Unknown tool {name}.'}
 
 
+def _chat(args):
+    from django.db.models import Q
+    from apps.communications.models import Conversation
+    if args.get('chat_id'):
+        return Conversation.objects.filter(pk=args['chat_id'], channel=Conversation.WHATSAPP).first()
+    name = str(args.get('customer') or '').strip()
+    if not name:
+        return None
+    return (Conversation.objects.filter(channel=Conversation.WHATSAPP)
+            .filter(Q(contact_name__icontains=name) | Q(customer__first_name__icontains=name)
+                    | Q(customer__last_name__icontains=name) | Q(contact_username__icontains=name))
+            .order_by('-last_message_at').first())
+
+
+def _act_on_chat(name, args, sent):
+    """answer_now and watch_chat: the boss's word, on one customer chat."""
+    from apps.communications.models import OwnerWatch
+    from apps.communications.services import owner_watch
+    chat = _chat(args)
+    if chat is None:
+        return {'error': 'No WhatsApp chat found. Look at whatsapp_chats for the chat_id.'}
+    if name == 'answer_now':
+        result = owner_watch.answer_now(chat)
+        sent.append('answer_now')
+        return {'customer': chat.display_name, **result}
+    if args.get('stop'):
+        owner_watch.stop(chat)
+        return {'customer': chat.display_name, 'watching': False}
+    mode = OwnerWatch.KEEP if args.get('until') == 'every' else OwnerWatch.NEXT
+    owner_watch.watch(chat, mode)
+    sent.append('watch')
+    return {'customer': chat.display_name, 'watching': True,
+            'reports': 'every reply for 12 hours' if mode == OwnerWatch.KEEP else 'their next reply'}
+
+
 def _last_out():
     return OwnerMessage.objects.order_by('-pk').values_list('pk', flat=True).first() or 0
 
@@ -305,11 +384,12 @@ def _send_now(after):
 
 # ── The conversation ───────────────────────────────────────────────────────
 
-def _history(message):
+def _history(message, upto=None):
     """The line's last messages as alternating turns, ending with what he just said."""
+    upto = upto or message.created_at
     since = timezone.now() - timedelta(hours=HISTORY_HOURS)
     rows = list(OwnerMessage.objects
-                .filter(created_at__gte=since, created_at__lte=message.created_at)
+                .filter(created_at__gte=since, created_at__lte=upto)
                 .exclude(kind=OwnerMessage.KNOCK)
                 .exclude(status__in=[OwnerMessage.FAILED, OwnerMessage.SKIPPED, OwnerMessage.WAITING])
                 .order_by('-created_at', '-pk')[:HISTORY])
@@ -329,10 +409,28 @@ def _history(message):
             turns.append({'role': role, 'content': text})
     if turns and turns[0]['role'] == 'assistant':
         turns.insert(0, {'role': 'user', 'content': '(earlier on the line)'})
-    if not turns or turns[-1]['role'] != 'user':
-        return [], ''
     told = '\n'.join(t['content'] for t in turns if t['role'] == 'assistant')
+    if message is not None and (not turns or turns[-1]['role'] != 'user'):
+        return [], ''
     return turns, told
+
+
+def follow_up(what, set_at, now=None):
+    """
+    The boss said "check back in a bit" (19 Nov 2026): now is that later.
+    Octos looks again and reports, as if he had just asked.
+    """
+    from datetime import datetime
+    now = now or timezone.now()
+    turns, told = _history(None, upto=now)
+    when_set = look.clock(datetime.fromisoformat(set_at)) if set_at else 'earlier'
+    ask = (f'[Octos reminder, not a new message from the boss: at {when_set} he asked you to check back on '
+           f'this: "{what}". Look now and report in a line or two. If nothing has changed, say so briefly.]')
+    if turns and turns[-1]['role'] == 'user':
+        turns[-1]['content'] += '\n\n' + ask
+    else:
+        turns.append({'role': 'user', 'content': ask})
+    return _answer(turns, told, None, now, f'check-later {what!r}')
 
 
 def reply(message, now=None):
@@ -340,11 +438,15 @@ def reply(message, now=None):
     Answer what the boss wrote. Runs in the worker, from owner_line.answer().
     Returns what was said (for the log and the tests), or '' when nothing was.
     """
-    started = time.monotonic()
     turns, told = _history(message)
     if not turns:
         return ''
     _typing(message)
+    return _answer(turns, told, message, now, f'message {message.pk}')
+
+
+def _answer(turns, told, message, now, label):
+    started = time.monotonic()
     usage = {'input': 0, 'output': 0, 'cache_read': 0}
     calls, sent = [], []
     try:
@@ -369,12 +471,12 @@ def reply(message, now=None):
             _say(text)
         return text
     except Exception:
-        logger.exception("Boss's line: Octos could not answer message %s", message.pk)
+        logger.exception("Boss's line: Octos could not answer %s", label)
         _say(FAILED)
         return FAILED
     finally:
         logger.info("Boss's line: answered %s in %.1fs, looked up %s, tokens in %s (cached %s) out %s",
-                    message.pk, time.monotonic() - started, [c['name'] for c in calls],
+                    label, time.monotonic() - started, [c['name'] for c in calls],
                     usage['input'], usage['cache_read'], usage['output'])
 
 
@@ -404,7 +506,8 @@ def _converse(turns, calls, sent, usage, message, now):
 
         # "On it 👀": the short word before a look-up goes out at once, so
         # the boss knows Octos is on it while it looks.
-        if text and not acknowledged and len(text) <= ACK_LIMIT and not checker.unverified(text, ''):
+        if message is not None and text and not acknowledged and len(text) <= ACK_LIMIT \
+                and not checker.unverified(text, ''):
             _say(text)
             acknowledged = True
             calls.append({'name': '_ack', 'input': {}, 'result': None, 'acknowledged': True})
@@ -435,7 +538,7 @@ def _say(text):
 
 
 def _typing(message):
-    if not message.external_id:
+    if message is None or not message.external_id:
         return
     try:
         from apps.communications.services import whatsapp_client

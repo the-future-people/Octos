@@ -108,3 +108,17 @@ def owner_close():
     """The day's close, 9:00pm every day, after sign-off."""
     from apps.communications.services import owner_line
     owner_line.send_close()
+
+
+@shared_task
+def report_watched_chat(conversation_id, trigger_id):
+    """A chat the owner asked Octos to watch: report the customer's reply (19 Nov 2026)."""
+    from apps.communications.services import owner_watch
+    owner_watch.report(conversation_id, trigger_id)
+
+
+@shared_task
+def owner_check_later(what, set_at):
+    """The owner said "check back in a bit": look now and report (19 Nov 2026)."""
+    from apps.communications.assistant import boss
+    boss.follow_up(what, set_at)

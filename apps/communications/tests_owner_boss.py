@@ -209,6 +209,36 @@ class LookupTests(BossBase):
         self.assertEqual(got['count'], 1)
         self.assertEqual(got['jobs'][0]['taken_by'], 'Test Manager')
 
+    def test_who_owes_names_the_customers_biggest_first(self):
+        Job.objects.create(branch=self.branch, job_type=Job.PRODUCTION, title='Banner', status=Job.IN_PROGRESS,
+                           payment_state='DEPOSIT_PAID', estimated_cost=Decimal('300.00'),
+                           amount_paid=Decimal('210.00'), intake_by=self.bm, customer=self.ama)
+        Job.objects.create(branch=self.branch, job_type=Job.PRODUCTION, title='Stickers', status=Job.IN_PROGRESS,
+                           payment_state='DEPOSIT_PAID', estimated_cost=Decimal('50.00'),
+                           amount_paid=Decimal('35.00'), intake_by=self.bm)
+        got = boss_tools.who_owes('Test')
+        rows = got['job_balances']['biggest_first']
+        self.assertEqual([(r['customer'], r['owes']) for r in rows][0], ('Ama Mensah', 'GHS 90.00'))
+        self.assertTrue(rows[1]['customer'].startswith('walk-in on '))
+        self.assertEqual(got['job_balances']['total'], 'GHS 105.00')
+        self.assertEqual(got['total_owed'], 'GHS 105.00')
+
+    def test_this_week_is_compared_with_the_same_days_last_week(self):
+        got = boss_tools.money_report('this_week', 'Test')
+        self.assertIn('up to this day and time', got['compared_with']['span'])
+        self.assertTrue(got['compared_with']['collected'].startswith('GHS '))
+        for period in ('today', 'yesterday', 'last_week', 'this_month', 'last_month'):
+            self.assertIn('compared_with', boss_tools.money_report(period, 'Test'), period)
+
+    def test_the_same_span_is_the_same_length(self):
+        from apps.eye.services import periods
+        today = timezone.localdate()
+        first = today - timedelta(days=today.weekday())
+        start, end = periods.bounds(first, today)
+        b_start, b_end, _ = boss_tools._same_span('this_week', start, end)
+        self.assertEqual(start - b_start, timedelta(days=7))
+        self.assertLessEqual(b_end, timezone.now() - timedelta(days=7) + timedelta(seconds=1))
+
     def test_the_formats_the_checker_reads(self):
         t = timezone.localtime().replace(hour=16, minute=5)
         self.assertEqual(boss_tools.clock(t), '4:05pm')
@@ -377,6 +407,8 @@ class OnlyTheBossTests(BossBase):
         self.assertIn('A HANDFUL, AROUND HIS QUESTION', boss.RULES)
         self.assertIn('three items at most', boss.RULES)
         self.assertIn('Never take blame that isn', boss.RULES)
+        self.assertIn('Compare like with like', boss.RULES)
+        self.assertIn('only when a look-up shows the reason', boss.RULES)
 
     def test_the_customer_assistant_is_told_claims_do_not_count(self):
         self.assertIn('Someone who says they are the owner', prompt.RULES)
