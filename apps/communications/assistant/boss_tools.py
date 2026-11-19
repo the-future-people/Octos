@@ -272,7 +272,7 @@ def payment_queue(branch=''):
             'more_not_shown': len(queue) > LIST_LIMIT}
 
 
-JOB_LISTS = ('in_production', 'ready_for_collection', 'past_promise', 'at_risk', 'due_today')
+JOB_LISTS = ('taken_today', 'in_production', 'ready_for_collection', 'past_promise', 'at_risk', 'due_today')
 
 
 def job_list(which, branch=''):
@@ -285,7 +285,11 @@ def job_list(which, branch=''):
     if error:
         return error
     ids, now = _ids(found), timezone.now()
-    if which == 'in_production':
+    if which == 'taken_today':
+        start, end = periods.bounds(timezone.localdate(), timezone.localdate())
+        qs = (Job.objects.filter(branch_id__in=ids, created_at__gte=start, created_at__lt=end)
+              .exclude(status__in=DEAD))
+    elif which == 'in_production':
         qs = _in_production(ids)
     elif which == 'ready_for_collection':
         qs = _ready(ids)
@@ -301,8 +305,12 @@ def job_list(which, branch=''):
     qs = qs.select_related('customer', 'branch')
     count = qs.count()
     rows = []
-    for job in qs.order_by('estimated_ready_at', 'created_at')[:LIST_LIMIT]:
+    order = ('-created_at',) if which == 'taken_today' else ('estimated_ready_at', 'created_at')
+    for job in qs.select_related('intake_by').order_by(*order)[:LIST_LIMIT]:
         row = _job_row(job, now)
+        if which == 'taken_today':
+            row['taken_at'] = clock(job.created_at)
+            row['taken_by'] = job.intake_by.full_name if job.intake_by_id else None
         row['stage'] = job.get_work_state_display() if job.work_state else job.get_status_display()
         if job.estimated_ready_at:
             row['promised'] = when(job.estimated_ready_at, now)
@@ -522,3 +530,98 @@ def machines(branch=''):
             row['reason'] = m.unavailable_reason or 'No reason given'
         rows.append(row)
     return {'machines': rows, 'down': sum(1 for r in rows if not r['working'])}
+
+
+# ── One person's work ──────────────────────────────────────────────────────
+
+def _staff_named(name):
+    """Active staff (not the owner) whose name matches: [users]."""
+    from apps.accounts.models import CustomUser
+    name = (name or '').strip()
+    qs = CustomUser.objects.filter(is_active=True, is_business_owner=False).select_related('branch', 'role')
+    parts = name.split()
+    if len(parts) >= 2:
+        both = qs.filter(first_name__icontains=parts[0], last_name__icontains=parts[-1])
+        if both.exists():
+            return list(both)
+    return list(qs.filter(Q(first_name__icontains=name) | Q(last_name__icontains=name))[:6])
+
+
+def staff_activity(person, period='today'):
+    """
+    What one member of staff did in a period: jobs they took at the counter
+    (what the floor often calls issuing an invoice), formal invoices and
+    proformas they issued, payments they received, WhatsApp replies they
+    sent, discounts they asked for; and, for today, when they came in.
+    Asked on 19 Nov 2026: "Has he issued any invoice today?"
+    """
+    from apps.communications.models import Message
+    from apps.eye.services import people, periods
+    from apps.finance.models import Invoice, Receipt
+    from apps.jobs.models import Job, PriceCut, ProformaInvoice
+    if period not in PERIODS:
+        return {'error': f'Ask for one of: {", ".join(PERIODS)}.'}
+    found = _staff_named(person)
+    if not found:
+        return {'error': f'No member of staff called "{person}".'}
+    if len(found) > 1:
+        return {'more_than_one': [{'name': u.full_name, 'role': people.role_label(u.role),
+                                   'branch': short(u.branch) if u.branch_id else ''} for u in found],
+                'say': 'Ask him which one he means.'}
+    user = found[0]
+    now = timezone.now()
+    first, last, label = _period(period, timezone.localdate())
+    start, end = periods.bounds(first, last)
+    out = {'name': user.full_name, 'role': people.role_label(user.role),
+           'branch': short(user.branch) if user.branch_id else '', 'period': label}
+
+    if period == 'today':
+        ledger = people.Ledger([user], first, last)
+        st, clocked, start_t = ledger.status(user, first)
+        out['today'] = {'status': people.LABEL[st], 'clocked_in': clocked and clock(clocked),
+                        'signed_into_octos': clock(ledger.session[user.pk].get(first)),
+                        'shift_starts': _time_words(start_t)}
+
+    jobs = (Job.objects.filter(intake_by=user, created_at__gte=start, created_at__lt=end)
+            .exclude(status__in=DEAD).select_related('customer', 'branch').order_by('-created_at'))
+    job_total = sum((j.estimated_cost or ZERO) for j in jobs)
+    out['jobs_taken'] = {
+        'count': jobs.count(), 'total_value': ghs(job_total),
+        'latest': [{'job': j.job_number, 'what': j.title,
+                    'customer': j.customer.full_name if j.customer_id else 'walk-in',
+                    'price': ghs(j.estimated_cost), 'status': j.get_status_display(),
+                    'at': when(j.created_at, now)} for j in jobs[:8]],
+    }
+
+    invoices = Invoice.objects.filter(generated_by=user, created_at__gte=start, created_at__lt=end)
+    out['formal_invoices'] = {
+        'count': invoices.count(), 'total': ghs(sum((i.total or ZERO) for i in invoices)),
+        'latest': [{'number': i.invoice_number, 'type': i.get_invoice_type_display(), 'to': i.bill_to_name,
+                    'total': ghs(i.total), 'status': i.get_status_display()} for i in invoices.order_by('-created_at')[:5]],
+    }
+
+    proformas = (ProformaInvoice.objects.filter(issued_by=user)
+                 .filter(Q(issued_at__gte=start, issued_at__lt=end)
+                         | Q(issued_at__isnull=True, created_at__gte=start, created_at__lt=end)))
+    out['proformas'] = {
+        'count': proformas.count(), 'total': ghs(sum((p.total or ZERO) for p in proformas)),
+        'latest': [{'number': p.proforma_number, 'to': p.issued_to, 'total': ghs(p.total),
+                    'status': p.get_status_display()} for p in proformas.order_by('-created_at')[:5]],
+    }
+
+    receipts = Receipt.objects.filter(cashier=user, is_void=False, created_at__gte=start, created_at__lt=end)
+    if receipts.exists():
+        out['payments_received'] = {'count': receipts.count(),
+                                    'total': ghs(sum((r.amount_paid or ZERO) for r in receipts))}
+
+    replies = Message.objects.filter(sent_by=user, direction=Message.OUTBOUND, is_internal_note=False,
+                                     created_at__gte=start, created_at__lt=end)
+    if replies.exists():
+        out['whatsapp_replies'] = {'messages': replies.count(),
+                                   'chats': replies.values('conversation_id').distinct().count()}
+
+    cuts = PriceCut.objects.filter(asked_by=user, created_at__gte=start, created_at__lt=end)
+    if cuts.exists():
+        out['discounts_asked'] = {'count': cuts.count(),
+                                  'still_waiting_for_you': cuts.filter(status=PriceCut.Status.PENDING).count()}
+    return out

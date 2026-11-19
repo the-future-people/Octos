@@ -188,6 +188,27 @@ class LookupTests(BossBase):
                                    body='Thank you. Is it ready?')
         self.assertEqual(waiting_since(chat), q.created_at)
 
+    def test_what_one_person_did_today(self):
+        Job.objects.create(branch=self.branch, job_type=Job.INSTANT, title='Photocopy', status=Job.PAID,
+                           estimated_cost=Decimal('6.00'), intake_by=self.attendant)
+        got = boss_tools.staff_activity('Test Attendant')
+        self.assertEqual((got['name'], got['period']), ('Test Attendant', 'today'))
+        self.assertEqual(got['jobs_taken']['count'], 1)
+        self.assertEqual(got['jobs_taken']['total_value'], 'GHS 6.00')
+        self.assertEqual(got['formal_invoices']['count'], 0)
+        self.assertEqual(got['proformas']['count'], 0)
+        self.assertIn('today', got)
+        self.assertNotIn('payments_received', got)
+        # "Test" matches several people: Octos asks which one.
+        self.assertIn('more_than_one', boss_tools.staff_activity('Test'))
+        self.assertIn('error', boss_tools.staff_activity('Nobody'))
+        self.assertIn('error', boss_tools.staff_activity('Test Attendant', 'fortnight'))
+
+    def test_todays_jobs_with_who_took_them(self):
+        got = boss_tools.job_list('taken_today', 'Test')
+        self.assertEqual(got['count'], 1)
+        self.assertEqual(got['jobs'][0]['taken_by'], 'Test Manager')
+
     def test_the_formats_the_checker_reads(self):
         t = timezone.localtime().replace(hour=16, minute=5)
         self.assertEqual(boss_tools.clock(t), '4:05pm')

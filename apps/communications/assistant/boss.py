@@ -97,7 +97,8 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, production, money, any job or customer, WhatsApp chats and what customers said, machines, discounts waiting.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
+- "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you).
 - For now you only look and report. You cannot message customers or staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks you to do something, tell him straight that you can only look and report for now, and say what he can do instead. Never pretend you did it.
 
@@ -178,7 +179,8 @@ TOOL_SPECS = [
      'description': 'Jobs waiting at the cashier to be paid for, oldest first, with how long each has waited.',
      'input_schema': {'type': 'object', 'properties': BRANCH}},
     {'name': 'job_list',
-     'description': 'Live jobs of one kind, soonest promise first.',
+     'description': ("Jobs of one kind: 'taken_today' (every job taken today, newest first, with who took it) "
+                     'or live jobs in production, ready, past promise, at risk or due today, soonest first.'),
      'input_schema': {'type': 'object', 'properties': {
          'which': {'type': 'string', 'enum': list(look.JOB_LISTS)}, **BRANCH}, 'required': ['which']}},
     {'name': 'find_job',
@@ -202,6 +204,14 @@ TOOL_SPECS = [
                      "the customer's name."),
      'input_schema': {'type': 'object', 'properties': {
          'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'}}}},
+    {'name': 'staff_activity',
+     'description': ("What one member of staff did in a period: when they came in (today), jobs they took at "
+                     "the counter (often called issuing an invoice on the floor), formal invoices and "
+                     "proformas they issued, payments they received, WhatsApp replies, discounts asked for. "
+                     'By name.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'person': {'type': 'string'}, 'period': {'type': 'string', 'enum': list(look.PERIODS)}},
+         'required': ['person']}},
     {'name': 'machines',
      'description': 'Which machines are working and which are down, since when and why.',
      'input_schema': {'type': 'object', 'properties': BRANCH}},
@@ -238,6 +248,8 @@ def _run_tool(name, args, sent):
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
+    if name == 'staff_activity':
+        return look.staff_activity(str(args.get('person') or ''), args.get('period') or 'today')
     if name == 'waiting_for_you':
         from apps.communications.services import owner_line
         mark = _last_out()
