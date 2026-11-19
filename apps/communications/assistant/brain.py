@@ -153,13 +153,29 @@ TOOL_SPECS = [
                         "how we print each one (smaller than A4 is printed on A4 and cut to size, priced as A4 "
                         "printing per sheet), how many fit on one A4 sheet and, with copies, how many A4 sheets "
                         "that takes. show_picture sends the customer a picture of the sizes drawn to scale "
-                        "against an A4 sheet: use it when they ask what a size looks like, or which is bigger."),
+                        "against an A4 sheet and a phone: use it when they ask what a size looks like or which "
+                        "is bigger, and there is no photo of theirs to preview (then use print_preview)."),
         'input_schema': {'type': 'object', 'properties': {
             'sizes': {'type': 'array', 'items': {'type': 'string'},
                       'description': 'e.g. ["B6"], ["A5", "A6"], ["4 x 6"], ["half A4"]'},
             'copies': {'type': 'integer', 'minimum': 1},
             'show_picture': {'type': 'boolean'},
         }, 'required': ['sizes']},
+    },
+    {
+        'name': 'print_preview',
+        'description': ("Shows the customer how their own photo will print: the photo laid out on the sheet "
+                        "at the size they chose (as many as fit, cut lines dotted in) and the piece they take "
+                        "home, with a phone beside it for scale. Use it when they ask how it will look, or "
+                        "once they've chosen a size for a photo. file is the photo's file number from the "
+                        "chat. fill true trims the edges so the photo fills the piece; false keeps the whole "
+                        "photo with white edges. Photos only (not PDFs or Word files)."),
+        'input_schema': {'type': 'object', 'properties': {
+            'file': {'type': 'integer'},
+            'size': {'type': 'string', 'description': 'e.g. "A5", "B6", "4 x 6", "A4"'},
+            'copies': {'type': 'integer', 'minimum': 1},
+            'fill': {'type': 'boolean'},
+        }, 'required': ['file', 'size']},
     },
     {
         'name': 'send_proforma',
@@ -589,6 +605,8 @@ def _run_tool(name, args, ctx):
         return {'saved': customer.display_name, 'say': 'Thank them warmly: they are now known to us.'}
     if name == 'paper_sizes':
         return _paper_sizes(ctx, args)
+    if name == 'print_preview':
+        return _print_preview(ctx, args)
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
@@ -621,17 +639,45 @@ def _paper_sizes(ctx, args):
     if picture is None:
         result['picture'] = 'None of these sizes is known, so no picture.'
         return result
+    result['picture'] = _send_picture(ctx, picture, 'Drawn to scale, with a phone for size 📏', 'paper-sizes.png')
+    return result
+
+
+def _send_picture(ctx, picture, caption, filename):
+    """A picture into the customer's chat, live only. Returns what to tell the model."""
     if settings.OCTOS_ASSISTANT_MODE != 'live':
-        result['picture'] = 'Shadow mode: the picture would be sent here.'
-        return result
+        return 'Shadow mode: the picture would be sent here.'
     from apps.communications.services import whatsapp_outbound
     try:
-        whatsapp_outbound.send_text(ctx.conversation, 'Drawn to scale, against an A4 sheet 📏',
-                                    image=picture, filename='paper-sizes.png')
-        result['picture'] = 'Sent in the chat just now. Refer to it briefly; do not describe it line by line.'
+        whatsapp_outbound.send_text(ctx.conversation, caption, image=picture, filename=filename)
     except Exception:
-        logger.exception('Could not send the paper sizes picture')
-        result['picture'] = 'Could not be sent. Describe the sizes in words instead.'
+        logger.exception('Could not send %s', filename)
+        return 'Could not be sent. Describe it in words instead.'
+    return ('Sent in the chat just now, with the caption "' + caption + '". Don\'t repeat what the caption '
+            'or the picture says; add only what they need next, in a line or two.')
+
+
+def _print_preview(ctx, args):
+    """
+    Their own photo, laid out as it will print (19 Nov 2026). A tester asked
+    "How would it look like??" and got a chart of paper sizes; what she
+    meant was her photo.
+    """
+    from apps.communications.assistant import paper
+    message = ctx.conversation.messages.filter(pk=args.get('file'), direction=Message.INBOUND).first()
+    if message is None:
+        return {'error': 'That file is not one this customer sent here.'}
+    if not message.media_file:
+        return {'error': 'The file is still being saved. Try again in a moment.'}
+    if message.message_type != Message.IMAGE and not (message.media_mime or '').startswith('image/'):
+        return {'error': 'A preview works for photos only. For a document, use paper_sizes to show the size.'}
+    with message.media_file.open('rb') as handle:
+        content = handle.read()
+    picture, result = paper.preview(content, str(args.get('size') or ''), args.get('copies') or 1,
+                                    bool(args.get('fill')))
+    if picture is None:
+        return result
+    result['picture'] = _send_picture(ctx, picture, 'Here’s how it will print 👇', 'print-preview.png')
     return result
 
 

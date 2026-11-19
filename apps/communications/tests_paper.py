@@ -7,7 +7,11 @@ Every size below A4 is printed on A4 and cut; photos usually go on normal
 paper, not photo paper.
 """
 from datetime import timedelta
+from io import BytesIO
 from unittest.mock import patch
+
+from django.core.files.base import ContentFile
+from PIL import Image
 
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -59,6 +63,45 @@ class SizeTests(SimpleTestCase):
         self.assertIsNone(paper.render(['huge']))
 
 
+def photo_bytes(w=900, h=1600):
+    buf = BytesIO()
+    Image.new('RGB', (w, h), (70, 130, 180)).save(buf, 'JPEG')
+    return buf.getvalue()
+
+
+class PreviewTests(SimpleTestCase):
+
+    def test_their_photo_on_the_sheet_with_the_piece_beside_it(self):
+        png, got = paper.preview(photo_bytes(), 'A5', copies=4)
+        self.assertTrue(png.startswith(b'\x89PNG'))
+        self.assertEqual((got['sheet'], got['fit_on_one_sheet'], got['sheets_needed']), ('A4', 2, 2))
+
+    def test_a_photo_the_wrong_shape_is_flagged_so_octos_can_ask(self):
+        _, tall = paper.preview(photo_bytes(900, 1600), 'A5')          # a 9:16 phone photo
+        self.assertTrue(tall['photo_shape_differs'])
+        self.assertIn('white edges', tall['say'])
+        _, close = paper.preview(photo_bytes(1480, 2100), 'A5')        # A5's own shape
+        self.assertFalse(close['photo_shape_differs'])
+        self.assertNotIn('say', close)
+
+    def test_fill_trims_the_edges(self):
+        _, got = paper.preview(photo_bytes(), 'B6', fill=True)
+        self.assertEqual(got['shown'], 'filling the piece, edges trimmed')
+
+    def test_whole_sheets_and_a3(self):
+        self.assertEqual(paper.preview(photo_bytes(), 'A4')[1]['fit_on_one_sheet'], 1)
+        self.assertEqual(paper.preview(photo_bytes(), 'A3')[1]['sheet'], 'A3')
+
+    def test_what_it_cannot_draw(self):
+        self.assertIn('error', paper.preview(b'not a photo', 'A5')[1])
+        self.assertIn('error', paper.preview(photo_bytes(), 'huge')[1])
+        self.assertIn('large format', paper.preview(photo_bytes(), 'A2')[1]['error'])
+
+    def test_the_layout_turns_pieces_to_fit_most(self):
+        self.assertEqual(paper._layout(148, 210, paper.A4), (210, 148, 1, 2))   # A5: two, turned
+        self.assertEqual(paper._layout(105, 148, paper.A4), (105, 148, 2, 2))   # A6: four, upright
+
+
 class RulesTests(SimpleTestCase):
 
     def test_octos_talks_about_paper_in_everyday_words(self):
@@ -70,8 +113,16 @@ class RulesTests(SimpleTestCase):
         self.assertIn('A photo is not a photo-paper job by default', prompt.RULES)
         self.assertIn('"On normal paper, or glossy photo paper?"', prompt.RULES)
 
-    def test_the_tool_is_offered(self):
-        self.assertIn('paper_sizes', [t['name'] for t in brain.TOOL_SPECS])
+    def test_the_tools_are_offered(self):
+        names = [t['name'] for t in brain.TOOL_SPECS]
+        self.assertIn('paper_sizes', names)
+        self.assertIn('print_preview', names)
+
+    def test_the_fixes_from_the_testers_chat(self):
+        self.assertIn('Never promise how a print will come out', prompt.RULES)
+        self.assertIn('never repeat its caption', prompt.RULES)
+        self.assertIn('"Take your time 😊 Just say yes when you\'re ready."', prompt.RULES)
+        self.assertIn('show them with print_preview', prompt.RULES)
 
 
 class PictureInTheChatTests(TestCase):
@@ -102,3 +153,42 @@ class PictureInTheChatTests(TestCase):
         got = brain._run_tool('paper_sizes', {'sizes': ['A6'], 'copies': 10}, self.ctx)
         self.assertNotIn('picture', got)
         self.assertEqual(got['sizes'][0]['a4_sheets_needed'], 3)
+
+
+class PreviewInTheChatTests(TestCase):
+
+    def setUp(self):
+        branch = make_org()
+        self.conv = make_conversation(None, contact_phone=PHONE)
+        customer_wrote(self.conv, timedelta(seconds=30))
+        self.ctx = brain.Context(conversation=self.conv, branches=[branch])
+        self.photo = Message.objects.create(conversation=self.conv, direction=Message.INBOUND,
+                                            channel=Message.WHATSAPP, message_type=Message.IMAGE,
+                                            media_mime='image/jpeg', media_name='me.jpg')
+        self.photo.media_file.save('me.jpg', ContentFile(photo_bytes()), save=True)
+
+    @override_settings(OCTOS_ASSISTANT_MODE='live')
+    def test_live_their_preview_goes_into_the_chat(self):
+        with patch('apps.communications.tasks.deliver_whatsapp.delay'), \
+                self.captureOnCommitCallbacks(execute=True):
+            got = brain._run_tool('print_preview', {'file': self.photo.pk, 'size': 'A5', 'copies': 4}, self.ctx)
+        self.assertIn('Sent in the chat', got['picture'])
+        self.assertEqual(got['sheets_needed'], 2)
+        sent = Message.objects.filter(conversation=self.conv, direction=Message.OUTBOUND).get()
+        self.assertEqual((sent.message_type, sent.media_name), (Message.IMAGE, 'print-preview.png'))
+
+    @override_settings(OCTOS_ASSISTANT_MODE='shadow')
+    def test_in_shadow_the_preview_is_not_sent(self):
+        got = brain._run_tool('print_preview', {'file': self.photo.pk, 'size': 'A5'}, self.ctx)
+        self.assertIn('Shadow mode', got['picture'])
+        self.assertFalse(Message.objects.filter(conversation=self.conv, direction=Message.OUTBOUND).exists())
+
+    def test_only_their_own_photos(self):
+        doc = Message.objects.create(conversation=self.conv, direction=Message.INBOUND, channel=Message.WHATSAPP,
+                                     message_type=Message.DOCUMENT, media_mime='application/pdf',
+                                     media_name='cv.pdf')
+        doc.media_file.save('cv.pdf', ContentFile(b'%PDF-1.4'), save=True)
+        self.assertIn('photos only', brain._run_tool('print_preview', {'file': doc.pk, 'size': 'A5'},
+                                                     self.ctx)['error'])
+        self.assertIn('not one this customer sent',
+                      brain._run_tool('print_preview', {'file': 999999, 'size': 'A5'}, self.ctx)['error'])

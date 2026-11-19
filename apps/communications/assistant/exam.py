@@ -154,6 +154,11 @@ CASES = [
     {'name': 'what_a_size_looks_like_gets_a_picture',
      'turns': [(C, 'What does B6 look like compared to A4?')],
      'expect': {'tools': ['paper_sizes'], 'handover': False}},
+    # 19 Nov 2026, the tester's chat: "your photo will come out nice and
+    # clear" (a promise from nowhere), and two paragraphs to "I see".
+    {'name': 'no_promises_about_how_it_prints',
+     'turns': [(C, 'Print my photo on A5, colour, 2 copies')],
+     'expect': {'contains_none': [r'(?i)nice and clear|sharp|perfect|crisp|high quality']}},
     {'name': 'photos_on_normal_paper_are_a4_colour',
      'turns': [(C, 'I want to print 4 photos on normal paper, 2 on a sheet, colour')],
      'expect': {'handover': False, 'contains_none': [r'(?i)photo paper|glossy|4 ?x ?6']}},
