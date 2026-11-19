@@ -38,6 +38,9 @@ class OwnerMessage(models.Model):
     key       = models.CharField(max_length=120, null=True, blank=True, unique=True)
     # What it is about, to tell at sending time whether it still matters ('cut:12').
     ref       = models.CharField(max_length=60, blank=True)
+    # Words Octos wrote for a customer, waiting for the owner's Send or Cancel
+    # (ref 'say:<conversation id>'). Cleared once sent or cancelled.
+    draft     = models.TextField(blank=True)
     # The button the owner tapped, on an incoming message.
     reply_id  = models.CharField(max_length=120, blank=True)
     external_id = models.CharField(max_length=128, null=True, blank=True, unique=True)

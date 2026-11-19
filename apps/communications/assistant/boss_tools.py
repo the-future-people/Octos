@@ -526,8 +526,8 @@ def _handler(conversation):
         who = conversation.assigned_to.full_name if conversation.assigned_to_id else 'a person'
         return f'{who} (took it {when(conversation.handled_since)})' if conversation.handled_since else who
     if conversation.handoff_reason:
-        return f'Octos, asking for a person: {conversation.handoff_reason}'
-    return 'Octos'
+        return f'you (Octos), asking for a person: {conversation.handoff_reason}'
+    return 'you (Octos)'
 
 
 def _said(message):
@@ -605,7 +605,7 @@ def read_chat(chat_id=None, customer=''):
         elif m.sent_by_id:
             who = m.sent_by.full_name
         else:
-            who = 'Octos'
+            who = 'you (Octos)'
         lines.append({'at': when(m.created_at, now), 'from': who, 'said': _said(m)})
     return {'chat_id': c.pk, 'customer': c.display_name, 'handled_by': _handler(c), 'messages': lines}
 

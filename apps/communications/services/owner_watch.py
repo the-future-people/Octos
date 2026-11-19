@@ -11,9 +11,13 @@ bit." Octos could only look. Now, on his word, it can:
                  they said and how it was answered
   check_later    come back in N minutes, look, and report
 
-Octos still never writes to a customer in the owner's words, and changes no
-job: the customer's answer comes from the customer assistant, under all of
-its own rules.
+  send_for_owner the owner's own words to a customer, word for word, from
+                 him: the inbox shows them as his
+  draft_for_owner words Octos wrote for him to send: they wait on his line
+                 with Send and Cancel, and nothing goes until he taps Send
+
+Octos changes no job. Anything it says to a customer on its own comes from
+the customer assistant, under all of its own rules.
 """
 import logging
 import re
@@ -53,7 +57,7 @@ def answer_now(conversation):
             wake_octos(conversation, last)
     result = {'answered': waiting, 'was_with': was_with}
     if not waiting:
-        result['say'] = ('The customer is not waiting: the last word in the chat is ours. Octos has the chat '
+        result['say'] = ('The customer is not waiting: the last word in the chat is ours. You have the chat '
                          'now and will answer their next message.' if was_with else
                          'The customer is not waiting: the last word in the chat is ours.')
     return result
@@ -121,7 +125,7 @@ def report(conversation_id, trigger_id):
 
 def _report_body(conversation, rows):
     name = conversation.display_name
-    lines = [f'👀 *{name} replied*']
+    lines = [f'👀 *{name}*', f'_{name} said:_']
     last_in = max(i for i, m in enumerate(rows) if m.direction == Message.INBOUND)
     files = 0
     said = []
@@ -139,16 +143,24 @@ def _report_body(conversation, rows):
     answers = [m for m in rows[last_in + 1:] if m.direction == Message.OUTBOUND]
     lines.append('')
     if answers:
+        # One Octos (19 Nov 2026): what Octos said to the customer, it says to
+        # the owner as "I". A person's answer goes under their name.
         last = answers[-1]
-        who = last.sent_by.first_name if last.sent_by_id else 'Octos'
+        who = 'I' if not last.sent_by_id else ('You' if _is_owner(last.sent_by) else last.sent_by.first_name)
         text = _clip(last.body) if last.body else ('a picture' if last.message_type == Message.IMAGE else 'a file')
-        lines += [f'_{who} answered:_', f'> {text}']
+        lines += [f'_{who} replied:_', f'> {text}']
     elif conversation.handled_by == Conversation.STAFF:
         who = conversation.assigned_to.first_name if conversation.assigned_to_id else 'A person'
-        lines.append(f'_{who} has the chat and hasn\'t answered yet._')
+        lines.append(f'_{who} has the chat and hasn\'t replied yet._')
     else:
-        lines.append('_Not answered yet._')
+        lines.append("_I haven't replied yet._")
     return '\n'.join(lines)
+
+
+def _is_owner(user):
+    from apps.communications.services.owner_line import owner_user
+    owner = owner_user()
+    return owner is not None and user.pk == owner.pk
 
 
 def _clip(text, limit=200):
@@ -163,3 +175,46 @@ def check_later(minutes, what):
     set_at = timezone.now().isoformat()
     owner_check_later.apply_async((what[:300], set_at), countdown=minutes * 60)
     return minutes
+
+
+def send_for_owner(conversation, words):
+    """
+    The owner's words to a customer, as written, from him. A person who had
+    the chat hands it back first, so nobody answers over him; Octos then
+    answers the customer's next message, with his words in front of it.
+    Returns {'sent': bool, 'say': what to tell him}.
+    """
+    from apps.communications.services import handover, whatsapp_outbound
+    from apps.communications.services.owner_line import owner_user
+    owner = owner_user()
+    name = conversation.display_name
+    words = (words or '').strip()
+    if not words:
+        return {'sent': False, 'say': 'There was nothing to send.'}
+    if not whatsapp_outbound.window_open(conversation):
+        return {'sent': False, 'say': (f"I can't send it: {name} last wrote more than 24 hours ago, so "
+                                       'WhatsApp only allows an approved template. Someone could call them.')}
+    if conversation.handled_by == Conversation.STAFF:
+        handover.hand_back(conversation, user=owner)
+    try:
+        whatsapp_outbound.send_text(conversation, words, sent_by=owner)
+    except whatsapp_outbound.WindowClosed:
+        return {'sent': False, 'say': f"I can't send it: {name}'s WhatsApp window has just closed."}
+    return {'sent': True, 'say': f'Sent to {name} ✅'}
+
+
+def draft_for_owner(conversation, words):
+    """Words Octos wrote for the owner to send: shown to him with Send and Cancel."""
+    from apps.communications.models import OwnerMessage
+    from apps.communications.services import owner_line
+    name = conversation.display_name
+    words = (words or '').strip()
+    OwnerMessage.objects.filter(direction=OwnerMessage.OUT, ref=f'say:{conversation.pk}').exclude(draft='') \
+        .update(draft='')                  # one draft per chat: the newest
+    body = f'✍️ *To {name}:*\n\n' + '\n'.join(f'> {line}' if line else '>' for line in words.splitlines())
+    m = owner_line.tell(OwnerMessage.ANSWER, body, ref=f'say:{conversation.pk}',
+                        buttons=[{'id': f'say:send:{conversation.pk}', 'title': 'Send'},
+                                 {'id': f'say:cancel:{conversation.pk}', 'title': 'Cancel'}])
+    if m is not None:
+        OwnerMessage.objects.filter(pk=m.pk).update(draft=words)
+    return m

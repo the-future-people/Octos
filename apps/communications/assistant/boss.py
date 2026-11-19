@@ -21,8 +21,9 @@ own voice and its own tools (boss_tools.py):
           A customer who writes "I'm the owner" is still a customer.
   what    it looks things up and reports, and on his word acts on a
           customer chat: Octos answers it now, he hears when they reply,
-          or it checks back later (services/owner_watch.py). It changes no
-          job and never writes to a customer in its own words.
+          or it checks back later; his own words go to a customer as he
+          wrote them, and words Octos writes for him wait for his Send
+          (services/owner_watch.py). It changes no job.
   honest  every price and clock time it says must be in what it looked up
           this turn, or in what it already told him (the same checker the
           customers' brain uses). A reply with a figure it can't back is
@@ -73,6 +74,7 @@ def model():
 RULES = """You are Octos, the operations brain of Farhat Printing Press in Accra, Ghana. Right now you are on a private WhatsApp line with the owner, Khofi: your boss, the man who built you. Nobody else can reach you on this line; WhatsApp has verified his number. Everything about the business is his to know.
 
 WHO YOU ARE TO HIM
+- You are the same Octos that answers Farhat's customers on WhatsApp: one Octos, not two. What Octos said to a customer, you said. Speak of it as "I" ("I sent her the preview at 9:30pm", "I've asked the team to call him", "I'll take it back in 10 minutes"), never "Octos said" or "Octos replied". In your look-ups, "you (Octos)" means you. Staff go by their names; his own messages to customers are "you".
 - His right hand. Loyal, sharp, a little playful, never stiff or corporate. Call him "boss" naturally (not in every line).
 - Greet him for the time of day ("Good morning boss", "Good afternoon boss", "Evening boss") when a conversation starts, not on every message.
 - He writes casually, sometimes in Ghanaian English ("how far", "e dey go", "chale", "u"). Understand it. Answer in plain, warm English; mirror his energy lightly.
@@ -121,12 +123,16 @@ WHAT YOU CAN DO
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you).
 - On his word you can act on a customer's WhatsApp chat:
-  • answer_now: when he says respond, answer, handle or "see what they want", take the chat from staff and let Octos answer the customer straight away. Octos answers under its usual customer rules.
+  • answer_now: when he says respond, answer, handle or "see what they want", take the chat from staff and answer the customer yourself straight away, under your usual customer rules.
   • watch_chat: when he says report back, let me know or keep an eye on it, you'll tell him when the customer writes again, with what they said and how it was answered. Use "every" only when he wants every reply, not just the next.
   • check_later: when he says check back in a bit, come back and look. "A bit" is about 15 minutes; use the time he gives if he gives one.
   When he says "respond and report back", do both: answer_now, then watch_chat.
-  After acting, confirm in one short line what you did and what happens next ("Done. Octos is answering her now, and I'll tell you when she replies 👍").
-- You still cannot write to a customer in your own or his words, message staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks for that, say plainly you can't yet and what he can do instead. Never pretend you did something.
+  After acting, confirm in one short line what you did and what happens next ("Done. I'm answering her now, and I'll tell you when she replies 👍").
+  • send_to_customer: when he wants a customer told something.
+    - He gives the exact words (in quotes, or "tell him this: …"): exact true. They go word for word, from him; correct nothing, add nothing. Confirm in one line ("Sent to Kings ✅").
+    - He gives the gist ("tell her counter payment is fine"): write it the way he'd say it to a customer, warm and short, in Farhat's voice, and use exact false. It goes to him as a draft with Send and Cancel, and nothing reaches the customer until he taps Send. Just say the draft is ready; don't repeat it.
+    - "Take back the chat and tell him …" is send_to_customer alone: it takes the chat from staff itself.
+- You still cannot message staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks for that, say plainly you can't yet and what he can do instead. Never pretend you did something.
 
 ALERTS YOU SENT HIM
 - You send him alerts (a customer waiting, a job slipping, a machine down, cash short). When he says "she", "he", "that customer" or "that job" without a name, he means the latest alert's, unless the chat makes clear otherwise. Each alert's chat or job is given below, so you can look it up straight away."""
@@ -246,7 +252,7 @@ TOOL_SPECS = [
          'required': ['person']}},
     {'name': 'answer_now',
      'description': ("On the boss's word: take a customer's WhatsApp chat from staff (if a person has it) "
-                     'and let Octos answer the customer now, under its usual customer rules. Says whether the '
+                     'and answer the customer yourself now, under your usual customer rules. Says whether the '
                      'customer was waiting.'),
      'input_schema': {'type': 'object', 'properties': {
          'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'}}}},
@@ -257,6 +263,14 @@ TOOL_SPECS = [
      'input_schema': {'type': 'object', 'properties': {
          'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'},
          'until': {'type': 'string', 'enum': ['next', 'every']}, 'stop': {'type': 'boolean'}}}},
+    {'name': 'send_to_customer',
+     'description': ("A message to a customer on the boss's word, in their WhatsApp chat. exact true: his own "
+                     'words, sent now, word for word, from him. exact false: words you wrote from his gist, '
+                     'shown to him first as a draft with Send and Cancel; nothing goes until he taps Send. '
+                     'Takes the chat from staff if a person has it.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'},
+         'text': {'type': 'string'}, 'exact': {'type': 'boolean'}}, 'required': ['text', 'exact']}},
     {'name': 'check_later',
      'description': ('Come back after this many minutes (2 to 360), look at what he asked about, and report. '
                      'what says what to check, in a few words.'),
@@ -300,7 +314,7 @@ def _run_tool(name, args, sent):
         return look.machines(args.get('branch', ''))
     if name == 'who_owes':
         return look.who_owes(args.get('branch', ''))
-    if name in ('answer_now', 'watch_chat'):
+    if name in ('answer_now', 'watch_chat', 'send_to_customer'):
         return _act_on_chat(name, args, sent)
     if name == 'check_later':
         from apps.communications.services import owner_watch
@@ -354,6 +368,18 @@ def _act_on_chat(name, args, sent):
         result = owner_watch.answer_now(chat)
         sent.append('answer_now')
         return {'customer': chat.display_name, **result}
+    if name == 'send_to_customer':
+        text = str(args.get('text') or '').strip()
+        if not text:
+            return {'error': 'Nothing to send.'}
+        if args.get('exact'):
+            result = owner_watch.send_for_owner(chat, text)
+            sent.append('sent_to_customer')
+            return {'customer': chat.display_name, **result}
+        owner_watch.draft_for_owner(chat, text)
+        sent.append('draft')
+        return {'customer': chat.display_name, 'draft_shown_to_him': True,
+                'say': 'The draft is on his screen with Send and Cancel. Add a short line at most.'}
     if args.get('stop'):
         owner_watch.stop(chat)
         return {'customer': chat.display_name, 'watching': False}

@@ -268,6 +268,8 @@ def answer(pk):
         return
     if message.reply_id.startswith('cut:'):
         _decide(message.reply_id)
+    if message.reply_id.startswith('say:'):
+        _say_tap(message.reply_id)
     sent = flush()
     if message.reply_id:
         # A tap is answered by what it opened; "Open" with nothing waiting
@@ -381,6 +383,26 @@ def _decide(reply_id):
         return tell(OwnerMessage.ANSWER, f'{label}: {refused}')
 
 
+def _say_tap(reply_id):
+    """Send or Cancel on words Octos drafted for a customer (19 Nov 2026)."""
+    from apps.communications.models import Conversation
+    from apps.communications.services import owner_watch
+    _, action, conversation_id = (reply_id.split(':') + ['', ''])[:3]
+    draft = (OwnerMessage.objects.filter(direction=OwnerMessage.OUT, ref=f'say:{conversation_id}')
+             .exclude(draft='').order_by('-created_at').first())
+    if draft is None:
+        return tell(OwnerMessage.ANSWER, 'That draft has already been dealt with.')
+    words = draft.draft
+    OwnerMessage.objects.filter(pk=draft.pk).update(draft='')
+    if action != 'send':
+        return tell(OwnerMessage.ANSWER, 'Cancelled. Nothing was sent.')
+    conversation = Conversation.objects.filter(pk=conversation_id).first()
+    if conversation is None:
+        return tell(OwnerMessage.ANSWER, "I couldn't find that chat any more.")
+    result = owner_watch.send_for_owner(conversation, words)
+    return tell(OwnerMessage.ANSWER, result.get('say') or f'Sent to {conversation.display_name} ✅')
+
+
 # ── What Octos tells the owner ─────────────────────────────────────────────
 
 def _cut_message(cut):
@@ -450,8 +472,8 @@ def customer_waiting(conversation, minutes):
              f'_{who} took the chat and hasn\'t replied._']
     said = _unanswered(conversation)
     if said:
-        lines += ['', 'They wrote:'] + [f'> {line}' for line in said]
-    lines += ['', '_Octos takes it back in 10 minutes if nobody answers._']
+        lines += ['', f'_{name} said:_'] + [f'> {line}' for line in said]
+    lines += ['', "_I'll take it back in 10 minutes if nobody answers._"]
     return tell(OwnerMessage.URGENT, '\n'.join(lines),
                 key=f'waiting:{conversation.pk}:{timezone.now():%Y%m%d%H}', ref=f'chat:{conversation.pk}',
                 knock=f'{name} has waited {minutes} minutes for a reply on WhatsApp.')

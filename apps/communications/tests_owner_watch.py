@@ -13,7 +13,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from apps.communications.assistant import boss
-from apps.communications.models import Conversation, Message, OwnerWatch
+from apps.communications.models import Conversation, Message, OwnerMessage, OwnerWatch
 from apps.communications.services import owner_watch
 from apps.communications.tests_owner_boss import BossBase, looks, model, said, turn
 from apps.communications.tests_owner_line import meta
@@ -86,9 +86,9 @@ class WatchTests(ChatBase):
         with meta() as m, self.captureOnCommitCallbacks(execute=True):
             owner_watch.report(self.chat.pk, reply.pk)
         body = m.text.call_args.args[1]
-        self.assertIn('👀 *Ama Mensah replied*', body)
-        self.assertIn('> Whole photo is fine', body)
-        self.assertIn('_Octos answered:_\n> Great! Here is your payment link', body)
+        # One Octos: the customer's words, then "I replied" (19 Nov 2026).
+        self.assertIn('👀 *Ama Mensah*\n_Ama Mensah said:_\n> Whole photo is fine', body)
+        self.assertIn('_I replied:_\n> Great! Here is your payment link', body)
         self.assertNotIn('How will it come out', body)       # already there before the watch
         self.assertIsNotNone(OwnerWatch.objects.get().done_at)  # 'next': one report, then done
 
@@ -107,7 +107,7 @@ class WatchTests(ChatBase):
         body = m.text.call_args.args[1]
         self.assertIn('> Sending another photo\n> 📎 1 file', body)
         self.assertNotIn('> ok', body)
-        self.assertIn("Test has the chat and hasn't answered yet", body)
+        self.assertIn("Test has the chat and hasn't replied yet", body)
 
     def test_a_burst_reports_once_from_the_last_message(self):
         owner_watch.watch(self.chat)
@@ -168,7 +168,7 @@ class OnHisWordTests(ChatBase):
         fake, use = model(
             turn(said('On it 👀'), looks('answer_now', chat_id=self.chat.pk),
                  looks('watch_chat', 2, chat_id=self.chat.pk)),
-            turn(said("Done. Octos is answering her now, and I'll tell you when she replies 👍")),
+            turn(said("Done. I'm answering her now, and I'll tell you when she replies 👍")),
         )
         with patch('apps.communications.tasks.answer_whatsapp.apply_async') as answer:
             m = self.talk('Respond to the message and see what he wants. Report back', use)
@@ -189,7 +189,7 @@ class OnHisWordTests(ChatBase):
     def test_the_rules_say_what_he_can_now_ask(self):
         self.assertIn('answer_now: when he says respond', boss.RULES)
         self.assertIn('do both: answer_now, then watch_chat', boss.RULES)
-        self.assertIn('cannot write to a customer in your own or his words', boss.RULES)
+        self.assertIn('You still cannot message staff', boss.RULES)
         names = {t['name'] for t in boss.TOOL_SPECS}
         self.assertTrue({'answer_now', 'watch_chat', 'check_later'} <= names)
 
@@ -204,3 +204,86 @@ class WebhookWatchTests(WebhookTestCase):
         wrote.assert_called_once()
         conversation, message = wrote.call_args.args
         self.assertEqual(message.body, 'Whole photo is fine')
+
+
+
+class YourWordsTests(ChatBase):
+
+    def window(self):
+        """The customer wrote just now (setUp): the 24-hour window is open."""
+
+    def tap(self, reply_id):
+        self.said(reply_id=reply_id)
+
+    def test_his_exact_words_go_from_him_and_the_chat_comes_back(self):
+        self.window()
+        with patch('apps.communications.tasks.deliver_whatsapp.delay'), \
+                self.captureOnCommitCallbacks(execute=True):
+            got = owner_watch.send_for_owner(self.chat, 'Payment at the counter is also fine Kings')
+        self.assertEqual(got, {'sent': True, 'say': 'Sent to Ama Mensah ✅'})
+        out = Message.objects.filter(conversation=self.chat, direction=Message.OUTBOUND).latest('pk')
+        self.assertEqual((out.body, out.sent_by), ('Payment at the counter is also fine Kings', self.owner))
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.handled_by, Conversation.OCTOS)   # nobody answers over him
+
+    def test_window_shut_nothing_is_sent_and_he_is_told(self):
+        Message.objects.filter(conversation=self.chat).update(created_at=timezone.now() - timedelta(hours=30))
+        got = owner_watch.send_for_owner(self.chat, 'Hello')
+        self.assertFalse(got['sent'])
+        self.assertIn('more than 24 hours ago', got['say'])
+
+    def test_octos_words_wait_for_his_send(self):
+        mine = Message.objects.filter(conversation=self.chat, sent_by=self.owner, is_internal_note=False)
+        with meta() as m, patch('apps.communications.tasks.deliver_whatsapp.delay'):
+            with self.captureOnCommitCallbacks(execute=True):
+                owner_watch.draft_for_owner(self.chat, 'No problem Kings, pay at the counter in the morning 😊')
+            draft = OwnerMessage.objects.get(ref=f'say:{self.chat.pk}')
+            self.assertEqual(draft.draft, 'No problem Kings, pay at the counter in the morning 😊')
+            self.assertEqual([b['title'] for b in draft.buttons], ['Send', 'Cancel'])
+            self.assertIn('To Ama Mensah', m.buttons.call_args.args[1])
+            self.assertFalse(mine.exists())               # nothing goes before his tap
+
+            self.tap(f'say:send:{self.chat.pk}')
+            self.assertEqual(mine.get().body, 'No problem Kings, pay at the counter in the morning 😊')
+            self.assertIn('Sent to Ama Mensah ✅', m.text.call_args.args[1])
+
+            self.tap(f'say:send:{self.chat.pk}')          # a second tap sends nothing
+            self.assertEqual(mine.count(), 1)
+            self.assertIn('already been dealt with', m.text.call_args.args[1])
+
+    def test_cancel_sends_nothing(self):
+        self.window()
+        with meta(), self.captureOnCommitCallbacks(execute=True):
+            owner_watch.draft_for_owner(self.chat, 'Hello Kings')
+        with meta() as m, self.captureOnCommitCallbacks(execute=True):
+            self.tap(f'say:cancel:{self.chat.pk}')
+        self.assertIn('Cancelled. Nothing was sent.', m.text.call_args.args[1])
+        self.assertFalse(Message.objects.filter(conversation=self.chat, sent_by=self.owner, is_internal_note=False).exists())
+
+    def test_his_own_message_is_you_in_a_report(self):
+        owner_watch.watch(self.chat)
+        reply = self.customer('ok thanks')
+        Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               body='See you tomorrow', sent_by=self.owner)
+        with meta() as m, self.captureOnCommitCallbacks(execute=True):
+            owner_watch.report(self.chat.pk, reply.pk)
+        self.assertIn('_You replied:_\n> See you tomorrow', m.text.call_args.args[1])
+
+    def test_the_boss_brain_sends_his_quoted_words_as_they_are(self):
+        self.window()
+        fake, use = model(
+            turn(looks('send_to_customer', chat_id=self.chat.pk, exact=True,
+                       text='Payment at the counter is also fine Kings, thank you')),
+            turn(said('Sent to Kings ✅')),
+        )
+        with patch('apps.communications.tasks.deliver_whatsapp.delay'):
+            self.talk('take back the chat and tell him "Payment at the counter is also fine Kings, thank you"', use)
+        out = Message.objects.filter(conversation=self.chat, sent_by=self.owner, is_internal_note=False).get()
+        self.assertEqual(out.body, 'Payment at the counter is also fine Kings, thank you')
+
+    def test_the_rules(self):
+        self.assertIn('one Octos, not two', boss.RULES)
+        self.assertIn('never "Octos said"', boss.RULES)
+        self.assertIn('word for word, from him', boss.RULES)
+        from apps.communications.assistant import prompt
+        self.assertIn('walk in and pay at the counter can', prompt.RULES)

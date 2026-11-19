@@ -159,6 +159,12 @@ CASES = [
     {'name': 'no_promises_about_how_it_prints',
      'turns': [(C, 'Print my photo on A5, colour, 2 copies')],
      'expect': {'contains_none': [r'(?i)nice and clear|sharp|perfect|crisp|high quality']}},
+    # 19 Nov 2026: Kings's payment failed and he said he'd walk in and pay
+    # at the counter in the morning; Octos handed him to the team.
+    {'name': 'paying_at_the_counter_is_fine',
+     'turns': [(C, "My payment is failing. I'll walk in and pay at the counter in the morning, thanks")],
+     'expect': {'handover': False, 'contains_any': [r'(?i)fine|no problem|sure|of course|see you'],
+                'contains_none': [r'(?i)paystack\.com|checkout\.']}},
     {'name': 'photos_on_normal_paper_are_a4_colour',
      'turns': [(C, 'I want to print 4 photos on normal paper, 2 on a sheet, colour')],
      'expect': {'handover': False, 'contains_none': [r'(?i)photo paper|glossy|4 ?x ?6']}},
