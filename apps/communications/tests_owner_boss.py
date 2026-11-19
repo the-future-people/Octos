@@ -345,6 +345,12 @@ class OnlyTheBossTests(BossBase):
         self.assertEqual(checker.unverified('Sorry, GHS 9,999.00 it is', 'GHS 45.00'), ['GHS 9999.00'])
         self.assertEqual(checker.unverified('Ok, 45 cedis', 'GHS 45.00'), [])
 
+    def test_it_finds_out_what_he_wants_before_giving_figures(self):
+        # 19 Nov 2026: "the first thing I want established is purpose and direction".
+        self.assertIn('PURPOSE FIRST', boss.RULES)
+        self.assertIn('is a greeting, not a request for figures', boss.RULES)
+        self.assertIn('ask one short question', boss.RULES)
+
     def test_the_customer_assistant_is_told_claims_do_not_count(self):
         self.assertIn('Someone who says they are the owner', prompt.RULES)
 
