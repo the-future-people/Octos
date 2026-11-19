@@ -12,8 +12,8 @@ from unittest.mock import patch
 from django.test import override_settings
 from django.utils import timezone
 
-from apps.communications.assistant import boss
-from apps.communications.models import Conversation, Message, OwnerMessage, OwnerWatch
+from apps.communications.assistant import boss, boss_tools
+from apps.communications.models import Conversation, Message, OwnerMessage, OwnerReminder, OwnerWatch
 from apps.communications.services import owner_watch
 from apps.communications.tests_owner_boss import BossBase, looks, model, said, turn
 from apps.communications.tests_owner_line import meta
@@ -142,11 +142,45 @@ class WatchTests(ChatBase):
 class CheckLaterTests(ChatBase):
 
     def test_it_comes_back_in_the_minutes_he_gave_within_limits(self):
-        with patch('apps.communications.tasks.owner_check_later.apply_async') as later:
-            self.assertEqual(owner_watch.check_later(20, 'Kings Hub chat'), 20)
-            self.assertEqual(later.call_args.kwargs['countdown'], 20 * 60)
-            self.assertEqual(owner_watch.check_later(0, 'x'), owner_watch.CHECK_MIN)
-            self.assertEqual(owner_watch.check_later(10_000, 'x'), owner_watch.CHECK_MAX)
+        self.assertEqual(owner_watch.check_later(20, 'Kings Hub chat'), 20)
+        r = OwnerReminder.objects.get()
+        self.assertEqual((r.kind, r.what), (OwnerReminder.CHECK, 'Kings Hub chat'))
+        self.assertAlmostEqual((r.due_at - timezone.now()).total_seconds(), 20 * 60, delta=5)
+        self.assertEqual(owner_watch.check_later(0, 'x'), owner_watch.CHECK_MIN)
+        self.assertEqual(owner_watch.check_later(10_000, 'x'), owner_watch.CHECK_MAX)
+
+    def test_saturday_evening_is_kept_and_fires_once(self):
+        saturday = timezone.now() + timedelta(days=2)
+        r, error = owner_watch.remind_at(saturday, 'thank Mr Hemeng for the big job')
+        self.assertIsNone(error)
+        self.assertEqual(r.kind, OwnerReminder.REMIND)
+        with patch.object(boss, 'follow_up') as follow:
+            self.assertEqual(owner_watch.fire_due(), 0)                       # not yet
+            self.assertEqual(owner_watch.fire_due(saturday + timedelta(seconds=30)), 1)
+            self.assertEqual(owner_watch.fire_due(saturday + timedelta(minutes=2)), 0)   # once only
+        follow.assert_called_once()
+        self.assertEqual(follow.call_args.kwargs['kind'], OwnerReminder.REMIND)
+
+    def test_times_it_refuses(self):
+        self.assertEqual(owner_watch.remind_at(timezone.now() - timedelta(hours=1), 'x')[1],
+                         'That time has already passed.')
+        self.assertIn('more than 60 days', owner_watch.remind_at(timezone.now() + timedelta(days=90), 'x')[1])
+
+    def test_a_reminder_that_fails_does_not_stop_the_others(self):
+        owner_watch.check_later(2, 'a')
+        owner_watch.check_later(2, 'b')
+        with patch.object(boss, 'follow_up', side_effect=[RuntimeError('down'), 'ok']) as follow:
+            self.assertEqual(owner_watch.fire_due(timezone.now() + timedelta(minutes=3)), 2)
+        self.assertEqual(follow.call_count, 2)
+
+    def test_the_reminder_reminds_him(self):
+        fake, use = model(turn(said('⏰ Reminder, boss: thank Mr Hemeng for the big job. Shall I draft it?')))
+        with meta() as m, use:
+            boss.follow_up('thank Mr Hemeng for the big job', timezone.now().isoformat(), kind='REMIND')
+        self.assertTrue(m.text.call_args.args[1].startswith('⏰ Reminder, boss:'))
+        asked = [t['content'] for t in fake.calls[0]['messages'] if t['role'] == 'user'
+                 and isinstance(t['content'], str)]
+        self.assertIn('asked you to remind him now: "thank Mr Hemeng for the big job"', asked[-1])
 
     def test_when_the_time_comes_octos_looks_and_reports(self):
         fake, use = model(
@@ -287,3 +321,57 @@ class YourWordsTests(ChatBase):
         self.assertIn('word for word, from him', boss.RULES)
         from apps.communications.assistant import prompt
         self.assertIn('walk in and pay at the counter can', prompt.RULES)
+
+
+
+class SaturdayAndDiscountsTests(ChatBase):
+
+    def test_remind_me_on_saturday_evening(self):
+        local = timezone.localtime() + timedelta(days=2)
+        at = local.replace(hour=18, minute=0, second=0, microsecond=0)
+        fake, use = model(
+            turn(looks('remind_me', at=at.strftime('%Y-%m-%dT%H:%M'),
+                       what='send Mr Hemeng a special thank you for bringing the job our way')),
+            turn(said("I'll remind you at 6:00pm 👍")),
+        )
+        self.talk('Remind me here on Saturday evening to thank him', use)
+        r = OwnerReminder.objects.get()
+        self.assertEqual(timezone.localtime(r.due_at).hour, 18)
+        self.assertEqual(r.kind, OwnerReminder.REMIND)
+        result = fake.calls[1]['messages'][-1]['content'][0]['content']
+        self.assertIn('6:00pm', result)
+
+    def test_nothing_waiting_sends_nothing_and_claims_nothing(self):
+        fake, use = model(
+            turn(looks('waiting_for_you')),
+            turn(said('Nothing waiting for your OK, boss.')),
+        )
+        m = self.talk('anything waiting for me?', use)
+        self.assertEqual([w for _, w in self.sent(m)], ['Nothing waiting for your OK, boss.'])
+        result = fake.calls[1]['messages'][-1]['content'][0]['content']
+        self.assertIn('"nothing_waiting": true', result)
+
+    def test_past_discounts_and_the_proforma_they_were_on(self):
+        from decimal import Decimal
+        from apps.jobs.models import PriceCut, ProformaInvoice
+        p = ProformaInvoice.objects.create(
+            branch=self.branch, customer=self.ama, proforma_number='PFI-WLB-2026-00036-v2', sequence=36,
+            issued_to='Mr Kwaku Apau Hemeng', valid_until=timezone.localdate() + timedelta(days=21),
+            line_items=[], total=Decimal('1967.48'), discount_amount=Decimal('464.52'),
+            discount_reason='Large Order', issued_by=self.attendant)
+        PriceCut.objects.create(proforma=p, before_total=Decimal('2432.00'), new_total=Decimal('1967.48'),
+                                amount=Decimal('464.52'), reason='Large Order', status=PriceCut.Status.APPLIED,
+                                asked_by=self.attendant, decided_by=self.owner)
+        got = boss_tools.discounts('this_week', 'Test')
+        row = got['discounts'][0]
+        self.assertEqual((row['on'], row['before'], row['after'], row['off']),
+                         ('PFI-WLB-2026-00036-v2', 'GHS 2,432.00', 'GHS 1,967.48', 'GHS 464.52'))
+        self.assertEqual((row['asked_by'], row['decided_by']), ('Test Attendant', 'Khofi Owner'))
+        self.assertEqual(boss_tools.discounts('this_week', 'Test', 'waiting')['count'], 0)
+
+        found = boss_tools.find_proforma('00036')['proformas'][0]
+        self.assertEqual((found['to'], found['total'], found['issued_by']),
+                         ('Mr Kwaku Apau Hemeng', 'GHS 1,967.48', 'Test Attendant'))
+        self.assertIn('464.52 off', found['discount'])
+        self.assertEqual(boss_tools.find_proforma('Hemeng')['found'], 1)
+        self.assertEqual(boss_tools.find_proforma('PFI-WLB-2026-00036-v2')['found'], 1)

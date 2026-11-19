@@ -85,3 +85,30 @@ class OwnerWatch(models.Model):
 
     def __str__(self):
         return f'Watch on {self.conversation_id} ({self.get_mode_display()})'
+
+
+class OwnerReminder(models.Model):
+    """
+    "Check back in a bit" or "remind me on Saturday evening" (19 Nov 2026).
+
+    Kept in the database, not as a delayed task in the queue: a delay held
+    by the queue can be lost or run twice across restarts, and Saturday is
+    two days away. A check every minute fires what is due.
+
+    CHECK looks again and reports; REMIND reminds him of what he asked and
+    offers to do it.
+    """
+    CHECK, REMIND = 'CHECK', 'REMIND'
+    KINDS = [(CHECK, 'Check back'), (REMIND, 'Remind him')]
+
+    kind    = models.CharField(max_length=6, choices=KINDS, default=CHECK)
+    what    = models.CharField(max_length=300)
+    due_at  = models.DateTimeField(db_index=True)
+    set_at  = models.DateTimeField(auto_now_add=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['due_at']
+
+    def __str__(self):
+        return f'{self.get_kind_display()} at {self.due_at:%Y-%m-%d %H:%M}: {self.what}'

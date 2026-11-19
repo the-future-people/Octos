@@ -170,11 +170,52 @@ def _clip(text, limit=200):
 
 def check_later(minutes, what):
     """Come back in N minutes (2 to 360), look, and report. Returns the minutes used."""
-    from apps.communications.tasks import owner_check_later
+    from apps.communications.models import OwnerReminder
     minutes = max(CHECK_MIN, min(15 if minutes is None else int(minutes), CHECK_MAX))
-    set_at = timezone.now().isoformat()
-    owner_check_later.apply_async((what[:300], set_at), countdown=minutes * 60)
+    OwnerReminder.objects.create(kind=OwnerReminder.CHECK, what=(what or 'how things stand')[:300],
+                                 due_at=timezone.now() + timedelta(minutes=minutes))
     return minutes
+
+
+REMIND_MAX_DAYS = 60
+
+
+def remind_at(when, what):
+    """
+    Remind the owner at a time ("Saturday evening" worked out by the brain
+    as a local date and time). Returns (reminder, None) or (None, error).
+    """
+    from apps.communications.models import OwnerReminder
+    now = timezone.now()
+    if timezone.is_naive(when):
+        when = timezone.make_aware(when)
+    if when <= now + timedelta(minutes=1):
+        return None, 'That time has already passed.'
+    if when > now + timedelta(days=REMIND_MAX_DAYS):
+        return None, f'That is more than {REMIND_MAX_DAYS} days away.'
+    return OwnerReminder.objects.create(kind=OwnerReminder.REMIND, what=(what or '')[:300], due_at=when), None
+
+
+def fire_due(now=None):
+    """
+    Every minute: run each reminder that is due, once. A reminder is marked
+    done before it runs, so a slow run can't fire it twice. Returns how many.
+    """
+    from apps.communications.assistant import boss
+    from apps.communications.models import OwnerReminder
+    now = now or timezone.now()
+    fired = 0
+    due = list(OwnerReminder.objects.filter(done_at__isnull=True, due_at__lte=now).order_by('due_at')[:10])
+    for r in due:
+        claimed = OwnerReminder.objects.filter(pk=r.pk, done_at__isnull=True).update(done_at=now)
+        if not claimed:
+            continue
+        try:
+            boss.follow_up(r.what, r.set_at.isoformat(), kind=r.kind)
+        except Exception:
+            logger.exception('Owner reminder %s failed', r.pk)
+        fired += 1
+    return fired
 
 
 def send_for_owner(conversation, words):

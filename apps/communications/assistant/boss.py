@@ -121,11 +121,12 @@ NEVER GUESS
 WHAT YOU CAN DO
 - You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
-- You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you).
+- You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
   • answer_now: when he says respond, answer, handle or "see what they want", take the chat from staff and answer the customer yourself straight away, under your usual customer rules.
   • watch_chat: when he says report back, let me know or keep an eye on it, you'll tell him when the customer writes again, with what they said and how it was answered. Use "every" only when he wants every reply, not just the next.
   • check_later: when he says check back in a bit, come back and look. "A bit" is about 15 minutes; use the time he gives if he gives one.
+  • remind_me: when he asks to be reminded at a day or time ("Saturday evening", "tomorrow at 9"), work out the date and time in Accra from now: morning is 8:00am, afternoon 2:00pm, evening 6:00pm, unless he says a time. Confirm the day and time in one line ("I'll remind you Saturday at 6:00pm 👍"). Up to 60 days ahead.
   When he says "respond and report back", do both: answer_now, then watch_chat.
   After acting, confirm in one short line what you did and what happens next ("Done. I'm answering her now, and I'll tell you when she replies 👍").
   • send_to_customer: when he wants a customer told something.
@@ -271,6 +272,24 @@ TOOL_SPECS = [
      'input_schema': {'type': 'object', 'properties': {
          'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'},
          'text': {'type': 'string'}, 'exact': {'type': 'boolean'}}, 'required': ['text', 'exact']}},
+    {'name': 'remind_me',
+     'description': ('Remind him at a day and time, up to 60 days ahead. at is the local Accra date and time, '
+                     'like 2026-11-21T18:00. what says what to remind him of, in his words.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'at': {'type': 'string'}, 'what': {'type': 'string'}}, 'required': ['at', 'what']}},
+    {'name': 'discounts',
+     'description': ('Discounts given, declined or waiting in a period: on which job or proforma, the customer, '
+                     'the price before and after, the reason, who asked, who decided, and the job a proforma '
+                     "became. status 'waiting', 'applied' or 'declined' narrows it."),
+     'input_schema': {'type': 'object', 'properties': {
+         'period': {'type': 'string', 'enum': list(look.PERIODS)},
+         'status': {'type': 'string', 'enum': ['waiting', 'applied', 'declined']}, **BRANCH},
+         'required': ['period']}},
+    {'name': 'find_proforma',
+     'description': ("A proforma by its number (any part, like 00036), or a customer's recent proformas by name "
+                     'or phone: total, status, version, who issued it, any discount, and the job it became '
+                     'with what was paid.'),
+     'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
     {'name': 'check_later',
      'description': ('Come back after this many minutes (2 to 360), look at what he asked about, and report. '
                      'what says what to check, in a few words.'),
@@ -316,6 +335,22 @@ def _run_tool(name, args, sent):
         return look.who_owes(args.get('branch', ''))
     if name in ('answer_now', 'watch_chat', 'send_to_customer'):
         return _act_on_chat(name, args, sent)
+    if name == 'discounts':
+        return look.discounts(args.get('period') or 'this_week', args.get('branch', ''), args.get('status') or '')
+    if name == 'find_proforma':
+        return look.find_proforma(str(args.get('query') or ''))
+    if name == 'remind_me':
+        from datetime import datetime
+        from apps.communications.services import owner_watch
+        try:
+            when = datetime.fromisoformat(str(args.get('at') or '').strip())
+        except ValueError:
+            return {'error': 'Give the time as a local date and time, like 2026-11-21T18:00.'}
+        reminder, error = owner_watch.remind_at(when, str(args.get('what') or '').strip())
+        if error:
+            return {'error': error}
+        return {'done': True, 'remind_at': look.when(reminder.due_at, timezone.now()),
+                'day': f'{timezone.localtime(reminder.due_at):%A %d %B}'}
     if name == 'check_later':
         from apps.communications.services import owner_watch
         what = str(args.get('what') or '').strip() or 'how things stand'
@@ -324,12 +359,16 @@ def _run_tool(name, args, sent):
     if name == 'staff_activity':
         return look.staff_activity(str(args.get('person') or ''), args.get('period') or 'today')
     if name == 'waiting_for_you':
+        from apps.jobs.models import PriceCut
         from apps.communications.services import owner_line
+        if not PriceCut.objects.filter(status=PriceCut.Status.PENDING).exists():
+            # Nothing waiting: nothing sent, and nothing to claim (19 Nov 2026).
+            return {'cards_sent': 0, 'nothing_waiting': True}
         mark = _last_out()
         owner_line._waiting()
         cards = _send_now(mark)
         sent.append('waiting')
-        return {'sent_to_him': cards, 'say': 'The cards are on his screen. Add a short line at most.'}
+        return {'cards_sent': cards, 'say': 'The cards are on his screen. Add a short line at most.'}
     if name == 'send_report':
         from apps.communications.services import owner_line
         which = {'today': 'snapshot'}.get(args.get('which'), args.get('which'))
@@ -441,22 +480,27 @@ def _history(message, upto=None):
     return turns, told
 
 
-def follow_up(what, set_at, now=None):
+def follow_up(what, set_at, now=None, kind='CHECK'):
     """
-    The boss said "check back in a bit" (19 Nov 2026): now is that later.
-    Octos looks again and reports, as if he had just asked.
+    The boss said "check back in a bit" or "remind me on Saturday" (19 Nov
+    2026): now is that time. Octos looks again and reports, or reminds him.
     """
     from datetime import datetime
     now = now or timezone.now()
     turns, told = _history(None, upto=now)
-    when_set = look.clock(datetime.fromisoformat(set_at)) if set_at else 'earlier'
-    ask = (f'[Octos reminder, not a new message from the boss: at {when_set} he asked you to check back on '
-           f'this: "{what}". Look now and report in a line or two. If nothing has changed, say so briefly.]')
+    when_set = look.when(datetime.fromisoformat(set_at), now) if set_at else 'earlier'
+    if kind == 'REMIND':
+        ask = (f'[Octos reminder, not a new message from the boss: on {when_set} he asked you to remind him '
+               f'now: "{what}". Start with "⏰ Reminder, boss:" and say it in a line. If it is something you '
+               f'can prepare (a look-up, or words for a customer as a draft for his Send), offer to, in one line.]')
+    else:
+        ask = (f'[Octos reminder, not a new message from the boss: at {when_set} he asked you to check back on '
+               f'this: "{what}". Look now and report in a line or two. If nothing has changed, say so briefly.]')
     if turns and turns[-1]['role'] == 'user':
         turns[-1]['content'] += '\n\n' + ask
     else:
         turns.append({'role': 'user', 'content': ask})
-    return _answer(turns, told, None, now, f'check-later {what!r}')
+    return _answer(turns, told, None, now, f'{kind.lower()} {what!r}')
 
 
 def reply(message, now=None):

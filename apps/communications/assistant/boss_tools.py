@@ -721,3 +721,93 @@ def staff_activity(person, period='today'):
         out['discounts_asked'] = {'count': cuts.count(),
                                   'still_waiting_for_you': cuts.filter(status=PriceCut.Status.PENDING).count()}
     return out
+
+
+# ── Discounts and proformas ────────────────────────────────────────────────
+
+def discounts(period='this_week', branch='', status=''):
+    """
+    Discounts given or asked for in a period: on what, for whom, the price
+    before and after, the reason, who asked and who decided. status narrows
+    it to 'waiting' (for his OK), 'applied' or 'declined'. Asked on 19 Nov
+    2026: "the job was around 2,300 and discounted to something lower".
+    """
+    from apps.eye.services import periods
+    from apps.jobs.models import PriceCut
+    if period not in PERIODS:
+        return {'error': f'Ask for one of: {", ".join(PERIODS)}.'}
+    found, error = branches(branch)
+    if error:
+        return error
+    ids = _ids(found)
+    first, last, label = _period(period, timezone.localdate())
+    start, end = periods.bounds(first, last)
+    qs = (PriceCut.objects.filter(created_at__gte=start, created_at__lt=end)
+          .filter(Q(job__branch_id__in=ids) | Q(proforma__branch_id__in=ids))
+          .exclude(status=PriceCut.Status.REPLACED)
+          .select_related('job__customer', 'proforma__customer', 'proforma__job', 'asked_by', 'decided_by'))
+    wanted = {'waiting': PriceCut.Status.PENDING, 'applied': PriceCut.Status.APPLIED,
+              'declined': PriceCut.Status.DECLINED}.get(status)
+    if wanted:
+        qs = qs.filter(status=wanted)
+    now = timezone.now()
+    rows = []
+    for cut in qs.order_by('-created_at')[:LIST_LIMIT]:
+        thing = cut.job or cut.proforma
+        customer = thing.customer.full_name if thing.customer_id else (
+            getattr(thing, 'issued_to', '') or 'walk-in')
+        row = {
+            'on': cut.job.job_number if cut.job_id else cut.proforma.proforma_number,
+            'kind': 'job' if cut.job_id else 'proforma',
+            'customer': customer,
+            'before': ghs(cut.before_total), 'after': ghs(cut.new_total), 'off': ghs(cut.amount),
+            'reason': cut.reason, 'status': cut.get_status_display(),
+            'asked_by': cut.asked_by.full_name if cut.asked_by_id else None,
+            'asked_at': when(cut.created_at, now),
+        }
+        if cut.decided_by_id:
+            row['decided_by'] = cut.decided_by.full_name
+        if cut.proforma_id and cut.proforma.job_id:
+            row['became_job'] = cut.proforma.job.job_number
+        rows.append(row)
+    return {'period': label, 'count': qs.count(), 'discounts': rows}
+
+
+def find_proforma(query):
+    """A proforma by its number (any part), or a customer's recent proformas by name or phone."""
+    from apps.jobs.models import ProformaInvoice
+    query = (query or '').strip()
+    if not query:
+        return {'error': 'Give a proforma number or a customer name.'}
+    now = timezone.now()
+    digits = ''.join(ch for ch in query if ch.isdigit())
+    qs = ProformaInvoice.objects.select_related('customer', 'issued_by', 'job', 'branch')
+    if 'PFI' in query.upper():
+        matches = list(qs.filter(proforma_number__icontains=query.strip().upper()).order_by('-created_at')[:5]) \
+            or list(qs.filter(proforma_number__icontains=digits[-5:]).order_by('-created_at')[:5])
+    elif digits and len(digits) <= 5:
+        matches = list(qs.filter(proforma_number__icontains=digits).order_by('-created_at')[:5])
+    else:
+        who = (Q(issued_to__icontains=query) | Q(customer__first_name__icontains=query)
+               | Q(customer__last_name__icontains=query) | Q(contact_person__icontains=query))
+        if len(digits) >= 9:
+            who = Q(customer__phone__endswith=digits[-9:]) | Q(contact_phone__endswith=digits[-9:])
+        matches = list(qs.filter(who).order_by('-created_at')[:5])
+    if not matches:
+        return {'found': 0, 'say': f'No proforma matches "{query}".'}
+    rows = []
+    for p in matches:
+        row = {
+            'number': p.proforma_number, 'version': p.version, 'to': p.issued_to,
+            'customer': p.customer.full_name if p.customer_id else None,
+            'total': ghs(p.total), 'status': p.get_status_display(),
+            'issued_by': p.issued_by.full_name if p.issued_by_id else None,
+            'issued_at': when(p.issued_at or p.created_at, now),
+        }
+        if p.discount_amount:
+            row['discount'] = f'{ghs(p.discount_amount)} off · {p.discount_reason}'
+        if p.job_id:
+            row['became_job'] = p.job.job_number
+            row['job_paid'] = ghs(p.job.amount_paid)
+        rows.append(row)
+    return {'found': len(rows), 'proformas': rows}

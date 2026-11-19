@@ -354,6 +354,11 @@ CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL = 25
 CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
 CELERY_BEAT_SCHEDULE = {
     # The owner's line: morning brief and day close to his phone (18 Nov 2026).
+    # The owner's "check back in a bit" and "remind me on Saturday" (19 Nov 2026).
+    'owner-reminders': {
+        'task': 'apps.communications.tasks.owner_reminders',
+        'schedule': crontab(minute='*'),
+    },
     'owner-brief': {
         'task': 'apps.communications.tasks.owner_brief',
         'schedule': crontab(hour=7, minute=30),
@@ -411,16 +416,6 @@ CELERY_BEAT_SCHEDULE = {
     'expire-proformas-nightly': {
         'task': 'apps.jobs.tasks.expire_proformas',
         'schedule': crontab(hour=2, minute=15),
-    },
-    # End-of-day thank-you, half an hour before each branch closes (14 Nov 2026).
-    'thanks-before-closing': {
-        'task': 'apps.storefront.tasks.send_thanks',
-        'schedule': crontab(minute='*/5'),
-    },
-    # One reminder for unpaid orders Octos took on WhatsApp (14 Nov 2026).
-    'payment-reminders': {
-        'task': 'apps.storefront.tasks.send_payment_reminders',
-        'schedule': crontab(minute='*/10'),
     },
     # End-of-day thank-you, half an hour before each branch closes (14 Nov 2026).
     'thanks-before-closing': {
