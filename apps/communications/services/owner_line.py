@@ -4,7 +4,9 @@ The owner's private WhatsApp line (18 Nov 2026).
 The owner is not always at a computer, so Octos reports to his own number:
 the morning brief, the day's close, and anything urgent the moment it
 happens, at any hour. He can answer: tap Approve or Decline on a discount,
-or ask for "today", "brief", "close", "waiting", or a job number.
+send a shortcut ("today", "brief", "close", "waiting", a job number), or
+just talk: anything else goes to Octos's brain for the boss (assistant/
+boss.py, 19 Nov 2026), which looks things up and answers in plain words.
 
 The number lives in the OCTOS_OWNER_PHONE setting (Railway), never in the
 code: the repository is public. Messages from that number never reach the
@@ -278,7 +280,9 @@ def answer(pk):
     if not words:
         return
     said = set(words.split())
-    if said & CARD_WORDS:
+    # The shortcuts: one word (or a bare job number) gets its answer at once,
+    # without the model. Anything else is a conversation (19 Nov 2026).
+    if said & CARD_WORDS and len(said) <= 3:
         which = 'brief' if said & {'brief', 'morning', 'yesterday'} else 'close' if said & {'close', 'night', 'eod'} \
             else 'snapshot'
         return _report(which, as_card=True)
@@ -290,11 +294,20 @@ def answer(pk):
         return _report('close')
     if words in WAITING_WORDS:
         return _waiting()
-    job = re.search(r'\b(\d{4,6})\b', words)
+    from apps.communications.assistant import boss
+    talking = boss.available()
+    job = re.fullmatch(r'(?:job\s*)?(?:[a-z]{2}\s*)?(\d{4,6})', words) if talking else \
+        re.search(r'\b(\d{4,6})\b', words)
     if job:
         return _job(job.group(1))
-    if sent:
+    if sent and words in GREETINGS:
         return                                   # what was waiting is the answer
+    if talking and words in ('menu', 'help'):
+        return tell(OwnerMessage.ANSWER, MENU + '\n\nOr just ask me anything, in your own words 🙂')
+    if talking:
+        return boss.reply(message)
+    if sent:
+        return
     tell(OwnerMessage.ANSWER, MENU if words in GREETINGS else
          "I didn't catch that. " + MENU.split('\n\n', 1)[1])
 
@@ -426,13 +439,48 @@ def cash_short(float_record):
 
 @_safely
 def customer_waiting(conversation, minutes):
+    """
+    A customer left waiting by the person who took their chat. Shows what
+    they actually wrote (19 Nov 2026: the owner had to ask "what was the
+    message from her?"), and who took the chat.
+    """
     name = conversation.display_name
-    body = (f'⏳ *{name} has waited {minutes} minutes*\n'
-            '_A person took the chat and hasn\'t replied._\n'
-            '> Octos takes it back in 10 minutes if nobody answers.')
-    return tell(OwnerMessage.URGENT, body,
-                key=f'waiting:{conversation.pk}:{timezone.now():%Y%m%d%H}',
+    who = conversation.assigned_to.first_name if conversation.assigned_to_id else 'A person'
+    lines = [f'⏳ *{name} has waited {minutes} minutes*',
+             f'_{who} took the chat and hasn\'t replied._']
+    said = _unanswered(conversation)
+    if said:
+        lines += ['', 'They wrote:'] + [f'> {line}' for line in said]
+    lines += ['', '_Octos takes it back in 10 minutes if nobody answers._']
+    return tell(OwnerMessage.URGENT, '\n'.join(lines),
+                key=f'waiting:{conversation.pk}:{timezone.now():%Y%m%d%H}', ref=f'chat:{conversation.pk}',
                 knock=f'{name} has waited {minutes} minutes for a reply on WhatsApp.')
+
+
+def _unanswered(conversation, limit=3):
+    """The customer's messages since Farhat last spoke, newest last: words, or what the file was."""
+    from apps.communications.models import Message
+    recent = list(conversation.messages.filter(is_internal_note=False)
+                  .exclude(kind__in=Message.QUIET_KINDS).order_by('-created_at')[:12])
+    theirs, files = [], 0
+    for m in recent:
+        if m.direction != Message.INBOUND:
+            break
+        if m.message_type in (Message.IMAGE, Message.VIDEO, Message.DOCUMENT, Message.AUDIO):
+            files += 1
+            if m.body:
+                theirs.append(_clip(m.body))
+        elif m.body:
+            theirs.append(_clip(m.body))
+    theirs = theirs[:limit][::-1]
+    if files:
+        theirs.append(f'📎 {files} file{"s" if files > 1 else ""}')
+    return theirs
+
+
+def _clip(text, limit=160):
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
 
 
 @_safely

@@ -292,6 +292,10 @@ OCTOS_OWNER_PHONE            = os.environ.get('OCTOS_OWNER_PHONE', '')
 ANTHROPIC_API_KEY      = os.environ.get('ANTHROPIC_API_KEY', '')
 OCTOS_ASSISTANT_MODE   = os.environ.get('OCTOS_ASSISTANT_MODE', 'off')
 OCTOS_ASSISTANT_MODEL  = os.environ.get('OCTOS_ASSISTANT_MODEL', 'claude-sonnet-5-5')
+# The owner's line talking back (19 Nov 2026): 'off' returns it to its
+# shortcuts and menu. Its model defaults to the assistant's.
+OCTOS_OWNER_BRAIN      = os.environ.get('OCTOS_OWNER_BRAIN', 'on')
+OCTOS_OWNER_MODEL      = os.environ.get('OCTOS_OWNER_MODEL', '')
 ASGI_APPLICATION = 'config.asgi.application'
 
 _REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')

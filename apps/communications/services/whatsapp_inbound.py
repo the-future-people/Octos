@@ -76,7 +76,7 @@ def process(event):
             for c in value.get('contacts') or []:
                 profile = c.get('profile') or {}
                 who = {'name': profile.get('name', ''), 'username': profile.get('username', ''),
-                       'user_id': c.get('user_id') or ''}
+                       'user_id': c.get('user_id') or '', 'wa_id': c.get('wa_id') or ''}
                 for key in (c.get('wa_id'), c.get('user_id')):
                     if key:
                         people[key] = who
@@ -85,7 +85,7 @@ def process(event):
             for message in value.get('messages') or []:
                 # The owner's own number is his private business line (18 Nov
                 # 2026): handled apart, never a chat in the inbox.
-                if _from_owner(message):
+                if _from_owner(message, people):
                     try:
                         with transaction.atomic():
                             from apps.communications.services import owner_line
@@ -117,11 +117,25 @@ def process(event):
     return recorded
 
 
-def _from_owner(message):
-    """True when this message comes from the owner's line number."""
+def _from_owner(message, people=None):
+    """
+    True when this message comes from the owner's line number. Meta verifies
+    the sender, so the number is the only proof: nothing a person writes
+    ("I'm the owner") can make a chat the owner's.
+
+    Should the owner ever turn on a WhatsApp username, Meta may name him by
+    his user id instead of his number; his contact entry still carries his
+    number (wa_id) whenever Meta shares it, and that is what is checked
+    (19 Nov 2026). With no number shared, he is treated as anyone else.
+    """
     from apps.communications.services.owner_line import is_owner_number
     sender = message.get('from') or ''
-    return bool(sender) and not USER_ID.match(sender) and is_owner_number('+' + sender)
+    if not sender:
+        return False
+    if not USER_ID.match(sender):
+        return is_owner_number('+' + sender)
+    wa_id = ((people or {}).get(sender) or (people or {}).get(message.get('from_user_id') or '') or {}).get('wa_id')
+    return bool(wa_id) and not USER_ID.match(wa_id) and is_owner_number('+' + wa_id)
 
 
 def _receive(message, profile_name, who=None):

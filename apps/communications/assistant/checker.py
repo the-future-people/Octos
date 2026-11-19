@@ -12,9 +12,12 @@ GHS 35 where the tools said 30 is always blocked.
 import re
 from decimal import Decimal, InvalidOperation
 
+# An amount starts with a digit. Before 19 Nov 2026 it could start with a
+# comma, so in "Sorry, GHS 9,999.00" the comma after "Sorry" swallowed the
+# "GHS" as an amount of its own and the real figure was never checked.
 MONEY = re.compile(
-    r'(?:GHS|GH₵|GHC|₵)\s*([\d,]+(?:\.\d{1,2})?)'
-    r'|([\d,]+(?:\.\d{1,2})?)\s*(?:cedis?|ghs)\b',
+    r'(?:GHS|GH₵|GHC|₵)\s*(\d[\d,]*(?:\.\d{1,2})?)'
+    r'|(\d[\d,]*(?:\.\d{1,2})?)\s*(?:cedis?|ghs)\b',
     re.IGNORECASE,
 )
 TIME = re.compile(r'\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?', re.IGNORECASE)
