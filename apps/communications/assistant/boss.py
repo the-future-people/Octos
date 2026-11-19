@@ -103,6 +103,8 @@ def system_prompt(message=None, now=None):
     local = timezone.localtime(now)
     part = 'morning' if local.hour < 12 else 'afternoon' if local.hour < 17 else 'evening'
     found, _ = look.branches()
+    from apps.organization.models import Branch
+    resting = Branch.objects.filter(is_active=True, is_trading=False).order_by('name')
     from apps.communications.services.owner_line import owner_user
     owner = owner_user()
     name = (owner.first_name if owner else '') or 'Khofi'
@@ -116,7 +118,9 @@ def system_prompt(message=None, now=None):
     today = [
         f"Now: {local:%A} {local.day} {local:%B} {local.year}, {look.clock(now)} in Accra (it's {part}).",
         f'The boss: {name}.',
-        'Branches: ' + (', '.join(look.short(b) for b in found) or 'none set up') + '.',
+        'Trading branches: ' + (', '.join(look.short(b) for b in found) or 'none set up') + '.'
+        + (' Not trading yet (only look at these when he names one): '
+           + ', '.join(look.short(b) for b in resting) + '.' if resting else ''),
         ('This is the start of a new conversation: greet him for the time of day.' if fresh else
          'You are mid-conversation: no new greeting.'),
     ]

@@ -160,6 +160,34 @@ class LookupTests(BossBase):
                                                 'said': 'Is my banner ready? I am coming at 3'})
         self.assertEqual(boss_tools.read_chat(customer='Ama')['chat_id'], chat.pk)
 
+    def test_with_no_name_only_trading_branches_are_reported(self):
+        type(self.branch).objects.filter(pk=self.branch.pk).update(is_trading=True)
+        self.assertEqual([p['branch'] for p in boss_tools.branch_pulse()], ['Test'])
+        # Named, a branch not yet trading can still be looked at.
+        self.assertEqual([p['branch'] for p in boss_tools.branch_pulse('Other Test')], ['Other Test'])
+
+    def test_a_thank_you_after_the_receipt_is_nobody_waiting(self):
+        from apps.communications.services.handover import waiting_since
+        chat = Conversation.objects.create(channel=Conversation.WHATSAPP, contact_phone='+233244123456',
+                                           customer=self.ama, handled_by=Conversation.STAFF,
+                                           assigned_to=self.attendant, handled_since=timezone.now())
+        Message.objects.create(conversation=chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               body='Your receipt RCP-WLB-2026-06045 is ready.')
+        thanks = Message.objects.create(conversation=chat, direction=Message.INBOUND, channel=Message.WHATSAPP,
+                                        body='Thank you')
+        self.assertIsNone(waiting_since(chat))
+        # After a question from us, the same words are an answer: they wait.
+        Message.objects.filter(pk=thanks.pk).delete()
+        Message.objects.create(conversation=chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               body='Shall we print it in colour?')
+        ok = Message.objects.create(conversation=chat, direction=Message.INBOUND, channel=Message.WHATSAPP,
+                                    body='ok')
+        self.assertEqual(waiting_since(chat), ok.created_at)
+        # And a real question always waits.
+        q = Message.objects.create(conversation=chat, direction=Message.INBOUND, channel=Message.WHATSAPP,
+                                   body='Thank you. Is it ready?')
+        self.assertEqual(waiting_since(chat), q.created_at)
+
     def test_the_formats_the_checker_reads(self):
         t = timezone.localtime().replace(hour=16, minute=5)
         self.assertEqual(boss_tools.clock(t), '4:05pm')

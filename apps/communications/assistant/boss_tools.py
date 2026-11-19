@@ -79,14 +79,18 @@ def waited(dt, now=None):
 
 def branches(wanted=''):
     """
-    Active branches matching the name ("westland", "Madina"), or all of them.
+    The branches matching the name ("westland", "Madina"), or, with no name,
+    the trading ones: a branch not yet trading has nothing to report and
+    only clutters the answer ("the other five branches have no tills open",
+    19 Nov 2026). Named, any active branch can be looked at.
     Returns (branches, error): error is set when a name matches nothing.
     """
     from apps.organization.models import Branch
     every = list(Branch.objects.filter(is_active=True).order_by('name'))
     wanted = (wanted or '').strip().lower().replace(' branch', '')
     if not wanted or wanted in ('all', 'every', 'everywhere', 'company', 'all branches'):
-        return every, None
+        trading = [b for b in every if b.is_trading]
+        return trading or every, None
     exact = [b for b in every if short(b).lower() == wanted]
     found = exact or [b for b in every if wanted in (b.name or '').lower()]
     if not found:

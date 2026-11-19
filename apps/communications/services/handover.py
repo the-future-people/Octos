@@ -102,15 +102,24 @@ def staff_replied(conversation, user):
 
 
 def waiting_since(conversation):
-    """When the customer's unanswered message arrived, or None if nobody is waiting."""
-    last = (
-        conversation.messages.filter(is_internal_note=False)
-        .exclude(kind__in=Message.QUIET_KINDS)
-        .order_by('-created_at').first()
-    )
-    if last is not None and last.direction == Message.INBOUND:
-        return last.created_at
-    return None
+    """
+    When the customer's unanswered message arrived, or None if nobody is
+    waiting. A message that only closes the chat ("Thank you", "ok thanks
+    boss") after a statement waits for nothing: Loretta's "Thank you" after
+    her receipt reached the owner as a customer left waiting (19 Nov 2026).
+    The same "ok" after a question from Farhat is an answer, and does wait.
+    """
+    from apps.communications.assistant.brain import _just_acknowledging
+    last, before = (
+        list(conversation.messages.filter(is_internal_note=False)
+             .exclude(kind__in=Message.QUIET_KINDS)
+             .order_by('-created_at')[:2]) + [None, None]
+    )[:2]
+    if last is None or last.direction != Message.INBOUND:
+        return None
+    if before is not None and before.direction == Message.OUTBOUND and _just_acknowledging(last, before):
+        return None
+    return last.created_at
 
 
 def watch(now=None):
