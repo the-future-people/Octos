@@ -148,6 +148,20 @@ TOOL_SPECS = [
         }, 'required': ['order']},
     },
     {
+        'name': 'paper_sizes',
+        'description': ("Paper sizes in plain words (A6 is a quarter of an A4 sheet, about postcard size), "
+                        "how we print each one (smaller than A4 is printed on A4 and cut to size, priced as A4 "
+                        "printing per sheet), how many fit on one A4 sheet and, with copies, how many A4 sheets "
+                        "that takes. show_picture sends the customer a picture of the sizes drawn to scale "
+                        "against an A4 sheet: use it when they ask what a size looks like, or which is bigger."),
+        'input_schema': {'type': 'object', 'properties': {
+            'sizes': {'type': 'array', 'items': {'type': 'string'},
+                      'description': 'e.g. ["B6"], ["A5", "A6"], ["4 x 6"], ["half A4"]'},
+            'copies': {'type': 'integer', 'minimum': 1},
+            'show_picture': {'type': 'boolean'},
+        }, 'required': ['sizes']},
+    },
+    {
         'name': 'send_proforma',
         'description': "Issue a proforma (a formal quotation) for the lines agreed in this chat and send its "
                        "PDF here. Lines as for prepare_order (service_code, quantity, specifications with "
@@ -573,6 +587,8 @@ def _run_tool(name, args, ctx):
         except ValueError:
             return {'error': 'Ask for their phone number first, and save it with use_phone_number.'}
         return {'saved': customer.display_name, 'say': 'Thank them warmly: they are now known to us.'}
+    if name == 'paper_sizes':
+        return _paper_sizes(ctx, args)
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
@@ -588,6 +604,35 @@ def _run_tool(name, args, ctx):
         ctx.handoff = args.get('reason') or 'Octos asked for a person.'
         return {'ok': True}
     return {'error': f'Unknown tool {name}.'}
+
+
+def _paper_sizes(ctx, args):
+    """
+    Sizes in plain words, and the picture when asked (19 Nov 2026: a customer
+    asked to see what B6 and A4 look like). The picture goes into the chat
+    only when Octos is live; in shadow it is described, not sent.
+    """
+    from apps.communications.assistant import paper
+    sizes = [str(s) for s in (args.get('sizes') or [])][:6]
+    result = paper.facts(sizes, args.get('copies'))
+    if not args.get('show_picture'):
+        return result
+    picture = paper.render(sizes)
+    if picture is None:
+        result['picture'] = 'None of these sizes is known, so no picture.'
+        return result
+    if settings.OCTOS_ASSISTANT_MODE != 'live':
+        result['picture'] = 'Shadow mode: the picture would be sent here.'
+        return result
+    from apps.communications.services import whatsapp_outbound
+    try:
+        whatsapp_outbound.send_text(ctx.conversation, 'Drawn to scale, against an A4 sheet 📏',
+                                    image=picture, filename='paper-sizes.png')
+        result['picture'] = 'Sent in the chat just now. Refer to it briefly; do not describe it line by line.'
+    except Exception:
+        logger.exception('Could not send the paper sizes picture')
+        result['picture'] = 'Could not be sent. Describe the sizes in words instead.'
+    return result
 
 
 def _history(conversation):
