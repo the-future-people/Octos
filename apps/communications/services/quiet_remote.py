@@ -14,9 +14,14 @@ visit. Octos takes it back by itself when the visit closes (handover.watch).
 - A job made or a receipt sent for the chat earlier the same day counts too:
   Osekre's job was made and his receipt sent, then a corrected copy of the
   same file opened a new visit and was flagged as "no job made".
-- Octos follows up once himself first ("Just checking in…"), and a person is
-  brought in only if that gets no answer either. Noel and Dominic were
-  handed to staff without a word to them, and nobody wrote.
+- Octos follows up once himself first, and a person is brought in only if
+  that gets no answer either. Noel and Dominic were handed to staff without
+  a word to them, and nobody wrote.
+- Before that, Octos reads the chat for proof the team already dealt with it
+  (settled.py): a person wrote or sent a file back, a job, a receipt, a
+  payment. Then it stays out. And the follow-up is written from the chat,
+  like a teammate who knows it, never a stock "just checking in": if the
+  chat shows nothing is open, Octos says nothing and nobody is called.
 """
 from datetime import timedelta
 
@@ -42,7 +47,10 @@ def dealt_with(chat, visit):
         return True
     if chat.customer_id and chat.customer.jobs.filter(created_at__gte=since).exists():
         return True
-    return chat.messages.filter(kind='receipt', created_at__gte=since).exists()
+    if chat.messages.filter(kind='receipt', created_at__gte=since).exists():
+        return True
+    from apps.communications.services.settled import team_dealt_with
+    return bool(team_dealt_with(chat, visit.opened_at))
 
 
 def _start_of_day(moment):
@@ -50,32 +58,31 @@ def _start_of_day(moment):
     return local.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-FOLLOW_UP_KIND = 'quiet_follow_up'
-
-
-def follow_up_text(chat):
-    """'Hi Akos, just checking in 👋 …', or without a name when we don't have a real one."""
-    from apps.communications.services.names import name_for
-    name = name_for(chat)
-    hello = f'Hi {name}, just checking in' if name else 'Just checking in'
-    return (f"{hello} \U0001F44B Would you like us to do something with the file you sent? "
-            "Tell me what you need and I'll get it going.")
-
-
 def _follow_up(chat, visit, now):
-    """Octos asks once. True when the question went out."""
-    from apps.communications.services.whatsapp_outbound import WindowClosed, send_text
+    """
+    Octos follows up once, in his own words from the chat (brain.follow_up).
+    Returns 'said', 'nothing' (the chat needed nothing: nobody is called) or
+    '' when he couldn't (off, window closed, an error): then a person is.
+    """
+    from apps.communications.assistant import brain
+    from apps.communications.models import AssistantRun
+    from apps.communications.services.window import window_open
     from apps.spine import kinds
     from apps.spine.models import Event
     from apps.spine.recorder import record
-    try:
-        send_text(chat, follow_up_text(chat), kind=FOLLOW_UP_KIND)
-    except (WindowClosed, ValueError):
-        return False
+    if not window_open(chat):
+        return ''
+    run = brain.follow_up(chat.pk, now)
+    if run is None or run.decision == AssistantRun.FAILED or run.reason == 'follow-up: could not verify it':
+        return ''
+    said = run.decision in (AssistantRun.REPLIED, AssistantRun.SHADOWED)
+    if not said and run.reason != brain.FOLLOW_UP_NOTHING:
+        return ''
     record(kinds.OCTOS_FOLLOWED_UP, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
-           key=f'quiet-follow-up:{visit.pk}', occurred_at=now,
-           reason='Sent a file from outside the shop and went quiet: Octos checked in once.')
-    return True
+           key=f'quiet-follow-up:{visit.pk}', occurred_at=now, payload={'said': said, 'run_id': run.pk},
+           reason=('Sent a file from outside the shop and went quiet: Octos followed up once.' if said
+                   else 'Octos read the chat after the customer went quiet: nothing was left open.'))
+    return 'said' if said else 'nothing'
 
 
 def flag_quiet(now=None):
@@ -107,10 +114,13 @@ def flag_quiet(now=None):
         chat = visit.conversation
         if dealt_with(chat, visit):
             continue
-        # Octos asks first; the visit's quiet clock restarts from his question.
-        if not Event.objects.filter(idempotency_key=f'quiet-follow-up:{visit.pk}').exists():
+        # Octos follows up first; the visit's quiet clock restarts from his message.
+        followed = Event.objects.filter(idempotency_key=f'quiet-follow-up:{visit.pk}').first()
+        if followed is None:
             if _follow_up(chat, visit, now):
                 continue
+        elif followed.payload.get('said') is False:
+            continue                         # he read the chat: nothing was open
         record(kinds.OCTOS_FLAGGED_QUIET, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
                key=key, reason=REASON)
         handover.octos_hands_over(chat, REASON)

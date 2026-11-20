@@ -349,6 +349,67 @@ def files_handled(message):
     return bool(received and received.visit and batch_handled(received.visit, upto_event_id=received.pk))
 
 
+TAKEN_BACK_NOTE = (
+    "A teammate had this chat and didn't get to reply, so you are picking it up for the team. Read the whole "
+    "chat and carry on from exactly where it is, like someone who knows what's going on: if they have waited "
+    "a while, a short sorry for the wait, then the next useful step. If a person opened their files, the team "
+    "has seen them. Never ask what the chat already answers and never send a general check-in. If the chat "
+    "shows nothing is left to do, reply with no text.")
+
+FOLLOW_UP_NOTE = (
+    "The customer sent a file from outside the shop and then went quiet for a while; nobody on the team has "
+    "written to them since. Write one short follow-up that carries on from exactly where the chat is, about "
+    "what they actually sent or asked (if you asked what they'd like done, ask again in different words, "
+    "with the likely job as a suggestion; if a price is waiting on their yes, ask whether to go ahead). Sound "
+    "like part of the team who knows the chat: never a general \"just checking in\". If the chat shows "
+    "nothing is left open, reply with no text.")
+
+
+def follow_up(conversation_id, now=None):
+    """
+    Octos follows up a quiet remote customer once, in his own words from the
+    chat (quiet_remote.py, 20 Nov 2026). Returns the AssistantRun (REPLIED
+    when something went out, SKIPPED when the chat needed nothing), or None
+    when Octos is off or can't speak here.
+    """
+    mode = settings.OCTOS_ASSISTANT_MODE
+    if mode not in MODES or not settings.ANTHROPIC_API_KEY:
+        return None
+    conversation = Conversation.objects.get(pk=conversation_id)
+    if conversation.channel != Conversation.WHATSAPP or conversation.status == Conversation.SPAM \
+            or conversation.handled_by != Conversation.OCTOS:
+        return None
+    trigger = (conversation.messages.filter(direction=Message.INBOUND, is_internal_note=False)
+               .exclude(kind__in=Message.QUIET_KINDS).order_by('-created_at').first())
+    if trigger is None:
+        return None
+    run = AssistantRun(conversation=conversation, trigger=trigger, mode=mode, model=settings.OCTOS_ASSISTANT_MODEL)
+    started = time.monotonic()
+    try:
+        from apps.organization.models import Branch
+        ctx = Context(conversation, list(Branch.objects.filter(is_trading=True, is_active=True)), trigger)
+        reply = _converse(conversation, ctx, run, note=FOLLOW_UP_NOTE)
+        run.tool_calls = ctx.calls
+        if _stepped_in(conversation, trigger):
+            return _finish(run, AssistantRun.SKIPPED, started, reason='follow-up: a person stepped in', reply=reply)
+        facts = json.dumps([c['result'] for c in ctx.calls], default=str)
+        if checker.unverified(reply, facts):
+            return _finish(run, AssistantRun.SKIPPED, started, reason='follow-up: could not verify it', reply=reply)
+        if not reply:
+            return _finish(run, AssistantRun.SKIPPED, started, reason=FOLLOW_UP_NOTHING)
+        _act(mode, conversation, run, text=reply, handoff='')
+        decision = AssistantRun.SHADOWED if mode == 'shadow' else AssistantRun.REPLIED
+        return _finish(run, decision, started, reason=FOLLOW_UP_REASON, reply=reply)
+    except Exception as exc:
+        logger.exception('Octos could not follow up conversation %s', conversation_id)
+        run.error = repr(exc)[:2000]
+        return _finish(run, AssistantRun.FAILED, started, reason='follow-up: error')
+
+
+FOLLOW_UP_REASON = 'followed up a quiet customer'
+FOLLOW_UP_NOTHING = 'follow-up: the chat needed nothing'
+
+
 def taken_back_since(conversation, message):
     """Octos took this chat back from a silent person after this message arrived."""
     from apps.spine import kinds as spine_kinds
@@ -395,8 +456,8 @@ def _silence(conversation, trigger, now):
     # the files just sent being opened is enough (20 Nov 2026): a person is
     # on it, even if an older file from the same visit was never opened.
     # Except when Octos took the chat back because nobody answered (20 Nov
-    # 2026): Noel's photo was opened, a person took over, nobody replied, and
-    # Octos took back only to stay silent. A take-back always gets an answer.
+    # 2026): then counter.step looks for proof the team dealt with it, and
+    # Octos answers from the chat only when there is none.
     if last.media_id and not taken_back_since(conversation, last) and files_handled(last):
         return 'the files were already handled'
     # Answered already: by a person since, or by a run that saw this message.
@@ -497,16 +558,19 @@ def _looks_automated(conversation, now):
 
 # ── Talking to the model ───────────────────────────────────────────────
 
-def _converse(conversation, ctx, run):
+def _converse(conversation, ctx, run, note=''):
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     system = prompt.system_prompt(conversation, ctx.branches)
     # Regulars: on a 4th visit in 72 hours, ask once for their details (13 Nov 2026).
     from apps.communications.assistant import regulars
-    extra = regulars.instruction(conversation)
-    if extra:
-        system = (system + '\n\n' + extra) if isinstance(system, str) else [*system, {'type': 'text', 'text': extra}]
+    # Picking up a chat a teammate never answered (20 Nov 2026).
+    picking_up = TAKEN_BACK_NOTE if ctx.trigger is not None and taken_back_since(conversation, ctx.trigger) else ''
+    for extra in (regulars.instruction(conversation), picking_up, note):
+        if extra:
+            system = ((system + '\n\n' + extra) if isinstance(system, str)
+                      else [*system, {'type': 'text', 'text': extra}])
     # The customer must speak last, or the model refuses (Steve, 14 Nov 2026).
     # Whatever Farhat sent after their latest message comes off the end and
     # is told to Octos as context instead.

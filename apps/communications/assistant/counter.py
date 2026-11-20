@@ -236,13 +236,17 @@ def step(conversation, trigger, now):
             if not _greeted_unsure(conversation, now):
                 return NOT_SURE_GREETING, NOT_SURE_REASON
             return None, 'not sure where they are: greeted already, waiting for their words'
-    # Taken back from a person who opened the files and never wrote (20 Nov
-    # 2026): the work may have been done in person, so not the stock "what
-    # would you like done?", but never silence either. A gentle check-in.
-    if trigger.media_id and taken_back_since(conversation, trigger):
-        from apps.communications.assistant.brain import files_handled
-        if files_handled(trigger):
-            return check_in_text(conversation), CHECK_IN_REASON
+    # Taken back from a person who never wrote (20 Nov 2026): if anything not
+    # from the customer shows the team dealt with it (a reply, a file sent
+    # back, a job, a receipt, a payment), Octos stays quiet. Otherwise it
+    # answers with the whole chat in view, as part of the team: never the
+    # stock "what would you like done?" and never a canned check-in.
+    if taken_back_since(conversation, trigger):
+        from apps.communications.services.settled import team_dealt_with
+        done = team_dealt_with(conversation, trigger.created_at)
+        if done:
+            return None, f'taken back, but the team dealt with it: {done}'
+        return None
     if no_words(trigger) and _batch_acknowledged(conversation, trigger):
         return None, 'files already acknowledged: waiting for their words'
     if file_only(trigger):
@@ -347,16 +351,6 @@ def ack_text(conversation, branch, now=None):
     hello = f'Hi {first} \U0001F44B' if first else 'Hi \U0001F44B'
     return (f"{hello} Welcome to {shop}. Hand your files to the attendant, "
             f"or drop them here and they'll pick them up.")
-
-
-CHECK_IN_REASON = 'taken back: checked in about files a person opened'
-
-
-def check_in_text(conversation):
-    from apps.communications.services.names import name_for
-    name = name_for(conversation)
-    hello = f'Hi {name}, just checking in' if name else 'Just checking in'
-    return f'{hello} \U0001F60A Did the team sort out the file you sent, or is there anything else you need?'
 
 
 ACK_REASON = 'counter visit started'

@@ -122,7 +122,7 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
@@ -248,6 +248,12 @@ TOOL_SPECS = [
                      "the customer's name."),
      'input_schema': {'type': 'object', 'properties': {
          'chat_id': {'type': 'integer'}, 'customer': {'type': 'string'}}}},
+    {'name': 'open_file',
+     'description': ("Open a file from a chat and see what's in it: the text of a PDF or Word file, or the "
+                     'photo itself. Use the file_id that read_chat gives. Use it whenever what matters is in '
+                     'the file (was the correction made, what did the customer send).'),
+     'input_schema': {'type': 'object', 'properties': {'file_id': {'type': 'integer'}},
+                      'required': ['file_id']}},
     {'name': 'staff_activity',
      'description': ("What one member of staff did in a period: when they came in (today), jobs they took at "
                      "the counter (often called issuing an invoice on the floor), formal invoices and "
@@ -347,6 +353,8 @@ def _run_tool(name, args, sent):
         return look.whatsapp_chats(args.get('view') or 'waiting')
     if name == 'read_chat':
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
+    if name == 'open_file':
+        return look.open_file(args.get('file_id'))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
     if name == 'record_stock_in':
@@ -614,9 +622,15 @@ def _converse(turns, calls, sent, usage, message, now):
             except Exception:
                 logger.exception("Boss's line: look-up %s failed", block.name)
                 result = {'error': 'That look-up failed.'}
+            # A photo from open_file is shown to the model as a picture, never kept as text.
+            picture = result.pop('_image', None) if isinstance(result, dict) else None
             calls.append({'name': block.name, 'input': block.input, 'result': result})
-            results.append({'type': 'tool_result', 'tool_use_id': block.id,
-                            'content': json.dumps(result, default=str)})
+            content = json.dumps(result, default=str)
+            if picture:
+                content = [{'type': 'text', 'text': content},
+                           {'type': 'image', 'source': {'type': 'base64', 'media_type': picture[0],
+                                                        'data': picture[1]}}]
+            results.append({'type': 'tool_result', 'tool_use_id': block.id, 'content': content})
         messages.append({'role': 'user', 'content': results})
     raise RuntimeError('Octos kept looking things up without answering')
 

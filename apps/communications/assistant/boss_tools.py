@@ -607,8 +607,30 @@ def read_chat(chat_id=None, customer=''):
             who = m.sent_by.full_name
         else:
             who = 'you (Octos)'
-        lines.append({'at': when(m.created_at, now), 'from': who, 'said': _said(m)})
+        line = {'at': when(m.created_at, now), 'from': who, 'said': _said(m)}
+        if m.message_type in ('IMAGE', 'DOCUMENT') and (m.media_file or m.media_id):
+            line['file_id'] = m.pk            # open_file reads it
+        lines.append(line)
     return {'chat_id': c.pk, 'customer': c.display_name, 'handled_by': _handler(c), 'messages': lines}
+
+
+def open_file(file_id):
+    """
+    What is inside a file in a chat (file_id from read_chat): the text of a
+    PDF or Word file, or the picture itself for a photo (20 Nov 2026).
+    """
+    from apps.communications.models import Message
+    from apps.communications.services import file_reader
+    m = (Message.objects.filter(pk=file_id, is_internal_note=False).select_related('sent_by', 'conversation')
+         .first())
+    if m is None:
+        return {'error': 'No such file. Use read_chat for the file_id.'}
+    found = file_reader.read(m)
+    found['sent_by'] = ('the customer' if m.direction == 'INBOUND'
+                        else (m.sent_by.full_name if m.sent_by_id else 'you (Octos)'))
+    found['sent_at'] = when(m.created_at)
+    found['chat'] = m.conversation.display_name
+    return found
 
 
 # ── Machines ───────────────────────────────────────────────────────────────

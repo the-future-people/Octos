@@ -4,7 +4,9 @@ Fixes from reading a week of chats (14 to 20 Nov 2026), one class each:
   names          "The", "Osekre01" and an email never greeted; "I'm not Mary" remembered
   one order      a changed order replaces the chat's earlier one; one payment reminder a chat
   the clock      a staff reminder counts from when a person got the chat
-  quiet files    a job or receipt that day counts; Octos checks in once before staff
+  quiet files    a job or receipt that day counts; Octos follows up once, from the chat, before staff
+  take-backs     proof the team dealt with it keeps Octos quiet; otherwise he answers from the chat
+  reading files  Octos opens PDFs, Word files and photos for the boss
   voice notes    "could you type it", once a visit
   regulars       a customer Farhat knows is welcomed back like one, never the same words twice
   softer         "prints softer" only for photos and big prints
@@ -20,7 +22,7 @@ from django.utils import timezone
 from apps.communications.assistant import counter, ordering, prompt
 from apps.communications.models import AssistantRun, Conversation, Message
 from apps.communications.services import chat_customer, handover, names
-from apps.communications.services.quiet_remote import FOLLOW_UP_KIND, flag_quiet
+from apps.communications.services.quiet_remote import flag_quiet
 from apps.communications.tests import make_conversation, make_job, make_org
 from apps.communications.tests_assistant_ordering import MEMORY, PAGES, pdf
 from apps.customers.models import CustomerProfile
@@ -270,6 +272,7 @@ class ReminderClockTests(TestCase):
         self.assertEqual(handover.watch(timezone.now() + timedelta(minutes=31))[0], 1)
 
 
+@override_settings(OCTOS_ASSISTANT_MODE='live', ANTHROPIC_API_KEY='test-key')
 class QuietFileTests(TestCase):
 
     def setUp(self):
@@ -289,16 +292,46 @@ class QuietFileTests(TestCase):
                payload={'has_file': True})
         return Visit.objects.get(conversation=self.chat, closed_at__isnull=True)
 
-    def test_octos_checks_in_once_before_a_person_is_brought_in(self):
+    def follow_up_says(self, words):
+        from apps.communications.tests_assistant_brain import Model, says, text
+        return patch('anthropic.Anthropic', return_value=Model(says(text(words))))
+
+    def octos_said(self):
+        return list(self.chat.messages.filter(direction=Message.OUTBOUND, is_internal_note=False)
+                    .values_list('body', flat=True))
+
+    def test_octos_follows_up_once_from_the_chat_before_a_person_is_brought_in(self):
         self.sent_file(40)
-        self.assertEqual(flag_quiet(self.now), 0)
-        sent = self.chat.messages.get(kind=FOLLOW_UP_KIND)
-        self.assertTrue(sent.body.startswith('Hi Noel, just checking in'))
+        with self.follow_up_says('Would you like the poster printed on A3, like last time?') as model:
+            self.assertEqual(flag_quiet(self.now), 0)
+        system = str(model.return_value.calls[0]['system'])
+        self.assertIn('never a general "just checking in"', system)
+        self.assertEqual(self.octos_said(), ['Would you like the poster printed on A3, like last time?'])
         self.chat.refresh_from_db()
         self.assertEqual(self.chat.handled_by, Conversation.OCTOS)
-        self.assertEqual(flag_quiet(self.now + timedelta(minutes=10)), 0)      # his question restarted the clock
+        self.assertEqual(flag_quiet(self.now + timedelta(minutes=10)), 0)      # his message restarted the clock
         self.assertEqual(flag_quiet(self.now + timedelta(minutes=31)), 1)      # still nothing: a person
-        self.assertEqual(self.chat.messages.filter(kind=FOLLOW_UP_KIND).count(), 1)
+        self.assertEqual(len(self.octos_said()), 1)                           # one follow-up, ever
+
+    def test_when_the_chat_needs_nothing_octos_says_nothing_and_nobody_is_called(self):
+        self.sent_file(40)
+        with self.follow_up_says(''):
+            self.assertEqual(flag_quiet(self.now), 0)
+        self.assertEqual(self.octos_said(), [])
+        self.assertEqual(flag_quiet(self.now + timedelta(minutes=31)), 0)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.handled_by, Conversation.OCTOS)
+
+    def test_a_teammate_sending_a_file_back_is_proof(self):
+        from apps.communications.tests import make_user
+        self.sent_file(40)
+        Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               message_type=Message.DOCUMENT, media_id='m-back', media_name='corrected.pdf',
+                               sent_by=make_user('kingsford-qf@example.com', self.branch))
+        with self.follow_up_says('should not be asked') as model:
+            self.assertEqual(flag_quiet(self.now), 0)
+        self.assertEqual(model.return_value.calls, [])
+        self.assertEqual(flag_quiet(self.now + timedelta(minutes=31)), 0)
 
     def test_a_job_made_earlier_the_same_day_counts(self):
         # Osekre: job and receipt, then a corrected copy of the file opened a new visit.
@@ -308,24 +341,117 @@ class QuietFileTests(TestCase):
         visit = self.sent_file(40)
         Visit.objects.filter(pk=visit.pk).update(opened_at=self.now - timedelta(minutes=40))
         self.assertEqual(flag_quiet(self.now), 0)
-        self.assertFalse(self.chat.messages.filter(kind=FOLLOW_UP_KIND).exists())
+        self.assertEqual(self.octos_said(), [])
 
 
 class TakeBackTests(TestCase):
 
     def setUp(self):
-        make_org('-TB')
+        self.branch = make_org('-TB')
         self.chat = make_conversation(None, contact_phone='+233244771050', contact_name='Noel')
-
-    def test_a_take_back_after_opened_files_checks_in(self):
-        photo = inbound(self.chat, message_type=Message.IMAGE, media_id='m-tb1', ago=timedelta(minutes=45))
+        self.photo = inbound(self.chat, message_type=Message.IMAGE, media_id='m-tb1', ago=timedelta(minutes=45))
         record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS, conversation=self.chat)
-        with patch('apps.communications.assistant.brain.files_handled', return_value=True), \
-                patch('apps.communications.services.opened.in_focus', return_value=False), \
+
+    def step(self):
+        with patch('apps.communications.services.opened.in_focus', return_value=False), \
                 patch('apps.communications.assistant.counter.shop_open', return_value=True):
-            said, why = counter.step(self.chat, photo, timezone.now())
-        self.assertEqual(why, counter.CHECK_IN_REASON)
-        self.assertTrue(said.startswith('Just checking in'))          # a WhatsApp profile name is never used
+            return counter.step(self.chat, self.photo, timezone.now())
+
+    def test_no_proof_goes_to_octos_with_the_chat_never_a_stock_line(self):
+        self.assertIsNone(self.step())
+        from apps.communications.assistant import brain
+        self.assertIn('picking it up for the team', brain.TAKEN_BACK_NOTE)
+        self.assertIn('never send a general check-in', brain.TAKEN_BACK_NOTE)
+
+    def test_a_receipt_after_the_file_is_proof(self):
+        Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                               kind='receipt', body="Here's your receipt")
+        self.assertEqual(self.step(), (None, 'taken back, but the team dealt with it: their receipt was sent'))
+
+    def test_a_job_after_the_file_is_proof(self):
+        job = make_job(self.branch)
+        self.chat.jobs.add(job)
+        said, why = self.step()
+        self.assertIsNone(said)
+        self.assertIn(f'job {job.job_number} was made', why)
+
+    def test_opening_the_file_is_not_proof(self):
+        record(kinds.FILE_OPENED, actor=Event.STAFF, conversation=self.chat,
+               occurred_at=timezone.now() - timedelta(minutes=40))
+        self.assertIsNone(self.step())
+
+
+class FileReadingTests(TestCase):
+
+    def setUp(self):
+        self.branch = make_org('-FR')
+        self.chat = make_conversation(None, contact_phone='+233244771090', contact_name='Amoree')
+
+    def sent(self, name, mime, content, mtype=Message.DOCUMENT):
+        from django.core.files.base import ContentFile
+        m = Message.objects.create(conversation=self.chat, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                                   message_type=mtype, media_name=name, media_mime=mime)
+        m.media_file.save(name, ContentFile(content), save=True)
+        return m
+
+    def table_pdf(self):
+        from reportlab.pdfgen import canvas
+        import io
+        out = io.BytesIO()
+        c = canvas.Canvas(out)
+        c.drawString(72, 720, 'No. 9  Kwame Mensah  1983')
+        c.save()
+        return out.getvalue()
+
+    def test_the_boss_can_open_kingsfords_pdf(self):
+        from apps.communications.assistant import boss_tools
+        m = self.sent('Typed_Table_A3_Landscape_.pdf', 'application/pdf', self.table_pdf())
+        chat = boss_tools.read_chat(self.chat.pk)
+        self.assertEqual(chat['messages'][-1]['file_id'], m.pk)
+        found = boss_tools.open_file(m.pk)
+        self.assertIn('1983', found['text'])
+        self.assertEqual(found['what'], 'PDF, 1 page')
+
+    def test_a_word_file(self):
+        import io
+        import zipfile
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, 'w') as z:
+            z.writestr('word/document.xml', '<w:document><w:body><w:p><w:r><w:t>Dear Sir &amp; Madam</w:t></w:r>'
+                                            '</w:p><w:p><w:r><w:t>SIM request</w:t></w:r></w:p></w:body></w:document>')
+        m = self.sent('letter.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                      out.getvalue())
+        from apps.communications.services import file_reader
+        self.assertEqual(file_reader.read(m)['text'], 'Dear Sir & Madam\nSIM request')
+
+    def test_what_cant_be_opened_is_said_plainly(self):
+        from apps.communications.services import file_reader
+        m = self.sent('design.cdr', 'application/octet-stream', b'xx')
+        self.assertIn("can't open this kind of file", file_reader.read(m)['error'])
+
+    def test_a_photo_is_shown_to_octos_as_a_picture(self):
+        import io
+        from PIL import Image
+        from apps.communications.assistant import boss
+        from apps.communications.tests_owner_boss import FakeModel, looks, said, turn
+        buf = io.BytesIO()
+        Image.new('RGB', (3000, 2000), 'white').save(buf, 'JPEG')
+        m = self.sent('proof.jpg', 'image/jpeg', buf.getvalue(), mtype=Message.IMAGE)
+        model = FakeModel(turn(looks('open_file', file_id=m.pk)), turn(said('A plain white page, boss.')))
+        calls, usage = [], {'input': 0, 'output': 0, 'cache_read': 0}
+        with patch('anthropic.Anthropic', return_value=model), patch.object(boss, '_say'), \
+                patch.object(boss, '_typing', create=True):
+            reply = boss._converse([{'role': 'user', 'content': 'What did Amoree send?'}], calls, [], usage,
+                                   None, timezone.now())
+        self.assertEqual(reply, 'A plain white page, boss.')
+        result = model.calls[1]['messages'][-1]['content'][0]['content']
+        self.assertEqual(result[1]['type'], 'image')
+        self.assertEqual(result[1]['source']['media_type'], 'image/jpeg')
+        self.assertNotIn('_image', calls[-1]['result'])                  # never kept as text for the checker
+
+    def test_the_rules_say_open_it_before_saying_you_cant(self):
+        from apps.communications.assistant import boss
+        self.assertIn("never tell him you can't read a file you haven't tried", boss.RULES)
 
 
 class VoiceNoteTests(TestCase):

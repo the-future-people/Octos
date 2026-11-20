@@ -137,25 +137,36 @@ class GoldenScenarios(CommunicationsTestBase):
 
     # ── Files without the QR ─────────────────────────────────
 
-    def test_files_handled_after_a_take_over_get_a_check_in_on_take_back(self):
+    def take_over_then_silence(self, r, between=None):
+        photo = r.customer(file=True)
+        r.wait(seconds=10)
+        r.take_over(self.user)
+        r.wait(minutes=2)
+        r.octos_turn(photo)                  # silent: a person has it
+        if between:
+            between()
+        r.wait(minutes=29)
+        r.handover_watch()                   # the reminder
+        r.wait(minutes=11)
+        r.handover_watch()                   # the take-back
+        r.octos_turn(photo)                  # the run the take-back wakes
+        return photo
+
+    def test_a_take_back_with_proof_the_team_dealt_with_it_stays_quiet(self):
         # Arthur and Kojo, 9 Nov: staff took over to open the files, never typed,
-        # and 40 minutes later Octos took back and sent the stock reply. Noel,
-        # 20 Nov: the same, and Octos then said nothing at all. Now: a gentle
-        # check-in, never the stock "what would you like done?".
+        # the job was made at the counter, and 40 minutes later Octos took back
+        # and sent the stock reply. Proof the team acted keeps Octos out.
         with Replay() as r:
-            photo = r.customer(file=True)
-            r.wait(seconds=10)
-            r.take_over(self.user)
-            r.wait(minutes=2)
-            r.octos_turn(photo)                  # silent: a person has it
-            r.wait(minutes=29)
-            r.handover_watch()                   # the reminder
-            r.wait(minutes=11)
-            r.handover_watch()                   # the take-back
-            r.octos_turn(photo)                  # the run the take-back wakes
-            self.assertEqual(len(r.said()), 1)
-            self.assertIn('just checking in', r.said()[0].lower())
-            self.assertIn('Did the team sort out the file you sent', r.said()[0])
+            self.take_over_then_silence(r, between=r.job_created)
+            self.assertEqual(r.said(), [])
+
+    def test_a_take_back_with_no_proof_is_answered_from_the_chat(self):
+        # Noel, 20 Nov: opened, taken over, nobody wrote, and Octos took back
+        # only to stay silent. With nothing to show the team acted, Octos
+        # answers, with the chat in view, never a stock line.
+        with Replay() as r:
+            self.take_over_then_silence(r)
+            self.assertEqual(r.said(), [MODEL_REPLY])
 
     # ── Remote customers ─────────────────────────────────────
 
