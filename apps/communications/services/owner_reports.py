@@ -264,8 +264,13 @@ def _alert_words(items, limit=3):
 
 # ── The three reports ──────────────────────────────────────────────────────
 
-def brief(day=None):
-    """Before opening: yesterday in numbers, and what today holds."""
+def brief(day=None, greeting=None):
+    """
+    Before opening: yesterday in numbers, and what today holds. greeting,
+    when given, opens it instead of the plain "Good morning": the 7:30 brief
+    opens with the time and the weather (20 Nov 2026); a brief asked for
+    later in the day keeps the plain heading.
+    """
     from apps.eye.services import periods
     day = day or timezone.localdate()
     yday, before = day - timedelta(days=1), day - timedelta(days=2)
@@ -292,7 +297,7 @@ def brief(day=None):
         today_rows.append((f'Discounts · {n_cuts}', amount(off)))
 
     text = compose(
-        f'☀️ *Good morning, {name}*',
+        greeting or f'☀️ *Good morning, {name}*',
         f'_Morning brief · {_short_day(day)}_',
         RULE,
         hero('Collected yesterday', ghs(collected), note),

@@ -295,6 +295,10 @@ OCTOS_ASSISTANT_MODEL  = os.environ.get('OCTOS_ASSISTANT_MODEL', 'claude-sonnet-
 # The owner's line talking back (19 Nov 2026): 'off' returns it to its
 # shortcuts and menu. Its model defaults to the assistant's.
 OCTOS_OWNER_BRAIN      = os.environ.get('OCTOS_OWNER_BRAIN', 'on')
+# The weather in the morning brief (20 Nov 2026): Open-Meteo, no key needed.
+OCTOS_WEATHER_PLACE    = os.environ.get('OCTOS_WEATHER_PLACE', 'Accra')
+OCTOS_WEATHER_LAT      = float(os.environ.get('OCTOS_WEATHER_LAT', '5.6037'))
+OCTOS_WEATHER_LON      = float(os.environ.get('OCTOS_WEATHER_LON', '-0.1870'))
 OCTOS_OWNER_MODEL      = os.environ.get('OCTOS_OWNER_MODEL', '')
 ASGI_APPLICATION = 'config.asgi.application'
 

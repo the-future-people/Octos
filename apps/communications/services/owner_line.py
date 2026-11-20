@@ -314,13 +314,13 @@ def answer(pk):
          "I didn't catch that. " + MENU.split('\n\n', 1)[1])
 
 
-def _report(which, key=None, as_card=False):
+def _report(which, key=None, as_card=False, **options):
     """
     A report as designed text (the default, 18 Nov 2026), or as the picture
     when the owner asks for a card. A picture that fails to draw goes as text.
     """
     from apps.communications.services import owner_cards, owner_reports
-    report = getattr(owner_reports, which)()
+    report = getattr(owner_reports, which)(**options)
     kind = {'brief': OwnerMessage.BRIEF, 'close': OwnerMessage.CLOSE}.get(which, OwnerMessage.ANSWER)
     if as_card:
         try:
@@ -517,7 +517,14 @@ def job_slipping(job, word, when):
 
 @_safely
 def send_brief():
-    return _report('brief', key=f'brief:{timezone.localdate():%Y-%m-%d}')
+    """The 7:30 brief, opening with the time and the weather (20 Nov 2026)."""
+    from apps.communications.services import weather
+    try:
+        greeting = weather.morning_greeting()
+    except Exception:
+        logger.exception("Owner's line: the morning greeting failed; the brief goes without it")
+        greeting = None
+    return _report('brief', key=f'brief:{timezone.localdate():%Y-%m-%d}', greeting=greeting)
 
 
 @_safely
