@@ -239,6 +239,36 @@ class LookupTests(BossBase):
         self.assertEqual(start - b_start, timedelta(days=7))
         self.assertLessEqual(b_end, timezone.now() - timedelta(days=7) + timedelta(seconds=1))
 
+    def test_how_much_paper_is_left(self):
+        # 20 Nov 2026: "How much sheet left at Westland?"
+        from apps.inventory.models import (BranchStock, ConsumableCategory, ConsumableItem, DeliveryUnit,
+                                           StockMovement)
+        paper = ConsumableCategory.objects.create(name='Paper')
+        a4 = ConsumableItem.objects.create(category=paper, name='A4 Paper 80gsm', paper_size='A4',
+                                           unit_type='SHEETS', unit_label='sheets', reorder_point=2500)
+        DeliveryUnit.objects.create(consumable=a4, pack_size=Decimal('2500'), pack_label='box')
+        rings = ConsumableItem.objects.create(category=ConsumableCategory.objects.create(name='Binding'),
+                                              name='Binding rings', unit_type='UNITS', unit_label='pcs')
+        StockMovement.objects.create(branch=self.branch, consumable=a4, movement_type='IN',
+                                     quantity=Decimal('5000'), balance_after=Decimal('5000'),
+                                     recorded_by=self.bm)
+        StockMovement.objects.create(branch=self.branch, consumable=a4, movement_type='OUT',
+                                     quantity=Decimal('700'), balance_after=Decimal('4300'), recorded_by=self.bm)
+        BranchStock.objects.create(branch=self.branch, consumable=a4, quantity=Decimal('4300'))
+        BranchStock.objects.create(branch=self.branch, consumable=rings, quantity=Decimal('80'))
+
+        got = boss_tools.stock('Test Branch', 'sheets')[0]
+        self.assertEqual([r['item'] for r in got['items']], ['A4 Paper 80gsm'])     # paper only
+        a4row = got['items'][0]
+        self.assertEqual(a4row['left'], '4,300 sheets')
+        self.assertEqual(a4row['in_packs'], 'about 1.7 boxes (2,500 sheets a box)')
+        self.assertEqual((a4row['used_today'], a4row['used_past_7_days']), ('700 sheets', '700 sheets'))
+        self.assertEqual(a4row['lasts_at_this_pace'], 'about 43 days')
+        self.assertFalse(a4row['low'])
+        self.assertIn('5,000 sheets', a4row['last_came_in'])
+        self.assertEqual(len(boss_tools.stock('Test Branch')[0]['items']), 2)
+        self.assertIn('Nothing matches', boss_tools.stock('Test Branch', 'toner')['say'])
+
     def test_the_formats_the_checker_reads(self):
         t = timezone.localtime().replace(hour=16, minute=5)
         self.assertEqual(boss_tools.clock(t), '4:05pm')

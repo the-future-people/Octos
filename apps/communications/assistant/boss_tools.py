@@ -811,3 +811,84 @@ def find_proforma(query):
             row['job_paid'] = ghs(p.job.amount_paid)
         rows.append(row)
     return {'found': len(rows), 'proformas': rows}
+
+
+# ── Stock ──────────────────────────────────────────────────────────────────
+
+def _count(value):
+    """'2,340' or '12.5': stock as people say it."""
+    v = Decimal(value or 0)
+    return f'{v:,.0f}' if v == v.to_integral_value() else f'{v:,.1f}'
+
+
+def stock(branch='', item=''):
+    """
+    What's left on the shelf, branch by branch (20 Nov 2026: "How much sheet
+    left at Westland?"): each item's count, whether it's low, the same in
+    boxes or reams, what went out today and this past week, how many days
+    that lasts at this week's pace, and when stock last came in. item
+    narrows it ("A4", "paper", "toner", "rings").
+    """
+    from apps.inventory.models import BranchStock, StockMovement
+    found, error = branches(branch)
+    if error:
+        return error
+    now = timezone.now()
+    today_start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    qs = (BranchStock.objects.filter(branch_id__in=_ids(found), consumable__is_active=True)
+          .select_related('branch', 'consumable', 'consumable__delivery_unit'))
+    wanted = (item or '').strip().lower()
+    if wanted in ('sheet', 'sheets', 'paper', 'papers'):
+        qs = qs.filter(consumable__unit_type='SHEETS')
+    elif wanted:
+        qs = qs.filter(Q(consumable__name__icontains=wanted) | Q(consumable__paper_size__iexact=wanted)
+                       | Q(consumable__category__name__icontains=wanted))
+    used = {}
+    for row in (StockMovement.objects
+                .filter(branch_id__in=_ids(found), created_at__gte=week_start,
+                        movement_type__in=['OUT', 'WASTE'])
+                .values('branch_id', 'consumable_id', 'created_at', 'quantity')):
+        key = (row['branch_id'], row['consumable_id'])
+        week, day = used.get(key, (ZERO, ZERO))
+        week += row['quantity']
+        if row['created_at'] >= today_start:
+            day += row['quantity']
+        used[key] = (week, day)
+    last_in = {}
+    for row in (StockMovement.objects.filter(branch_id__in=_ids(found), movement_type__in=['IN', 'OPENING'])
+                .order_by('branch_id', 'consumable_id', '-created_at')
+                .values('branch_id', 'consumable_id', 'created_at', 'quantity')):
+        last_in.setdefault((row['branch_id'], row['consumable_id']), row)
+
+    out = []
+    for b in found:
+        items = []
+        for s in qs.filter(branch=b).order_by('consumable__category__name', 'consumable__name'):
+            c = s.consumable
+            unit = c.unit_label or 'units'
+            row = {'item': c.name, 'left': f'{_count(s.quantity)} {unit}'}
+            if c.reorder_point:
+                row['low'] = s.is_low
+                row['reorder_at'] = f'{_count(c.reorder_point)} {unit}'
+            pack = getattr(c, 'delivery_unit', None)
+            if pack is not None and pack.is_active and pack.pack_size and pack.pack_size > 1:
+                packs = Decimal(s.quantity or 0) / pack.pack_size
+                row['in_packs'] = (f'about {packs:.1f} {pack.pack_label}{"es" if pack.pack_label.endswith("x") else "s"}'
+                                   f' ({_count(pack.pack_size)} {unit} a {pack.pack_label})')
+            week, day = used.get((b.pk, c.pk), (ZERO, ZERO))
+            row['used_today'] = f'{_count(day)} {unit}'
+            row['used_past_7_days'] = f'{_count(week)} {unit}'
+            if week > 0:
+                days = Decimal(s.quantity or 0) / (week / 7)
+                row['lasts_at_this_pace'] = f'about {int(days)} day{"s" if int(days) != 1 else ""}'
+            came = last_in.get((b.pk, c.pk))
+            if came:
+                row['last_came_in'] = f'{_count(came["quantity"])} {unit}, {when(came["created_at"], now)}'
+            items.append(row)
+        low = [r['item'] for r in items if r.get('low')]
+        out.append({'branch': short(b), 'items': items, 'running_low': low})
+    if not any(o['items'] for o in out):
+        return {'branches': [o['branch'] for o in out],
+                'say': 'No stock is recorded for that here.' + (f' Nothing matches "{item}".' if item else '')}
+    return out

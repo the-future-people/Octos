@@ -119,7 +119,7 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
@@ -295,6 +295,12 @@ TOOL_SPECS = [
                      'what says what to check, in a few words.'),
      'input_schema': {'type': 'object', 'properties': {
          'minutes': {'type': 'integer'}, 'what': {'type': 'string'}}, 'required': ['minutes', 'what']}},
+    {'name': 'stock',
+     'description': ("What's left on the shelf at each branch: each item's count, whether it's running low, "
+                     'the same in boxes or reams, what went out today and in the past 7 days, how many days '
+                     "that lasts at this pace, and when stock last came in. item narrows it: 'paper' or "
+                     "'sheets' for all paper, or 'A4', 'A3', 'toner', 'rings', 'lamination'."),
+     'input_schema': {'type': 'object', 'properties': {'item': {'type': 'string'}, **BRANCH}}},
     {'name': 'machines',
      'description': 'Which machines are working and which are down, since when and why.',
      'input_schema': {'type': 'object', 'properties': BRANCH}},
@@ -331,6 +337,8 @@ def _run_tool(name, args, sent):
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
+    if name == 'stock':
+        return look.stock(args.get('branch', ''), str(args.get('item') or ''))
     if name == 'who_owes':
         return look.who_owes(args.get('branch', ''))
     if name in ('answer_now', 'watch_chat', 'send_to_customer'):
