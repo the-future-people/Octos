@@ -7,6 +7,7 @@ urlpatterns = [
     path('', views.ConversationListView.as_view(), name='conversation-list'),
     path('counts/', views.InboxCountsView.as_view(), name='inbox-counts'),
     path('messages/<int:pk>/file/', views.MessageFileView.as_view(), name='message-file'),
+    path('messages/<int:pk>/opened/', views.MessageOpenedView.as_view(), name='message-opened'),
     path('start/', views.ConversationStartView.as_view(), name='conversation-start'),
     path('<int:pk>/', views.ConversationDetailView.as_view(), name='conversation-detail'),
     path('<int:pk>/reply/', views.ConversationReplyView.as_view(), name='conversation-reply'),

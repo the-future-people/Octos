@@ -5,8 +5,10 @@ Recorded on the spine as file.opened, once per file, with who opened it. It
 discharges the visit's files obligation (no more questions about those files)
 and is a presence anchor: a person has them (apps/spine/presence.py).
 
-Only an explicit open counts (the inbox's Open, ?download=1), not a photo
-appearing in a thread someone is looking at.
+Only an explicit open counts, not a photo appearing in a thread someone is
+looking at: the inbox's Open (?download=1), a photo looked at full size in
+the photo viewer, or photos opened as one PDF (the last two from 20 Nov
+2026, when opening an album never told Octos).
 """
 from apps.communications.models import Message
 

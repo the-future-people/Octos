@@ -96,3 +96,86 @@ class FileOpenedTests(CommunicationsTestBase):
         said, why = counter.step(second.conversation, second, timezone.now())
         self.assertIsNone(said)
         self.assertIn('attendant', why)
+
+
+@override_settings(OCTOS_ASSISTANT_MODE='off', ANTHROPIC_API_KEY='test-key')
+class OpenedFileKeepsOctosQuietTests(CommunicationsTestBase):
+    """
+    20 Nov 2026: twice in one day, a customer sent a file, Khofi opened it,
+    and Octos still asked the customer what the files were for.
+    """
+
+    def setUp(self):
+        super().setUp()
+        keep = patch('apps.communications.services.whatsapp_inbound._keep_media')
+        keep.start()
+        self.addCleanup(keep.stop)
+
+    def _file(self, n, kind='image'):
+        _receive({'id': f'wamid.Q{n}', 'from': '233244123495', 'type': kind,
+                  kind: {'id': f'media-Q{n}', 'mime_type': 'image/jpeg' if kind == 'image' else 'application/pdf',
+                         **({'filename': f'doc{n}.pdf'} if kind == 'document' else {})}}, 'Efua')
+        message = Message.objects.get(external_id=f'wamid.Q{n}')
+        Message.objects.filter(pk=message.pk).update(media_file=f'communications/q{n}.jpg')
+        message.refresh_from_db()
+        return message
+
+    def silence(self, message):
+        from apps.communications.assistant.brain import _silence
+        return _silence(message.conversation, message, timezone.now())
+
+    def test_the_new_file_opened_is_enough_even_with_an_older_one_unopened(self):
+        self._file(1)                                  # earlier in the visit, never opened
+        new = self._file(2)
+        file_opened(new, self.user)
+        self.assertEqual(self.silence(new), 'the files were already handled')
+
+    def test_opening_one_of_several_files_just_sent_is_enough(self):
+        first = self._file(1)
+        self._file(2)
+        last = self._file(3)
+        file_opened(first, self.user)
+        self.assertEqual(self.silence(last), 'the files were already handled')
+
+    def test_nothing_opened_octos_may_still_ask(self):
+        last = self._file(1)
+        self.assertNotEqual(self.silence(last), 'the files were already handled')
+
+    def test_an_open_from_before_farhat_last_spoke_does_not_cover_new_files(self):
+        old = self._file(1)
+        file_opened(old, self.user)
+        from apps.spine.recorder import record
+        record(kinds.MESSAGE_SENT, actor=Event.OCTOS, conversation=old.conversation,
+               key='sent:between', payload={})
+        new = self._file(2)
+        self.assertNotEqual(self.silence(new), 'the files were already handled')
+
+    def test_opening_photos_as_one_pdf_counts_as_opening_them(self):
+        from django.core.files.base import ContentFile
+        from io import BytesIO
+        from PIL import Image
+        photos = [self._file(1), self._file(2)]
+        for p in photos:
+            buf = BytesIO()
+            Image.new('RGB', (40, 60), (200, 100, 50)).save(buf, 'JPEG')
+            p.media_file.save(f'q{p.pk}.jpg', ContentFile(buf.getvalue()), save=True)
+            Message.objects.filter(pk=p.pk).update(media_mime='image/jpeg')
+        r = self.client.post(f'/api/v1/communications/{photos[0].conversation_id}/photos-pdf/',
+                             {'messages': [p.pk for p in photos]}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(Event.objects.filter(kind=kinds.FILE_OPENED).count(), 2)
+
+    def test_looking_at_a_photo_in_the_viewer_counts_as_opening_it(self):
+        photo = self._file(1)
+        r = self.client.post(f'/api/v1/communications/messages/{photo.pk}/opened/')
+        self.assertEqual(r.status_code, 204)
+        event = Event.objects.get(kind=kinds.FILE_OPENED)
+        self.assertEqual(event.actor_user, self.user)
+        self.assertEqual(self.silence(photo), 'the files were already handled')
+
+    def test_the_viewer_route_checks_who_is_asking(self):
+        from rest_framework.test import APIClient
+        photo = self._file(1)
+        r = APIClient().post(f'/api/v1/communications/messages/{photo.pk}/opened/')
+        self.assertIn(r.status_code, (401, 403))
+        self.assertFalse(Event.objects.filter(kind=kinds.FILE_OPENED).exists())

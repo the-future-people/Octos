@@ -81,3 +81,25 @@ def files_handled(visit, upto_event_id=None):
     files = [o for o in ledger(visit) if o.what == FILES
              and (upto_event_id is None or o.opened_by <= upto_event_id)]
     return bool(files) and all(not o.open for o in files)
+
+
+def batch_handled(visit, upto_event_id):
+    """
+    True when a person has picked up the files the customer has just sent
+    (20 Nov 2026). The batch is the files that came after Farhat last spoke,
+    up to this one; one of them opened, claimed, made into a job, or the chat
+    taken over, means a person is on it.
+
+    files_handled() asks that every file in the visit be handled. That was
+    too strict for staying quiet: Khofi opened a customer's new file, but an
+    older one from the same visit hadn't been opened, so Octos still asked
+    what the files were for.
+    """
+    events = list(visit.events.filter(pk__lte=upto_event_id).order_by('occurred_at', 'id'))
+    last_spoke = max((i for i, e in enumerate(events) if e.kind == kinds.MESSAGE_SENT), default=-1)
+    batch = [e for e in events[last_spoke + 1:]
+             if e.kind == kinds.MESSAGE_RECEIVED and e.payload.get('has_file')]
+    if not batch:
+        return False
+    first = batch[0]
+    return visit.events.filter(kind__in=DISCHARGES[FILES], occurred_at__gte=first.occurred_at).exists()

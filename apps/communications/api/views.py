@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import generics, filters, status
 from rest_framework.pagination import PageNumberPagination
 from django.db.models import Case, Count, F, IntegerField, Min, Q, Value, When
@@ -12,6 +14,8 @@ from .serializers import (
     ConversationListSerializer, ConversationDetailSerializer,
     MessageSerializer, MessageCreateSerializer, ConversationAssignSerializer
 )
+
+logger = logging.getLogger(__name__)
 
 # What staff are told when WhatsApp's 24-hour window is shut. Plain words:
 # staff don't need to know what a template is, only when it will work again.
@@ -745,6 +749,26 @@ class ConversationLinkCustomerView(APIView):
         return Response({'customer': customer.pk, 'phone': conversation.contact_phone})
 
 
+class MessageOpenedView(APIView):
+    """
+    POST /api/v1/communications/messages/<id>/opened/
+
+    A person looked at this customer's photo full size in the inbox's photo
+    viewer (20 Nov 2026). Thumbnails load by themselves and prove nothing;
+    the viewer is a person choosing to look, so it counts as opening, and
+    Octos doesn't ask the customer what the photos are for.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        message = Message.objects.filter(pk=pk).only('id', 'conversation_id', 'direction', 'media_name').first()
+        if message is None or _visible(request, message.conversation_id) is None:
+            return _not_found()
+        from apps.communications.services.opened import file_opened
+        file_opened(message, request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ConversationPhotosPdfView(APIView):
     """
     POST /api/v1/communications/<id>/photos-pdf/  { messages: [ids] }
@@ -771,6 +795,11 @@ class ConversationPhotosPdfView(APIView):
         photos = [chosen[i] for i in ids if i in chosen]
         if not photos:
             return Response({'detail': 'None of those photos is ready yet.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Opening them as one PDF is opening them (20 Nov 2026): Octos had
+        # gone on to ask the customer what the photos were for.
+        from apps.communications.services.opened import file_opened
+        for message in photos:
+            file_opened(message, request.user)
 
         pages = []
         for message in photos:

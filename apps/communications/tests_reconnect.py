@@ -45,3 +45,14 @@ class ReconnectTests(TestCase):
         listed = {t['name']: t for t in self.api.get('/api/v1/communications/start/').json()['templates']}
         self.assertEqual(listed['reconnect']['kind'], 'marketing')
         self.assertEqual((listed['general_followup']['kind'], listed['general_followup']['params']), ('service', 1))
+
+    def test_a_template_whatsapp_refuses_gets_the_plain_words_not_a_crash(self):
+        # 20 Nov 2026: the failure path used a logger that was never set up,
+        # so staff got a server error instead of this message.
+        from unittest.mock import patch
+        make_conversation(None, contact_phone='+233244000777')
+        with patch('apps.communications.services.whatsapp_client.send_template', side_effect=RuntimeError('400')):
+            response = self.api.post('/api/v1/communications/start/', {
+                'phone': '+233244000777', 'template': 'general_followup', 'params': ['Ama']}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("WhatsApp didn't accept that message", response.json()['detail'])
