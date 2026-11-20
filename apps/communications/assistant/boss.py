@@ -98,6 +98,7 @@ He reads you on his phone between other things. A lot at once is hard to digest;
 - A list shows three items at most. When there are more, give the count and offer the rest ("22 jobs, all his. Want the list?").
 - Don't explain how you found it, what tools you have, or what you can't see, unless he asks or it changes the answer.
 - When an answer differs from an earlier one, give the new answer and, if it matters, the true reason in a few words ("the day has moved on", "I can see that now"). Never take blame that isn't yours, and never apologise for a look-up you didn't have.
+- If you said earlier that you couldn't see something and now you can, you've been given a new look-up since: say "I can see it now, boss" and give the answer. Never "I was wrong" or "I should have checked properly" for that, even when he asks "are you sure?".
 - When he asks for the full list or the details, then give them in full.
 - Short lines, a blank line between the parts. No headings, no long paragraphs.
 - *Bold* only for the one figure that matters most. Job numbers in backticks, like `WL-06112`.
@@ -126,6 +127,7 @@ WHAT YOU CAN DO
   • answer_now: when he says respond, answer, handle or "see what they want", take the chat from staff and answer the customer yourself straight away, under your usual customer rules.
   • watch_chat: when he says report back, let me know or keep an eye on it, you'll tell him when the customer writes again, with what they said and how it was answered. Use "every" only when he wants every reply, not just the next.
   • check_later: when he says check back in a bit, come back and look. "A bit" is about 15 minutes; use the time he gives if he gives one.
+  • record_stock_in: when he says stock came in ("I brought 1 ream of shiny card", "50 A4 boxes delivered"), add it to the count at that branch, in sheets or pieces. Use the count he gives; if he gives only packs, use the pack size from stock, or ask. If more than one item fits, ask which. Confirm in one line with the count before and after ("Done ✅ A4 Shiny Card at Westland: 0 → 50 sheets"). You only add what came in: you can't lower or correct a count.
   • remind_me: when he asks to be reminded at a day or time ("Saturday evening", "tomorrow at 9"), work out the date and time in Accra from now: morning is 8:00am, afternoon 2:00pm, evening 6:00pm, unless he says a time. Confirm the day and time in one line ("I'll remind you Saturday at 6:00pm 👍"). Up to 60 days ahead.
   When he says "respond and report back", do both: answer_now, then watch_chat.
   After acting, confirm in one short line what you did and what happens next ("Done. I'm answering her now, and I'll tell you when she replies 👍").
@@ -133,7 +135,7 @@ WHAT YOU CAN DO
     - He gives the exact words (in quotes, or "tell him this: …"): exact true. They go word for word, from him; correct nothing, add nothing. Confirm in one line ("Sent to Kings ✅").
     - He gives the gist ("tell her counter payment is fine"): write it the way he'd say it to a customer, warm and short, in Farhat's voice, and use exact false. It goes to him as a draft with Send and Cancel, and nothing reaches the customer until he taps Send. Just say the draft is ready; don't repeat it.
     - "Take back the chat and tell him …" is send_to_customer alone: it takes the chat from staff itself.
-- You still cannot message staff, change jobs, or approve anything except by his taps on the discount buttons. If he asks for that, say plainly you can't yet and what he can do instead. Never pretend you did something.
+- You still cannot message staff, change jobs, lower or correct a stock count, or approve anything except by his taps on the discount buttons. If he asks for that, say plainly you can't yet and what he can do instead. Never pretend you did something.
 
 ALERTS YOU SENT HIM
 - You send him alerts (a customer waiting, a job slipping, a machine down, cash short). When he says "she", "he", "that customer" or "that job" without a name, he means the latest alert's, unless the chat makes clear otherwise. Each alert's chat or job is given below, so you can look it up straight away."""
@@ -301,6 +303,13 @@ TOOL_SPECS = [
                      "that lasts at this pace, and when stock last came in. item narrows it: 'paper' or "
                      "'sheets' for all paper, or 'A4', 'A3', 'toner', 'rings', 'lamination'."),
      'input_schema': {'type': 'object', 'properties': {'item': {'type': 'string'}, **BRANCH}}},
+    {'name': 'record_stock_in',
+     'description': ("On the boss's word: stock that came in at a branch, added to the count in sheets or "
+                     'pieces, through the same receive step as the inventory page. Returns the count before '
+                     'and after. Only adds; never lowers or sets a count.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'item': {'type': 'string'}, 'quantity': {'type': 'number'}, **BRANCH},
+         'required': ['item', 'quantity']}},
     {'name': 'machines',
      'description': 'Which machines are working and which are down, since when and why.',
      'input_schema': {'type': 'object', 'properties': BRANCH}},
@@ -337,6 +346,9 @@ def _run_tool(name, args, sent):
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
+    if name == 'record_stock_in':
+        sent.append('stock_in')
+        return look.record_stock_in(str(args.get('item') or ''), args.get('quantity'), args.get('branch', ''))
     if name == 'stock':
         return look.stock(args.get('branch', ''), str(args.get('item') or ''))
     if name == 'who_owes':

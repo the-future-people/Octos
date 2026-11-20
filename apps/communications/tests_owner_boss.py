@@ -269,6 +269,32 @@ class LookupTests(BossBase):
         self.assertEqual(len(boss_tools.stock('Test Branch')[0]['items']), 2)
         self.assertIn('Nothing matches', boss_tools.stock('Test Branch', 'toner')['say'])
 
+    def test_stock_that_came_in_on_his_word(self):
+        # 20 Nov 2026: "I brought 1 ream (50pcs) of the shiny cards, can you update it?"
+        from apps.inventory.models import BranchStock, ConsumableCategory, ConsumableItem, StockMovement
+        paper = ConsumableCategory.objects.create(name='Paper')
+        card = ConsumableItem.objects.create(category=paper, name='A4 Shiny Card', paper_size='A4',
+                                             unit_type='SHEETS', unit_label='sheets', reorder_point=20)
+        ConsumableItem.objects.create(category=paper, name='A4 Paper 80gsm', paper_size='A4',
+                                      unit_type='SHEETS', unit_label='sheets')
+        BranchStock.objects.create(branch=self.branch, consumable=card, quantity=Decimal('0'))
+
+        got = boss_tools.record_stock_in('shiny cards', 50, 'Test Branch')
+        self.assertEqual((got['item'], got['was'], got['now']), ('A4 Shiny Card', '0 sheets', '50 sheets'))
+        move = StockMovement.objects.get(consumable=card)
+        self.assertEqual((move.movement_type, move.quantity, move.recorded_by), ('IN', Decimal('50'), self.owner))
+        self.assertIn("owner's word", move.notes)
+
+        self.assertIn('more_than_one', boss_tools.record_stock_in('A4', 10, 'Test Branch'))
+        self.assertIn('Which branch', boss_tools.record_stock_in('shiny card', 10)['error'])
+        self.assertIn('error', boss_tools.record_stock_in('shiny card', -5, 'Test Branch'))
+        self.assertIn('error', boss_tools.record_stock_in('gold leaf', 5, 'Test Branch'))
+        self.assertEqual(BranchStock.objects.get(consumable=card).quantity, Decimal('50'))   # nothing else moved
+
+    def test_now_i_can_see_it_is_not_i_was_wrong(self):
+        self.assertIn('say "I can see it now, boss"', boss.RULES)
+        self.assertIn('record_stock_in: when he says stock came in', boss.RULES)
+
     def test_the_formats_the_checker_reads(self):
         t = timezone.localtime().replace(hour=16, minute=5)
         self.assertEqual(boss_tools.clock(t), '4:05pm')

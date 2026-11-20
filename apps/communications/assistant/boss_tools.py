@@ -16,6 +16,7 @@ Two rules keep the figure checker (checker.py) honest:
   clock times are always written like "8:04am", never as ISO strings
 so every figure Octos repeats can be found, as written, in what it looked up.
 """
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -892,3 +893,51 @@ def stock(branch='', item=''):
         return {'branches': [o['branch'] for o in out],
                 'say': 'No stock is recorded for that here.' + (f' Nothing matches "{item}".' if item else '')}
     return out
+
+
+def record_stock_in(item, quantity, branch=''):
+    """
+    Stock that came in, on the owner's word (20 Nov 2026: "I brought 1 ream
+    (50 pcs) of the shiny cards, can you update it?"). Goes through the
+    same receive step as the BM's inventory page, so the ledger shows it,
+    recorded by the owner. Adds to the count; never sets or lowers it.
+    """
+    from apps.communications.services.owner_line import owner_user
+    from apps.inventory.inventory_engine import InventoryEngine
+    from apps.inventory.models import BranchStock, ConsumableItem
+    found, error = branches(branch)
+    if error:
+        return error
+    if len(found) != 1:
+        return {'error': 'Which branch did it come in at?', 'branches': [short(b) for b in found]}
+    b = found[0]
+    try:
+        quantity = Decimal(str(quantity))
+    except Exception:
+        return {'error': 'Give the number of sheets or pieces that came in.'}
+    if quantity <= 0 or quantity > 1_000_000:
+        return {'error': 'Give the number of sheets or pieces that came in.'}
+    words = [w for w in re.split(r'\s+', (item or '').strip().lower()) if w]
+    if not words:
+        return {'error': 'Which item came in?'}
+    qs = ConsumableItem.objects.filter(is_active=True)
+    for w in words:
+        qs = qs.filter(Q(name__icontains=w.rstrip('s')) | Q(paper_size__iexact=w))
+    matches = list(qs[:6])
+    if not matches:
+        return {'error': f'No stock item matches "{item}". Look at stock for the names.'}
+    if len(matches) > 1:
+        return {'more_than_one': [m.name for m in matches], 'say': 'Ask him which one.'}
+    consumable = matches[0]
+    owner = owner_user()
+    if owner is None:
+        return {'error': "I can't tell who you are in the system, so I can't record it."}
+    before = (BranchStock.objects.filter(branch=b, consumable=consumable)
+              .values_list('quantity', flat=True).first()) or ZERO
+    InventoryEngine(b).receive_stock(consumable, quantity, owner,
+                                     notes='Recorded by Octos on the owner\'s word, from WhatsApp')
+    after = BranchStock.objects.get(branch=b, consumable=consumable).quantity
+    unit = consumable.unit_label or 'units'
+    return {'done': True, 'branch': short(b), 'item': consumable.name,
+            'came_in': f'{_count(quantity)} {unit}',
+            'was': f'{_count(before)} {unit}', 'now': f'{_count(after)} {unit}'}
