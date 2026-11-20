@@ -9,6 +9,14 @@ Every few minutes, while a branch is open: an open visit that isn't at the
 counter, where the customer sent a file, no job has been made and no receipt
 sent, and nothing has happened for QUIET_FOR, goes to "Needs you" with the reason. Once per
 visit. Octos takes it back by itself when the visit closes (handover.watch).
+
+20 Nov 2026, from a week of chats:
+- A job made or a receipt sent for the chat earlier the same day counts too:
+  Osekre's job was made and his receipt sent, then a corrected copy of the
+  same file opened a new visit and was flagged as "no job made".
+- Octos follows up once himself first ("Just checking in…"), and a person is
+  brought in only if that gets no answer either. Noel and Dominic were
+  handed to staff without a word to them, and nobody wrote.
 """
 from datetime import timedelta
 
@@ -29,9 +37,45 @@ def dealt_with(chat, visit):
 
     if visit.events.filter(kind__in=[kinds.JOB_CREATED, kinds.JOB_LINKED]).exists():
         return True
-    if chat.jobs.filter(created_at__gte=visit.opened_at).exists():
+    since = min(visit.opened_at, _start_of_day(visit.opened_at))
+    if chat.jobs.filter(created_at__gte=since).exists():
         return True
-    return chat.messages.filter(kind='receipt', created_at__gte=visit.opened_at).exists()
+    if chat.customer_id and chat.customer.jobs.filter(created_at__gte=since).exists():
+        return True
+    return chat.messages.filter(kind='receipt', created_at__gte=since).exists()
+
+
+def _start_of_day(moment):
+    local = timezone.localtime(moment)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+FOLLOW_UP_KIND = 'quiet_follow_up'
+
+
+def follow_up_text(chat):
+    """'Hi Akos, just checking in 👋 …', or without a name when we don't have a real one."""
+    from apps.communications.services.names import name_for
+    name = name_for(chat)
+    hello = f'Hi {name}, just checking in' if name else 'Just checking in'
+    return (f"{hello} \U0001F44B Would you like us to do something with the file you sent? "
+            "Tell me what you need and I'll get it going.")
+
+
+def _follow_up(chat, visit, now):
+    """Octos asks once. True when the question went out."""
+    from apps.communications.services.whatsapp_outbound import WindowClosed, send_text
+    from apps.spine import kinds
+    from apps.spine.models import Event
+    from apps.spine.recorder import record
+    try:
+        send_text(chat, follow_up_text(chat), kind=FOLLOW_UP_KIND)
+    except (WindowClosed, ValueError):
+        return False
+    record(kinds.OCTOS_FOLLOWED_UP, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
+           key=f'quiet-follow-up:{visit.pk}', occurred_at=now,
+           reason='Sent a file from outside the shop and went quiet: Octos checked in once.')
+    return True
 
 
 def flag_quiet(now=None):
@@ -63,6 +107,10 @@ def flag_quiet(now=None):
         chat = visit.conversation
         if dealt_with(chat, visit):
             continue
+        # Octos asks first; the visit's quiet clock restarts from his question.
+        if not Event.objects.filter(idempotency_key=f'quiet-follow-up:{visit.pk}').exists():
+            if _follow_up(chat, visit, now):
+                continue
         record(kinds.OCTOS_FLAGGED_QUIET, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
                key=key, reason=REASON)
         handover.octos_hands_over(chat, REASON)

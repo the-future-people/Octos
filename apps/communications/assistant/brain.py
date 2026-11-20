@@ -340,6 +340,23 @@ def _stepped_in(conversation, trigger):
     return None
 
 
+def files_handled(message):
+    """Someone dealt with the files this message belongs to: claimed, opened or made into a job."""
+    from apps.spine.models import Event as SpineEvent
+    from apps.spine.obligations import batch_handled
+    received = (SpineEvent.objects.select_related('visit')
+                .filter(idempotency_key=f'wa:{message.external_id}').first())
+    return bool(received and received.visit and batch_handled(received.visit, upto_event_id=received.pk))
+
+
+def taken_back_since(conversation, message):
+    """Octos took this chat back from a silent person after this message arrived."""
+    from apps.spine import kinds as spine_kinds
+    from apps.spine.models import Event as SpineEvent
+    return SpineEvent.objects.filter(conversation=conversation, kind=spine_kinds.OCTOS_TOOK_BACK,
+                                     occurred_at__gte=message.created_at).exists()
+
+
 def _silence(conversation, trigger, now):
     """A reason to stay silent, or None."""
     if not settings.ANTHROPIC_API_KEY:
@@ -377,13 +394,11 @@ def _silence(conversation, trigger, now):
     # no word from Octos: the work was done in person (11 Nov 2026). One of
     # the files just sent being opened is enough (20 Nov 2026): a person is
     # on it, even if an older file from the same visit was never opened.
-    if last.media_id:
-        from apps.spine.models import Event as SpineEvent
-        from apps.spine.obligations import batch_handled
-        received = (SpineEvent.objects.select_related('visit')
-                    .filter(idempotency_key=f'wa:{last.external_id}').first())
-        if received and received.visit and batch_handled(received.visit, upto_event_id=received.pk):
-            return 'the files were already handled'
+    # Except when Octos took the chat back because nobody answered (20 Nov
+    # 2026): Noel's photo was opened, a person took over, nobody replied, and
+    # Octos took back only to stay silent. A take-back always gets an answer.
+    if last.media_id and not taken_back_since(conversation, last) and files_handled(last):
+        return 'the files were already handled'
     # Answered already: by a person since, or by a run that saw this message.
     # Not "Octos spoke after it": a customer typing while Octos writes lands
     # messages just after its reply, unseen by it (Mercy, 6 Nov 2026).
@@ -600,6 +615,13 @@ def _run_tool(name, args, ctx):
         first = str(args.get('first_name') or '').strip()
         if not first:
             return {'error': 'A first name is needed. Ask for it kindly.'}
+        if ctx.conversation.customer_id:
+            # Already known: the name they want is remembered for every greeting (20 Nov 2026).
+            from apps.communications.services import names
+            used = names.use_name(ctx.conversation, first)
+            if not used:
+                return {'error': "That doesn't read as a first name. Ask kindly what to call them."}
+            return {'saved': used, 'say': f'Use {used} from now on.'}
         try:
             customer = identity.register_from_chat(ctx.conversation, first, str(args.get('last_name') or ''))
         except ValueError:

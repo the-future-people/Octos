@@ -137,9 +137,11 @@ class GoldenScenarios(CommunicationsTestBase):
 
     # ── Files without the QR ─────────────────────────────────
 
-    def test_files_handled_after_a_take_over_get_no_message_on_take_back(self):
+    def test_files_handled_after_a_take_over_get_a_check_in_on_take_back(self):
         # Arthur and Kojo, 9 Nov: staff took over to open the files, never typed,
-        # and 40 minutes later Octos took back and sent the stock reply.
+        # and 40 minutes later Octos took back and sent the stock reply. Noel,
+        # 20 Nov: the same, and Octos then said nothing at all. Now: a gentle
+        # check-in, never the stock "what would you like done?".
         with Replay() as r:
             photo = r.customer(file=True)
             r.wait(seconds=10)
@@ -151,7 +153,9 @@ class GoldenScenarios(CommunicationsTestBase):
             r.wait(minutes=11)
             r.handover_watch()                   # the take-back
             r.octos_turn(photo)                  # the run the take-back wakes
-            self.assertEqual(r.said(), [])
+            self.assertEqual(len(r.said()), 1)
+            self.assertIn('just checking in', r.said()[0].lower())
+            self.assertIn('Did the team sort out the file you sent', r.said()[0])
 
     # ── Remote customers ─────────────────────────────────────
 

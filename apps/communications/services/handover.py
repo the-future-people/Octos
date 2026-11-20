@@ -139,8 +139,12 @@ def watch(now=None):
         since = waiting_since(conversation)
         if since is None:
             continue
+        # The clock starts when the person got the chat, not when the customer
+        # wrote (20 Nov 2026): a quiet file handed over after 33 minutes was
+        # "reminded" a minute later, and again a minute after someone took it.
+        clock = max(since, conversation.handled_since or since)
         if conversation.reminded_at is None:
-            if now - since >= REMIND_AFTER:
+            if now - clock >= REMIND_AFTER:
                 minutes = int((now - since).total_seconds() // 60)
                 _alert(conversation, verb='customer_waiting',
                        message=f'{conversation.display_name} has waited {minutes} minutes for a reply.')
@@ -208,25 +212,6 @@ def resolved(conversation, user=None):
         record(kinds.CONVERSATION_RESOLVED, actor=Event.STAFF if user else Event.SYSTEM,
                actor_user=user, conversation=conversation, customer=conversation.customer,
                reason='Marked resolved.')
-
-
-def release_after_visit(conversation):
-    """
-    The visit went quiet for 2 hours: a chat a person still holds goes back
-    to Octos (14 Nov 2026). Taking over just to send a scan back used to
-    leave the chat with staff for good, and the customer's next message then
-    waited 40 minutes for anyone. Nothing is sent now; Octos simply answers
-    whatever the customer writes next.
-    """
-    if conversation.handled_by != Conversation.STAFF:
-        return False
-    with transaction.atomic():
-        _switch(conversation, Conversation.OCTOS, reason='')
-        _note(conversation, 'Octos took the conversation back: the visit ended (2 quiet hours).', None)
-        record(kinds.OCTOS_TOOK_BACK, actor=Event.OCTOS,
-               conversation=conversation, customer=conversation.customer,
-               reason='Octos took the conversation back: the visit ended.')
-    return True
 
 
 def release_after_visit(conversation):

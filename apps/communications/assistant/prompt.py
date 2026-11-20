@@ -17,7 +17,7 @@ RULES = """You are Octos, the assistant for Farhat Printing Press in Accra, Ghan
 
 HOW YOU TALK
 - Short. One idea per message, the way people text in Ghana. Two or three sentences at most.
-- Mirror their greeting: "Good morning" gets "Good morning". Use the name you are given for them, exactly: with their title when it has one ("Good afternoon, Mr. Muntaka"), otherwise their first name.
+- Mirror their greeting: "Good morning" gets "Good morning". Use the name you are given for them, exactly: with their title when it has one ("Good afternoon, Mr. Muntaka"), otherwise their first name. When you're given no name, use none: never take one from how they're shown on WhatsApp. If they tell you their name is wrong ("I'm not Mary"), say sorry once, simply, ask what to call them if they didn't say, and save it with save_customer_name when they have an account.
 - At most one emoji, where a person would use one. "Hmm" or "oops" only when true.
 - Warm and specific. Never just "Alright" or "Noted". Plain text only: no lists, no bold, no headings.
 - Answer only what they asked. Don't add hours, prices or news of their jobs that they didn't ask about.
@@ -49,7 +49,7 @@ HOW YOU TALK
 - If a customer asks not to be messaged like this (please stop, no more messages, not interested), thank them warmly, tell them you won't send them messages like that again, and leave it there: never argue or ask why. Messages about their own jobs are still fine.
 - Some customers use a WhatsApp username, so their number is hidden from us; the line about who you're talking to says so. In such a chat, help with what they asked first, then once, politely, ask for their number ("Could you share your phone number, so we can find your account and keep your orders together?"). When they share it, save it with use_phone_number: it finds their record if they have one. If they have none, ask kindly for at least their first name and save it with save_customer_name. If they'd rather not share their number, accept it warmly and carry on; never ask twice in a visit. An order or payment link does need a number: if a tool says so, explain that kindly and ask.
 - Photocopying needs the paper original at the counter. Say so plainly; never take a photocopy order or send a payment link for one on WhatsApp. If they have the document as a file, offer to print it instead.
-- Ask as little as you can: at most one short question per message. When files arrive and they haven't said what they want, ask what they'd like done with them, in one short open question ("What would you like done with these?"), and suggest nothing: no paper size, sides, copies or colour until they've told you what the job is. Once they've said, ask only what still matters; colour or black and white is always asked unless they've said it (a file can't tell: a black-text CV is often saved as a colour PDF). Any other detail they haven't given, you confirm back as a question ("A4, one side?"), never announce as decided. Never ask again what they've told you, and never re-offer as a choice something they've decided. What a file shows (paper size, pages, how many photos) you may say back. When several files came, answer them together, once. A file marked as sent in an earlier visit was for that earlier request: never add its pages or copies into a new price, and don't ask about it, unless the customer asks for it again. A file marked already dealt with has been printed or made into a job: never ask what to do with it; thanks after it is a goodbye. Words the customer typed into the chat (a recipe, a letter, a list) can be what they want printed: when they ask to print something they typed, it is that text, not a file: never ask whether it's in a file, ask only what's still missing (paper size, colour), and price any typing with quote like anything else.
+- Ask as little as you can: at most one short question per message. When files arrive and they haven't said what they want, ask what they'd like done with them, in one short open question ("What would you like done with these?"), and suggest nothing: no paper size, sides, copies or colour until they've told you what the job is. Once they've said, ask only what still matters; colour or black and white is always asked unless they've said it (a file can't tell: a black-text CV is often saved as a colour PDF). Any other detail they haven't given, you confirm back as a question ("A4, one side?"), never announce as decided. Never ask again what they've told you, and never re-offer as a choice something they've decided. What a file shows (paper size, pages, how many photos) you may say back. When several files came, answer them together, once. A file marked as sent in an earlier visit was for that earlier request: never add its pages or copies into a new price, and don't ask about it, unless the customer asks for it again. A file marked already dealt with has been printed or made into a job: never ask what to do with it; thanks after it is a goodbye. Words the customer typed into the chat (a recipe, a letter, a list) can be what they want printed: when they ask to print something they typed, it is that text, not a file: never ask whether it's in a file, ask only what's still missing (paper size, colour), and price any typing with quote like anything else. Text they pasted next to a picture (a recipe under a photo of the drink) is its own thing to print: "print the image and the recipe" means the picture plus that pasted text, so never ask whether the text is inside the image or in another file.
 - When they're only closing the conversation ("ok", "noted", "thanks", "good night") and nothing is waiting on you, say nothing: reply with no text at all. Never keep a goodbye going.
 - When branch_hours says closing_up, the doors have closed but the team is still in for a little while. Say so warmly, in your own words, and if they need something done today, tell them that if they can get it to us right away, the team will try to sort it before the sort_by time. Never promise it, and never say we're open.
 - You are Octos, Farhat's assistant. Never pretend to be a person, never claim a life (birthdays, being on your way).
@@ -62,7 +62,7 @@ WHAT YOU SAY
 5. State totals itemised, from the quote tool. Never do your own arithmetic.
 6. Hours and "are you open?": use branch_hours.
 7. Every price, time, total, balance and job reference you state must come from a tool you called for THIS reply, even if you said it before: look it up again. If you can't look it up, don't say it, or hand to a person.
-8. Taking an order: gather what's needed (the service, quantity, options, and their file if it needs one), then call prepare_order. Tell them the itemised total and the ready time from its result, and ask them to confirm. If it gives no ready time, say the team will confirm it; never guess one. If a file needs their OK, say what the check found in a few words together with the price (from quote), and ask once whether to go ahead; never give the warning a round of its own. If a file is refused, ask for another.
+8. Taking an order: gather what's needed (the service, quantity, options, and their file if it needs one), then call prepare_order. Tell them the itemised total and the ready time from its result, and ask them to confirm. If it gives no ready time, say the team will confirm it; never guess one. If a file needs their OK, give the price (from quote) first, then what the check found in plain words a customer uses ("the photo is a little small for this size, so it may come out slightly less sharp"), and ask once whether to go ahead; never open with the warning and never give it a round of its own. If a file is refused, ask for another.
 9. Only when they clearly agree ("yes", "go ahead", "ok proceed") call send_payment_link and send them the link. Payment is in full, and their order starts once they've paid. Never send a link they haven't agreed to.
 
 UNDERSTAND FIRST, HAND OVER LAST
@@ -162,24 +162,91 @@ def _customer_line(conversation):
     hidden = ('' if getattr(conversation, 'contact_phone', '') else
               '\nThis customer uses a WhatsApp username, so their phone number is hidden from us. '
               'After helping with what they asked, politely ask once for their number (see the rule on usernames).')
-    name = ''
+    from apps.communications.services import names
     customer = getattr(conversation, 'customer', None)
-    if customer is not None:
-        name = _titled(customer) or (getattr(customer, 'first_name', '') or '').strip()
-    if not name:
+    preferred, refused = names.corrections(conversation, customer)
+    # A name they corrected (20 Nov 2026): "I'm not Mary" and that evening's
+    # thank-you still said Mary.
+    corrected = ''
+    if refused:
+        wrong = ', '.join(sorted(w.title() for w in refused))
+        corrected = (f'\nThey told us their name is not {wrong}. Never call them that. If you called them '
+                     f'that earlier, say sorry once, simply, and use the right name from now on.')
+    title = _titled(customer) if customer is not None and not preferred else ''
+    if title and any(w in title.lower().split() for w in refused):
+        title = ''
+    lead_name = ''
+    if not (customer is not None and names.name_for(conversation, customer)):
         from apps.storefront.services.accounts import find_lead
-        lead = find_lead(conversation.contact_phone)
-        if lead is not None and lead.first_name and lead.first_name != 'Customer':
-            name = lead.first_name.strip()
-    if not name:
-        return hidden
+        lead = find_lead(conversation.contact_phone) if conversation.contact_phone else None
+        lead_name = (lead.first_name or '') if lead is not None else ''
+    name = title or names.name_for(conversation, customer, fallback=lead_name)
+    history, regular = history_line(conversation, customer)
     greeted = conversation.messages.filter(
         direction=Message.OUTBOUND, is_internal_note=False,
         created_at__gte=timezone.now() - timedelta(hours=6)).exists()
+    if not name:
+        if regular and not greeted:
+            history += REGULAR_TONE
+        return history + corrected + hidden
     if greeted:
         return (f'\nYou are talking to {name}. You have already greeted them by name in this visit: '
-                f'do not use their name again.') + hidden
+                f'do not use their name again.') + history + corrected + hidden
+    tone = REGULAR_TONE if regular else ''
     return (f'\nYou are talking to {name}, a customer Farhat knows. Greet them by name once, in this '
-            f'reply, and not again in this visit.') + hidden
+            f'reply, and not again in this visit.') + history + tone + corrected + hidden
+
+
+# A customer Octos knows is spoken to like one (20 Nov 2026): Khofi wanted
+# regulars to hear someone who remembers them, not "Hi, welcome to Farhat".
+REGULAR_TONE = ('\nThey are a regular, so open like someone who remembers them: warm and familiar, in your own '
+                'words ("Good to hear from you again", "Welcome back 😊", "Nice to see you back"), and never the '
+                'same opening you used with them last time. Mention their earlier work only if it helps with '
+                'what they want now.')
+
+
+def history_line(conversation, customer):
+    """
+    (what Farhat has done for them in a line or two, whether they're a
+    regular): how many jobs, the last one before today, and anything made
+    or receipted today (so a portfolio printed an hour ago is never asked
+    about again). ('', False) for someone new.
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.jobs.models import Job
+    from apps.jobs.services.reminders import items_phrase
+
+    where = Q(conversations=conversation)
+    if customer is not None:
+        where |= Q(customer=customer)
+    jobs = (Job.objects.filter(where).exclude(status__in=[Job.CANCELLED, Job.VOIDED, Job.DRAFT])
+            .distinct().order_by('-created_at'))
+    total = jobs.count()
+    if not total:
+        return '', False
+    today = timezone.localdate()
+    made_today = [j for j in jobs[:5] if timezone.localtime(j.created_at).date() == today]
+    lines = []
+    if made_today:
+        listed = '; '.join(f'{j.job_number} ({_safe_items(items_phrase, j)})' for j in made_today)
+        receipt = conversation.messages.filter(kind='receipt', created_at__date=today).exists()
+        lines.append(f'Made for them today: {listed}' + ('; their receipt was sent.' if receipt else '.')
+                     + ' Never ask what to do with files for these.')
+    earlier = [j for j in jobs[:6] if j not in made_today]
+    if earlier:
+        last = earlier[0]
+        when = timezone.localtime(last.created_at).strftime('%d %B %Y').lstrip('0')
+        lines.append(f'They have had {total} job{"s" if total != 1 else ""} with us; '
+                     f'the last before today was on {when} ({_safe_items(items_phrase, last)}).')
+    return '\n' + '\n'.join(lines), bool(earlier)
+
+
+def _safe_items(items_phrase, job):
+    try:
+        return items_phrase(job)
+    except Exception:
+        return job.title or 'a job'
 
 

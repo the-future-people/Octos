@@ -27,6 +27,7 @@ STAFF_HANDED_BACK = 'staff.handed_back'
 OCTOS_TOOK_BACK = 'octos.took_back'          # the handover watcher took it back
 OCTOS_ASKED_FOR_PERSON = 'octos.asked_for_person'   # Octos handed over and said why
 OCTOS_FLAGGED_QUIET = 'octos.flagged_quiet'  # a remote customer sent a file and went quiet, no job: a person should follow up
+OCTOS_FOLLOWED_UP = 'octos.followed_up'      # a remote customer went quiet after a file: Octos asked once himself
 STAFF_REMINDED = 'staff.reminded'            # a customer waited 30 minutes on a person
 CONVERSATION_RESOLVED = 'conversation.resolved'
 
@@ -66,6 +67,7 @@ CUSTOMER_REGISTERED = 'customer.registered'
 OCTOS_ASKED_DETAILS = 'octos.asked_details'      # a regular was asked for their details
 CUSTOMER_DECLINED_DETAILS = 'customer.declined_details'   # said no: wait 30 days
 CUSTOMER_MATCHED = 'customer.matched'        # a sender was linked to an existing customer
+NAME_CORRECTED = 'customer.name_corrected'   # "I'm not Mary" / "my name is Akos"
 
 ALL = {
     value for name, value in globals().items()

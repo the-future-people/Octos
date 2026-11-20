@@ -38,14 +38,9 @@ def pickup_step(days_ready, already_sent):
 
 
 def first_name(job):
-    from apps.jobs.services.labels import for_whom
-    who, _ = for_whom(job)
-    word = who.split(' (')[0].split()[0] if who and who != 'Walk-in' else ''
-    titles = {'MR', 'MRS', 'MS', 'DR', 'MISS', 'PROF', 'REV'}
-    words = who.split(' (')[0].split() if who and who != 'Walk-in' else []
-    while words and words[0].rstrip('.').upper() in titles:
-        words = words[1:]
-    return words[0] if words else word
+    """What to call the customer, or '' (names.py): never a WhatsApp handle or a corrected name."""
+    from apps.communications.services.names import for_job
+    return for_job(job)
 
 
 def items_phrase(job):

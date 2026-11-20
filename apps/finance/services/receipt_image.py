@@ -289,11 +289,11 @@ def receipt_data(receipt) -> dict:
     address = (getattr(branch, 'address', '') or '').strip() or WESTLAND[0]
     gps = (getattr(branch, 'gps_address', '') or getattr(branch, 'ghana_post_gps', '') or '').strip() or WESTLAND[1]
 
-    words = (receipt.customer_name or '').split(' (')[0].split()
-    titles = {'MR', 'MRS', 'MS', 'DR', 'MISS', 'PROF', 'REV'}
-    while words and words[0].rstrip('.').upper() in titles:
-        words = words[1:]
-    first = words[0] if words and words[0].lower() not in ('walk-in', 'walk') else ''
+    # What to call them (names.py, 20 Nov 2026): the customer record or their
+    # own word in the chat, never "The" or "Osekre01" from a WhatsApp profile.
+    from apps.communications.services.names import for_job
+    typed = receipt.customer_name or ''
+    first = for_job(job, fallback='' if '(WhatsApp' in typed else typed.split(' (')[0])
 
     method = receipt.payment_method
     ref = getattr(receipt, 'momo_reference', '') or getattr(receipt, 'pos_approval_code', '') or ''

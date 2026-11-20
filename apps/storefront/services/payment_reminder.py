@@ -8,7 +8,9 @@ later, while the branch is open, Octos asks once whether they still want
 it. If they say yes, Octos sends the link again. The reminder never
 carries a link itself: an old link is easy to ignore, a question isn't.
 
-Once per order, ever. Not sent once the order is paid or cancelled, when
+Once per order, ever, and once per chat (20 Nov 2026): when a customer
+changed their order and a link went out for each, only the newest order
+is asked about, and never twice in a day. Not sent once the order is paid or cancelled, when
 the customer already said no after the link, or mid-conversation (the
 next run catches it). "I'll pay tomorrow" isn't a no, so it still gets
 the reminder. WhatsApp only, inside the 24-hour window; never SMS.
@@ -73,6 +75,14 @@ def remind(order, now):
     conversation = _thread(order)
     if conversation is None or not window_open(conversation):
         return None
+    # One reminder per chat: a newer order from it, or a reminder to it today, settles this one.
+    newer = (OnlineOrder.objects.filter(notes__contains=f'(conversation {conversation.pk})',
+                                        created_at__gt=order.created_at)
+             .exclude(status=OnlineOrder.Status.ABANDONED).exists())
+    reminded = conversation.messages.filter(kind=KIND, created_at__gte=now - timedelta(hours=20)).exists()
+    if newer or reminded:
+        OnlineOrder.objects.filter(pk=order.pk, payment_reminded_at__isnull=True).update(payment_reminded_at=now)
+        return None
     said = conversation.messages.filter(is_internal_note=False)
     if said.filter(created_at__gte=now - BUSY).exists():
         return None
@@ -105,9 +115,14 @@ def _thread(order):
 
 
 def reminder_text(order):
-    from apps.storefront.services.welcome import first_name
+    from apps.communications.services.names import name_for
 
-    name = first_name(order.lead.first_name or '') if order.lead_id else ''
+    lead_name = (order.lead.first_name or '') if order.lead_id else ''
+    try:
+        chat = _thread(order)
+    except Exception:
+        chat = None
+    name = name_for(chat, fallback=lead_name)
     items = [line.get('service_name') for line in (order.line_items or []) if line.get('service_name')]
     if len(items) == 1:
         what = f'order for {items[0]}'

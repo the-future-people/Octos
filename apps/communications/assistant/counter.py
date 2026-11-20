@@ -35,6 +35,8 @@ FORK_REASON = 'file only: asked once'
 # One plain question (14 Nov 2026): no "if you're at the counter" lines.
 FORK_TEXT = "Got your file \U0001F44D What would you like done with it?"
 MEDIA = (Message.IMAGE, Message.DOCUMENT, Message.VIDEO)
+VOICE_REASON = 'voice note: asked them to type it'
+VOICE_TEXT = "Sorry, I can't listen to voice notes yet \U0001F64F Could you type it for me?"
 QR = re.compile(r"\bi(?:'|\u2019)?m at the ([a-z][a-z ]*?) counter\b")
 HERE = re.compile(r"\b(?:i(?:'|\u2019)?m|i am)\s+(?:here|at the (?:shop|counter|desk|front desk)|in the shop)\b"
                   r"|\bat the counter\b")
@@ -192,20 +194,22 @@ def step(conversation, trigger, now):
     signed_at = _verified_qr(trigger) if opened else None
     if signed_at is not None:
         _visit(conversation, signed_at, now)
-        return ack_text(conversation, signed_at), 'counter visit started'
+        return ack_text(conversation, signed_at, now), ACK_REASON
     if opened:
         named = counter_phrase(trigger.body)
         if named is not None:
             branch = _branch(named)
             _visit(conversation, branch, now)
-            return ack_text(conversation, branch), 'counter visit started'
+            return ack_text(conversation, branch, now), ACK_REASON
     # Someone at Farhat has this chat open right now: a greeting or a file is
     # theirs to pick up, so Octos stays quiet (14 Nov 2026). Questions with
     # words still go on, so nobody is left unanswered by a chat left open.
     from apps.communications.services.opened import in_focus
     # Only while the shop is open (15 Nov 2026): out of hours, whoever has
     # the chat open is keeping an eye on it, not serving. Octos answers.
-    if opened and (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk):
+    from apps.communications.assistant.brain import taken_back_since
+    if opened and (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk) \
+            and not taken_back_since(conversation, trigger):
         return None, 'a person has this chat open'
     # Where is the customer? A belief, not a timer (Layer 2, Step 2.2).
     from apps.spine import presence
@@ -214,6 +218,15 @@ def step(conversation, trigger, now):
         if in_visit(conversation, now):
             _visit(conversation, None, now)        # keeps the inbox's counter strip fresh
         return None, f'at the counter, the attendant has them ({belief.why})'
+    # A voice note (20 Nov 2026): Octos can't listen yet, so it asks them to
+    # type it, once a visit. Listening comes later, as its own piece of work.
+    if trigger.message_type == Message.AUDIO:
+        from apps.communications.models import AssistantRun
+        from apps.spine.visits import QUIET_GAP
+        if AssistantRun.objects.filter(conversation=conversation, reason=VOICE_REASON,
+                                       created_at__gte=now - QUIET_GAP).exists():
+            return None, 'voice note: asked them to type already'
+        return VOICE_TEXT, VOICE_REASON
     if belief.band == presence.UNSURE:
         if belief.texture in ('words', 'info_question', 'status_question', 'on_the_way'):
             held = _hold(conversation, trigger, belief)
@@ -223,6 +236,13 @@ def step(conversation, trigger, now):
             if not _greeted_unsure(conversation, now):
                 return NOT_SURE_GREETING, NOT_SURE_REASON
             return None, 'not sure where they are: greeted already, waiting for their words'
+    # Taken back from a person who opened the files and never wrote (20 Nov
+    # 2026): the work may have been done in person, so not the stock "what
+    # would you like done?", but never silence either. A gentle check-in.
+    if trigger.media_id and taken_back_since(conversation, trigger):
+        from apps.communications.assistant.brain import files_handled
+        if files_handled(trigger):
+            return check_in_text(conversation), CHECK_IN_REASON
     if no_words(trigger) and _batch_acknowledged(conversation, trigger):
         return None, 'files already acknowledged: waiting for their words'
     if file_only(trigger):
@@ -311,34 +331,82 @@ def _hold(conversation, trigger, belief):
     return f'{HOLD_REASON}: not sure where they are ({belief.why})'
 
 
-def ack_text(conversation, branch):
+def ack_text(conversation, branch, now=None):
     """
     The one acknowledgement at the counter (11 Nov 2026): warm, personal when
-    Octos truly knows the name, never the customer's phone digits.
+    Octos truly knows the name, never the customer's phone digits. A regular
+    is welcomed back like one (20 Nov 2026), in words that change from one
+    visit to the next.
     """
     name = (branch.name or '') if branch is not None else ''
     where = name[:-7] if name.endswith(' Branch') else name
     first = _first_name(conversation)
-    hello = f'Hi {first} \U0001F44B' if first else 'Hi \U0001F44B'
     shop = f'Farhat {where}' if where else 'Farhat'
+    if is_regular(conversation, now):
+        return _welcome_back(conversation, first, shop, now)
+    hello = f'Hi {first} \U0001F44B' if first else 'Hi \U0001F44B'
     return (f"{hello} Welcome to {shop}. Hand your files to the attendant, "
             f"or drop them here and they'll pick them up.")
+
+
+CHECK_IN_REASON = 'taken back: checked in about files a person opened'
+
+
+def check_in_text(conversation):
+    from apps.communications.services.names import name_for
+    name = name_for(conversation)
+    hello = f'Hi {name}, just checking in' if name else 'Just checking in'
+    return f'{hello} \U0001F60A Did the team sort out the file you sent, or is there anything else you need?'
+
+
+ACK_REASON = 'counter visit started'
+FILES_LINES = (
+    "Hand your files to the attendant, or drop them here and they'll pick them up.",
+    "Drop your files here or hand them to the attendant, whichever is easier.",
+    "Send your files here or give them to the attendant, and we'll take it from there.",
+)
+
+
+def is_regular(conversation, now=None):
+    """They've had work done with us before today: Farhat knows them."""
+    from apps.jobs.models import Job
+    from django.db.models import Q
+    where = Q(conversations=conversation)
+    if conversation.customer_id:
+        where |= Q(customer_id=conversation.customer_id)
+    start = timezone.localtime(now or timezone.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (Job.objects.filter(where, created_at__lt=start)
+            .exclude(status__in=[Job.CANCELLED, Job.VOIDED, Job.DRAFT]).exists())
+
+
+def _day_part(now):
+    hour = timezone.localtime(now or timezone.now()).hour
+    return 'Good morning' if hour < 12 else ('Good afternoon' if hour < 17 else 'Good evening')
+
+
+def _welcome_back(conversation, first, shop, now):
+    """A different welcome each visit: the count of earlier ones picks it, so it never repeats back to back."""
+    from apps.communications.models import AssistantRun
+    you = f', {first}' if first else ''
+    openings = (
+        f'Welcome back{you} \U0001F60A',
+        f'{_day_part(now)}{you}! Good to see you again.',
+        f'Nice to have you back at {shop}{you} \U0001F44B',
+        f'Hey{you}, good to see you again \U0001F60A',
+    )
+    seen = AssistantRun.objects.filter(conversation=conversation, reason=ACK_REASON).count()
+    return f'{openings[seen % len(openings)]} {FILES_LINES[seen % len(FILES_LINES)]}'
 
 
 def _first_name(conversation):
     """
     A registered customer's first name, from their customer record only.
     Never the WhatsApp profile name: "PEOPLE'S KOFI" is how "Hi People's"
-    happened. A name we can't trust is worse than no name.
+    happened. A name we can't trust is worse than no name, and a name they
+    corrected ("I'm not Mary") is never used again (names.py).
     """
-    customer = getattr(conversation, 'customer', None)
-    if customer is None:
-        return ''
-    for field in ('first_name', 'full_name', 'name'):
-        value = (getattr(customer, field, '') or '').strip()
-        if value:
-            return value.split()[0].title()
-    return ''
+    from apps.communications.services.names import name_for
+    return name_for(conversation)
 
 
 def _batch_acknowledged(conversation, trigger):

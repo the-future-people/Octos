@@ -15,7 +15,6 @@ Unicode, which halves its length and doubles its cost.
 """
 
 import logging
-import re
 
 from django.conf import settings
 
@@ -39,21 +38,14 @@ def first_name(customer_or_name):
     Titles typed into the name ("Mss. Grace", "Dr Kofi") are skipped, and
     when a title filled the whole first-name box, the last-name box is read
     on: "Mss." + "Grace Adjorkor" greets Grace.
+    One checker for every greeting (names.py, 20 Nov 2026): handles, emails
+    and "The" give no name, and for a customer, a name they corrected
+    ("I'm not Mary") is never used.
     """
+    from apps.communications.services import names
     if isinstance(customer_or_name, str):
-        words = customer_or_name.split()
-    else:
-        words = f'{customer_or_name.first_name or ""} {customer_or_name.last_name or ""}'.split()
-    for word in words:
-        raw = word.strip(".,;:")
-        if raw.lower() in TITLES:
-            continue
-        if not re.fullmatch(r"[A-Za-z][A-Za-z'-]{1,14}", raw):
-            return ''
-        if raw.lower() in NOT_NAMES:
-            return ''
-        return raw[:1].upper() + raw[1:].lower()
-    return ''
+        return names.first_name_from(customer_or_name)
+    return names.name_for(customer=customer_or_name)
 
 
 def welcome_text(customer_or_name) -> str:

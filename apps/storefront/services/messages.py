@@ -157,7 +157,21 @@ def _first_name(order):
     first = words[0]
     if not 2 <= len(first) <= 12:
         return None
-    return first[:1].upper() + first[1:].lower()
+    first = first[:1].upper() + first[1:].lower()
+    # A name they corrected in the chat ("I'm not Mary") is never used (20 Nov 2026).
+    from apps.communications.services import names
+    from apps.communications.services.whatsapp_outbound import thread_for
+    try:
+        chat = thread_for(lead.phone) if getattr(lead, 'phone', '') else None
+    except Exception:
+        chat = None
+    if chat is not None:
+        preferred, refused = names.corrections(chat, chat.customer)
+        if preferred:
+            return preferred
+        if first.lower() in refused:
+            return None
+    return first
 
 
 def _what(order):

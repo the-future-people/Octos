@@ -14,8 +14,13 @@ pay button's own path, only for this customer's order, and only after
 they have agreed. From payment on, nothing is new: the webhook, the
 conversion to a job and the customer's messages are the storefront's.
 
-Each prepare makes a fresh order; earlier unpaid ones expire as any
-unpaid storefront order does.
+One open order per chat (20 Nov 2026): Kings Hub changed his mind three
+times and ended up with ORD-115 to 118, and two payment reminders. Each
+prepare still makes a fresh order (its files and prices are this one's),
+but the chat's earlier orders that no link was sent for are set aside
+(abandoned, swept with their files). One whose link went out can't be:
+money may be on its way. Octos is told, so the customer hears to use only
+the new link, and only the newest is ever reminded (payment_reminder.py).
 """
 import logging
 import os
@@ -75,6 +80,8 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
             _, _, verdict, staged = inspect_file(content, name, message.media_mime, specs)
             if verdict['verdict'] == 'refuse':
                 return stop({'file_refused': True, 'file': name, 'checks': verdict['checks']})
+            if verdict['verdict'] == 'warn' and not _worth_a_warning(verdict, service, message):
+                verdict = {**verdict, 'verdict': 'fine'}
             if verdict['verdict'] == 'warn' and not accept_warnings:
                 staged_for_line.append(staged)
                 return stop({'needs_customer_ok': True, 'file': name, 'checks': verdict['checks']})
@@ -106,6 +113,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
         for line, staged in zip(priced, staged_for_line):
             if staged is not None:
                 _attach_copies(order, [line['id']], staged)
+        replaced, links_out = _set_aside_earlier(conversation, order)
 
     from apps.communications.assistant.tools import _branch_name, _when, _window
     from apps.production.models import ServiceStation
@@ -129,7 +137,57 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
         'ready': _window(ready, now) if ready else None,
         'ready_note': None if ready else 'The team will confirm the ready time.',
         'next': 'Confirm this with the customer. Send the payment link only when they agree.',
+        **({'replaces': replaced} if replaced else {}),
+        **({'earlier_link_still_open': links_out,
+            'tell_them': ('This replaces the earlier order. When you send the new link, tell them to '
+                          'use only the new one and ignore the earlier link.')} if links_out else {}),
     }
+
+
+BIG_OR_PHOTO = ('photo', 'poster', 'banner', 'flex', 'sticker', 'canvas', 'roll up', 'rollup', 'a3', 'a2',
+                'a1', 'a0', 'large', 'billboard', 'backdrop')
+
+
+def _worth_a_warning(verdict, service, message):
+    """
+    "It will print softer" matters for a photo or a big print, not for a
+    letter on A4 (20 Nov 2026: a one-page MTN SIM request letter opened
+    with "Your file will print a bit softer than usual"). A warning that is
+    only about resolution, on a document printed at document sizes, is let
+    through as fine. Anything else the checks warn about still stands.
+    """
+    checks = [c if isinstance(c, dict) else {'verdict': 'warn', 'message': str(c)} for c in verdict.get('checks') or []]
+    warned = [c for c in checks if c.get('verdict') == 'warn']
+    if not warned or any(c.get('name') != 'resolution' for c in warned):
+        return True
+    if (message.media_mime or '').startswith('image/'):
+        return True
+    if service.unit in ('PER_SQFT', 'PER_SQCM'):
+        return True
+    words = f'{service.name} {service.display_name or ""} {service.code}'.lower()
+    return any(w in words for w in BIG_OR_PHOTO)
+
+
+def chat_orders(conversation):
+    """The orders Octos took in this chat, newest first."""
+    from apps.storefront.models import OnlineOrder
+    return (OnlineOrder.objects.filter(notes__contains=f'(conversation {conversation.pk})')
+            .order_by('-created_at', '-pk'))
+
+
+def _set_aside_earlier(conversation, order):
+    """
+    ([order numbers set aside], [order numbers whose link is still out]).
+    Never touches an order with a link out, paid or made into a job.
+    """
+    from apps.storefront.models import OnlineOrder
+    earlier = chat_orders(conversation).exclude(pk=order.pk).filter(paid_at__isnull=True, job__isnull=True)
+    drafts = list(earlier.filter(status=OnlineOrder.Status.DRAFT).values_list('order_number', flat=True))
+    if drafts:
+        earlier.filter(order_number__in=drafts).update(
+            status=OnlineOrder.Status.ABANDONED, expires_at=timezone.now())
+    links = list(earlier.filter(status=OnlineOrder.Status.AWAITING_PAYMENT).values_list('order_number', flat=True))
+    return drafts, links
 
 
 def send_payment_link(conversation, order_number):
@@ -156,7 +214,8 @@ def _lead_for(conversation):
     lead = find_lead(conversation.contact_phone)
     if lead is not None:
         return lead
-    first = ((conversation.contact_name or '').strip().split() or ['Customer'])[0][:100]
+    from apps.communications.services.names import first_name_from
+    first = (first_name_from(conversation.contact_name) or 'Customer')[:100]
     return Lead.objects.create(phone=normalise_phone(conversation.contact_phone), first_name=first)
 
 

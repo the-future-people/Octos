@@ -214,6 +214,13 @@ def _receive(message, profile_name, who=None):
     from apps.communications.assistant import counter
     counter.arrived(conversation, message)
 
+    # "I'm not Mary" / "my name is Akos": remembered for every greeting after (20 Nov 2026).
+    from apps.communications.services import names
+    try:
+        names.note_correction(conversation, message)
+    except Exception:
+        logger.warning("A name correction could not be noted", exc_info=True)
+
     from apps.communications.services import owner_watch
     owner_watch.customer_wrote(conversation, message)
 

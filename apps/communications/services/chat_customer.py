@@ -4,7 +4,8 @@ The customer behind a WhatsApp chat, for a job made at the counter (Layer 2, Ste
 Every job whose files came in on WhatsApp carries who it is for, even when they
 never registered: the chat's own customer if it has one, else an existing
 record with the same number (phone or secondary phone), else a light record
-made from the chat (its WhatsApp name and number). A chat with a username and
+made from the chat (its number, and a first name only when the WhatsApp name
+reads as one: never "The", "Osekre01" or an email, 20 Nov 2026). A chat with a username and
 no number has no number to make a record from; the job is still linked to it.
 """
 from django.db import transaction
@@ -45,10 +46,10 @@ def customer_for_chat(conversation):
                     .filter(Q(phone__in=forms) | Q(secondary_phone__in=forms)).first())
         created = customer is None
         if created:
-            name = (conversation.contact_name or '').strip().split()
+            from apps.communications.services.names import first_name_from
             customer = CustomerProfile.objects.create(
                 phone=_stored_form(conversation.contact_phone),
-                first_name=(name[0] if name else '')[:100],
+                first_name=first_name_from(conversation.contact_name)[:100],
             )
         conversation.customer = customer
         conversation.save(update_fields=['customer'])
