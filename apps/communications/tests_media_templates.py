@@ -122,6 +122,41 @@ class StatementTemplateTests(TestCase):
         self.assertIn('Total due: GHS 300.00', message.body)
 
 
+@override_settings(WHATSAPP_ACCESS_TOKEN='t', WHATSAPP_PHONE_NUMBER_ID='n')
+class UsernameTests(TestCase):
+    """
+    A customer who writes from a WhatsApp username has no number, only their
+    WhatsApp user id (GH.…). Templates reach them by that id, as Meta allows
+    since July 2026: the receipt through the job's chat, the statement
+    through their chat.
+    """
+
+    def setUp(self):
+        from apps.customers.models import CustomerProfile
+        from apps.communications.tests import make_org
+        self.branch = make_org('-UN')
+        self.customer = CustomerProfile.objects.create(first_name='Esi', phone='', customer_type='INDIVIDUAL')
+        self.chat = make_conversation(None, contact_phone='', contact_user_id='GH.1114480144784115',
+                                      contact_name='esi.prints', customer=self.customer)
+
+    def test_the_statement_goes_to_their_user_id(self):
+        from apps.finance.services.statement_pdf import send_statement
+        owes = {'customer': self.customer, 'owed': [], 'current': [], 'owed_total': Decimal('80'),
+                'current_total': Decimal('0'), 'total': Decimal('80')}
+        with patch('apps.finance.services.owing.statement', return_value=owes), \
+                patch(UPLOAD, return_value='media-u'), \
+                patch('apps.communications.services.whatsapp_client.requests.post') as post:
+            post.return_value.json.return_value = {'messages': [{'id': 'wamid.u1'}]}
+            post.return_value.status_code = 200
+            sent, why = send_statement(self.customer, self.branch)
+        self.assertTrue(sent, why)
+        payload = post.call_args.kwargs['json']
+        self.assertEqual(payload['recipient'], 'GH.1114480144784115')
+        self.assertNotIn('to', payload)
+        self.assertEqual(payload['template']['name'], 'account_statement')
+        self.assertEqual(self.chat.messages.get(kind='statement').status, Message.SENT)
+
+
 @override_settings(WHATSAPP_ACCESS_TOKEN='t', WHATSAPP_BUSINESS_ACCOUNT_ID='waba')
 class SubmitTests(TestCase):
 

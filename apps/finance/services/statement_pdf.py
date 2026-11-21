@@ -168,6 +168,12 @@ def send_statement(customer, branch=None, branch_ids=None):
         return False, f'{customer.display_name} owes nothing.'
     chat = chat_for_phone(customer.phone, customer.display_name) if customer.phone else None
     if chat is None:
+        # No number: a customer who writes from a WhatsApp username. Their
+        # chat reaches them by their WhatsApp user id, templates included.
+        from apps.communications.models import Conversation
+        chat = (Conversation.objects.filter(customer=customer, channel=Conversation.WHATSAPP, branch__isnull=True)
+                .exclude(status=Conversation.SPAM).exclude(contact_user_id='').order_by('-id').first())
+    if chat is None:
         return False, f'{customer.display_name} has no WhatsApp number we can use. Print it or download it instead.'
     name = name_for(chat, customer)
     pdf = build_statement_pdf(st, branch)
