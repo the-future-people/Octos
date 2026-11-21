@@ -74,6 +74,8 @@ urlpatterns = [
     path('proformas/<int:pk>/issue/',   proforma_views.ProformaIssueView.as_view(),   name='proforma-issue'),
     path('proformas/<int:pk>/revise/',  proforma_views.ProformaReviseView.as_view(),  name='proforma-revise'),
     path('proformas/<int:pk>/convert/', proforma_views.ProformaConvertView.as_view(), name='proforma-convert'),
+    path('proformas/<int:pk>/record-owed/', proforma_views.ProformaRecordOwedView.as_view(), name='proforma-record-owed'),
+    path('proformas/<int:pk>/renew/',   proforma_views.ProformaRenewView.as_view(),   name='proforma-renew'),
     path('proformas/<int:pk>/pdf/',     proforma_views.ProformaPDFView.as_view(),     name='proforma-pdf'),
 
     # Routing

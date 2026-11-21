@@ -42,7 +42,8 @@ def expire_proformas():
                 verb      = 'proforma_expired',
                 message   = (
                     f"{q.proforma_number} for {q.issued_to} "
-                    f"(GHS {q.total}) expired without an answer."
+                    f"(GHS {q.total}) expired without an answer. If the work was done, "
+                    f"open it and record what's owed; if not, renew it."
                 ),
                 link      = '/portal/proformas/',
             )
@@ -56,7 +57,7 @@ def expire_proformas():
 # Days after issue at which the issuing manager is nudged. The last is the
 # three-days-left warning — after 21 days the proforma is gone and a new one
 # must be raised at current prices.
-PROFORMA_REMINDER_DAYS = (3, 10, 18)
+PROFORMA_REMINDER_DAYS = (3, 10, 18, 20)      # 20: the day before it expires, was the work done?
 
 
 @shared_task
@@ -92,7 +93,14 @@ def remind_open_proformas():
             continue
 
         days_left = (q.valid_until - today).days if q.valid_until else None
-        if days_left is not None and days_left <= 3:
+        if days_left == 1:
+            # The day before (21 Nov 2026): Mr. Dwumfour's work was done and
+            # delivered, and the proforma expired with nobody noticing.
+            body = (
+                f"{q.proforma_number} for {q.issued_to} (GHS {q.total}) expires tomorrow. "
+                f"Was the work done? If so, convert it today so what's owed is tracked."
+            )
+        elif days_left is not None and days_left <= 3:
             body = (
                 f"{q.proforma_number} for {q.issued_to} expires in "
                 f"{days_left} day{'s' if days_left != 1 else ''}. "

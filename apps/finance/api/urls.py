@@ -1,4 +1,6 @@
 from django.urls import path
+
+from . import statement_views
 from .views import (
     BranchLockStatusView,
     DeclareHolidayView,
@@ -191,4 +193,9 @@ urlpatterns = [
     path('monthly-close/<int:pk>/respond-clarification/', MonthlyCloseRespondClarificationView.as_view(),  name='monthly-close-respond-clarification'),
     path('sheets/<int:pk>/notes/',                        DayNoteCreateView.as_view(),                     name='day-sheet-note-create'),
     path('sheets/today/summary/',                         TodaySummaryView.as_view(),                  name='sheet-today-summary'),
+
+    # A customer's statement: owed from before, new work, total (21 Nov 2026)
+    path('customers/<int:pk>/statement/',      statement_views.CustomerStatementView.as_view(),     name='customer-statement'),
+    path('customers/<int:pk>/statement/pdf/',  statement_views.CustomerStatementPdfView.as_view(),  name='customer-statement-pdf'),
+    path('customers/<int:pk>/statement/send/', statement_views.CustomerStatementSendView.as_view(), name='customer-statement-send'),
 ]

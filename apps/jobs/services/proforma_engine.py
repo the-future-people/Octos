@@ -28,6 +28,16 @@ Lifecycle:
 Expiry is deliberately terminal. An expired proforma is replaced by a new one
 at current prices, never revived — otherwise a stale price becomes
 negotiable and the 21-day limit means nothing.
+
+Two ways back from EXPIRED (21 Nov 2026), neither of which revives a price:
+
+  - record_owed(): the work WAS done and delivered, it just never went
+    through Octos (Mr. Dwumfour: printed, delivered, never paid, and the
+    proforma quietly expired). Its price isn't an offer any more, it's what
+    he was served at, so it becomes a job, done and handed over, owing its
+    whole value. It then shows wherever money owed shows (owing.py).
+  - renew(): the work was never done. The same lines on a fresh proforma at
+    today's prices, so nobody retypes them.
 """
 
 import logging
@@ -300,7 +310,7 @@ class ProformaEngine:
         sheet that carries the cost. The cashier applies the deposit or the
         credit arrangement; agreed_terms only records what was agreed.
         """
-        from apps.jobs.models import Job, JobLineItem, ProformaInvoice, Service
+        from apps.jobs.models import Job, ProformaInvoice
         from apps.finance.sheet_engine import SheetEngine
 
         self._require_permission(actor, 'convert')
@@ -323,6 +333,119 @@ class ProformaEngine:
                 'Convert once the branch has opened.'
             )
 
+        job = self._job_from(
+            proforma, actor,
+            status          = Job.PENDING_PAYMENT,
+            daily_sheet     = sheet,
+            work_state      = 'RECEIVED',
+            handover_state  = 'AWAITING_COLLECTION',
+            notes           = f"Converted from {proforma.proforma_number}.",
+        )
+
+        proforma.status       = ProformaInvoice.Status.CONVERTED
+        proforma.job          = job
+        proforma.converted_at = timezone.now()
+        proforma.converted_by = actor
+        proforma.agreed_terms = agreed_terms or ''
+        proforma.save(update_fields=[
+            'status', 'job', 'converted_at', 'converted_by',
+            'agreed_terms', 'updated_at',
+        ])
+
+        from apps.core.broadcast import broadcast_invalidation
+        broadcast_invalidation(self.branch.id, [
+            'paymentQueue', 'jobs', 'jobStats', 'recentJobs',
+            'proformas', 'cashierSummary',
+        ])
+
+        return job
+
+    # ── Back from expiry ─────────────────────────────────────────
+
+    @transaction.atomic
+    def record_owed(self, proforma, actor, delivered_on=None, note=''):
+        """
+        The work on an expired proforma was done and delivered, and never
+        paid: it becomes a job at the quoted price, done and handed over,
+        with its whole value owed. No receipt and no sheet: no money moved
+        and it isn't today's work, so today's sales are untouched. Money
+        counts only when he pays, against this job, like any balance.
+        """
+        from apps.jobs.models import Job, JobStatusLog, ProformaInvoice
+
+        self._require_permission(actor, 'convert')
+        if not proforma.is_expired:
+            raise ValueError(
+                f"{proforma.proforma_number} is {proforma.get_status_display().lower()}: "
+                f"only an expired proforma is recorded this way. Convert it instead.")
+        if proforma.job_id:
+            raise ValueError(f"{proforma.proforma_number} already has a job ({proforma.job.job_number}).")
+
+        now = timezone.now()
+        delivered = now
+        if delivered_on:
+            from datetime import datetime, time
+            if delivered_on > timezone.localdate():
+                raise ValueError('The delivery date cannot be in the future.')
+            delivered = timezone.make_aware(datetime.combine(delivered_on, time(12, 0)))
+        by = actor.get_full_name() if hasattr(actor, 'get_full_name') else str(actor)
+        why = (f"Work on {proforma.proforma_number} was delivered and never paid; "
+               f"recorded as owed by {by} on {timezone.localdate():%d %b %Y}.")
+        job = self._job_from(
+            proforma, actor,
+            status          = Job.COMPLETE,
+            daily_sheet     = None,
+            work_state      = 'DONE',
+            handover_state  = 'HANDED_OVER',
+            handed_over_at  = delivered,
+            notes           = why + (f" {note.strip()}" if note and note.strip() else ''),
+        )
+        for axis, frm, to in ((JobStatusLog.Axis.WORK, 'RECEIVED', 'DONE'),
+                              (JobStatusLog.Axis.HANDOVER, 'AWAITING_COLLECTION', 'HANDED_OVER')):
+            JobStatusLog.objects.create(job=job, axis=axis, from_status=frm, to_status=to,
+                                        actor=actor, notes=why, transitioned_at=now)
+
+        proforma.status       = ProformaInvoice.Status.CONVERTED
+        proforma.job          = job
+        proforma.converted_at = now
+        proforma.converted_by = actor
+        proforma.agreed_terms = 'OWED'          # delivered before it was recorded: owed in full
+        proforma.save(update_fields=['status', 'job', 'converted_at', 'converted_by',
+                                     'agreed_terms', 'updated_at'])
+
+        from apps.core.broadcast import broadcast_invalidation
+        broadcast_invalidation(self.branch.id, ['jobs', 'jobStats', 'proformas', 'cashierBalances'])
+        return job
+
+    @transaction.atomic
+    def renew(self, proforma, actor):
+        """
+        An expired proforma whose work was never done: the same lines on a
+        fresh proforma at today's prices, issued. The old one stays expired.
+        """
+        if not proforma.is_expired:
+            raise ValueError(f"{proforma.proforma_number} hasn't expired: revise it instead.")
+        raw = []
+        for li in proforma.line_items:
+            line = {'service': li['service_id'], 'quantity': li['quantity'], 'pages': li.get('pages') or 1,
+                    'is_color': li.get('is_color', False), 'specifications': li.get('specifications') or {}}
+            for key in ('width_in', 'height_in', 'ring_size', 'output_mode'):
+                if li.get(key) not in (None, ''):
+                    line[key] = li[key]
+            if li.get('addons'):
+                line['addons'] = [{'service': a['service'], 'quantity': a['quantity']} for a in li['addons']]
+            raw.append(line)
+        fresh = self.create(
+            customer=proforma.customer, raw_lines=raw, actor=actor,
+            contact_person=proforma.contact_person, contact_phone=proforma.contact_phone,
+            contact_email=proforma.contact_email,
+            notes=(f"Renewed from {proforma.proforma_number} at today's prices. " + (proforma.notes or '')).strip())
+        return self.issue(fresh, actor)
+
+    def _job_from(self, proforma, actor, **fields):
+        """The job a proforma's lines make, priced as quoted. `fields` sets its state."""
+        from apps.jobs.models import Job, JobLineItem, Service
+
         names = [li['service_name'] for li in proforma.line_items]
         if len(names) == 1:
             title = names[0]
@@ -343,7 +466,6 @@ class ProformaEngine:
         job = Job.objects.create(
             branch          = self.branch,
             job_type        = job_type,
-            status          = Job.PENDING_PAYMENT,
             title           = title,
             customer        = proforma.customer,
             intake_by       = actor,
@@ -355,11 +477,8 @@ class ProformaEngine:
             discount_amount = proforma.discount_amount,
             discount_reason = proforma.discount_reason,
             discount_by     = proforma.discount_by,
-            daily_sheet     = sheet,
             payment_state   = 'UNPAID',
-            work_state      = 'RECEIVED',
-            handover_state  = 'AWAITING_COLLECTION',
-            notes           = f"Converted from {proforma.proforma_number}.",
+            **fields,
         )
 
         for i, li in enumerate(proforma.line_items):
@@ -391,23 +510,6 @@ class ProformaEngine:
                     line_total = Decimal(str(a['total'])),
                     position   = i,
                 )
-
-        proforma.status       = ProformaInvoice.Status.CONVERTED
-        proforma.job          = job
-        proforma.converted_at = timezone.now()
-        proforma.converted_by = actor
-        proforma.agreed_terms = agreed_terms or ''
-        proforma.save(update_fields=[
-            'status', 'job', 'converted_at', 'converted_by',
-            'agreed_terms', 'updated_at',
-        ])
-
-        from apps.core.broadcast import broadcast_invalidation
-        broadcast_invalidation(self.branch.id, [
-            'paymentQueue', 'jobs', 'jobStats', 'recentJobs',
-            'proformas', 'cashierSummary',
-        ])
-
         return job
 
     # ── Expiry ───────────────────────────────────────────────────

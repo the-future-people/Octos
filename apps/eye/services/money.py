@@ -69,13 +69,11 @@ def sheets(branch_ids, first, last):
 
 
 def owed(branch_ids) -> dict:
-    """Balances still due on live jobs, and what credit customers owe."""
+    """Balances still due on jobs (owing.py), and what credit customers owe."""
     from apps.finance.models import CreditAccount
-    from apps.jobs.models import Job
 
-    live = Job.objects.filter(
-        branch_id__in=branch_ids, payment_state='DEPOSIT_PAID',
-    ).exclude(status__in=['CANCELLED', 'VOIDED'])
+    from apps.finance.services.owing import owing_jobs
+    live = owing_jobs(branch_ids)
     balances = ZERO
     for est, paid in live.values_list('estimated_cost', 'amount_paid'):
         if est is not None:

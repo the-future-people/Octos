@@ -27,14 +27,17 @@ logger = logging.getLogger(__name__)
 METHODS = ('CASH', 'MOMO', 'POS', 'SPLIT', 'WALLET')
 
 
-def check_balance_request(payment_state, balance_due, method, split_legs=None):
+def check_balance_request(payment_state, balance_due, method, split_legs=None, handover_state=''):
     """
     Whether this balance can be taken this way. Raises ValueError with words
-    the cashier can act on; returns the balance as a Decimal.
+    the cashier can act on; returns the balance as a Decimal. A job handed
+    over unpaid (work delivered on trust, owing.py) has its whole value as
+    its balance (21 Nov 2026).
     """
     if payment_state == 'SETTLED':
         raise ValueError('This job is already fully paid.')
-    if payment_state != 'DEPOSIT_PAID':
+    owed_unpaid = payment_state == 'UNPAID' and handover_state == 'HANDED_OVER'
+    if payment_state != 'DEPOSIT_PAID' and not owed_unpaid:
         raise ValueError('Only a job with a deposit paid has a balance to take. Take its payment from the queue.')
     balance = Decimal(str(balance_due or 0)).quantize(Decimal('0.01'))
     if balance <= 0:
@@ -63,7 +66,7 @@ def confirm_balance(job, validated_data: dict, actor) -> dict:
 
     method = validated_data.get('payment_method', 'CASH')
     split_legs = validated_data.get('split_legs', []) or []
-    balance = check_balance_request(job.payment_state, job.balance_due, method, split_legs)
+    balance = check_balance_request(job.payment_state, job.balance_due, method, split_legs, job.handover_state)
 
     result = {}
     change_given = validated_data.get('change_given')

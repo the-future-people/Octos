@@ -122,7 +122,7 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. What a customer owes is one picture: statement gives jobs owed from before, new work and the total due, the same as the statement they receive. When he says a customer's old invoice was delivered but never recorded, record_owed puts it where money owed shows; then send_statement on his word. A customer paying part pays the job they point to: never say a payment clears the oldest first. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
@@ -301,6 +301,21 @@ TOOL_SPECS = [
                      'or phone: total, status, version, who issued it, any discount, and the job it became '
                      'with what was paid.'),
      'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
+    {'name': 'statement',
+     'description': ("Everything a customer owes, by name or phone: jobs owed from before (work delivered and "
+                     "not paid, or a balance after a deposit), new work waiting for payment, and the total due. "
+                     "The same figures as the statement they'd receive."),
+     'input_schema': {'type': 'object', 'properties': {'customer': {'type': 'string'}}, 'required': ['customer']}},
+    {'name': 'send_statement',
+     'description': ("On his word: send the customer their statement (a PDF listing each job by number, and the "
+                     "total) in their WhatsApp chat. Works only if they wrote to us in the last 24 hours."),
+     'input_schema': {'type': 'object', 'properties': {'customer': {'type': 'string'}}, 'required': ['customer']}},
+    {'name': 'record_owed',
+     'description': ("On his word: an EXPIRED proforma whose work was done and delivered but never paid becomes "
+                     "a job owing its whole value, so it shows in who owes and on the customer's statement. "
+                     "delivered_on (YYYY-MM-DD) if he says when it was delivered."),
+     'input_schema': {'type': 'object', 'properties': {
+         'proforma': {'type': 'string'}, 'delivered_on': {'type': 'string'}}, 'required': ['proforma']}},
     {'name': 'check_later',
      'description': ('Come back after this many minutes (2 to 360), look at what he asked about, and report. '
                      'what says what to check, in a few words.'),
@@ -370,6 +385,14 @@ def _run_tool(name, args, sent):
         return look.discounts(args.get('period') or 'this_week', args.get('branch', ''), args.get('status') or '')
     if name == 'find_proforma':
         return look.find_proforma(str(args.get('query') or ''))
+    if name == 'statement':
+        return look.statement(str(args.get('customer') or ''))
+    if name == 'send_statement':
+        sent.append('statement')
+        return look.send_statement(str(args.get('customer') or ''))
+    if name == 'record_owed':
+        sent.append('record_owed')
+        return look.record_owed(str(args.get('proforma') or ''), str(args.get('delivered_on') or ''))
     if name == 'remind_me':
         from datetime import datetime
         from apps.communications.services import owner_watch

@@ -491,9 +491,9 @@ class CashierSummaryView(APIView):
 class CashierBalancesView(APIView):
     """
     GET /api/v1/jobs/cashier/balances/
-    Jobs with a deposit paid and a balance owing, at the cashier's branch:
-    finished ones first, so the balance is taken before the attendant hands
-    over (13 Nov 2026).
+    Jobs with a balance owing, at the cashier's branch (owing.py: a deposit
+    paid, or handed over unpaid): finished ones first, so the balance is
+    taken before the attendant hands over (13 Nov 2026).
     """
     permission_classes = [IsAuthenticated]
 
@@ -503,8 +503,8 @@ class CashierBalancesView(APIView):
         branch = getattr(request.user, 'branch', None)
         if not branch:
             return Response({'detail': 'No branch assigned.'}, status=400)
-        jobs = (Job.objects.filter(branch=branch, payment_state='DEPOSIT_PAID')
-                .exclude(status='CANCELLED')
+        from apps.finance.services.owing import owing_jobs
+        jobs = (owing_jobs([branch.pk])
                 .annotate(finished=Case(When(work_state='DONE', then=Value(0)), default=Value(1),
                                         output_field=IntegerField()))
                 .select_related('customer', 'intake_by')
@@ -514,6 +514,7 @@ class CashierBalancesView(APIView):
             row['balance_due'] = f"{job.balance_due or 0:.2f}"
             row['amount_paid'] = f"{job.amount_paid or 0:.2f}"
             row['work_state'] = job.work_state
+            row['handover_state'] = job.handover_state
         total = sum((j.balance_due or 0) for j in jobs)
         return Response({'count': len(rows), 'total': f"{total:.2f}", 'results': rows})
 

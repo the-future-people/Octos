@@ -478,19 +478,19 @@ def _pct(now_value, before_value):
 
 def who_owes(branch=''):
     """
-    Who owes us right now: customers with a balance left on a job (deposit
-    paid, rest due) and credit accounts carrying a balance, biggest first.
+    Who owes us right now: customers with a balance left on a job (a deposit
+    paid, or work handed over unpaid: owing.py) and credit accounts carrying
+    a balance, biggest first.
     The totals match owed_to_us_now in money_report.
     """
     from apps.eye.services import money
     from apps.finance.models import CreditAccount
-    from apps.jobs.models import Job
     found, error = branches(branch)
     if error:
         return error
     ids, now = _ids(found), timezone.now()
-    live = (Job.objects.filter(branch_id__in=ids, payment_state='DEPOSIT_PAID')
-            .exclude(status__in=['CANCELLED', 'VOIDED']).select_related('customer', 'branch'))
+    from apps.finance.services.owing import owing_jobs
+    live = owing_jobs(ids)
     people = {}
     for job in live:
         due = job.balance_due or ZERO
@@ -834,6 +834,113 @@ def find_proforma(query):
             row['job_paid'] = ghs(p.job.amount_paid)
         rows.append(row)
     return {'found': len(rows), 'proformas': rows}
+
+
+# ── What a customer owes (21 Nov 2026) ─────────────────────────────────────
+
+def _customers_named(query):
+    """Customers matching a name or phone, best first (up to 6)."""
+    from apps.customers.models import CustomerProfile
+    query = (query or '').strip()
+    digits = ''.join(ch for ch in query if ch.isdigit())
+    qs = CustomerProfile.objects.all()
+    if len(digits) >= 9:
+        return list(qs.filter(phone__endswith=digits[-9:])[:6])
+    words = [w for w in query.replace('.', ' ').split() if w.lower() not in ('mr', 'mrs', 'ms', 'miss', 'dr', 'madam')]
+    if not words:
+        return []
+    if len(words) > 1:
+        both = list(qs.filter(first_name__icontains=words[0], last_name__icontains=words[-1])[:6])
+        if both:
+            return both
+    found = qs.none()
+    for w in words:
+        found = found | qs.filter(Q(first_name__icontains=w) | Q(last_name__icontains=w) | Q(company_name__icontains=w))
+    return list(found.distinct()[:6])
+
+
+def _one_customer(query):
+    """(customer, None) or (None, a reply for Octos)."""
+    found = _customers_named(query)
+    if not found:
+        return None, {'found': 0, 'say': f'No customer matches "{query}".'}
+    if len(found) > 1:
+        return None, {'found': len(found), 'ask_which': [
+            {'name': c.display_name, 'phone': c.phone} for c in found]}
+    return found[0], None
+
+
+def statement(customer):
+    """
+    Everything a customer owes, the way their statement shows it: jobs owed
+    from before (delivered unpaid, or a balance after a deposit), new work
+    waiting for payment, and the total.
+    """
+    from apps.finance.services.owing import statement as build
+    c, reply = _one_customer(customer)
+    if reply:
+        return reply
+    st = build(c)
+    now = timezone.now()
+
+    def row(j):
+        return {'job': j.job_number, 'what': j.title, 'amount': ghs(j.estimated_cost), 'paid': ghs(j.amount_paid),
+                'balance': ghs(j.balance_due), 'delivered': when(j.handed_over_at, now) if j.handed_over_at else None,
+                'taken': when(j.created_at, now)}
+    return {'customer': c.display_name, 'phone': c.phone,
+            'owed_from_before': [row(j) for j in st['owed']], 'owed_total': ghs(st['owed_total']),
+            'new_work': [row(j) for j in st['current']], 'new_work_total': ghs(st['current_total']),
+            'total_due': ghs(st['total'])}
+
+
+def send_statement(customer):
+    """On the boss's word: the customer's statement, as a PDF, in their WhatsApp chat."""
+    from apps.finance.services.owing import statement as build
+    from apps.finance.services.statement_pdf import send_statement as send
+    from apps.organization.models import Branch
+    c, reply = _one_customer(customer)
+    if reply:
+        return reply
+    branch = Branch.objects.filter(is_trading=True, is_active=True).first()
+    sent, reason = send(c, branch)
+    if not sent:
+        return {'sent': False, 'why': reason}
+    return {'sent': True, 'to': c.display_name, 'total_due': ghs(build(c)['total'])}
+
+
+def record_owed(proforma, delivered_on=''):
+    """
+    On the boss's word: an expired proforma whose work was done and
+    delivered, never paid, becomes a job owing its whole value.
+    """
+    from datetime import date
+
+    from apps.accounts.system import octos_user
+    from apps.jobs.models import ProformaInvoice
+    from apps.jobs.services.proforma_engine import ProformaEngine
+    query = (proforma or '').strip().upper()
+    if not query:
+        return {'error': 'Which proforma? Give its number.'}
+    p = (ProformaInvoice.objects.select_related('branch', 'customer')
+         .filter(proforma_number__icontains=query).order_by('-version', '-created_at').first())
+    if p is None:
+        return {'error': f'No proforma matches "{proforma}".'}
+    actor = octos_user()
+    if actor is None:
+        return {'error': "Octos can't record this (no Octos account). A manager can, on the Proformas page."}
+    on = None
+    if delivered_on:
+        try:
+            on = date.fromisoformat(str(delivered_on))
+        except ValueError:
+            return {'error': 'The delivery date should look like 2026-11-03.'}
+    try:
+        job = ProformaEngine(p.branch).record_owed(p, actor, delivered_on=on,
+                                                   note='Recorded by Octos on the boss\'s word.')
+    except (ValueError, PermissionError) as refused:
+        return {'error': str(refused)}
+    return {'recorded': p.proforma_number, 'job': job.job_number, 'customer': p.issued_to,
+            'owes_on_it': ghs(job.balance_due)}
 
 
 # ── Stock ──────────────────────────────────────────────────────────────────

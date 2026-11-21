@@ -248,6 +248,75 @@ class ProformaConvertView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+class ProformaRecordOwedView(APIView):
+    """
+    POST /api/v1/jobs/proformas/<pk>/record-owed/   Body: {delivered_on?: 'YYYY-MM-DD', note?: str}
+
+    An expired proforma whose work was done and delivered, never paid: it
+    becomes a job, done and handed over, owing its whole value (21 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from datetime import date
+
+        from apps.jobs.api.serializers import JobListSerializer
+
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'}, status=status.HTTP_404_NOT_FOUND)
+        delivered_on = None
+        if request.data.get('delivered_on'):
+            try:
+                delivered_on = date.fromisoformat(str(request.data['delivered_on']))
+            except ValueError:
+                return Response({'detail': 'The delivery date should look like 2026-11-03.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        try:
+            job = ProformaEngine(branch).record_owed(proforma, request.user, delivered_on=delivered_on,
+                                                     note=str(request.data.get('note') or '')[:300])
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        proforma.refresh_from_db()
+        return Response({
+            'detail': (f'{proforma.proforma_number} recorded as {job.job_number}. '
+                       f'{proforma.issued_to} owes GHS {job.balance_due:,.2f} on it.'),
+            'job': JobListSerializer(job, context={'request': request}).data,
+            'proforma': ProformaDetailSerializer(proforma).data,
+        }, status=status.HTTP_201_CREATED)
+
+
+class ProformaRenewView(APIView):
+    """
+    POST /api/v1/jobs/proformas/<pk>/renew/
+
+    An expired proforma whose work was never done: the same lines on a
+    fresh proforma at today's prices, issued (21 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        proforma = _get_proforma(pk, branch)
+        if not proforma:
+            return Response({'detail': 'Proforma not found.'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            fresh = ProformaEngine(branch).renew(proforma, request.user)
+        except PermissionError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': f'Renewed as {fresh.proforma_number} at today\'s prices.',
+                         'proforma': ProformaDetailSerializer(fresh).data}, status=status.HTTP_201_CREATED)
+
+
 class ProformaPDFView(APIView):
     """
     GET /api/v1/jobs/proformas/<pk>/pdf/
