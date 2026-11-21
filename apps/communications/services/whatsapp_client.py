@@ -51,14 +51,27 @@ def send_text(phone, body, reply_to=None):
     return _send(phone, message)
 
 
-def send_template(phone, name, language='en', params=()):
-    """An approved template, with its body's {{1}}, {{2}}… filled in order."""
+def send_template(phone, name, language='en', params=(), header=None):
+    """
+    An approved template, with its body's {{1}}, {{2}}… filled in order.
+    header: a picture or document for a template that carries one (21 Nov
+    2026), as ('image' | 'document', content, filename, mime): uploaded first.
+    """
     template = {'name': name, 'language': {'code': language}}
+    components = []
+    if header:
+        kind, content, filename, mime = header
+        media = {'id': upload_media(content, filename, mime)}
+        if kind == 'document':
+            media['filename'] = filename
+        components.append({'type': 'header', 'parameters': [{'type': kind, kind: media}]})
     if params:
-        template['components'] = [{
+        components.append({
             'type': 'body',
             'parameters': [{'type': 'text', 'text': str(p)} for p in params],
-        }]
+        })
+    if components:
+        template['components'] = components
     return _send(phone, {'type': 'template', 'template': template})
 
 

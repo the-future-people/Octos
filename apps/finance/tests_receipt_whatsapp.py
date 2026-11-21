@@ -1,6 +1,7 @@
 """
-Sending a receipt on WhatsApp: only inside the customer's 24-hour window,
-an honest reason when not, and never a receipt marked sent that wasn't.
+Sending a receipt on WhatsApp: as a picture inside the customer's 24-hour
+window, as the approved receipt message outside it (21 Nov 2026), an honest
+reason when it can't go, and never a receipt marked sent that wasn't.
 
 Receipts are built with the stranded-sheet fixtures (RecoveryFixtureMixin),
 which make them without a job. Where a test needs the text itself, the
@@ -48,11 +49,13 @@ class ReceiptWhatsAppTests(RecoveryFixtureMixin, TestCase):
         self.assertIn('no phone', reason)
         self.assert_untouched()
 
-    def test_closed_window_gives_the_reason_and_leaves_the_receipt(self):
+    def test_closed_window_tries_the_approved_message_and_says_when_it_is_refused(self):
+        # 21 Nov 2026: outside the window it goes as receipt_ready (tests_media_templates).
+        # Here WhatsApp isn't set up, so it's refused, said plainly, and the receipt is left.
         with patch(FORMAT, return_value='Receipt text'):
             sent, reason = self.engine.send_whatsapp(self.receipt)
         self.assertFalse(sent)
-        self.assertIn('24 hours', reason)
+        self.assertIn('approved receipt message', reason)
         self.assert_untouched()
 
     def test_open_window_queues_the_receipt_and_marks_it_sent(self):

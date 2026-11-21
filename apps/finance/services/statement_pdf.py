@@ -154,25 +154,38 @@ def build_statement_pdf(st, branch=None) -> bytes:
 def send_statement(customer, branch=None, branch_ids=None):
     """
     The statement on WhatsApp, in the customer's chat. Returns (sent, reason).
-    WhatsApp only lets us write to someone who wrote in the last 24 hours.
+    Inside their 24-hour window it goes with a caption; outside it, or if
+    they never wrote (21 Nov 2026), as the approved account_statement
+    message with the PDF on top.
     """
-    from apps.communications.services.whatsapp_outbound import WindowClosed, send_text, thread_for
+    from apps.communications.services.names import name_for
+    from apps.communications.services.templates import hello_name
+    from apps.communications.services.whatsapp_outbound import (
+        WindowClosed, chat_for_phone, send_template_to, send_text, window_open)
     from apps.finance.services.owing import statement
     st = statement(customer, branch_ids)
     if st['total'] <= 0:
         return False, f'{customer.display_name} owes nothing.'
-    chat = thread_for(customer.phone) if customer.phone else None
+    chat = chat_for_phone(customer.phone, customer.display_name) if customer.phone else None
     if chat is None:
-        return False, f'{customer.display_name} has no WhatsApp chat with us. Print it or download it instead.'
-    from apps.communications.services.names import name_for
+        return False, f'{customer.display_name} has no WhatsApp number we can use. Print it or download it instead.'
     name = name_for(chat, customer)
+    pdf = build_statement_pdf(st, branch)
+    filename = f"Statement-{timezone.localdate():%Y-%m-%d}.pdf"
+    if not window_open(chat):
+        try:
+            send_template_to(chat, 'account_statement', [hello_name(name), _ghs(st['total'])],
+                             kind='statement', document=pdf, filename=filename)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Statement template refused for %s', customer.pk, exc_info=True)
+            return False, ("WhatsApp didn't take it: the approved statement message may not be ready yet. "
+                           'Download it and share it for now.')
+        return True, ''
     caption = (f"Here's your statement{', ' + name if name else ''}: {_ghs(st['total'])} in all. "
                'Each job is listed by number, so tell us which one you are paying for. Thank you 🙏')
-    pdf = build_statement_pdf(st, branch)
     try:
-        send_text(chat, caption, kind='statement', document=pdf,
-                  filename=f"Statement-{timezone.localdate():%Y-%m-%d}.pdf")
+        send_text(chat, caption, kind='statement', document=pdf, filename=filename)
     except (WindowClosed, ValueError):
-        return False, ("WhatsApp only lets us write to someone who messaged us in the last 24 hours. "
-                       'Download it and share it, or send it once they write.')
+        return False, "WhatsApp wouldn't take it just now. Download it and share it instead."
     return True, ''

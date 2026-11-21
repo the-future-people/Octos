@@ -106,6 +106,54 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
     return message
 
 
+def send_template_to(conversation, name, params, kind, image=None, document=None, filename='file'):
+    """
+    An approved template into this chat, now (21 Nov 2026): for a customer
+    whose 24-hour window is shut, or who never wrote. A picture or document
+    goes in the template's header. Sent straight away, not queued: the
+    caller is already in the background or wants the answer. Recorded in
+    the thread as SENT, with its file. Raises WhatsAppError when Meta
+    refuses (not approved yet, a bad number): the caller says so.
+    """
+    from apps.communications.services.templates import MEDIA_TEMPLATES, fill
+    spec = MEDIA_TEMPLATES[name]
+    header = None
+    if image is not None:
+        header = ('image', image, filename, 'image/png')
+    elif document is not None:
+        header = ('document', document, filename, 'application/pdf')
+    phone = conversation.contact_phone or conversation.contact_user_id
+    wamid = whatsapp_client.send_template(phone, name, params=params, header=header)
+    content, mime, mtype = ((image, 'image/png', Message.IMAGE) if image is not None
+                            else (document, 'application/pdf', Message.DOCUMENT) if document is not None
+                            else (None, '', Message.TEXT))
+    message = Message(conversation=conversation, direction=Message.OUTBOUND, channel=conversation.channel,
+                      body=fill(spec['text'], params), kind=kind, status=Message.SENT,
+                      external_id=wamid if isinstance(wamid, str) else '', message_type=mtype)
+    if content is not None:
+        message.media_file.save(filename, ContentFile(content), save=False)
+        message.media_name, message.media_mime, message.media_size = filename, mime, len(content)
+    message.save()
+    _record_sent(message, message.external_id)
+    return message
+
+
+def chat_for_phone(phone, name=''):
+    """
+    This number's chat on the central number, made if they never wrote (for a
+    template, 21 Nov 2026). None for a number that isn't real or is marked spam.
+    """
+    number = to_international(phone or '')
+    if not number:
+        return None
+    chat = (Conversation.objects.filter(channel=Conversation.WHATSAPP, branch__isnull=True, contact_phone=number)
+            .first())
+    if chat is None:
+        chat = Conversation.objects.create(channel=Conversation.WHATSAPP, contact_phone=number,
+                                           contact_name=(name or '')[:100])
+    return None if chat.status == Conversation.SPAM else chat
+
+
 def thread_for(phone):
     """
     This number's WhatsApp chat on the central number, or None: no real

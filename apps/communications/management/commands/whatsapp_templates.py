@@ -9,6 +9,13 @@ ones the inbox's New message offers (START_TEMPLATES), so the two can't drift.
     python manage.py whatsapp_templates --submit   # send the ones not there yet
 
 Needs the WhatsApp token to carry whatsapp_business_management.
+
+21 Nov 2026: the receipt and the statement too (services/templates.py),
+whose header carries the receipt picture or the statement PDF. Meta wants a
+sample of the header with the submission, uploaded through the app's
+resumable upload; the app's id comes from the token (or WHATSAPP_APP_ID).
+If Meta won't take the upload, the command says so, and the two can be made
+by hand in WhatsApp Manager with the same name and wording.
 """
 import re
 
@@ -31,6 +38,60 @@ EXAMPLES = {
 OWNER_TEMPLATES = {
     'owner_update': ('Octos update for you: {1}\n\nTap Open below to see the full details here.', ['Open']),
 }
+
+
+def _sample_image():
+    """A receipt-shaped sample picture for Meta's review."""
+    import io
+
+    from PIL import Image, ImageDraw
+    img = Image.new('RGB', (600, 800), 'white')
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, 600, 110], fill=(200, 16, 46))
+    draw.text((30, 40), 'FARHAT PRINTING PRESS  -  RECEIPT', fill='white')
+    for n, line in enumerate(['Receipt RCP-WLB-2026-00123', 'A4 printing x 20', 'Amount paid  GHS 45.00',
+                              'Thank you for choosing Farhat']):
+        draw.text((30, 170 + n * 60), line, fill=(30, 30, 30))
+    out = io.BytesIO()
+    img.save(out, 'PNG')
+    return out.getvalue(), 'image/png'
+
+
+def _sample_pdf():
+    """A sample statement PDF for Meta's review."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from django.utils import timezone
+
+    from apps.finance.services.statement_pdf import build_statement_pdf
+    now = timezone.now()
+    job = SimpleNamespace(job_number='FP-WLB-2026-05812', title='A4 printing', estimated_cost=Decimal('300'),
+                          amount_paid=Decimal('0'), balance_due=Decimal('300'), handed_over_at=now, created_at=now,
+                          line_items=None)
+    st = {'customer': SimpleNamespace(display_name='Ama Mensah', phone='0244000000'), 'owed': [job], 'current': [],
+          'owed_total': Decimal('300'), 'current_total': Decimal('0'), 'total': Decimal('300')}
+    return build_statement_pdf(st), 'application/pdf'
+
+
+def _header_handle(content, mime, token, api_version):
+    """Meta's handle for a sample file (resumable upload), needed to submit a template with a media header."""
+    app_id = getattr(settings, 'WHATSAPP_APP_ID', '') or ''
+    headers = {'Authorization': f'Bearer {token}'}
+    if not app_id:
+        app = requests.get(f'https://graph.facebook.com/{api_version}/app', headers=headers, timeout=30).json()
+        app_id = app.get('id', '')
+    if not app_id:
+        raise CommandError("Couldn't find the app's id: set WHATSAPP_APP_ID.")
+    session = requests.post(f'https://graph.facebook.com/{api_version}/{app_id}/uploads', headers=headers, timeout=30,
+                            params={'file_length': len(content), 'file_type': mime}).json()
+    if 'id' not in session:
+        raise CommandError(f"Meta refused the upload: {session.get('error', {}).get('message', session)}")
+    done = requests.post(f"https://graph.facebook.com/{api_version}/{session['id']}", timeout=60, data=content,
+                         headers={'Authorization': f'OAuth {token}', 'file_offset': '0'}).json()
+    if 'h' not in done:
+        raise CommandError(f"Meta refused the upload: {done.get('error', {}).get('message', done)}")
+    return done['h']
 
 
 class Command(BaseCommand):
@@ -56,8 +117,10 @@ class Command(BaseCommand):
             raise CommandError(f"Meta refused the list: {listed.json().get('error', {}).get('message', listed.text)}")
         at_meta = {t['name']: t for t in listed.json().get('data', [])}
 
+        from apps.communications.services.templates import MEDIA_TEMPLATES
         wanted = [(name, text, []) for name, text in START_TEMPLATES.items()]
         wanted += [(name, text, buttons) for name, (text, buttons) in OWNER_TEMPLATES.items()]
+        wanted += [(name, spec['text'], []) for name, spec in MEDIA_TEMPLATES.items()]
         for name, text, buttons in wanted:
             found = at_meta.get(name)
             if found:
@@ -68,12 +131,22 @@ class Command(BaseCommand):
                 self.stdout.write(f'{name:16} not submitted yet')
                 continue
             body = re.sub(r'\{(\d+)\}', r'{{\1}}', text)
+            media = MEDIA_TEMPLATES.get(name)
+            example = media['example'] if media else EXAMPLES.get(name, ['Ama', 'FP-WLB-05812'])
             payload = {
                 'name': name, 'language': 'en',
                 'category': 'MARKETING' if name in MARKETING_TEMPLATES else 'UTILITY',
-                'components': [{'type': 'BODY', 'text': body,
-                                'example': {'body_text': [EXAMPLES.get(name, ['Ama', 'FP-WLB-05812'])]}}],
+                'components': [{'type': 'BODY', 'text': body, 'example': {'body_text': [example]}}],
             }
+            if media:
+                content, mime = _sample_image() if media['header'] == 'IMAGE' else _sample_pdf()
+                try:
+                    handle = _header_handle(content, mime, token, API_VERSION)
+                except CommandError as refused:
+                    self.stdout.write(f'{name:16} NOT SUBMITTED: {refused} Make it by hand in WhatsApp Manager.')
+                    continue
+                payload['components'].insert(0, {'type': 'HEADER', 'format': media['header'],
+                                                 'example': {'header_handle': [handle]}})
             if buttons:
                 payload['components'].append({'type': 'BUTTONS', 'buttons': [
                     {'type': 'QUICK_REPLY', 'text': b} for b in buttons]})

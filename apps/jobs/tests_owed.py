@@ -169,13 +169,15 @@ class StatementTests(Base):
                          ('300.00', '40.00', '340.00'))
         self.assertEqual(api.get(f'/api/v1/finance/customers/{self.dwumfour.pk}/statement/pdf/').status_code, 200)
 
-    def test_sending_needs_an_open_chat(self):
+    def test_a_refused_send_is_said_plainly(self):
+        # Outside the window it goes as the approved account_statement message
+        # (tests_media_templates); here WhatsApp isn't set up, so it's refused.
         ProformaEngine(self.branch).record_owed(self.expired(), self.bm)
         api = APIClient()
         api.force_authenticate(self.bm)
         r = api.post(f'/api/v1/finance/customers/{self.dwumfour.pk}/statement/send/')
         self.assertEqual(r.status_code, 400)
-        self.assertIn('no WhatsApp chat', r.data['detail'])
+        self.assertIn('approved statement message may not be ready yet', r.data['detail'])
 
     def test_sent_in_his_chat_when_it_is_open(self):
         from apps.communications.models import Conversation, Message

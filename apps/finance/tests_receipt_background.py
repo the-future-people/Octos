@@ -12,7 +12,7 @@ from apps.communications.models import Message
 from apps.communications.tests import make_conversation
 from apps.communications.tests_whatsapp_outbound import customer_wrote
 from apps.finance.models import Receipt
-from apps.finance.receipt_engine import NOT_WRITTEN, ReceiptEngine
+from apps.finance.receipt_engine import ReceiptEngine
 from apps.finance.tasks import send_receipt_whatsapp
 from apps.finance.tests import RecoveryFixtureMixin
 
@@ -41,10 +41,21 @@ class BackgroundReceiptTests(RecoveryFixtureMixin, TestCase):
         later.assert_called_once_with(self.receipt.pk)
         self.assertFalse(Message.objects.filter(direction=Message.OUTBOUND).exists())
 
-    def test_a_closed_window_is_said_at_once_and_nothing_queued(self):
+    def test_a_closed_window_still_queues_it_for_the_approved_message(self):
+        # 21 Nov 2026: outside the window the receipt goes as receipt_ready.
         with patch(DELAY) as later, self.captureOnCommitCallbacks(execute=True):
             queued, reason = self.engine.queue_whatsapp(self.receipt)
-        self.assertEqual((queued, reason), (False, NOT_WRITTEN))
+        self.assertEqual((queued, reason), (True, ''))
+        later.assert_called_once_with(self.receipt.pk)
+
+    def test_a_number_marked_spam_is_said_at_once(self):
+        from apps.communications.models import Conversation
+        from apps.finance.receipt_engine import SPAM
+        conv = make_conversation(None, contact_phone='+233244123456')
+        Conversation.objects.filter(pk=conv.pk).update(status=Conversation.SPAM)
+        with patch(DELAY) as later, self.captureOnCommitCallbacks(execute=True):
+            queued, reason = self.engine.queue_whatsapp(self.receipt)
+        self.assertEqual((queued, reason), (False, SPAM))
         later.assert_not_called()
 
     def test_the_worker_sends_it(self):

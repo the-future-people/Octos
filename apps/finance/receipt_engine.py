@@ -15,6 +15,11 @@ NOT_WRITTEN = (
     "so WhatsApp won't let us send it. Print the receipt, or ask them to "
     "send us a message first, then try again."
 )
+SPAM = "This number is marked as spam in the inbox, so nothing is sent to it. Print the receipt."
+NOT_APPROVED = (
+    "WhatsApp didn't take the receipt: the approved receipt message may not be "
+    "ready yet. Print it for now."
+)
 
 
 class ReceiptEngine:
@@ -163,17 +168,21 @@ class ReceiptEngine:
         """
         from apps.communications.models import Conversation
         from apps.communications.services.chat_customer import chat_for
-        from apps.communications.services.whatsapp_outbound import thread_for, window_open
+        from apps.core.phones import to_international
 
+        # A shut window is no longer a refusal (21 Nov 2026): the approved
+        # receipt message (receipt_ready) reaches them, even if they never wrote.
         if receipt.customer_phone:
-            chat = thread_for(receipt.customer_phone)
-        else:
-            chat = chat_for(receipt.job)
-            if chat is None:
+            if not to_international(receipt.customer_phone):
                 return NO_NUMBER
-        if chat is None or chat.status == Conversation.SPAM or not window_open(chat):
-            return NOT_WRITTEN
-        return ''
+            spam = Conversation.objects.filter(
+                channel=Conversation.WHATSAPP, branch__isnull=True, status=Conversation.SPAM,
+                contact_phone=to_international(receipt.customer_phone)).exists()
+            return SPAM if spam else ''
+        chat = chat_for(receipt.job)
+        if chat is None:
+            return NO_NUMBER
+        return SPAM if chat.status == Conversation.SPAM else ''
 
     def queue_whatsapp(self, receipt):
         """
@@ -195,16 +204,19 @@ class ReceiptEngine:
         The receipt on WhatsApp. Returns (sent, reason).
 
         WhatsApp lets a business send a free message only to someone who
-        wrote to it in the last 24 hours. So this works when the customer
-        has been chatting with us, and says so plainly when not: the
-        receipt stays as it was, and staff can print it.
+        wrote to it in the last 24 hours. Inside that window the receipt goes
+        as a picture with a caption, as before. Outside it, or to a customer
+        who never wrote (21 Nov 2026), it goes as the approved receipt
+        message, receipt_ready, with the picture on top, the way Uber and
+        Bolt reach you.
 
         SENT here means handed to WhatsApp. Whether it arrived shows on
         the customer's conversation (delivered, read). A receipt never
         falls back to SMS: see NO_SMS_FALLBACK in whatsapp_outbound.
         """
         from apps.communications.services.chat_customer import chat_for
-        from apps.communications.services.whatsapp_outbound import try_send_text, try_send_to
+        from apps.communications.services.whatsapp_outbound import (
+            chat_for_phone, send_template_to, try_send_text, try_send_to, window_open)
         from apps.finance.models import Receipt
 
         # No number: a customer writing from a WhatsApp username (14 Nov 2026).
@@ -229,12 +241,12 @@ class ReceiptEngine:
         # The receipt as a picture, in Farhat's colours (13 Nov 2026), with a
         # one-line caption. If it can't be drawn, the text receipt goes
         # instead: a customer never gets nothing.
-        image, caption = None, text
+        image, caption, name = None, text, ''
         try:
             from apps.finance.services.receipt_image import receipt_data, render
             data = receipt_data(receipt)
             image = render(data)
-            name = data.get('first_name')
+            name = data.get('first_name') or ''
             # No digits in the caption: WhatsApp turns digit runs into phone links.
             caption = f"Here's your receipt{', ' + name if name else ''}. Thank you for choosing Farhat 🙏"
         except Exception:
@@ -243,6 +255,25 @@ class ReceiptEngine:
                 receipt.receipt_number,
             )
             image, caption = None, text
+
+        # The window shut, or they never wrote: the approved receipt message.
+        target = chat if chat is not None else chat_for_phone(receipt.customer_phone, receipt.customer_name)
+        if target is not None and not window_open(target):
+            if image is None:
+                return False, NOT_WRITTEN
+            from apps.communications.services.templates import hello_name
+            try:
+                send_template_to(target, 'receipt_ready',
+                                 [hello_name(name), f'GHS {receipt.amount_paid:,.2f}'],
+                                 kind='receipt', image=image, filename=f'{receipt.receipt_number}.png')
+            except Exception:
+                logger.warning('ReceiptEngine: receipt %s template was refused', receipt.receipt_number,
+                               exc_info=True)
+                return False, NOT_APPROVED
+            receipt.whatsapp_status = Receipt.DeliveryStatus.SENT
+            receipt.whatsapp_sent_at = timezone.now()
+            receipt.save(update_fields=['whatsapp_status', 'whatsapp_sent_at'])
+            return True, ''
 
         try:
             if chat is not None:
