@@ -122,7 +122,7 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
-- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. A customer with no chat, or who hasn't written in 24 hours, can still be reached: never tell him you have no way to message them. reach_customer gives the approved messages word for word; show him the one that fits (quote it exactly), and send it with send_approved only when he says yes. Once they reply, you can write to them freely. What a customer owes is one picture: statement gives jobs owed from before, new work and the total due, the same as the statement they receive. When he says a customer's old invoice was delivered but never recorded, record_owed puts it where money owed shows; then send_statement on his word. A customer paying part pays the job they point to: never say a payment clears the oldest first. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
+- You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. A customer with no chat, or who hasn't written in 24 hours, can still be reached: never tell him you have no way to message them. reach_customer gives the approved messages word for word; show him the one that fits (quote it exactly), and send it with send_approved only when he says yes. Once they reply, you can write to them freely. Only offer messages reach_customer lists as approved: one still with Meta can't go yet, so say so. You CAN send receipts (find_receipt shows exactly what goes, send_receipt sends it on his yes) and statements, to anyone with a number, whether or not they ever wrote. What a customer owes is one picture: statement gives jobs owed from before, new work and the total due, the same as the statement they receive. When he says a customer's old invoice was delivered but never recorded, record_owed puts it where money owed shows; then send_statement on his word. A customer paying part pays the job they point to: never say a payment clears the oldest first. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
@@ -308,7 +308,8 @@ TOOL_SPECS = [
      'input_schema': {'type': 'object', 'properties': {'customer': {'type': 'string'}}, 'required': ['customer']}},
     {'name': 'send_statement',
      'description': ("On his word: send the customer their statement (a PDF listing each job by number, and the "
-                     "total) in their WhatsApp chat. Works only if they wrote to us in the last 24 hours."),
+                     "total) on WhatsApp. Works whether or not they wrote to us recently (an approved message "
+                     "carries it outside the 24 hours)."),
      'input_schema': {'type': 'object', 'properties': {'customer': {'type': 'string'}}, 'required': ['customer']}},
     {'name': 'record_owed',
      'description': ("On his word: an EXPIRED proforma whose work was done and delivered but never paid becomes "
@@ -328,6 +329,14 @@ TOOL_SPECS = [
                      "order_ready, job_question, reconnect."),
      'input_schema': {'type': 'object', 'properties': {
          'customer': {'type': 'string'}, 'template': {'type': 'string'}}, 'required': ['customer', 'template']}},
+    {'name': 'find_receipt',
+     'description': ("A receipt by receipt number, job number or customer name (their latest), and exactly what "
+                     "sending it on WhatsApp would look like."),
+     'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
+    {'name': 'send_receipt',
+     'description': ("On his word: send a customer their receipt picture on WhatsApp, with a thank-you. Works "
+                     "whether or not they ever wrote to us."),
+     'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
     {'name': 'check_later',
      'description': ('Come back after this many minutes (2 to 360), look at what he asked about, and report. '
                      'what says what to check, in a few words.'),
@@ -397,6 +406,11 @@ def _run_tool(name, args, sent):
         return look.discounts(args.get('period') or 'this_week', args.get('branch', ''), args.get('status') or '')
     if name == 'find_proforma':
         return look.find_proforma(str(args.get('query') or ''))
+    if name == 'find_receipt':
+        return look.find_receipt(str(args.get('query') or ''))
+    if name == 'send_receipt':
+        sent.append('receipt')
+        return look.send_receipt(str(args.get('query') or ''))
     if name == 'reach_customer':
         return look.reach_customer(str(args.get('customer') or ''))
     if name == 'send_approved':

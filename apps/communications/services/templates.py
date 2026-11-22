@@ -66,3 +66,39 @@ def fill(text, params):
 def hello_name(name):
     """A template blank can't be empty: no name we trust reads 'Hello there'."""
     return (name or '').strip() or 'there'
+
+
+def statuses():
+    """
+    {template name: 'APPROVED' | 'PENDING' | 'REJECTED' …} as Meta has them,
+    cached ten minutes (22 Nov 2026: Octos offered the thank-you while Meta
+    was still reviewing it). None when Meta can't be asked: then nothing is
+    held back, and a refusal is reported when sending.
+    """
+    from django.conf import settings
+    from django.core.cache import cache
+    found = cache.get('wa:template-statuses')
+    if found is not None:
+        return found
+    token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
+    waba = getattr(settings, 'WHATSAPP_BUSINESS_ACCOUNT_ID', '')
+    if not token or not waba:
+        return None
+    try:
+        import requests
+
+        from apps.communications.services.whatsapp_client import API_VERSION
+        r = requests.get(f'https://graph.facebook.com/{API_VERSION}/{waba}/message_templates', timeout=10,
+                         headers={'Authorization': f'Bearer {token}'}, params={'fields': 'name,status', 'limit': 200})
+        found = {t['name']: t.get('status', '') for t in r.json().get('data', [])}
+    except Exception:
+        return None
+    cache.set('wa:template-statuses', found, 10 * 60)
+    return found
+
+
+def approved(name):
+    """True when Meta has approved it, or when we can't tell (then sending reports any refusal)."""
+    known = statuses()
+    return True if known is None else known.get(name) == 'APPROVED'
+

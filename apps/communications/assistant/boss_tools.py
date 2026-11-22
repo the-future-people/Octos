@@ -997,11 +997,16 @@ def reach_customer(customer):
     if window_open(chat):
         return {'customer': c.display_name, 'chat_id': chat.pk, 'can_write_freely': True,
                 'say': 'They wrote in the last 24 hours: write to them with send_to_customer.'}
+    from apps.communications.services.templates import approved
     wording = _approved_wording(c, chat)
+    ready = {t: words for t, (_p, words) in wording.items() if approved(t)}
+    waiting = [t for t in wording if t not in ready]
     return {'customer': c.display_name, 'can_write_freely': False,
             'why': ("They haven't written in the last 24 hours" if chat.messages.exists()
                     else 'They have never written to us') + ': only an approved message can go first.',
-            'approved_messages': {t: words for t, (_p, words) in wording.items()},
+            'approved_messages': ready,
+            **({'still_with_meta_for_approval': waiting} if waiting else {}),
+            'their_receipt': 'send_receipt sends their receipt picture with a thank-you, approved too.',
             'marketing_opted_out': bool(chat.marketing_opt_out)}
 
 
@@ -1025,6 +1030,9 @@ def send_approved(customer, template):
     wording = _approved_wording(c, chat)
     if template not in wording:
         return {'sent': False, 'why': 'That message needs a job number, and they have no job with us.'}
+    from apps.communications.services.templates import approved
+    if not approved(template):
+        return {'sent': False, 'why': 'Meta is still reviewing that message, so it can\'t go yet. Usually within a day.'}
     params, words = wording[template]
     try:
         send_template_to(chat, template, params, kind='template', sent_by=owner_user())
@@ -1032,6 +1040,60 @@ def send_approved(customer, template):
         return {'sent': False, 'why': "WhatsApp didn't take it: Meta may not have approved that message yet."}
     return {'sent': True, 'to': c.display_name, 'words': words,
             'next': 'When they reply, you can write to them freely.'}
+
+
+def _receipt_for(query):
+    """(receipt, None) or (None, a reply): by receipt or job number, else a customer's latest receipt."""
+    from apps.finance.models import Receipt
+    q = (query or '').strip()
+    receipts = Receipt.objects.select_related('job', 'job__customer', 'daily_sheet__branch').order_by('-created_at')
+    if q.upper().startswith(('RCP', 'FP-', 'FP ')) or any(ch.isdigit() for ch in q) and '-' in q:
+        r = receipts.filter(Q(receipt_number__icontains=q) | Q(job__job_number__icontains=q)).first()
+        return (r, None) if r else (None, {'error': f'No receipt matches "{query}".'})
+    c, reply = _one_customer(q)
+    if reply:
+        return None, reply
+    r = receipts.filter(job__customer=c).first()
+    return (r, None) if r else (None, {'error': f'{c.display_name} has no receipt with us.'})
+
+
+def find_receipt(query):
+    """A receipt (by receipt number, job number or customer), and the message that would carry it."""
+    from apps.communications.services.templates import fill, hello_name, MEDIA_TEMPLATES
+    from apps.communications.services.names import name_for
+    r, reply = _receipt_for(query)
+    if reply:
+        return reply
+    customer = r.job.customer if r.job_id and r.job.customer_id else None
+    phone = r.customer_phone or (customer.phone if customer else '')
+    words = fill(MEDIA_TEMPLATES['receipt_ready']['text'],
+                 [hello_name(name_for(customer=customer) if customer else ''), f'GHS {r.amount_paid:,.2f}'])
+    return {'receipt': r.receipt_number, 'job': r.job.job_number if r.job_id else None,
+            'customer': customer.display_name if customer else r.customer_name, 'amount': ghs(r.amount_paid),
+            'paid': when(r.created_at), 'phone_on_file': bool(phone),
+            'would_send': f'[their receipt picture] {words}' if phone else None,
+            **({} if phone else {'why': 'No phone number on the receipt or their record.'})}
+
+
+def send_receipt(query):
+    """
+    On the boss's word: the receipt picture to the customer on WhatsApp. In
+    their 24-hour window as a picture with a caption; outside it, or if they
+    never wrote, as the approved receipt message (with its thank-you).
+    """
+    from apps.finance.receipt_engine import ReceiptEngine
+    r, reply = _receipt_for(query)
+    if reply:
+        return reply
+    customer = r.job.customer if r.job_id and r.job.customer_id else None
+    if not r.customer_phone and customer is not None and customer.phone:
+        r.customer_phone = customer.phone              # the number on their record
+        r.save(update_fields=['customer_phone'])
+    branch = r.daily_sheet.branch if r.daily_sheet_id else (r.job.branch if r.job_id else None)
+    sent, why = ReceiptEngine(branch).send_whatsapp(r)
+    if not sent:
+        return {'sent': False, 'why': why}
+    return {'sent': True, 'receipt': r.receipt_number, 'to': customer.display_name if customer else r.customer_name}
 
 
 # ── Stock ──────────────────────────────────────────────────────────────────
