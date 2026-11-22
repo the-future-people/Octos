@@ -233,8 +233,9 @@ def send_for_owner(conversation, words):
     if not words:
         return {'sent': False, 'say': 'There was nothing to send.'}
     if not whatsapp_outbound.window_open(conversation):
-        return {'sent': False, 'say': (f"I can't send it: {name} last wrote more than 24 hours ago, so "
-                                       'WhatsApp only allows an approved template. Someone could call them.')}
+        return {'sent': False, 'say': (f"I can't send those words: {name} last wrote more than 24 hours ago, so "
+                                       'WhatsApp only allows one of our approved messages first (reach_customer '
+                                       'shows them). Once they reply, I can send anything.')}
     if conversation.handled_by == Conversation.STAFF:
         handover.hand_back(conversation, user=owner)
     try:

@@ -29,6 +29,7 @@ EXAMPLES = {
     'proforma_ready': ['Ama', 'PFI-WLB-2026-00030'],
     'general_followup': ['Ama'],
     'reconnect': ['Ama'],
+    'thank_you_order': ['Kwaku', 'FP-WLB-2026-06033'],
     'owner_update': ['A discount on PFI-WLB-2026-00036 is waiting for your OK: GHS 1,967.48.'],
 }
 
@@ -101,7 +102,7 @@ class Command(BaseCommand):
         parser.add_argument('--submit', action='store_true', help='Submit the templates Meta does not have yet.')
 
     def handle(self, *args, submit=False, **options):
-        from apps.communications.api.views import MARKETING_TEMPLATES, START_TEMPLATES
+        from apps.communications.services.templates import MARKETING_TEMPLATES, START_TEMPLATES
         from apps.communications.services.whatsapp_client import API_VERSION
 
         token = settings.WHATSAPP_ACCESS_TOKEN

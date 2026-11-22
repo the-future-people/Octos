@@ -193,3 +193,6 @@ class SubmitTests(TestCase):
         self.assertEqual(receipt[1]['text'].count('{{'), 2)
         self.assertEqual(by_name['account_statement']['components'][0]['format'], 'DOCUMENT')
         self.assertEqual(by_name['account_statement']['category'], 'UTILITY')
+        thanks = by_name['thank_you_order']
+        self.assertEqual(thanks['category'], 'UTILITY')
+        self.assertEqual(thanks['components'][0]['example'], {'body_text': [['Kwaku', 'FP-WLB-2026-06033']]})

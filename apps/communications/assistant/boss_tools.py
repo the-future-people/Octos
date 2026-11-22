@@ -943,6 +943,97 @@ def record_owed(proforma, delivered_on=''):
             'owes_on_it': ghs(job.balance_due)}
 
 
+# ── A customer who never wrote, or whose window shut (22 Nov 2026) ─────────
+
+OWNER_TEMPLATES_ALLOWED = ('thank_you_order', 'general_followup', 'order_ready', 'job_question', 'reconnect')
+
+
+def _chat_for_customer(c):
+    """Their WhatsApp chat: by number (made if they never wrote), else by their username's chat. None if spam."""
+    from apps.communications.models import Conversation
+    from apps.communications.services.whatsapp_outbound import chat_for_phone
+    if c.phone:
+        return chat_for_phone(c.phone, c.display_name)
+    return (Conversation.objects.filter(customer=c, channel=Conversation.WHATSAPP, branch__isnull=True)
+            .exclude(status=Conversation.SPAM).exclude(contact_user_id='').order_by('-id').first())
+
+
+def _approved_wording(c, chat):
+    """{template: (params, the words as the customer would read them)} for this customer."""
+    from apps.communications.services.names import name_for
+    from apps.communications.services.templates import START_TEMPLATES, fill, hello_name
+    from apps.jobs.models import Job
+    name = hello_name(name_for(chat, c) if chat is not None else name_for(customer=c))
+    last = (Job.objects.filter(customer=c).exclude(status__in=['CANCELLED', 'VOIDED', 'DRAFT'])
+            .order_by('-created_at').first())
+    out = {}
+    for t in OWNER_TEMPLATES_ALLOWED:
+        text = START_TEMPLATES[t]
+        if '{2}' in text:
+            if last is None:
+                continue
+            params = [name, last.job_number]
+        else:
+            params = [name]
+        out[t] = (params, fill(text, params))
+    return out
+
+
+def reach_customer(customer):
+    """
+    Can Octos write to this customer, and how. If they wrote in the last 24
+    hours: freely (send_to_customer). If not, or they never wrote: only one
+    of Farhat's approved messages, shown here word for word, sent with
+    send_approved on his word.
+    """
+    from apps.communications.services.whatsapp_outbound import window_open
+    c, reply = _one_customer(customer)
+    if reply:
+        return reply
+    chat = _chat_for_customer(c)
+    if chat is None:
+        return {'customer': c.display_name, 'can_reach': False,
+                'why': 'No WhatsApp number or chat for them (or the number is marked spam).'}
+    if window_open(chat):
+        return {'customer': c.display_name, 'chat_id': chat.pk, 'can_write_freely': True,
+                'say': 'They wrote in the last 24 hours: write to them with send_to_customer.'}
+    wording = _approved_wording(c, chat)
+    return {'customer': c.display_name, 'can_write_freely': False,
+            'why': ("They haven't written in the last 24 hours" if chat.messages.exists()
+                    else 'They have never written to us') + ': only an approved message can go first.',
+            'approved_messages': {t: words for t, (_p, words) in wording.items()},
+            'marketing_opted_out': bool(chat.marketing_opt_out)}
+
+
+def send_approved(customer, template):
+    """On the boss's word: one of Farhat's approved messages to a customer whose window is shut."""
+    from apps.communications.services.owner_line import owner_user
+    from apps.communications.services.templates import MARKETING_TEMPLATES
+    from apps.communications.services.whatsapp_outbound import send_template_to, window_open
+    c, reply = _one_customer(customer)
+    if reply:
+        return reply
+    if template not in OWNER_TEMPLATES_ALLOWED:
+        return {'error': f'Use one of: {", ".join(OWNER_TEMPLATES_ALLOWED)}.'}
+    chat = _chat_for_customer(c)
+    if chat is None:
+        return {'sent': False, 'why': 'No WhatsApp number or chat for them.'}
+    if window_open(chat):
+        return {'sent': False, 'why': 'They wrote in the last 24 hours: write freely with send_to_customer instead.'}
+    if template in MARKETING_TEMPLATES and chat.marketing_opt_out:
+        return {'sent': False, 'why': 'They asked not to get messages like this.'}
+    wording = _approved_wording(c, chat)
+    if template not in wording:
+        return {'sent': False, 'why': 'That message needs a job number, and they have no job with us.'}
+    params, words = wording[template]
+    try:
+        send_template_to(chat, template, params, kind='template', sent_by=owner_user())
+    except Exception:
+        return {'sent': False, 'why': "WhatsApp didn't take it: Meta may not have approved that message yet."}
+    return {'sent': True, 'to': c.display_name, 'words': words,
+            'next': 'When they reply, you can write to them freely.'}
+
+
 # ── Stock ──────────────────────────────────────────────────────────────────
 
 def _count(value):

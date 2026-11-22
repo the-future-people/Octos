@@ -106,7 +106,7 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
     return message
 
 
-def send_template_to(conversation, name, params, kind, image=None, document=None, filename='file'):
+def send_template_to(conversation, name, params, kind, image=None, document=None, filename='file', sent_by=None):
     """
     An approved template into this chat, now (21 Nov 2026): for a customer
     whose 24-hour window is shut, or who never wrote. A picture or document
@@ -115,8 +115,10 @@ def send_template_to(conversation, name, params, kind, image=None, document=None
     the thread as SENT, with its file. Raises WhatsAppError when Meta
     refuses (not approved yet, a bad number): the caller says so.
     """
-    from apps.communications.services.templates import MEDIA_TEMPLATES, fill
-    spec = MEDIA_TEMPLATES[name]
+    from apps.communications.services.templates import fill, text_of
+    text = text_of(name)
+    if text is None:
+        raise ValueError(f'{name} is not one of our approved messages')
     header = None
     if image is not None:
         header = ('image', image, filename, 'image/png')
@@ -128,7 +130,7 @@ def send_template_to(conversation, name, params, kind, image=None, document=None
                             else (document, 'application/pdf', Message.DOCUMENT) if document is not None
                             else (None, '', Message.TEXT))
     message = Message(conversation=conversation, direction=Message.OUTBOUND, channel=conversation.channel,
-                      body=fill(spec['text'], params), kind=kind, status=Message.SENT,
+                      body=fill(text, params), kind=kind, status=Message.SENT, sent_by=sent_by,
                       external_id=wamid if isinstance(wamid, str) else '', message_type=mtype)
     if content is not None:
         message.media_file.save(filename, ContentFile(content), save=False)

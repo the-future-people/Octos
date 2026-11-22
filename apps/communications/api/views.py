@@ -571,21 +571,8 @@ def _reply_with_files(request, conversation, files):
 
 # The approved WhatsApp messages a chat may start with. Each must be approved
 # in WhatsApp Manager under this exact name, in English, before it can be sent.
-START_TEMPLATES = {
-    'order_ready': 'Hello {1}, your order {2} is ready to collect at Farhat Printing Press, Westland.',
-    'job_question': 'Hello {1}, about your job {2}: please reply when you can.',
-    'proforma_ready': 'Hello {1}, your proforma {2} is ready. Reply to receive it here.',
-    # Checking in after a past job (utility), and reaching customers who have
-    # gone quiet (marketing), in Farhat's own warm voice (Khofi, 8 Nov 2026).
-    'general_followup': ('Hello {1}, it\u2019s Farhat Printing Press at Westland. We were thinking about the '
-                         'last job we did for you and wanted to check in. How did it all turn out? We\u2019d love '
-                         'to hear from you whenever you have a moment.'),
-    'reconnect': ('Hello {1}! It\u2019s the team at Farhat Printing Press, Westland. We haven\u2019t seen you in a '
-                  'while and just wanted to say we\u2019re still here for you, from a single copy to a big order. '
-                  'Send us a message anytime. If you\u2019d prefer not to hear from us, just let us know.'),
-}
-# Marketing, by WhatsApp's rules: never sent to a customer who asked not to be.
-MARKETING_TEMPLATES = {'reconnect'}
+# The approved messages live with the others (services/templates.py, 22 Nov 2026).
+from apps.communications.services.templates import MARKETING_TEMPLATES, START_TEMPLATES  # noqa: E402
 
 
 def _e164(phone):
