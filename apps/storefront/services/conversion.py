@@ -70,9 +70,17 @@ def convert(order):
         if locked.job_id:
             return locked.job
 
+        partner = order.partner if order.partner_id else None
+        extra = {}
+        if partner is not None:
+            # Packed plain and labelled with their ID and reference; the
+            # receipt is the business's, never the rep's (23 Nov 2026).
+            extra = {'trade_partner': partner, 'partner_reference': order.partner_reference,
+                     'discount_amount': order.discount_amount, 'discount_reason': order.discount_reason}
         job = Job.objects.create(
             branch=order.branch,
-            customer=_customer_and_link(order),
+            customer=(partner.customer if partner is not None and partner.customer_id
+                      else _customer_and_link(order)),
             daily_sheet=sheet,
             # Always production. Online work is paid for before it is
             # made, and only the production flow has a way to say
@@ -108,6 +116,7 @@ def convert(order):
             # nothing to be late against.
             estimated_ready_at=order.promised_for or promise_for(order),
             notes=f'Ordered online — {order.order_number}',
+            **extra,
         )
 
         _carry_lines(order, job)

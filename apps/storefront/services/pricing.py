@@ -80,6 +80,8 @@ def price_lines(raw_lines, existing_ids=None):
             'specifications': specs,
             'unit_price': str(quote.get('unit_price') or quote['total']),
             'base_total': str(quote['total']),
+            # The minimum charge set this price: no trade discount goes under it.
+            'at_minimum': bool(quote.get('minimum_applied')),
             'addons': addons,
             'total': str(Decimal(str(quote['total'])) + addons_total),
         })

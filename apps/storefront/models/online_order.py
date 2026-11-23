@@ -171,6 +171,18 @@ class OnlineOrder(AuditModel):
 
     notes = models.TextField(blank=True)
 
+    # ── Trade partners (23 Nov 2026) ──────────────────────────────
+    # A partner's order: the trade price and any reward come off
+    # (discount_amount says which), and the partner pays the payment
+    # provider's fee on top, as its own line. Worked out on every save
+    # while the order is open (partners/services/pricing.py), never by
+    # the browser, and frozen once it is paid.
+    partner = models.ForeignKey('partners.Partner', null=True, blank=True, on_delete=models.PROTECT,
+                                related_name='orders')
+    partner_reference = models.CharField(max_length=80, blank=True)   # theirs; goes on the label
+    partner_reward = models.CharField(max_length=10, blank=True)      # FIRST or EVERY_20 when one applied
+    processing_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -206,6 +218,10 @@ class OnlineOrder(AuditModel):
             self.access_token = token_urlsafe(32)
         if not self.short_code:
             self.short_code = self._make_short_code()
+        fields = kwargs.get('update_fields')
+        if self.partner_id and self.is_open and (fields is None or {'line_items', 'total'} & set(fields)):
+            from apps.partners.services.pricing import settle
+            settle(self)
         super().save(*args, **kwargs)
 
     @staticmethod

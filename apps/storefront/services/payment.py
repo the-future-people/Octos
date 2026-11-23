@@ -66,6 +66,10 @@ def start_payment(order, email='', callback_url=None):
 
     if order.is_paid or order.status == OnlineOrder.Status.PAID:
         raise PaymentRefused('This order has already been paid for.', 409)
+    if order.partner_id:
+        # The trade price and the fee, worked out now and saved, so the
+        # amount Paystack is asked for is exactly what the order says.
+        order.save()
     if not order.lead_id:
         raise PaymentRefused('Tell us who you are first.')
     if not order.branch_id:

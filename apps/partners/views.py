@@ -17,6 +17,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.partners.services import apply as applying
+from apps.partners.services import portal
 
 
 def _partner_services():
@@ -124,4 +125,36 @@ class MeView(APIView):
             'logo': _url(partner.logo),
             'rep': {'title': rep.title, 'first_name': rep.first_name, 'last_name': rep.last_name,
                     'role': rep.role},
+            # Only an approved (or paused) partner has jobs to show.
+            **(portal.dashboard(partner) if partner.status in (partner.Status.APPROVED, partner.Status.PAUSED) else {}),
         })
+
+
+class OrderView(APIView):
+    """
+    POST /api/v1/partners/orders/  {reference}
+
+    Starts a partner's order. From here the page uses the storefront's own
+    steps with the order's token (lines, files, branch, pay), and every save
+    prices it at the trade price (OnlineOrder.save, partners/services/pricing).
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront'
+
+    def get_authenticators(self):
+        from apps.storefront.auth import AppSessionAuthentication
+        return [AppSessionAuthentication()]
+
+    def post(self, request):
+        from apps.storefront.models import OnlineOrder
+        session = request.auth
+        if session is None:
+            return Response({'detail': 'Sign in first.'}, status=status.HTTP_401_UNAUTHORIZED)
+        partner, rep = partner_for(session)
+        if partner is None or partner.status != partner.Status.APPROVED:
+            return Response({'detail': 'Only an approved partner can send jobs.'}, status=status.HTTP_403_FORBIDDEN)
+        reference = ' '.join(str(request.data.get('reference') or '').split())[:80]
+        order = OnlineOrder.objects.create(lead=rep.lead, partner=partner, partner_reference=reference)
+        return Response({'order_number': order.order_number, 'access_token': order.access_token,
+                         'reference': reference}, status=status.HTTP_201_CREATED)

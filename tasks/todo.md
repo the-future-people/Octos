@@ -20,14 +20,14 @@ claude.ai project doc "B2B partner programme". Sign-ups stay closed
 - [x] 8. Tests
 
 ## be20b: trade price, rewards, partner orders
-- [ ] 9. 6% off every job, server-side; 10% on the first job and one in every 20;
+- [x] 9. 6% off every job, server-side; 10% on the first job and one in every 20;
          never on a line already at its minimum charge; rewards replace, never stack
-- [ ] 10. Paystack fee as its own line, paid by the partner
-- [ ] 11. Partner orders through the storefront's own upload and pay; no customer code
+- [x] 10. Paystack fee as its own line, paid by the partner
+- [x] 11. Partner orders through the storefront's own upload and pay; no customer code
           discount on top; paid orders become jobs for the partner's business
-- [ ] 12. Job: trade_partner, partner_reference (plain packaging, label, board tag)
-- [ ] 13. Rewards progress: wrap at 15, next 10% at every 20 (paid jobs of GHS 30+)
-- [ ] 14. Tests
+- [x] 12. Job: trade_partner, partner_reference (plain packaging, label, board tag)
+- [x] 13. Rewards progress: wrap at 15, next 10% at every 20 (paid jobs of GHS 30+)
+- [x] 14. Tests
 
 ## po: Print Octos screens (desktop centred max-w-6xl, tablet tabs, phone)
 - [ ] 15. Apply (4 steps) and status; sign-in by code

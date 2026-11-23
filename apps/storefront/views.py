@@ -86,6 +86,9 @@ def _serialise(order):
         'full_total': f'{Decimal(order.full_total):.2f}',
         'discount_amount': f'{Decimal(order.discount_amount):.2f}',
         'discount_reason': order.discount_reason,
+        'processing_fee': f'{Decimal(order.processing_fee):.2f}',
+        'partner_reference': order.partner_reference,
+        'partner_reward': order.partner_reward,
         'total': f'{Decimal(order.total):.2f}',
         'fulfilment': order.fulfilment,
         'promised_for': order.promised_for,
@@ -601,7 +604,7 @@ class OrderCodeView(APIView):
         lead.set_code(code)
 
         discount = Decimal('0.00')
-        if not lead.code_discount_used and order.full_total >= DISCOUNT_THRESHOLD:
+        if not order.partner_id and not lead.code_discount_used and order.full_total >= DISCOUNT_THRESHOLD:
             # To the nearest cedi. Pesewas off a discount read as
             # arithmetic rather than as a gift.
             discount = (order.full_total * DISCOUNT_RATE).quantize(Decimal('1'))

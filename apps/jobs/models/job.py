@@ -373,6 +373,12 @@ class Job(AuditModel):
     discount_by     = models.ForeignKey('accounts.CustomUser', null=True, blank=True, on_delete=models.SET_NULL,
                                         related_name='%(class)s_discounts_given')
 
+    # A trade partner's job (23 Nov 2026): packed plain, no Farhat name,
+    # labelled with the partner's ID and their own reference.
+    trade_partner     = models.ForeignKey('partners.Partner', null=True, blank=True, on_delete=models.PROTECT,
+                                          related_name='jobs')
+    partner_reference = models.CharField(max_length=80, blank=True)
+
     # ── Inspection claim ──────────────────────────────────────────
     # Who has this job open in the inspection workspace, and since when.
     # A claim, not a state: it stops two coordinators checking the same
