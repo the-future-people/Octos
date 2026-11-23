@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from apps.accounts.api.views import AuditedTokenObtainPairView
 from django.conf import settings
 from django.conf.urls.static import static
+from apps.communications.api.sandbox_views import SandboxCaseView, SandboxStartView
 from config.views import (
     home_view, hr_portal_view, login_view, dashboard_view, inbox_view, jobs_view,
     cashier_view, attendant_view, belt_manager_view, onboarding_view, regional_manager_view,
@@ -36,6 +37,11 @@ urlpatterns = [
     path('api/v1/recruitment/',   include('apps.hr.api.urls')),
     path('api/v1/careers/',       include('apps.hr.api.careers_urls')),
     path('api/v1/communications/',include('apps.communications.api.urls')),
+    # The website's "Not sure what to ask for?" (23 Nov 2026): public, no sign-in.
+    path('api/v1/sandbox/', SandboxStartView.as_view(),
+         name='sandbox-start'),
+    path('api/v1/sandbox/<str:code>/', SandboxCaseView.as_view(),
+         name='sandbox-case'),
     path('api/v1/finance/',       include('apps.finance.api.urls')),
     path('api/v1/notifications/', include('apps.notifications.api.urls')),
     path('api/v1/analytics/',     include('apps.analytics.api.urls')),

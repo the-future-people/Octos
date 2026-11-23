@@ -163,6 +163,19 @@ TOOL_SPECS = [
         }, 'required': ['sizes']},
     },
     {
+        'name': 'what_is_this',
+        'description': ("When a customer shows a photo, video or GIF of an item and asks whether we can do it, what "
+                        "it is, or how much for something like it (the Can-Do Sandbox): first works out exactly "
+                        "what it is (searching the web when needed), then whether Farhat can make it, how, a price "
+                        "guide from our price list and a ready time, and what to ask them. files are the file "
+                        "numbers from the chat; note is what they said about it. Not for a file they want printed "
+                        "as it is."),
+        'input_schema': {'type': 'object', 'properties': {
+            'files': {'type': 'array', 'items': {'type': 'integer'}},
+            'note': {'type': 'string'},
+        }, 'required': ['files']},
+    },
+    {
         'name': 'print_preview',
         'description': ("Shows the customer how their own photo will print: the photo laid out on the sheet "
                         "at the size they chose (as many as fit, cut lines dotted in) and the piece they take "
@@ -347,6 +360,27 @@ def files_handled(message):
     received = (SpineEvent.objects.select_related('visit')
                 .filter(idempotency_key=f'wa:{message.external_id}').first())
     return bool(received and received.visit and batch_handled(received.visit, upto_event_id=received.pk))
+
+
+def _website_case_note(conversation):
+    """
+    A customer who comes from the website's "Not sure what to ask for?" with
+    their case number (SB-7K3QXA): Octos carries on from what it told them
+    there, without asking them to explain again.
+    """
+    from apps.communications.models import SandboxCase
+    recent = conversation.messages.filter(direction=Message.INBOUND).order_by('-created_at')[:4]
+    codes = re.findall(r'\bSB-[A-Z2-9]{6}\b', ' '.join((m.body or '').upper() for m in recent))
+    if not codes:
+        return ''
+    case = SandboxCase.objects.filter(code=codes[0]).first()
+    if case is None or not case.result:
+        return ''
+    if case.conversation_id is None:
+        SandboxCase.objects.filter(pk=case.pk).update(conversation=conversation)
+    return ('The customer comes from the website, where they showed you a photo (case ' + case.code + '). What you '
+            'told them there: ' + json.dumps(case.result, default=str) + '. Carry on from it: never ask them to '
+            'explain again, and firm up the price with its questions.')
 
 
 TAKEN_BACK_NOTE = (
@@ -567,7 +601,7 @@ def _converse(conversation, ctx, run, note=''):
     from apps.communications.assistant import regulars
     # Picking up a chat a teammate never answered (20 Nov 2026).
     picking_up = TAKEN_BACK_NOTE if ctx.trigger is not None and taken_back_since(conversation, ctx.trigger) else ''
-    for extra in (regulars.instruction(conversation), picking_up, note):
+    for extra in (regulars.instruction(conversation), picking_up, _website_case_note(conversation), note):
         if extra:
             system = ((system + '\n\n' + extra) if isinstance(system, str)
                       else [*system, {'type': 'text', 'text': extra}])
@@ -695,6 +729,8 @@ def _run_tool(name, args, ctx):
         return _paper_sizes(ctx, args)
     if name == 'print_preview':
         return _print_preview(ctx, args)
+    if name == 'what_is_this':
+        return _what_is_this(ctx, args)
     if name == 'send_proforma':
         from apps.communications.assistant import proformas
         return proformas.send_proforma(ctx.conversation, args.get('lines') or [], args.get('customer') or {})
@@ -743,6 +779,46 @@ def _send_picture(ctx, picture, caption, filename):
         return 'Could not be sent. Describe it in words instead.'
     return ('Sent in the chat just now, with the caption "' + caption + '". Don\'t repeat what the caption '
             'or the picture says; add only what they need next, in a line or two.')
+
+
+def _what_is_this(ctx, args):
+    """
+    "Can you do this?" (the Can-Do Sandbox, 23 Nov 2026): what it is first,
+    then whether Farhat can make it. Octos says "Let me take a look 👀"
+    while it works, as a person would.
+    """
+    from apps.communications.models import SandboxCase
+    from apps.communications.services import sandbox, whatsapp_outbound
+    wanted = [int(f) for f in (args.get('files') or []) if str(f).isdigit()][:4]
+    shown = list(ctx.conversation.messages.filter(pk__in=wanted, direction=Message.INBOUND).exclude(media_file=''))
+    if not shown:
+        return {'error': "Those aren't files this customer sent here, or they're still being saved."}
+    files = []
+    for m in shown:
+        with m.media_file.open('rb') as handle:
+            files.append((handle.read(), m.media_mime or ('image/jpeg' if m.message_type == Message.IMAGE else '')))
+    try:
+        if settings.OCTOS_ASSISTANT_MODE == 'live':
+            whatsapp_outbound.send_text(ctx.conversation, 'Let me take a look 👀')
+    except Exception:
+        logger.warning('Sandbox: the "let me take a look" did not go', exc_info=True)
+    case = SandboxCase.objects.create(source=SandboxCase.WHATSAPP, conversation=ctx.conversation,
+                                      note=str(args.get('note') or '')[:500],
+                                      files=[{'message': m.pk, 'mime': m.media_mime or ''} for m in shown])
+    case = sandbox.run(case, files=files)
+    r = dict(case.result)
+    if case.status == SandboxCase.FAILED:
+        return {'error': r.get('message') or "Couldn't look at it.", 'say': 'Ask them for a clearer photo.'}
+    r['case'] = case.code
+    r['say'] = {
+        'yes': 'Tell them what it is, that we can make it, the price as a guide (a person confirms before they '
+               'pay), the ready time, then ask its questions.',
+        'partly': 'Say what it is, what we can and can\'t do of it, then the price guide and questions.',
+        'no': "Say plainly we don't make this, and offer the nearest thing if there is one. Don't promise.",
+        'unsure': "Say you're not sure what it is yet, ask its question, and that you've asked the team and will "
+                  'come back to them.',
+    }.get(r.get('can_do'), '')
+    return r
 
 
 def _print_preview(ctx, args):

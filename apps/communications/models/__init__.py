@@ -3,8 +3,10 @@ from .message import Message
 from .whatsapp_event import WhatsAppEvent
 from .assistant_run import AssistantRun
 from .owner_line import OwnerMessage, OwnerReminder, OwnerWatch
+from .sandbox import SandboxCase
 
-__all__ = ['Conversation', 'Message', 'WhatsAppEvent', 'AssistantRun', 'OwnerMessage', 'OwnerReminder', 'OwnerWatch']
+__all__ = ['Conversation', 'Message', 'WhatsAppEvent', 'AssistantRun', 'OwnerMessage', 'OwnerReminder', 'OwnerWatch',
+           'SandboxCase']
 
 # The inbox, live (9 Nov 2026): announce saved messages and changed chats.
 from apps.communications import live  # noqa: E402,F401

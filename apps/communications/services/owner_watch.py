@@ -242,6 +242,9 @@ def send_for_owner(conversation, words):
         whatsapp_outbound.send_text(conversation, words, sent_by=owner)
     except whatsapp_outbound.WindowClosed:
         return {'sent': False, 'say': f"I can't send it: {name}'s WhatsApp window has just closed."}
+    # His answer to a "can you do this?" Octos wasn't sure about: kept for next time (23 Nov 2026).
+    from apps.communications.services.sandbox import remember_answer
+    remember_answer(conversation, words)
     return {'sent': True, 'say': f'Sent to {name} ✅'}
 
 

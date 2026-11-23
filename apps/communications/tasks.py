@@ -122,3 +122,13 @@ def owner_reminders():
     """Every minute: the owner's "check back" and "remind me" that are due (19 Nov 2026)."""
     from apps.communications.services import owner_watch
     owner_watch.fire_due()
+
+
+@shared_task
+def run_sandbox(case_id):
+    """A 'can you do this?' look from the website (services/sandbox.py)."""
+    from apps.communications.models import SandboxCase
+    from apps.communications.services import sandbox
+    case = SandboxCase.objects.filter(pk=case_id).first()
+    if case is not None and case.status == SandboxCase.QUEUED:
+        sandbox.run(case)
