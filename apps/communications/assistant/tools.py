@@ -101,7 +101,7 @@ def _job_facts(job, at):
         'stage': words,
         'ready_to_collect': job.handover_state == job.Handover.AWAITING_COLLECTION,
         'out_for_delivery': job.handover_state == job.Handover.OUT_FOR_DELIVERY,
-        'promised_ready': _window(job.estimated_ready_at, at) if job.estimated_ready_at else None,
+        'promised_ready': _about(job.estimated_ready_at, at) if job.estimated_ready_at else None,
         'promise': (job.promise_state or '').lower() or None,
         'balance_due': f'GHS {balance:.2f}' if balance is not None else None,
         'paid_in_full': job.is_fully_paid,
@@ -135,23 +135,25 @@ def _when(moment, now):
     return f'{moment:%a} {clock}'
 
 
-def _window(moment, now):
+def _about(moment, now):
     """
-    A ready time as the customer hears it (7 Nov 2026, Khofi): half an hour,
-    starting at the next quarter hour, so it never starts before the floor
-    can deliver. 'between 6:30pm and 7:00pm today'. A single time sounds
-    more certain than anyone can be.
+    A ready time as the customer hears it (23 Nov 2026, Khofi): one time,
+    "about 5:10pm today", the way the receipt, the storefront and the
+    counter's message already say it. It replaced the half-hour window
+    ("between 4:30pm and 5:00pm"). The promise is already buffered above
+    the expected time; rounding up to the next 5 minutes keeps it a time a
+    person would say, and never earlier than the floor can deliver.
     """
     from datetime import timedelta
     moment = timezone.localtime(moment)
-    start = moment.replace(second=0, microsecond=0)
-    start += timedelta(minutes=(-start.minute) % 15)
-    if start < moment:
-        start += timedelta(minutes=15)
-    end = start + timedelta(minutes=30)
-    days = (start.date() - now.date()).days
-    day = 'today' if days == 0 else 'tomorrow' if days == 1 else f'on {start:%A}'
-    return f'between {_clock(start.time())} and {_clock(end.time())} {day}'
+    at = moment.replace(second=0, microsecond=0)
+    if at < moment:
+        at += timedelta(minutes=1)
+    at += timedelta(minutes=(-at.minute) % 5)
+    days = (at.date() - now.date()).days
+    day = 'today' if days == 0 else 'tomorrow' if days == 1 else f'on {at:%A}'
+    return f'about {_clock(at.time())} {day}'
+
 
 # ── Prices ─────────────────────────────────────────────────────────────
 # Words that say nothing about which service ("size", "please"), and the
@@ -283,7 +285,7 @@ def quote(service_code, specifications=None, quantity=1, addon_codes=(), branche
             pages = max(1, int(specs.get('pages') or 1))
             ready_at = PredictionService(maker).predict([(service, quantity, pages)]).ready_at
             if ready_at:
-                ready = f'{_window(ready_at, timezone.now())} at {_branch_name(maker)}'
+                ready = f'{_about(ready_at, timezone.now())} at {_branch_name(maker)}'
                 ready_note = 'An estimate from the floor now; it is fixed once the order is paid.'
     except Exception:
         import logging

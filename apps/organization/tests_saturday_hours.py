@@ -47,11 +47,12 @@ class SaturdayHoursTests(TestCase):
         self.assertTrue(hours.is_open(self.branch, at(2026, 11, 7, 7, 45)))
 
 
-class ReadyWindowTests(TestCase):
+class ReadyAboutTests(TestCase):
 
-    def test_rounded_up_to_the_quarter_then_half_an_hour(self):
-        from apps.communications.assistant.tools import _window
+    def test_one_time_rounded_up_to_five_minutes(self):
+        from apps.communications.assistant.tools import _about
         now = at(2026, 11, 7, 14, 0)
-        self.assertEqual(_window(at(2026, 11, 7, 18, 17), now), 'between 6:30pm and 7:00pm today')
-        self.assertEqual(_window(at(2026, 11, 7, 17, 30), now), 'between 5:30pm and 6:00pm today')
-        self.assertEqual(_window(at(2026, 11, 9, 9, 5), now), 'between 9:15am and 9:45am on Monday')
+        self.assertEqual(_about(at(2026, 11, 7, 18, 17), now), 'about 6:20pm today')
+        self.assertEqual(_about(at(2026, 11, 7, 17, 30), now), 'about 5:30pm today')
+        self.assertEqual(_about(at(2026, 11, 9, 9, 5), now), 'about 9:05am on Monday')
+        self.assertEqual(_about(at(2026, 11, 8, 8, 1), now), 'about 8:05am tomorrow')

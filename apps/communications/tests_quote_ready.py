@@ -26,13 +26,13 @@ class QuoteReadyTests(TestCase):
                                              unit='PER_PIECE', is_active=True)
         PricingRule.objects.create(service=self.flyers, branch=None, base_price=Decimal('1.50'), is_active=True)
 
-    def test_a_quote_carries_a_window_from_the_floor(self):
+    def test_a_quote_carries_one_time_from_the_floor(self):
         ready_at = timezone.make_aware(datetime(2026, 11, 9, 17, 22))
         with patch(PREDICT, return_value=SimpleNamespace(ready_at=ready_at)), \
                 patch('django.utils.timezone.now', return_value=timezone.make_aware(datetime(2026, 11, 9, 9, 0))):
             facts = tools.quote('FLY-A5', {}, 500)
         self.assertTrue(facts['success'])
-        self.assertTrue(facts['ready'].startswith('between 5:30pm and 6:00pm today at '))
+        self.assertTrue(facts['ready'].startswith('about 5:25pm today at '))
 
     def test_when_the_floor_cannot_say_no_time_is_given(self):
         with patch(PREDICT, return_value=SimpleNamespace(ready_at=None)):

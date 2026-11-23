@@ -115,7 +115,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
                 _attach_copies(order, [line['id']], staged)
         replaced, links_out = _set_aside_earlier(conversation, order)
 
-    from apps.communications.assistant.tools import _branch_name, _when, _window
+    from apps.communications.assistant.tools import _about, _branch_name, _when
     from apps.production.models import ServiceStation
     # A service with no route on the floor has no measured work, so the
     # engine would promise "ready at opening" for it. Octos never guesses.
@@ -134,7 +134,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
             'total': f"GHS {Decimal(line['total']):.2f}",
         } for line in priced],
         'total': f'GHS {total:.2f}',
-        'ready': _window(ready, now) if ready else None,
+        'ready': _about(ready, now) if ready else None,
         'ready_note': None if ready else 'The team will confirm the ready time.',
         'next': 'Confirm this with the customer. Send the payment link only when they agree.',
         **({'replaces': replaced} if replaced else {}),
