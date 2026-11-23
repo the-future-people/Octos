@@ -113,6 +113,41 @@ class EngineTests(TestCase):
         self.assertIsNone(case.result['price_from'])
         self.assertEqual(case.result['assumptions'], 'A person at Farhat will price this.')
 
+    def test_a_refused_web_search_still_gets_an_answer(self):
+        class Refused(Exception):                            # what the SDK raises: a 400 with status_code
+            status_code = 400
+        refused = Refused('web search is not enabled for this organization')
+
+        class Refuses(Model):
+            def create(self, **kwargs):
+                if kwargs.get('tools', [{}])[0].get('type', '').startswith('web_search'):
+                    self.calls.append(kwargs)
+                    raise refused
+                return super().create(**kwargs)
+
+        model = Refuses(identified(searched=False), self.answered({
+            'can_do': 'yes', 'why': 'We make acrylic signs.', 'price_from': None, 'questions': []}))
+        case = SandboxCase.objects.create(source=SandboxCase.WEB)
+        with patch('anthropic.Anthropic', return_value=model):
+            sandbox.run(case, files=[(png(), 'image/png')])
+        case.refresh_from_db()
+        self.assertEqual(case.status, SandboxCase.DONE)
+        self.assertEqual(case.result['what'], IDENTITY['what'])
+        self.assertFalse(case.result['searched'])
+        self.assertNotIn('tools', model.calls[1])              # asked again, pictures only
+
+    def test_a_bare_number_price_is_shown_as_cedis(self):
+        model = Model(
+            identified(searched=False),
+            says(tool('quote', {'service_code': 'T-ACRYLIC', 'quantity': 1}), stop='tool_use'),
+            self.answered({'can_do': 'yes', 'why': 'We can.', 'price_from': 450, 'price_to': None, 'questions': []}))
+        case = SandboxCase.objects.create(source=SandboxCase.WEB)
+        with patch('anthropic.Anthropic', return_value=model):
+            sandbox.run(case, files=[(png(), 'image/png')])
+        case.refresh_from_db()
+        self.assertEqual(case.status, SandboxCase.DONE)
+        self.assertEqual(case.result['price_from'], 'GHS 450.00')
+
     def test_not_sure_asks_its_question_and_the_boss(self):
         unsure = {**IDENTITY, 'what': 'Something carved, maybe wood', 'confidence': 'low',
                   'question': 'Is it carved wood or printed?'}

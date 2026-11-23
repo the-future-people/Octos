@@ -176,18 +176,43 @@ def identify(images, note=''):
     content.append({'type': 'text', 'text': f'The customer wrote: "{note}"' if note else 'The customer wrote nothing.'})
     messages = [{'role': 'user', 'content': content}]
     client = _client()
-    for _ in range(3):              # a long search can pause the turn: carry on
-        response = client.messages.create(
-            model=settings.OCTOS_ASSISTANT_MODEL, max_tokens=1200, system=IDENTIFY, messages=messages,
-            tools=[{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': SEARCHES,
-                    'user_location': {'type': 'approximate', 'city': 'Accra', 'country': 'GH',
-                                      'timezone': 'Africa/Accra'}}])
-        if response.stop_reason != 'pause_turn':
-            break
-        messages.append({'role': 'assistant', 'content': response.content})
+    search = [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': SEARCHES,
+               'user_location': {'type': 'approximate', 'city': 'Accra', 'country': 'GH',
+                                 'timezone': 'Africa/Accra'}}]
+    try:
+        response = _identify_turns(client, messages, search)
+    except Exception as exc:
+        # The API refused the search (switched off for the account, a tool
+        # version it won't take). Octos still has eyes: it judges from the
+        # pictures alone, rather than the whole look failing.
+        if getattr(exc, 'status_code', None) not in (400, 403, 404):
+            raise
+        logger.warning('Sandbox: web search refused, looking without it: %s', exc)
+        response = _identify_turns(client, [{'role': 'user', 'content': content}], None)
     found = _json(_text(response))
     found['searched'] = any(getattr(b, 'type', '') == 'server_tool_use' for b in response.content)
     return found
+
+
+def _identify_turns(client, messages, tools):
+    """The identify call, carrying on when a long search pauses the turn."""
+    extra = {'tools': tools} if tools else {}
+    for _ in range(3):
+        response = client.messages.create(model=settings.OCTOS_ASSISTANT_MODEL, max_tokens=1200, system=IDENTIFY,
+                                          messages=messages, **extra)
+        if response.stop_reason != 'pause_turn':
+            break
+        messages.append({'role': 'assistant', 'content': response.content})
+    return response
+
+
+def _money(value):
+    """A price as the card shows it: 'GHS 45.00'. The model sometimes gives a bare number."""
+    if value in (None, '', 0):
+        return None
+    if isinstance(value, (int, float)):
+        return f'GHS {value:,.2f}'
+    return str(value)
 
 
 def _past_cases(identity, limit=5):
@@ -265,6 +290,7 @@ def can_do(identity, note='', branches=()):
 def _checked_prices(answer, facts):
     """Prices only if a quote gave them (checker.py); otherwise none, and a person prices it."""
     from apps.communications.assistant.checker import unverified
+    answer['price_from'], answer['price_to'] = _money(answer.get('price_from')), _money(answer.get('price_to'))
     said = ' '.join(filter(None, [answer.get('price_from'), answer.get('price_to')]))
     if said and unverified(said, json.dumps(facts, default=str)):
         logger.warning('Sandbox: dropped prices no quote gave: %s', said)
