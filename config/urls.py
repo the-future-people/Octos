@@ -52,6 +52,7 @@ urlpatterns = [
     # The public surface. Unauthenticated by design: a stranger pricing
     # a banner has no account.
     path('api/v1/storefront/',    include('apps.storefront.urls')),
+    path('api/v1/partners/',      include('apps.partners.urls')),
 
     # The owner's view of the whole business. Owner-only, read-only.
     path('api/v1/eye/',           include('apps.eye.api.urls')),

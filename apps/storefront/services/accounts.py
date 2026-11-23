@@ -103,18 +103,12 @@ def send_code(raw_phone):
     return phone
 
 
-def _hash_token(token):
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-@transaction.atomic
-def verify_code(raw_phone, code, first_name='', device=''):
+def check_code(raw_phone, code):
     """
-    Check the code. Right: the account (made now if the number is new) and
-    a fresh session token, returned once and never stored as is.
+    Is this the code we sent this number? Returns the normalised number, or
+    raises AccountRefused. A code works once. Shared by app sign-in and by
+    the trade-partner application, which confirms numbers the same way.
     """
-    from apps.storefront.models import AppSession, Lead
-
     phone = normalise_phone(raw_phone)
     if phone is None:
         raise AccountRefused('Enter a Ghanaian mobile number, like 024 000 0000.')
@@ -132,6 +126,22 @@ def verify_code(raw_phone, code, first_name='', device=''):
         raise AccountRefused('That code is not right. Check the message and try again.')
 
     cache.delete(_code_key(phone))
+    return phone
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@transaction.atomic
+def verify_code(raw_phone, code, first_name='', device=''):
+    """
+    Check the code. Right: the account (made now if the number is new) and
+    a fresh session token, returned once and never stored as is.
+    """
+    from apps.storefront.models import AppSession, Lead
+
+    phone = check_code(raw_phone, code)
 
     lead = find_lead(phone)
     if lead is None:

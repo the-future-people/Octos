@@ -76,6 +76,7 @@ LOCAL_APPS = [
     # nothing imports back, so the storefront stays separable from the
     # staff platform it sits in front of.
     'apps.storefront',
+    'apps.partners',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -285,6 +286,12 @@ WHATSAPP_VERIFY_TOKEN        = os.environ.get('WHATSAPP_VERIFY_TOKEN', '')
 # Railway, never in the code (the repository is public). Empty: no line.
 OCTOS_OWNER_PHONE            = os.environ.get('OCTOS_OWNER_PHONE', '')
 
+# Farhat Trade Partners (23 Nov 2026). Sign-ups stay closed until the machines
+# have run 90 days: until PARTNER_SIGNUPS_OPEN is 'on', only a shop with one of
+# the invite codes (comma-separated, set on Railway) can apply.
+PARTNER_SIGNUPS_OPEN         = os.environ.get('PARTNER_SIGNUPS_OPEN', 'off').lower() == 'on'
+PARTNER_INVITE_CODES         = [c.strip().upper() for c in os.environ.get('PARTNER_INVITE_CODES', '').split(',') if c.strip()]
+
 # Octos's assistant. Mode is the kill switch: 'off' (silent, the default),
 # 'shadow' (writes its reply as an internal note, sends nothing) or 'live'.
 # An unknown mode is treated as off. The model is a setting so the exams can
@@ -434,6 +441,11 @@ CELERY_BEAT_SCHEDULE = {
     'sweep-storefront-nightly': {
         'task': 'apps.storefront.tasks.sweep_storefront',
         'schedule': crontab(hour=2, minute=30),
+    },
+    # Trade partners: an application left unanswered after "Ask for more" closes at 14 days.
+    'partners-close-stale': {
+        'task': 'apps.partners.tasks.close_stale',
+        'schedule': crontab(hour=6, minute=17),
     },
     'observe-station-timings-nightly': {
         'task': 'apps.production.tasks.observe_station_timings',

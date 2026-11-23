@@ -1,3 +1,50 @@
+# Farhat Trade Partners (B2B portal)
+
+Started 23 Nov 2026. Interview, mocks (phone, tablet, desktop centred like the
+staff portals) and every decision agreed the same day; full list in the
+claude.ai project doc "B2B partner programme". Sign-ups stay closed
+(PARTNER_SIGNUPS_OPEN off, invite codes only) until the machines have run 90 days.
+
+## be20a: accounts, applications, verification, approval
+- [x] 1. `apps/partners`: Partner (area+code ID, status, shop, location, contacts,
+         services from our catalogue, photo, logo, terms, consent) and PartnerRep
+- [x] 2. IDs: MAD-K7Q2 from the town picked, random, never reused, shown MAD·K7Q2
+- [x] 3. Codes: one check shared with app sign-in (accounts.check_code); primary
+         contact and rep phone both confirmed before an application is taken
+- [x] 4. The switch: PARTNER_SIGNUPS_OPEN, PARTNER_INVITE_CODES
+- [x] 5. Apply API: validation, duplicates (number, name+area), history as a customer
+- [x] 6. Owner line: card with the shop photo, Approve / Ask for more / Decline;
+         "Ask" takes his next message as the question; approve makes the business
+         customer and welcomes them with the ID and 10% off the first job
+- [x] 7. Unanswered "Ask for more" closes after 14 days (daily task)
+- [x] 8. Tests
+
+## be20b: trade price, rewards, partner orders
+- [ ] 9. 6% off every job, server-side; 10% on the first job and one in every 20;
+         never on a line already at its minimum charge; rewards replace, never stack
+- [ ] 10. Paystack fee as its own line, paid by the partner
+- [ ] 11. Partner orders through the storefront's own upload and pay; no customer code
+          discount on top; paid orders become jobs for the partner's business
+- [ ] 12. Job: trade_partner, partner_reference (plain packaging, label, board tag)
+- [ ] 13. Rewards progress: wrap at 15, next 10% at every 20 (paid jobs of GHS 30+)
+- [ ] 14. Tests
+
+## po: Print Octos screens (desktop centred max-w-6xl, tablet tabs, phone)
+- [ ] 15. Apply (4 steps) and status; sign-in by code
+- [ ] 16. Dashboard, new job, jobs, rewards, shop profile
+
+## ow: octos-web
+- [ ] 17. "Trade, plain packaging" tag and the packing label (partner ID, their
+          reference, job number) on the board and at collection
+
+## Verify
+- [ ] 18. Full suite; screenshots at 1440, 1024 and 390; one end-to-end test order
+
+## Review
+(filled in when done)
+
+---
+
 # Front-desk jobs go straight to the attendants (Phase 1)
 
 Started 14 Nov 2026. Design agreed 13 Nov (arrival modal mock), plan approved 14 Nov.

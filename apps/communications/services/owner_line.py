@@ -179,6 +179,9 @@ def _still_matters(message):
     if message.ref.startswith('cut:'):
         from apps.jobs.models import PriceCut
         return PriceCut.objects.filter(pk=message.ref.split(':')[1], status=PriceCut.Status.PENDING).exists()
+    if message.ref.startswith('partner:'):
+        from apps.partners.models import Partner
+        return Partner.objects.filter(pk=message.ref.split(':')[1], status=Partner.Status.APPLIED).exists()
     return True
 
 
@@ -279,6 +282,9 @@ def answer(pk):
         _decide(message.reply_id)
     if message.reply_id.startswith('say:'):
         _say_tap(message.reply_id)
+    if message.reply_id.startswith('partner:'):
+        from apps.partners.services import review as partners
+        partners.tap(message.reply_id)
     sent = flush()
     if message.reply_id:
         # A tap is answered by what it opened; "Open" with nothing waiting
@@ -288,6 +294,13 @@ def answer(pk):
         return
     words = re.sub(r'[^\w\s]', ' ', message.body.lower()).strip()
     words = re.sub(r'\s+', ' ', words)
+    if words and not message.media_id:
+        # He tapped "Ask for more" on a partner application: these words are
+        # the question, and they go to the shop as he wrote them (23 Nov 2026).
+        from apps.partners.services import review as partners
+        waiting = partners.waiting_for_question()
+        if waiting is not None:
+            return partners.take_question(waiting, message.body)
     if message.media_id:
         # He sent a photo (23 Nov 2026). It goes to Octos, never to a shortcut:
         # "photo" in a caption is not a request for the card.
