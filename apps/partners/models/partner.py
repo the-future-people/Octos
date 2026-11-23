@@ -123,6 +123,9 @@ class PartnerRep(AuditModel):
     last_name = models.CharField(max_length=60)
     role = models.CharField(max_length=10, choices=Role.choices)
     is_active = models.BooleanField(default=True)
+    # Chosen at registration and kept only as a hash (24 Nov 2026): reps log
+    # in with their number and this. A code to the phone sets a new one.
+    password = models.CharField(max_length=128, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['partner', 'lead'], name='one_rep_per_person_per_partner')]

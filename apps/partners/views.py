@@ -75,11 +75,59 @@ class ApplyView(_Public):
     throttle_scope = 'storefront'
 
     def post(self, request):
+        from apps.partners.services import access
         try:
             partner = applying.submit(request.data, request.FILES.get('shop_photo'), request.FILES.get('logo'))
         except applying.Refused as refused:
             return Response({'detail': str(refused), 'field': refused.field}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'status': partner.status, 'name': partner.name}, status=status.HTTP_201_CREATED)
+        # The phone is confirmed and the password set: the account exists, so
+        # they're logged in straight away, to wait for the owner's decision.
+        rep = partner.reps.select_related('lead').first()
+        return Response({'status': partner.status, 'name': partner.name, 'token': access.session(rep.lead)},
+                        status=status.HTTP_201_CREATED)
+
+
+class LoginView(_Public):
+    """POST {phone, password} -> {token}. Five wrong tries lock the number for 15 minutes."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_code'
+
+    def post(self, request):
+        from apps.partners.services import access
+        try:
+            _, token = access.login(request.data.get('phone'), request.data.get('password'))
+        except access.Refused as refused:
+            return Response({'detail': str(refused), 'field': refused.field}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'token': token})
+
+
+class PasswordCodeView(_Public):
+    """POST {phone}: a code to set a new password. The answer is the same whether or not the number is a rep's."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_code'
+
+    def post(self, request):
+        from apps.partners.services import access
+        try:
+            shown = access.send_reset_code(request.data.get('phone'))
+        except access.Refused as refused:
+            return Response({'detail': str(refused), 'field': refused.field}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'sent_to': shown})
+
+
+class PasswordResetView(_Public):
+    """POST {phone, code, password} -> {token}: the new password is set and they're logged in."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'storefront_code'
+
+    def post(self, request):
+        from apps.partners.services import access
+        try:
+            _, token = access.reset(request.data.get('phone'), request.data.get('code'), request.data.get('password'))
+        except access.Refused as refused:
+            return Response({'detail': str(refused), 'field': refused.field}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'token': token})
+
 
 
 def _url(field):
@@ -158,3 +206,11 @@ class OrderView(APIView):
         order = OnlineOrder.objects.create(lead=rep.lead, partner=partner, partner_reference=reference)
         return Response({'order_number': order.order_number, 'access_token': order.access_token,
                          'reference': reference}, status=status.HTTP_201_CREATED)
+
+
+class SignOutView(MeView):
+    def post(self, request):
+        from apps.storefront.services.accounts import sign_out
+        if request.auth is not None:
+            sign_out(request.auth)
+        return Response({'ok': True})

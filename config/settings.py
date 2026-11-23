@@ -290,6 +290,8 @@ OCTOS_OWNER_PHONE            = os.environ.get('OCTOS_OWNER_PHONE', '')
 # have run 90 days: until PARTNER_SIGNUPS_OPEN is 'on', only a shop with one of
 # the invite codes (comma-separated, set on Railway) can apply.
 PARTNER_SIGNUPS_OPEN         = os.environ.get('PARTNER_SIGNUPS_OPEN', 'off').lower() == 'on'
+# Where the partner portal lives: its own app on Farhat's domain.
+PARTNERS_HOST                = os.environ.get('PARTNERS_HOST', 'partners.farhatprintingpress.com')
 PARTNER_INVITE_CODES         = [c.strip().upper() for c in os.environ.get('PARTNER_INVITE_CODES', '').split(',') if c.strip()]
 
 # Octos's assistant. Mode is the kill switch: 'off' (silent, the default),
@@ -534,6 +536,12 @@ CORS_ALLOWED_ORIGINS = [
     'https://farhat-web.vercel.app',
     'https://farhatprintingpress.com',
     'https://www.farhatprintingpress.com',
+    # The trade-partner portal (24 Nov 2026): its own app on its own
+    # subdomain. Local dev runs on 5185.
+    'http://localhost:5185',
+    'http://127.0.0.1:5185',
+    'https://farhat-partners.vercel.app',
+    'https://partners.farhatprintingpress.com',
     # The Print Octos app. Its pages are served from inside the phone,
     # under these addresses: Android's, then iPhone's.
     'https://localhost',

@@ -198,8 +198,9 @@ def _business_customer(partner):
 
 def approve(partner):
     from apps.partners.models import Partner
+    from django.conf import settings
+
     from apps.partners.services.ids import new_code
-    from apps.storefront.services.messages import STOREFRONT
     with transaction.atomic():
         partner = Partner.objects.select_for_update().get(pk=partner.pk)
         if partner.status not in (Partner.Status.APPLIED, Partner.Status.ASKED):
@@ -216,7 +217,7 @@ def approve(partner):
             f'{partner.name} is now a partner. Your partner ID is *{partner.shown_code}*: it goes on every '
             f'parcel we pack for you.\n\n'
             f'Your first job is 10% off, and every job after that is 6% under the walk-in price.\n\n'
-            f'Sign in with this number at {STOREFRONT}/partners to send your first job.')
+            f'Log in at {settings.PARTNERS_HOST} with your number and password to send your first job.')
     transaction.on_commit(lambda: say(rep.lead.phone if rep else partner.primary_phone, text))
     return partner
 

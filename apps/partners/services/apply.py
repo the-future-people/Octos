@@ -3,7 +3,9 @@ Applying to be a trade partner (23 Nov 2026).
 
 1. The shop asks for a code on its primary contact and on the rep's phone
    (the same six-digit code app sign-in uses).
-2. It sends the application with both codes, its photo and logo.
+2. It sends the application with both codes, its photo, its logo and the
+   rep's chosen password (24 Nov 2026): the account exists from then, and
+   the rep is logged in, while the owner reviews it.
 3. Octos checks it isn't already a partner or a copy of another shop, finds
    its history as a Farhat customer, and puts it in front of the owner on
    his line (review.py).
@@ -117,6 +119,11 @@ def submit(data, shop_photo, logo):
     role = str(data.get('rep_role') or '')
     if role not in PartnerRep.Role.values:
         raise Refused('Choose your role at the shop.', 'rep_role')
+    from apps.partners.services import access
+    try:
+        password = access.check_new(data.get('password'))
+    except access.Refused as exc:
+        raise Refused(str(exc), 'password')
 
     ids = [i for i in re.findall(r'\d+', str(data.get('services') or ''))]
     services = list(Service.objects.filter(pk__in=ids, is_active=True, online=True))
@@ -167,7 +174,7 @@ def submit(data, shop_photo, logo):
         partner.services.set(services)
         lead = find_lead(rep_phone) or Lead.objects.create(phone=rep_phone, first_name=first)
         PartnerRep.objects.create(partner=partner, lead=lead, title=title, first_name=first,
-                                  last_name=last, role=role)
+                                  last_name=last, role=role, password=password)
 
     from apps.partners.services import review
     transaction.on_commit(lambda: review.put_to_owner(partner.pk))

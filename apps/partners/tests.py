@@ -39,7 +39,7 @@ def form(**changes):
         'monthly_volume': '6-20', 'accept_terms': 'true', 'rep_title': 'Mr', 'rep_first_name': 'Kobby',
         'rep_last_name': 'Asante', 'rep_role': 'OWNER', 'primary_phone': '0244550912',
         'primary_code': '123456', 'rep_phone': '020 111 2233', 'rep_code': '123456',
-        'messages_consent': 'true',
+        'messages_consent': 'true', 'password': 'Madina-Prints-26',
     }
     data.update(changes)
     return data
@@ -235,3 +235,73 @@ class ApiTests(Base):
         _, token = accounts.verify_code('0209998877', '111111')
         self.assertEqual(APIClient().get('/api/v1/partners/me/', HTTP_AUTHORIZATION=f'App {token}').status_code, 404)
         self.assertFalse(PartnerRep.objects.exists())
+
+
+class AccessTests(Base):
+    """Registering sets a password; reps log in with their number and it (24 Nov 2026)."""
+
+    def test_registering_logs_them_in_and_keeps_only_a_hash(self):
+        client = APIClient()
+        with patch(CODE, return_value=123456):
+            client.post('/api/v1/partners/code/', {'phone': '0244550912', 'invite': 'TESTSHOP'})
+            client.post('/api/v1/partners/code/', {'phone': '0201112233', 'invite': 'TESTSHOP'})
+        data = form(services=str(self.banner.pk))
+        data.update(shop_photo=photo(), logo=photo('logo.png'))
+        with patch('apps.partners.services.review.put_to_owner'):
+            r = client.post('/api/v1/partners/apply/', data, format='multipart')
+        self.assertEqual(r.status_code, 201, r.data)
+        rep = PartnerRep.objects.get()
+        self.assertNotIn('Madina-Prints-26', rep.password)
+        me = client.get('/api/v1/partners/me/', HTTP_AUTHORIZATION=f"App {r.data['token']}")
+        self.assertEqual(me.data['status'], 'APPLIED')
+
+    def test_a_weak_password_is_refused_before_any_code_is_used(self):
+        send_code(SHOP)
+        with self.assertRaises(applying.Refused) as refused:
+            applying.submit(form(services=str(self.banner.pk), password='1234'), photo(), photo())
+        self.assertEqual(refused.exception.field, 'password')
+
+    def test_log_in_with_number_and_password(self):
+        self.apply()
+        client = APIClient()
+        bad = client.post('/api/v1/partners/login/', {'phone': '020 111 2233', 'password': 'wrong-one-1'})
+        self.assertEqual(bad.status_code, 400)
+        good = client.post('/api/v1/partners/login/', {'phone': '020 111 2233', 'password': 'Madina-Prints-26'})
+        self.assertEqual(good.status_code, 200)
+        me = client.get('/api/v1/partners/me/', HTTP_AUTHORIZATION=f"App {good.data['token']}")
+        self.assertEqual(me.data['name'], 'Kobby Prints')
+
+    def test_five_wrong_passwords_lock_the_number(self):
+        from apps.partners.services import access
+        self.apply()
+        for _ in range(access.MAX_TRIES):
+            with self.assertRaises(access.Refused):
+                access.login(REP, 'not-the-password')
+        with self.assertRaises(access.Refused) as locked:
+            access.login(REP, 'Madina-Prints-26')
+        self.assertIn('15 minutes', str(locked.exception))
+
+    def test_forgotten_password_by_code(self):
+        from apps.partners.services import access
+        self.apply()
+        with patch(CODE, return_value=777777):
+            self.assertEqual(APIClient().post('/api/v1/partners/password/code/', {'phone': REP}).status_code, 200)
+        r = APIClient().post('/api/v1/partners/password/reset/',
+                             {'phone': REP, 'code': '777777', 'password': 'Brand-New-Pass-9'})
+        self.assertEqual(r.status_code, 200, r.data)
+        rep, _ = access.login(REP, 'Brand-New-Pass-9')
+        self.assertEqual(rep.first_name, 'Kobby')
+
+    def test_a_reset_code_says_nothing_about_strangers(self):
+        with patch('apps.storefront.services.accounts.send_code') as sent:
+            r = APIClient().post('/api/v1/partners/password/code/', {'phone': '0209998877'})
+        self.assertEqual(r.status_code, 200)
+        sent.assert_not_called()
+
+    def test_sign_out_ends_the_session(self):
+        from apps.partners.services import access
+        self.apply()
+        _, token = access.login(REP, 'Madina-Prints-26')
+        client = APIClient()
+        client.post('/api/v1/partners/signout/', HTTP_AUTHORIZATION=f'App {token}')
+        self.assertEqual(client.get('/api/v1/partners/me/', HTTP_AUTHORIZATION=f'App {token}').status_code, 401)
