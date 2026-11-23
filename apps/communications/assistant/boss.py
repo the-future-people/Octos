@@ -123,6 +123,7 @@ NEVER GUESS
 
 WHAT YOU CAN DO
 - You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. A customer with no chat, or who hasn't written in 24 hours, can still be reached: never tell him you have no way to message them. reach_customer gives the approved messages word for word; show him the one that fits (quote it exactly), and send it with send_approved only when he says yes. Once they reply, you can write to them freely. Only offer messages reach_customer lists as approved: one still with Meta can't go yet, so say so. You CAN send receipts (find_receipt shows exactly what goes, send_receipt sends it on his yes) and statements, to anyone with a number, whether or not they ever wrote. What a customer owes is one picture: statement gives jobs owed from before, new work and the total due, the same as the statement they receive. When he says a customer's old invoice was delivered but never recorded, record_owed puts it where money owed shows; then send_statement on his word. A customer paying part pays the job they point to: never say a payment clears the oldest first. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
+- When he sends you a photo, video or GIF himself (the chat shows "[he sent a photo, photo_id N]") and asks what it is or whether we can make it, call look_at_photo with that photo_id. A photo he sends is his own: never go looking in customer chats for it. Tell him what it is, whether we can make it and why, how, the price guide exactly as it comes (none if it gives none) with what it assumes, and what would firm it up. If he says he sent a photo and the chat shows none, say it hasn't reached you and ask him to send it again.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
 - You can send him the designed reports (send_report) and the discount cards with their Approve / Decline buttons (waiting_for_you). waiting_for_you is only for discounts waiting for his OK now; for discounts already given or declined, use discounts. Never say you sent him a card unless the look-up says cards were sent.
 - On his word you can act on a customer's WhatsApp chat:
@@ -254,6 +255,13 @@ TOOL_SPECS = [
                      'the file (was the correction made, what did the customer send).'),
      'input_schema': {'type': 'object', 'properties': {'file_id': {'type': 'integer'}},
                       'required': ['file_id']}},
+    {'name': 'look_at_photo',
+     'description': ("A photo, video or GIF HE sent on this line (photo_id from the chat): what the item is "
+                     '(with a web search if needed), whether Farhat can make it, how, a price guide only from '
+                     'our price list, and the ready time. You see the photo too. For customer files, use '
+                     'open_file instead.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'photo_id': {'type': 'integer'}, 'note': {'type': 'string', 'description': 'What he said about it.'}}}},
     {'name': 'staff_activity',
      'description': ("What one member of staff did in a period: when they came in (today), jobs they took at "
                      "the counter (often called issuing an invoice on the floor), formal invoices and "
@@ -391,6 +399,8 @@ def _run_tool(name, args, sent):
         return look.read_chat(args.get('chat_id'), str(args.get('customer') or ''))
     if name == 'open_file':
         return look.open_file(args.get('file_id'))
+    if name == 'look_at_photo':
+        return look.what_is_this(args.get('photo_id'), str(args.get('note') or ''))
     if name == 'machines':
         return look.machines(args.get('branch', ''))
     if name == 'record_stock_in':
@@ -550,6 +560,8 @@ def _history(message, upto=None):
         text = (m.body or '').strip()
         if m.direction == OwnerMessage.IN and m.reply_id and not text:
             text = f'[tapped {m.reply_id}]'
+        if m.direction == OwnerMessage.IN and m.media_id:
+            text = f'[he sent {look.media_kind(m.media_mime)}, photo_id {m.pk}]' + (f'\n{text}' if text else '')
         if not text:
             continue
         text = text[:1500]

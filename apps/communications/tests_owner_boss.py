@@ -527,3 +527,87 @@ class OnlyTheBossWebhookTests(WebhookTestCase):
         with patch('apps.communications.services.whatsapp_inbound.wake_octos'):
             self.deliver(payload)
         self.assertFalse(OwnerMessage.objects.exists())
+
+
+# ── A photo he sends himself (23 Nov 2026) ─────────────────────────────────
+# "Check, can you tell what this is and if we can make it?" with a photo
+# attached: Octos kept only the caption, went looking in a customer's files,
+# then said no photo came through. Now the photo is kept and looked at.
+
+class PhotoTests(BossBase):
+
+    def photo(self, body='', mime='image/jpeg'):
+        return OwnerMessage.objects.create(direction=OwnerMessage.IN, status=OwnerMessage.RECEIVED, body=body,
+                                           media_id='MEDIA-1', media_mime=mime)
+
+    def answer(self, message, fake_patch, download=None):
+        from apps.communications.tests_sandbox import png
+        with meta() as m, fake_patch, \
+                patch('apps.communications.services.whatsapp_media.download',
+                      return_value=download or (png(), 'image/png')), \
+                self.captureOnCommitCallbacks(execute=True):
+            owner_line.answer(message.pk)
+        return m
+
+    def test_his_photo_is_kept_not_just_its_caption(self):
+        with patch('apps.communications.tasks.answer_owner.delay'), self.captureOnCommitCallbacks(execute=True):
+            owner_line.receive({'id': 'wamid.PHOTO1', 'type': 'image', 'from': OWNER_WA,
+                                'image': {'id': 'MEDIA-9', 'mime_type': 'image/jpeg',
+                                          'caption': 'Can we make this?'}})
+        m = OwnerMessage.objects.get(external_id='wamid.PHOTO1')
+        self.assertEqual((m.body, m.media_id, m.media_mime), ('Can we make this?', 'MEDIA-9', 'image/jpeg'))
+
+    def test_can_we_make_this_looks_at_his_photo(self):
+        import json
+
+        from apps.communications.models import SandboxCase
+        from apps.communications.tests_sandbox import IDENTITY
+        sandbox_says = lambda found: SimpleNamespace(  # noqa: E731
+            content=[said(json.dumps(found))], stop_reason='end_turn',
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1, cache_read_input_tokens=0))
+        message = self.photo('Check, can you tell what this is and if we can make it?')
+        fake, use = model(
+            turn(said('On it 👀'), looks('look_at_photo', photo_id=message.pk)),
+            sandbox_says(IDENTITY),                                            # what is it
+            sandbox_says({'can_do': 'yes', 'why': 'We make acrylic signs at Westland.', 'questions': []}),
+            turn(said("Boss, it's a frosted acrylic signboard. Yes, we can make it at Westland.")),
+        )
+        with patch('apps.communications.services.owner_line.tell') as asked_him:
+            m = self.answer(message, use)
+        words = [w for _, w in self.sent(m)]
+        self.assertEqual(words[-1], "Boss, it's a frosted acrylic signboard. Yes, we can make it at Westland.")
+        # It knew he sent a photo, and which one.
+        self.assertIn(f'[he sent a photo, photo_id {message.pk}]', json.dumps(fake.calls[0]['messages'], default=str))
+        # The look was a staff case, and Octos saw the photo with the answer.
+        case = SandboxCase.objects.get()
+        self.assertEqual((case.source, case.status), (SandboxCase.STAFF, SandboxCase.DONE))
+        result = fake.calls[3]['messages'][-1]['content'][0]['content']
+        self.assertEqual([part['type'] for part in result], ['text', 'image'])
+        self.assertIn('frosted acrylic', result[0]['text'])
+        asked_him.assert_not_called()
+
+    def test_a_caption_saying_photo_is_not_the_card_shortcut(self):
+        fake, use = model(turn(said('Got it, boss. What do you want me to do with it?')))
+        m = self.answer(self.photo('photo'), use)
+        self.assertEqual(len(fake.calls), 1)
+        m.image.assert_not_called()
+
+    def test_a_photo_with_no_words_waits_for_what_he_types(self):
+        message = self.photo()
+        fake, use = model()
+        with patch('apps.communications.tasks.answer_owner_photo.apply_async') as later:
+            self.answer(message, use)
+        self.assertEqual(later.call_args.kwargs['countdown'], owner_line.PHOTO_WAIT)
+        # He typed "can we make this?" meanwhile: that was answered, so the photo isn't again.
+        OwnerMessage.objects.create(direction=OwnerMessage.IN, status=OwnerMessage.RECEIVED, body='can we make this?')
+        with use:
+            owner_line.answer_photo(message.pk)
+        self.assertEqual(fake.calls, [])
+
+    def test_a_pdf_is_not_looked_at_as_an_item(self):
+        message = self.photo(mime='application/pdf')
+        found = boss_tools.what_is_this(message.pk)
+        self.assertIn('a PDF', found['error'])
+
+    def test_the_rule_says_his_photo_is_his_own(self):
+        self.assertIn('never go looking in customer chats for it', boss.RULES)

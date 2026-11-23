@@ -161,6 +161,16 @@ class EngineTests(TestCase):
         self.assertIn('Can we do this?', tell.call_args.args[1])
         self.assertIsNotNone(tell.call_args.kwargs['card'])                # he sees the photo
 
+    def test_unsure_about_the_bosss_own_photo_is_not_sent_back_to_him(self):
+        unsure = {**IDENTITY, 'confidence': 'low', 'question': 'Is it carved wood or printed?'}
+        case = SandboxCase.objects.create(source=SandboxCase.STAFF)
+        with patch('anthropic.Anthropic', return_value=Model(identified(unsure))), \
+                patch('apps.communications.services.owner_line.tell') as tell:
+            sandbox.run(case, files=[(png(), 'image/png')])
+        case.refresh_from_db()
+        self.assertEqual(case.status, SandboxCase.UNSURE)
+        tell.assert_not_called()
+
     def test_a_file_we_cannot_open_fails_kindly(self):
         case = SandboxCase.objects.create(source=SandboxCase.WEB)
         sandbox.run(case, files=[(b'junk', 'image/jpeg')])

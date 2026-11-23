@@ -213,16 +213,25 @@ def receive(raw):
     never in the inbox. True if new, False if Meta sent it twice.
     """
     body, reply_id = _words(raw)
+    media = raw.get(raw.get('type') or '') if raw.get('type') in MEDIA_TYPES else None
+    media = media if isinstance(media, dict) else {}
     try:
         with transaction.atomic():
             message = OwnerMessage.objects.create(
                 direction=OwnerMessage.IN, status=OwnerMessage.RECEIVED, body=body,
-                reply_id=reply_id, external_id=raw.get('id') or None)
+                reply_id=reply_id, external_id=raw.get('id') or None,
+                media_id=media.get('id') or '', media_mime=media.get('mime_type') or '')
     except IntegrityError:
         return False
     from apps.communications.tasks import answer_owner
     transaction.on_commit(lambda: answer_owner.delay(message.pk))
     return True
+
+
+# What he can send that Octos keeps to look at: the photo itself, not just its caption.
+MEDIA_TYPES = {'image', 'video', 'document', 'sticker'}
+# A photo with no words: a moment for him to type what he wants with it.
+PHOTO_WAIT = 20
 
 
 def _words(raw):
@@ -279,6 +288,17 @@ def answer(pk):
         return
     words = re.sub(r'[^\w\s]', ' ', message.body.lower()).strip()
     words = re.sub(r'\s+', ' ', words)
+    if message.media_id:
+        # He sent a photo (23 Nov 2026). It goes to Octos, never to a shortcut:
+        # "photo" in a caption is not a request for the card.
+        from apps.communications.assistant import boss
+        if not boss.available():
+            return
+        if words:
+            return boss.reply(message)
+        from apps.communications.tasks import answer_owner_photo
+        transaction.on_commit(lambda: answer_owner_photo.apply_async((message.pk,), countdown=PHOTO_WAIT))
+        return
     if not words:
         return
     said = set(words.split())
@@ -312,6 +332,22 @@ def answer(pk):
         return
     tell(OwnerMessage.ANSWER, MENU if words in GREETINGS else
          "I didn't catch that. " + MENU.split('\n\n', 1)[1])
+
+
+def answer_photo(pk):
+    """
+    A photo he sent with no words, a little later. If he has written since
+    ("can we make this?"), that message was answered with the photo in view;
+    otherwise Octos answers the photo itself.
+    """
+    message = OwnerMessage.objects.filter(pk=pk, direction=OwnerMessage.IN).first()
+    if message is None:
+        return
+    if OwnerMessage.objects.filter(direction=OwnerMessage.IN, pk__gt=message.pk).exists():
+        return
+    from apps.communications.assistant import boss
+    if boss.available():
+        boss.reply(message)
 
 
 def _report(which, key=None, as_card=False, **options):

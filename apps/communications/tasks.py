@@ -97,6 +97,12 @@ def answer_owner(pk):
 
 
 @shared_task
+def answer_owner_photo(pk):
+    from apps.communications.services import owner_line
+    owner_line.answer_photo(pk)
+
+
+@shared_task
 def owner_brief():
     """The morning brief, 7:30 every day."""
     from apps.communications.services import owner_line

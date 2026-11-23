@@ -633,6 +633,59 @@ def open_file(file_id):
     return found
 
 
+def media_kind(mime):
+    """'a photo', 'a GIF', 'a video', 'a PDF', 'a file': how the chat names what he sent."""
+    mime = (mime or '').lower()
+    if mime == 'image/gif':
+        return 'a GIF'
+    if mime.startswith('image/'):
+        return 'a photo'
+    if mime.startswith('video/'):
+        return 'a video'
+    if mime == 'application/pdf':
+        return 'a PDF'
+    return 'a file'
+
+
+def what_is_this(photo_id=None, note=''):
+    """
+    "Can we make this?" about a photo, video or GIF the boss sent on his own
+    line (23 Nov 2026): the same Can-Do Sandbox the customers get, and he
+    sees what Octos saw. He is the boss, so an unsure answer isn't sent back
+    to him to settle.
+    """
+    import base64
+
+    from apps.communications.models import OwnerMessage, SandboxCase
+    from apps.communications.services import sandbox, whatsapp_media
+    sent = OwnerMessage.objects.filter(direction=OwnerMessage.IN).exclude(media_id='')
+    if photo_id:
+        m = sent.filter(pk=photo_id).first()
+    else:
+        m = sent.filter(created_at__gte=timezone.now() - timedelta(hours=2)).order_by('-pk').first()
+    if m is None:
+        return {'error': "No photo from him on this line to look at. Ask him to send it again."}
+    if not (m.media_mime.startswith('image/') or m.media_mime.startswith('video/')):
+        return {'error': f"What he sent is {media_kind(m.media_mime)}, not a photo, video or GIF of an item."}
+    try:
+        content, mime = whatsapp_media.download(m.media_id)
+    except Exception as exc:
+        return {'error': "The photo couldn't be fetched from WhatsApp. Ask him to send it again.",
+                'why': str(exc)[:200]}
+    mime = mime or m.media_mime
+    case = SandboxCase.objects.create(source=SandboxCase.STAFF, note=(note or m.body or '')[:500],
+                                      files=[{'owner_message': m.pk, 'mime': mime}])
+    case = sandbox.run(case, files=[(content, mime)])
+    if case.status == SandboxCase.FAILED:
+        return {'error': "I couldn't finish looking at it.", 'why': case.error[:300]}
+    found = dict(case.result)
+    found['case'] = case.code
+    seen = sandbox.pictures([(content, mime)])[:1]
+    if seen:
+        found['_image'] = ('image/jpeg', base64.b64encode(seen[0]).decode())
+    return found
+
+
 # ── Machines ───────────────────────────────────────────────────────────────
 
 def machines(branch=''):

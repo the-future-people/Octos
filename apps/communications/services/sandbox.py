@@ -367,8 +367,8 @@ def run(case, files=None):
         }
         case.status = SandboxCase.UNSURE if case.result['can_do'] == 'unsure' else SandboxCase.DONE
         case.save(update_fields=['result', 'status', 'updated_at'])
-        if case.status == SandboxCase.UNSURE:
-            ask_the_boss(case, images[:1])
+        if case.status == SandboxCase.UNSURE and case.source != SandboxCase.STAFF:
+            ask_the_boss(case, images[:1])      # never the boss about his own photo
         return case
     except Exception as exc:
         logger.exception('Sandbox case %s failed', case.code)

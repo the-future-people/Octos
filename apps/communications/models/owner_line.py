@@ -43,6 +43,10 @@ class OwnerMessage(models.Model):
     draft     = models.TextField(blank=True)
     # The button the owner tapped, on an incoming message.
     reply_id  = models.CharField(max_length=120, blank=True)
+    # A photo, video, GIF or file he sent (23 Nov 2026): Meta's media id, to
+    # fetch it when he asks about it ("can we make this?").
+    media_id   = models.CharField(max_length=128, blank=True)
+    media_mime = models.CharField(max_length=100, blank=True)
     external_id = models.CharField(max_length=128, null=True, blank=True, unique=True)
     error     = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
