@@ -234,7 +234,7 @@ def step(conversation, trigger, now):
                 return None, held
         elif belief.texture == 'greeting' and opened:
             if not _greeted_unsure(conversation, now):
-                return NOT_SURE_GREETING, NOT_SURE_REASON
+                return unsure_greeting(conversation, trigger, now), NOT_SURE_REASON
             return None, 'not sure where they are: greeted already, waiting for their words'
     # Taken back from a person who never wrote (20 Nov 2026): if anything not
     # from the customer shows the team dealt with it (a reply, a file sent
@@ -305,6 +305,28 @@ NOT_SURE_REASON = 'greeted: not sure where they are'
 NOT_SURE_GREETING = "Hi \U0001F44B How can I help you today?"
 HOLD_REASON = 'held for the attendant'
 HOLD_SECONDS = 120
+
+
+BACK_AFTER = timedelta(hours=1)
+
+
+def unsure_greeting(conversation, trigger, now):
+    """
+    The plain hello, or "Welcome back" for someone we served or spoke with
+    earlier today: Hermann came back at 15:19 for a second job and got the
+    same "How can I help you today?" as a stranger (23 Nov 2026). Their name
+    when we know it, the way names.py allows.
+    """
+    from django.utils import timezone as tz
+    from apps.communications.services import names
+    start = tz.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
+    earlier = (conversation.messages
+               .filter(is_internal_note=False, created_at__gte=start, created_at__lt=now - BACK_AFTER)
+               .exclude(pk=trigger.pk))
+    if not earlier.exists():
+        return NOT_SURE_GREETING
+    name = names.name_for(conversation)
+    return f"Welcome back{', ' + name if name else ''} \U0001F60A How can I help you this time?"
 
 
 def _greeted_unsure(conversation, now):

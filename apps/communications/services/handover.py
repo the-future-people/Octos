@@ -108,18 +108,18 @@ def waiting_since(conversation):
     boss") after a statement waits for nothing: Loretta's "Thank you" after
     her receipt reached the owner as a customer left waiting (19 Nov 2026).
     The same "ok" after a question from Farhat is an answer, and does wait.
+    A decline then a goodbye ("No please", "Thank you", Kwabena, 23 Nov
+    2026) answered the question and closed the chat: nothing waits.
     """
-    from apps.communications.assistant.brain import _just_acknowledging
-    last, before = (
-        list(conversation.messages.filter(is_internal_note=False)
-             .exclude(kind__in=Message.QUIET_KINDS)
-             .order_by('-created_at')[:2]) + [None, None]
-    )[:2]
-    if last is None or last.direction != Message.INBOUND:
+    from apps.communications.assistant.brain import closed_after
+    recent = list(conversation.messages.filter(is_internal_note=False)
+                  .exclude(kind__in=Message.QUIET_KINDS)
+                  .order_by('-created_at')[:6])
+    if not recent or recent[0].direction != Message.INBOUND:
         return None
-    if before is not None and before.direction == Message.OUTBOUND and _just_acknowledging(last, before):
+    if closed_after(recent):
         return None
-    return last.created_at
+    return recent[0].created_at
 
 
 def watch(now=None):

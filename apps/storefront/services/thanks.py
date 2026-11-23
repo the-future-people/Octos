@@ -15,6 +15,12 @@ an SMS thank-you is money spent on courtesy. So nobody is thanked who
 hasn't written to us in the last day, or was thanked in the last week, or
 asked us to stop messaging. Anyone mid-conversation is left until the
 next run, five minutes later.
+
+23 Nov 2026: five customers with a WhatsApp username and no number (Kay,
+Mc James, Kweku, S.K. Doh, Sylvia) were served, sent their receipts, and
+never thanked: the thank-you looked for a chat by phone number only. Now
+it thanks chats: every chat a customer served today writes from, and every
+chat a job made today was linked to, whether or not it has a number.
 """
 import logging
 from datetime import timedelta
@@ -67,25 +73,67 @@ def served_today(branch, day):
     return CustomerProfile.objects.filter(pk__in=jobs.values('customer')).exclude(pk__in=owing)
 
 
+def chats_served_today(branch, day):
+    """
+    [(chat, customer or None, a job of theirs today)] for this branch today,
+    one per chat: chats of customers served, then chats linked to a job made
+    today with nothing on it unpaid, even with no number (a username chat).
+    """
+    from apps.communications.models import Conversation
+    from apps.communications.services.whatsapp_outbound import thread_for
+    from apps.jobs.models import Job
+
+    found, seen, people = [], set(), set()
+
+    def add(chat, customer, job):
+        if chat is None or chat.pk in seen or chat.status == Conversation.SPAM:
+            return
+        if customer is not None and customer.pk in people:
+            return                       # one thank-you a person, even with two chats
+        seen.add(chat.pk)
+        if customer is not None:
+            people.add(customer.pk)
+        found.append((chat, customer, job))
+
+    today = _live(Job.objects.filter(branch=branch, created_at__date=day))
+    owing = set(today.filter(payment_state=Job.Payment.UNPAID, customer__isnull=False)
+                .values_list('customer', flat=True))
+    for customer in served_today(branch, day):
+        job = today.filter(customer=customer).order_by('-pk').first()
+        add(thread_for(customer.phone) or thread_for(customer.secondary_phone), customer, job)
+    linked = (Conversation.objects
+              .filter(channel=Conversation.WHATSAPP, branch__isnull=True, jobs__in=today)
+              .distinct())
+    for chat in linked:
+        theirs = today.filter(conversations=chat)
+        if theirs.filter(payment_state=Job.Payment.UNPAID).exists():
+            continue
+        job = theirs.order_by('-pk').first()
+        customer = chat.customer if chat.customer_id else (job.customer if job.customer_id else None)
+        if customer is not None and customer.pk in owing:
+            continue
+        add(chat, customer, job)
+    return found
+
+
 def thank_branch(branch, now=None):
     now = now or timezone.now()
     day = timezone.localdate(now)
     sent = 0
-    for customer in served_today(branch, day):
+    for chat, customer, job in chats_served_today(branch, day):
         try:
-            sent += bool(thank(customer, day, now))
+            sent += bool(thank(chat, customer, day, now, job=job))
         except Exception:
-            logger.exception('Thank-you not sent to customer %s', customer.pk)
+            logger.exception('Thank-you not sent to chat %s', chat.pk)
     return sent
 
 
-def thank(customer, day, now):
-    """One customer, if every rule above allows. Returns the queued message, or None."""
+def thank(conversation, customer, day, now, job=None):
+    """One chat, if every rule above allows. Returns the queued message, or None."""
     from apps.communications.models import Message
-    from apps.communications.services.whatsapp_outbound import WindowClosed, send_text, thread_for
+    from apps.communications.services.whatsapp_outbound import WindowClosed, send_text
     from apps.communications.services.window import window_open
 
-    conversation = thread_for(customer.phone)
     if conversation is None or conversation.marketing_opt_out or not window_open(conversation):
         return None
     said = conversation.messages.filter(is_internal_note=False)
@@ -94,17 +142,24 @@ def thank(customer, day, now):
     if said.filter(created_at__gte=now - BUSY).exists():
         return None
     try:
-        return send_text(conversation, thanks_text(customer, day), kind=KIND)
+        return send_text(conversation, thanks_text(customer, day, conversation=conversation, job=job),
+                         kind=KIND)
     except (WindowClosed, ValueError):
         return None
 
 
-def thanks_text(customer, day):
+def thanks_text(customer, day, conversation=None, job=None):
+    from apps.communications.services import names
     from apps.jobs.models import Job
-    from apps.storefront.services.welcome import business_name, first_name
+    from apps.storefront.services.welcome import business_name
 
-    name = first_name(customer)
-    returning = _live(Job.objects.filter(customer=customer, created_at__date__lt=day)).exists()
+    if customer is not None:
+        name = names.name_for(conversation, customer)
+        earlier = Job.objects.filter(customer=customer)
+    else:
+        name = names.for_job(job) if job is not None else names.name_for(conversation)
+        earlier = Job.objects.filter(conversations=conversation) if conversation else Job.objects.none()
+    returning = _live(earlier.filter(created_at__date__lt=day)).exists()
     if returning:
         hello = f'Thank you for coming back today, {name}!' if name else 'Thank you for coming back today!'
         return f'{hello} We really appreciate you choosing {business_name()} \U0001F64F'

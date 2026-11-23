@@ -67,6 +67,11 @@ GOODBYE_WORDS = {
     'dear', 'bye', 'good', 'night', 'goodnight', 'gn', 'have', 'nice', 'day', 'evening', 'and',
     'well', 'done', 'received', 'got', 'perfect', 'with',
 }
+# "No please", "no thank you", "not now": a no to Octos's question (23 Nov 2026).
+DECLINE_WORDS = {
+    'no', 'nope', 'nah', 'please', 'pls', 'plz', 'thanks', 'thank', 'you', 'u', 'not', 'now', 'need',
+    'its', 'it', 'is', 'fine', 'ok', 'okay', 'sir', 'madam', 'boss', 'dear', 'for', 'yet', 'again',
+}
 GOODBYE_CORE = {
     'ok', 'okay', 'okk', 'oki', 'k', 'kk', 'noted', 'alright', 'thanks', 'thank', 'thankyou', 'tnx', 'thx',
     'appreciated', 'appreciate', 'bye', 'goodnight', 'gn', 'received', 'perfect',
@@ -533,14 +538,62 @@ def show_typing_for(message_id):
     if _silence(message.conversation, message, timezone.now()) is None:
         _show_typing(message)
 
+def _plain(message):
+    return re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (message.body or '').strip().lower()))
+
+
+def _only_emoji(text):
+    """
+    Emoji and nothing else ("🙏🏼🙏🏼🙏🏼"), never a wave: Emmanuel's praying
+    hands after his receipt got "Hi 👋 How can I help you today?" (23 Nov 2026).
+    """
+    return bool(text) and not re.search(r'[\w?]', text) and '\U0001F44B' not in text
+
+
+def _closing(message, before=None):
+    """Only words of goodbye or thanks, or emoji alone once there is a chat to close."""
+    text = _plain(message)
+    return (text in ACKNOWLEDGEMENTS or _goodbye(text)
+            or (before is not None and not message.media_id and _only_emoji(text)))
+
+
+def _declining(message):
+    words = re.findall(r"[a-z]+", _plain(message).replace("'", ''))
+    return bool(words) and words[0] in ('no', 'nope', 'nah') and all(w in DECLINE_WORDS for w in words)
+
+
 def _just_acknowledging(last, before):
     """'Ok' after a statement ends a conversation; after Octos's question it is an answer."""
-    text = re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (last.body or '').strip().lower()))
-    if text not in ACKNOWLEDGEMENTS and not _goodbye(text):
+    if not _closing(last, before):
         return False
     asked = (before is not None and before.direction == Message.OUTBOUND
              and (before.body or '').rstrip().endswith('?'))
     return not asked
+
+
+def closed_after(recent):
+    """
+    The customer's last words (newest first in recent) close the chat:
+    a goodbye after a statement, or a "no" to the question then a goodbye
+    ("No please", "Thank you": Kwabena, 23 Nov 2026). A goodbye straight
+    after a question is an answer, and a bare "no" waits for a word back.
+    """
+    run = []
+    for message in recent:
+        if message.direction != Message.INBOUND:
+            break
+        run.append(message)
+    prior = recent[len(run)] if len(run) < len(recent) else None
+    if not run or prior is None:
+        return False
+    if not _closing(run[0], prior):
+        return False
+    if not all(_closing(m, prior) or _declining(m) for m in run):
+        return False
+    oldest = run[-1]
+    if _declining(oldest):
+        return len(run) > 1
+    return _just_acknowledging(oldest, prior)
 
 
 def _goodbye(text):

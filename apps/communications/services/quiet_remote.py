@@ -22,6 +22,11 @@ visit. Octos takes it back by itself when the visit closes (handover.watch).
   payment. Then it stays out. And the follow-up is written from the chat,
   like a teammate who knows it, never a stock "just checking in": if the
   chat shows nothing is open, Octos says nothing and nobody is called.
+
+23 Nov 2026: Octos followed Kwabena up, he answered ("No please",
+"Thank you"), and half an hour later he was still handed to staff as
+"went quiet". A customer who answered the follow-up didn't go quiet: what
+they wrote is answered like any other message, so nobody is called.
 """
 from datetime import timedelta
 
@@ -85,6 +90,13 @@ def _follow_up(chat, visit, now):
     return 'said' if said else 'nothing'
 
 
+def _answered_since(chat, moment):
+    """The customer wrote after Octos's follow-up."""
+    from apps.communications.models import Message
+    return chat.messages.filter(direction=Message.INBOUND, is_internal_note=False,
+                                created_at__gt=moment).exists()
+
+
 def flag_quiet(now=None):
     """Hand every such chat to a person. Returns how many."""
     from apps.communications.assistant.counter import shop_open
@@ -121,6 +133,8 @@ def flag_quiet(now=None):
                 continue
         elif followed.payload.get('said') is False:
             continue                         # he read the chat: nothing was open
+        elif _answered_since(chat, followed.occurred_at):
+            continue                         # they answered him: not quiet
         record(kinds.OCTOS_FLAGGED_QUIET, actor=Event.OCTOS, conversation=chat, customer=chat.customer,
                key=key, reason=REASON)
         handover.octos_hands_over(chat, REASON)

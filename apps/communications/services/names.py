@@ -12,7 +12,7 @@ counter welcome, receipts, thank-yous, reminders):
 
   1. a name the customer gave in this chat ("my name is Akos", "call me Akos")
   2. the customer record's first name, if it looks like a real first name
-  3. otherwise no name: "Here's your receipt. Thank you…" reads fine
+  3. otherwise no name: "Hello there, here is your receipt…" reads fine
 
 and a name the customer refused ("I'm not Mary") is never used again for
 them. A WhatsApp username (@handle) is never a name.

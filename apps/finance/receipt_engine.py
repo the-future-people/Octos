@@ -22,6 +22,13 @@ NOT_APPROVED = (
 )
 
 
+def receipt_caption(name, amount):
+    """The words under a receipt picture, inside or outside the 24-hour window alike."""
+    from apps.communications.services.templates import hello_name
+    return (f'Hello {hello_name(name)}, here is your receipt from Farhat Printing Press for '
+            f'GHS {amount:,.2f}. Thank you for choosing Farhat 🙏')
+
+
 class ReceiptEngine:
     """
     Generates and delivers receipts for all payment confirmations.
@@ -247,8 +254,11 @@ class ReceiptEngine:
             data = receipt_data(receipt)
             image = render(data)
             name = data.get('first_name') or ''
-            # No digits in the caption: WhatsApp turns digit runs into phone links.
-            caption = f"Here's your receipt{', ' + name if name else ''}. Thank you for choosing Farhat 🙏"
+            # The same words as the approved template (23 Nov 2026): Emmanuel's
+            # receipt said "Hello Emmanuel … for GHS 35.00", Hermann's the
+            # shorter caption with no amount. No receipt number: a long digit
+            # run becomes a phone link, an amount with "GHS" doesn't.
+            caption = receipt_caption(name, receipt.amount_paid)
         except Exception:
             logger.exception(
                 'ReceiptEngine: receipt %s picture could not be drawn; sending the text receipt',

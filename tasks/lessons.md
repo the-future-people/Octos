@@ -1187,3 +1187,6 @@ Internal detail belongs in the log, not on the screen.
 - Tests must never read the real calendar: pin "now" to a fixed weekday (as tests_attendant_signoff does). On Sunday 15 Nov, 16 jobs tests failed only because the branch is closed on Sundays.
 
 - A FileField's column holds 100 characters by default: keep stored file names short (Octos keeps 50 + extension) and the customer's real name in its own field. A 100-character PDF name silently never saved (15 Nov).
+## 23 Nov 2026
+- In a PowerShell move loop, work out each file's destination inside the loop (`$target = Join-Path ...`) and stop the loop if it comes out empty. A failed `Join-Path` left an old `$dest` behind, and 20 files overwrote print-octos/src/partners/usePartner.js.
+- A fix for "customer X wasn't served" must cover every way a customer reaches us: by phone number, and by a WhatsApp username with no number. The thank-you only looked chats up by phone, so five username customers were never thanked.
