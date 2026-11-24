@@ -18,12 +18,15 @@ A file with no words while open gets one message suiting both cases. And
 once Octos has acknowledged a batch of files, more files with no words get
 silence until the customer writes.
 """
+import logging
 import re
 from datetime import timedelta
 
 from django.utils import timezone
 
 from apps.communications.models import Message
+
+logger = logging.getLogger(__name__)
 
 WORDS_WAIT = 8        # seconds after words
 GREETING_WAIT = 20    # after a bare "Hi": a file often follows (14 Nov 2026)
@@ -194,13 +197,13 @@ def step(conversation, trigger, now):
     signed_at = _verified_qr(trigger) if opened else None
     if signed_at is not None:
         _visit(conversation, signed_at, now)
-        return ack_text(conversation, signed_at, now), ACK_REASON
+        return ack_text(conversation, signed_at, now) + _order_waiting(conversation, signed_at, now), ACK_REASON
     if opened:
         named = counter_phrase(trigger.body)
         if named is not None:
             branch = _branch(named)
             _visit(conversation, branch, now)
-            return ack_text(conversation, branch, now), ACK_REASON
+            return ack_text(conversation, branch, now) + _order_waiting(conversation, branch, now), ACK_REASON
     # Someone at Farhat has this chat open right now: a greeting or a file is
     # theirs to pick up, so Octos stays quiet (14 Nov 2026). Questions with
     # words still go on, so nobody is left unanswered by a chat left open.
@@ -362,6 +365,24 @@ def _hold(conversation, trigger, belief):
            message=f'{conversation.display_name} may be at the counter: "{(trigger.body or "")[:60]}". '
                    f'Octos answers in 2 minutes if nobody does.')
     return f'{HOLD_REASON}: not sure where they are ({belief.why})'
+
+
+def _order_waiting(conversation, branch, now):
+    """
+    They're at the counter with an order that pays there (24 Nov 2026): the
+    attendant sees them as here now, and they're reminded of their code.
+    """
+    try:
+        from apps.jobs.services.counter_orders import here_by_chat
+        jobs = here_by_chat(conversation, branch if getattr(branch, 'pk', None) else None, now)
+    except Exception:
+        logger.exception('Could not mark the order waiting for chat %s', conversation.pk)
+        return ''
+    if not jobs:
+        return ''
+    codes = ', '.join(j.counter_code for j in jobs)
+    return (f'\n\nYour order is waiting for you: just tell the attendant your code, {codes}.'
+            if len(jobs) == 1 else f'\n\nYour orders are waiting for you: just tell the attendant your codes, {codes}.')
 
 
 def ack_text(conversation, branch, now=None):

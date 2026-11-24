@@ -20,7 +20,7 @@ from django.db.models import Count, Min, Q
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 
-NOT_PAID = ('DRAFT', 'PENDING_PAYMENT', 'CANCELLED', 'VOIDED', 'INTAKE_HELD')
+NOT_PAID = ('DRAFT', 'PENDING_PAYMENT', 'CANCELLED', 'VOIDED', 'INTAKE_HELD', 'AWAITING_ARRIVAL')
 NOT_COUNTED = ('DRAFT', 'CANCELLED', 'VOIDED')
 SCAN_MINUTES = 10
 USUAL_DAYS = 7

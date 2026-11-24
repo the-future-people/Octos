@@ -67,20 +67,26 @@ def landed_at(job, now=None):
     from apps.organization.services import hours
 
     now = timezone.localtime(now or timezone.now())
+    if job.counter_code and job.arrived_at and not job.print_ahead:
+        return job.arrived_at            # printed when they come: the clock starts when they do
     opened = hours.opening_at(job.branch, now.date(), now.tzinfo)
     return max(job.created_at, opened)
 
 
 def queue(branch):
     """Front-desk work not yet done at this branch, soonest promise first."""
-    from django.db.models import F
+    from django.db.models import F, Q
     from apps.jobs.models import Job
 
+    # Pays at the counter (24 Nov 2026): kept here until they come, even
+    # printed, so the attendant can find it; on the shelf after closing.
+    counter = Q(status=Job.AWAITING_ARRIVAL, shelved_at__isnull=True)
+    ordinary = Q(counter_code__isnull=True) & ~Q(work_state='DONE')
     return list(
         Job.objects
         .filter(branch=branch, front_desk=True)
         .exclude(status__in=CLOSED)
-        .exclude(work_state='DONE')
+        .filter(counter | ordinary)
         .select_related('customer', 'desk_taken_by')
         .prefetch_related('line_items__service', 'halts', 'verifications')
         .order_by(F('estimated_ready_at').asc(nulls_last=True), 'created_at')
@@ -137,6 +143,10 @@ def start(job, actor, signed_checks):
         if hasattr(verification, 'signed_checks'):
             verification.signed_checks = list(DESK_CHECKS)
             verification.save(update_fields=['signed_checks'])
+        if job.counter_code and job.work_state == 'RECEIVED':
+            # Pays at the counter (24 Nov 2026): instant work, unpaid, so
+            # verifying alone doesn't start it. Checked, so it starts here.
+            JobStatusEngine(job).move_work('IN_PRODUCTION', actor, notes='Checked at the front desk')
         _tell_branch(job)
     return verification
 
@@ -151,6 +161,10 @@ def finish(job, actor):
     with transaction.atomic():
         result = JobStatusEngine(job).move_work('DONE', actor, notes='Done at the front desk')
         _tell_branch(job)
+        if job.counter_code:
+            # Pays at the counter: printed ahead, they're told it's ready with their code.
+            from apps.jobs.services.counter_orders import tell_ready
+            transaction.on_commit(lambda: tell_ready(job))
     return result
 
 
@@ -194,6 +208,9 @@ def escalate(now=None):
         .filter(front_desk=True, desk_taken_by__isnull=True, desk_escalated_at__isnull=True)
         .exclude(status__in=CLOSED)
         .exclude(work_state='DONE')
+        # Printed when they come: nothing to take until they're here (24 Nov 2026).
+        .exclude(counter_code__isnull=False, print_ahead=False, arrived_at__isnull=True)
+        .exclude(shelved_at__isnull=False)
         .select_related('branch')
     )
     told = 0

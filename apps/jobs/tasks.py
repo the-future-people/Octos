@@ -173,3 +173,14 @@ def escalate_front_desk():
     """
     from apps.jobs.services.front_desk import escalate
     escalate()
+
+@shared_task
+def tidy_counter_orders():
+    """
+    Every 15 minutes: pays-at-the-counter orders not collected by closing go
+    to the Waiting for collection shelf; a week on it and Octos cancels them
+    (24 Nov 2026).
+    """
+    from apps.jobs.services.counter_orders import tidy
+    shelved, cancelled = tidy()
+    return {'shelved': shelved, 'cancelled': cancelled}

@@ -436,6 +436,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.storefront.tasks.send_thanks',
         'schedule': crontab(minute='*/5'),
     },
+    # Pays at the counter: the shelf at closing, cancelled a week on (24 Nov 2026).
+    'tidy-counter-orders': {
+        'task': 'apps.jobs.tasks.tidy_counter_orders',
+        'schedule': crontab(minute='7,22,37,52'),
+    },
     # One reminder for unpaid orders Octos took on WhatsApp (14 Nov 2026).
     'payment-reminders': {
         'task': 'apps.storefront.tasks.send_payment_reminders',

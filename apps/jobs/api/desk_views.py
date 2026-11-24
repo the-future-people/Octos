@@ -5,6 +5,8 @@ Thin on purpose. Who may do what lives in the status engine
 (_desk_may_move) and the rules in services/front_desk.py; these views
 only find the job, ask, and say what happened.
 """
+from datetime import timedelta
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -12,7 +14,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.jobs.models import Job, JobVerification
-from apps.jobs.services import front_desk
+from apps.jobs.services import counter_orders, front_desk
+from apps.jobs.services.counter_orders import CounterRefused
 from apps.jobs.services.front_desk import DeskRefused
 
 
@@ -39,6 +42,8 @@ def _source(job):
         order = job.online_order
     except Exception:
         order = None
+    if job.counter_code:
+        return 'WhatsApp order, pays at the counter'
     if order is not None:
         whatsapp = 'Taken by Octos on WhatsApp' in (order.notes or '')
         return f'{"WhatsApp" if whatsapp else "Print Octos"} order {order.order_number}'
@@ -97,6 +102,16 @@ def _row(job, user, now):
             for line in job.line_items.all()
         ],
         'files': _files(job),
+        # Pays at the counter (24 Nov 2026): the code they'll say, printed
+        # ahead or when they come, whether they're here, and what they owe.
+        'counter': ({
+            'code':        job.counter_code,
+            'print_ahead': job.print_ahead,
+            'here':        job.arrived_at.isoformat() if job.arrived_at else None,
+            'shelved':     job.shelved_at.isoformat() if job.shelved_at else None,
+            'with_cashier': job.status != Job.AWAITING_ARRIVAL,
+            'owes':        str(job.estimated_cost or 0),
+        } if job.counter_code else None),
     }
 
 
@@ -142,7 +157,7 @@ class _DeskAction(APIView):
             return Response({'detail': 'Front-desk job not found.'}, status=status.HTTP_404_NOT_FOUND)
         try:
             detail = self.act(request, job)
-        except DeskRefused as e:
+        except (DeskRefused, CounterRefused) as e:
             return Response({'detail': str(e)}, status=status.HTTP_409_CONFLICT)
         except PermissionError as e:
             return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
@@ -196,3 +211,42 @@ class DeskResumeView(_DeskAction):
     def act(self, request, job):
         front_desk.resume(job, request.user)
         return f'{job.job_number} is back in your hands.'
+
+
+class DeskHereView(_DeskAction):
+    """POST /api/v1/jobs/<pk>/desk/here/   A pays-at-the-counter customer came (or was found on the shelf)."""
+
+    def act(self, request, job):
+        counter_orders.here(job)
+        return f'{job.job_number} is back on Work: they are here.'
+
+
+class DeskCashierView(_DeskAction):
+    """POST /api/v1/jobs/<pk>/desk/cashier/   Pays at the counter: on to the cashier, as a counter sale."""
+
+    def act(self, request, job):
+        counter_orders.send_to_cashier(job, request.user)
+        return f'{job.job_number} is with the cashier: GHS {job.estimated_cost or 0:,.2f}.'
+
+
+class DeskShelfView(APIView):
+    """
+    GET /api/v1/jobs/desk/shelf/?q=4821
+    Waiting for collection: pays-at-the-counter orders not collected by
+    closing, kept a week, found by code, name or number.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        now = timezone.now()
+        jobs = counter_orders.shelf(branch, request.query_params.get('q', ''))
+        return Response({
+            'now':  now.isoformat(),
+            'days': counter_orders.SHELF_DAYS,
+            'jobs': [{**_row(job, request.user, now),
+                      'cancels_on': (job.shelved_at + timedelta(days=counter_orders.SHELF_DAYS)).isoformat()}
+                     for job in jobs],
+        })

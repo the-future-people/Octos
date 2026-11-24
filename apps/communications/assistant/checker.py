@@ -22,6 +22,9 @@ MONEY = re.compile(
 )
 TIME = re.compile(r'\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?', re.IGNORECASE)
 REF = re.compile(r'\bref(?:erence)?\.?\s*(?:no\.?\s*)?#?\s*(\d{2,})\b', re.IGNORECASE)
+# A pickup code (24 Nov 2026): a wrong one sends a customer to the counter
+# with a number nobody has.
+CODE = re.compile(r'\bcode(?:\s+is)?\s*:?\s*(\d{4,6})\b', re.IGNORECASE)
 
 
 def unverified(reply, facts):
@@ -41,6 +44,9 @@ def unverified(reply, facts):
     for ref in sorted(set(REF.findall(reply))):
         if ref not in facts:
             problems.append(f'ref {ref}')
+    for code in sorted(set(CODE.findall(reply))):
+        if not re.search(rf'\b{code}\b', facts or ''):
+            problems.append(f'code {code}')
     return problems
 
 

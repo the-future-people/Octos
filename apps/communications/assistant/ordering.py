@@ -206,6 +206,44 @@ def send_payment_link(conversation, order_number):
     return {'success': True, 'link': started['authorization_url'], 'amount': f"GHS {started['amount']}"}
 
 
+def pay_at_counter(conversation, order_number, now=None):
+    """
+    The customer would rather pay when they collect (24 Nov 2026): the
+    order goes to the front desk with a pickup code. Printed ahead for a
+    customer we know and a small job, otherwise when they arrive.
+    """
+    from django.utils import timezone
+    from apps.communications.assistant.tools import _about
+    from apps.jobs.services.counter_orders import CounterRefused, reserve
+    from apps.storefront.models import OnlineOrder
+    from apps.storefront.services.accounts import find_lead
+
+    now = now or timezone.now()
+    lead = find_lead(conversation.contact_phone)
+    order = OnlineOrder.objects.filter(order_number=order_number, lead=lead).first() if lead else None
+    if order is None:
+        return {'success': False, 'error': 'No order with that number for this customer.'}
+    try:
+        job = reserve(order, conversation, now)
+    except CounterRefused as refused:
+        if str(refused) == 'needs_deposit':
+            return {'success': False, 'needs_deposit': True,
+                    'say': ("Part of this order is made on the production floor, and that starts only once at "
+                            "least 70% is paid. Tell them kindly: they can pay through the link, or come in and "
+                            "pay at the counter, and we start as soon as it's paid.")}
+        return {'success': False, 'error': str(refused)}
+    total = f'GHS {job.estimated_cost:,.2f}'
+    if job.print_ahead:
+        ready = _about(job.estimated_ready_at, now) if job.estimated_ready_at else None
+        return {'success': True, 'code': job.counter_code, 'printed_ahead': True, 'ready': ready, 'total': total,
+                'say': ("Tell them warmly it's no problem: we'll have it printed and ready"
+                        + (f' {ready}' if ready else '') + ", they pay when they collect, and give them their "
+                        "code to show at the counter. Don't offer the link again.")}
+    return {'success': True, 'code': job.counter_code, 'printed_ahead': False, 'total': total,
+            'say': ("Tell them warmly it's no problem: their order is prepared and we'll print it as soon as they "
+                    "arrive; they just show this code at the counter and pay there. Don't offer the link again.")}
+
+
 def _lead_for(conversation):
     """The customer's storefront account, found by any form of the number, or made now."""
     from apps.storefront.models import Lead

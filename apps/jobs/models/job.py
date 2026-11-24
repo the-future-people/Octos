@@ -42,6 +42,8 @@ class Job(AuditModel):
 
     # ── After-hours (BM post-closing, awaiting cashier handover) ─────────
     INTAKE_HELD        = 'INTAKE_HELD'
+    # Octos took it on WhatsApp and they pay when they collect (24 Nov 2026).
+    AWAITING_ARRIVAL   = 'AWAITING_ARRIVAL'
 
     # ── Deprecated (kept for DB integrity, not used in new transitions) ──
     BRIEFED            = 'BRIEFED'
@@ -88,6 +90,7 @@ class Job(AuditModel):
         (VOIDED,             'Voided'),
         (HALTED,             'Halted'),
         (INTAKE_HELD,        'Intake Held'),
+        (AWAITING_ARRIVAL,   'Pays at counter'),
         (SAMPLE_SENT,        'Sample Sent'),
         (REVISION_REQUESTED, 'Revision Requested'),
         (DESIGN_APPROVED,    'Design Approved'),
@@ -411,6 +414,21 @@ class Job(AuditModel):
     desk_taken_at = models.DateTimeField(null=True, blank=True)
     # When the BM was told nobody had taken it. Once per job.
     desk_escalated_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Pays at the counter (24 Nov 2026) ─────────────────────────
+    # Octos took the order on WhatsApp and the customer pays when they
+    # collect (jobs/services/counter_orders.py). The code is what they say
+    # at the counter: never given twice.
+    counter_code = models.CharField(max_length=8, unique=True, null=True, blank=True)
+    # Printed before they come (a known customer, a small job), or only
+    # once they arrive.
+    print_ahead = models.BooleanField(default=False)
+    # They came: the QR at the counter, or the attendant pressed "They're here".
+    arrived_at = models.DateTimeField(null=True, blank=True)
+    # Not collected by closing: moved to the Waiting for collection shelf.
+    shelved_at = models.DateTimeField(null=True, blank=True)
+    # Seven days on the shelf and Octos cancelled it: they never came.
+    no_show = models.BooleanField(default=False)
 
     # ── Routing ──────────────────────────────────────────────────
     is_routed      = models.BooleanField(default=False)

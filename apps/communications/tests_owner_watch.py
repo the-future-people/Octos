@@ -320,7 +320,7 @@ class YourWordsTests(ChatBase):
         self.assertIn('never "Octos said"', boss.RULES)
         self.assertIn('word for word, from him', boss.RULES)
         from apps.communications.assistant import prompt
-        self.assertIn('walk in and pay at the counter can', prompt.RULES)
+        self.assertIn('would rather pay at the counter can', prompt.RULES)      # reworded 24 Nov 2026 (pay_at_counter)
 
 
 

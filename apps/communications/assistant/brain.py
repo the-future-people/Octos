@@ -156,6 +156,16 @@ TOOL_SPECS = [
         }, 'required': ['order']},
     },
     {
+        'name': 'pay_at_counter',
+        'description': ('For an order you prepared and the customer agreed to, when they would rather pay when '
+                        'they collect at the counter instead of by the link. It goes to the front desk with a '
+                        'pickup code: printed ahead for customers we know, otherwise printed when they arrive. '
+                        'Front-desk work only; the tool says if part of it needs a deposit first.'),
+        'input_schema': {'type': 'object', 'properties': {
+            'order': {'type': 'string', 'description': 'The order number prepare_order returned.'},
+        }, 'required': ['order']},
+    },
+    {
         'name': 'paper_sizes',
         'description': ("Paper sizes in plain words (A6 is a quarter of an A4 sheet, about postcard size), "
                         "how we print each one (smaller than A4 is printed on A4 and cut to size, priced as A4 "
@@ -762,7 +772,7 @@ def _run_tool(name, args, ctx):
     # Before the order tools, or they run with no number and fail (Clarity,
     # 14 Nov 2026: "That lookup failed" twice, then a hand-over). This guard
     # sat below them from 9 Nov and was never reached.
-    if name in ('prepare_order', 'send_payment_link') and not ctx.conversation.contact_phone:
+    if name in ('prepare_order', 'send_payment_link', 'pay_at_counter') and not ctx.conversation.contact_phone:
         return {'error': 'needs_phone', 'say': ("This customer uses a WhatsApp username, so their number is "
                 "hidden. Ask politely for the phone number they'd like for this order and its receipt, "
                 "then save it with use_phone_number and try again.")}
@@ -775,6 +785,9 @@ def _run_tool(name, args, ctx):
     if name == 'send_payment_link':
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
+    if name == 'pay_at_counter':
+        from apps.communications.assistant import ordering
+        return ordering.pay_at_counter(ctx.conversation, str(args.get('order') or ''))
     if name == 'use_phone_number':
         # Their number finds their customer record; with none, ask for a name (9 Nov 2026).
         from apps.communications.services import identity

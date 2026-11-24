@@ -33,6 +33,7 @@ class OnlineOrder(AuditModel):
         AWAITING_PAYMENT = 'AWAITING_PAYMENT', 'Awaiting payment'
         PAID            = 'PAID',            'Paid'
         CONVERTED       = 'CONVERTED',       'Converted to a job'
+        COUNTER         = 'COUNTER',         'Pays at the counter'
         ABANDONED       = 'ABANDONED',       'Abandoned'
         CANCELLED       = 'CANCELLED',       'Cancelled'
 

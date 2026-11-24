@@ -11,6 +11,9 @@ from django.db import transaction
 
 INSTANT_TRANSITIONS = {
     'DRAFT'           : ['PENDING_PAYMENT', 'CANCELLED'],
+    # Pays at the counter (24 Nov 2026): to the cashier when they come,
+    # cancelled by Octos after a week on the shelf.
+    'AWAITING_ARRIVAL': ['PENDING_PAYMENT', 'CANCELLED'],
     'PENDING_PAYMENT' : ['COMPLETE', 'CANCELLED'],
     'INTAKE_HELD'     : ['PENDING_PAYMENT'],  # morning handover affirmed by cashier
     'COMPLETE'        : [],
@@ -678,7 +681,7 @@ class JobStatusEngine:
         """
         job = self.job
 
-        if job.status in ('DRAFT', 'INTAKE_HELD', 'CANCELLED'):
+        if job.status in ('DRAFT', 'INTAKE_HELD', 'CANCELLED', 'AWAITING_ARRIVAL'):
             return None
 
         if job.handover_state == 'HANDED_OVER':

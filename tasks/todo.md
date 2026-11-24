@@ -85,3 +85,54 @@ Started 14 Nov 2026. Design agreed 13 Nov (arrival modal mock), plan approved 14
 
 ## Review
 (filled in when done)
+
+---
+
+# Pay at the counter (24 Nov 2026)
+
+Customers who'd rather send the file on WhatsApp and pay when they collect. Octos
+takes the order either way; nothing reaches the floor unless it's paid or agreed.
+
+## Decisions (Khofi, 24 Nov 2026)
+- Octos accepts "I'll pay at the counter" warmly; it never pushes the link again.
+- Only front-desk work (every line instant). Anything for the coordinator still
+  needs its deposit first.
+- Printed ahead: a known customer (a customer record, which covers anyone who has
+  paid us, or a chat at least a month old), never a no-show, total up to GHS 50.
+- Everyone else: prepared (file checked, priced) and printed when they arrive.
+- A 4-digit pickup code, never given twice (unique for ever; 5 digits once 4 run out).
+- Not collected by close of the same day: onto the Waiting for collection shelf.
+  Seven days on the shelf: Octos cancels it (not an employee), deletes the file and
+  records the no-show, which ends printing ahead for that customer.
+- Username chats can't order without a number, so they never reach this.
+
+## Backend
+- [x] 1. Job: status AWAITING_ARRIVAL ("Pays at counter"), counter_code (unique),
+         print_ahead, arrived_at, shelved_at, no_show + migration;
+         OnlineOrder status COUNTER + migration
+- [x] 2. Status engine: AWAITING_ARRIVAL -> PENDING_PAYMENT | CANCELLED; axis moves leave it alone
+- [x] 3. jobs/services/counter_orders.py: new_code, may_print_ahead, reserve(order),
+         here(job), send_to_cashier(job), shelve_due, tidy (shelve + cancel)
+- [x] 4. front_desk: queue keeps waiting counter jobs (even printed), leaves shelved ones
+         out; escalation skips print-on-arrival jobs nobody has come for;
+         finish tells a print-ahead customer it's ready with their code
+- [x] 5. Octos: pay_at_counter tool + prompt; counter QR marks them here and says the code
+- [x] 6. API: queue rows carry the counter details; shelf (search), here, cashier
+- [x] 7. Beat: tidy every 15 minutes
+- [x] 8. Tests: jobs/tests_counter_orders.py
+
+## Frontend (octos-web, attendant Work tab)
+- [x] 9. Badges (Pays at counter · coming about 5pm / Print on arrival · 4821 / Here now),
+         Send to cashier, Waiting for collection shelf with code search, They're here
+
+## Verify
+- [x] 10. Full test run, build, screenshot of the Work tab
+
+## Review (24 Nov 2026)
+- Backend be21a: 25 tests in jobs/tests_counter_orders.py; full suite 1888, only the two
+  known finance failures. Status AWAITING_ARRIVAL is left alone by axis moves, the cashier
+  queue, day sheets and the attendant's Today (counted unpaid).
+- Print-on-arrival work starts its 5- and 10-minute clocks when the customer arrives, not
+  when Octos took it; it never alerts or escalates before then.
+- Octos's replies are checked for the pickup code like prices and times (checker CODE).
+- octos-web: Work tab checked on screen at desktop and phone width with sample jobs.
