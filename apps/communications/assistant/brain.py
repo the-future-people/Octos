@@ -66,6 +66,9 @@ GOODBYE_WORDS = {
     'same', 'to', 'appreciated', 'appreciate', 'it', 'god', 'bless', 'boss', 'sir', 'madam', 'maam',
     'dear', 'bye', 'good', 'night', 'goodnight', 'gn', 'have', 'nice', 'day', 'evening', 'and',
     'well', 'done', 'received', 'got', 'perfect', 'with',
+    # "You're welcome" after a receipt (24 Nov 2026) got a thank-you and a
+    # request for her number.
+    'youre', 'your', 'are', 'welcome', 'my', 'pleasure', 'most',
 }
 # "No please", "no thank you", "not now": a no to Octos's question (23 Nov 2026).
 DECLINE_WORDS = {
@@ -74,7 +77,7 @@ DECLINE_WORDS = {
 }
 GOODBYE_CORE = {
     'ok', 'okay', 'okk', 'oki', 'k', 'kk', 'noted', 'alright', 'thanks', 'thank', 'thankyou', 'tnx', 'thx',
-    'appreciated', 'appreciate', 'bye', 'goodnight', 'gn', 'received', 'perfect',
+    'appreciated', 'appreciate', 'bye', 'goodnight', 'gn', 'received', 'perfect', 'welcome', 'pleasure',
 }
 TOOL_SPECS = [
     {
@@ -294,7 +297,7 @@ def respond(conversation_id, trigger_id=None, now=None):
         if stepped_in:
             return _finish(run, AssistantRun.SKIPPED, started, reason=stepped_in, reply=reply)
 
-        facts = json.dumps([c['result'] for c in ctx.calls], default=str)
+        facts = json.dumps([c['result'] for c in ctx.calls], default=str) + _already_known(conversation, ctx, now)
         problems = checker.unverified(reply, facts)
         if problems:
             why = 'I could not verify ' + ', '.join(problems) + ' before sending.'
@@ -601,6 +604,31 @@ def _goodbye(text):
     words = re.findall(r"[a-z]+", text.replace("'", ''))
     return (0 < len(words) <= 8 and all(w in GOODBYE_WORDS for w in words)
             and any(w in GOODBYE_CORE for w in words))
+
+
+def _already_known(conversation, ctx, now):
+    """
+    Figures Octos may repeat without looking them up again in this run:
+    today's hours at the trading branches, and the clock times Octos itself
+    gave this customer in the last 12 hours (checked when they were sent).
+    Prices are always looked up again: an order can change between turns.
+    Loretta said "Yes please" to the payment link and was handed to a
+    person instead, because the reply said 7:30pm, the closing time Octos
+    had given her twenty minutes earlier from a lookup in another run
+    (24 Nov 2026).
+    """
+    known = []
+    for branch in ctx.branches:
+        try:
+            known.append(tools.branch_hours(branch, now))
+        except Exception:
+            logger.exception('Hours for the checker failed at branch %s', branch.pk)
+    for body in (conversation.messages
+                 .filter(direction=Message.OUTBOUND, sent_by__isnull=True, is_internal_note=False,
+                         created_at__gte=now - timedelta(hours=12))
+                 .values_list('body', flat=True)):
+        known += sorted(checker._times(body))
+    return ' ' + json.dumps(known, default=str)
 
 
 def _holding():

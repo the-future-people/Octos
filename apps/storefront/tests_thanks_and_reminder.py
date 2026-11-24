@@ -30,6 +30,11 @@ class Base(TestCase):
         alerts = patch('apps.notifications.services.notify_many')
         alerts.start()
         self.addCleanup(alerts.stop)
+        # Jobs here are made just now; the three-hour wait has its own tests
+        # (tests_chat_review_24nov.LateThanksTests).
+        soon = patch.object(thanks, 'AFTER_SERVED', timedelta(0))
+        soon.start()
+        self.addCleanup(soon.stop)
 
     def wrote(self, body='Hi', ago=timedelta(hours=4)):
         """The customer wrote this long ago: inside the 24-hour window, not mid-conversation."""
@@ -96,13 +101,15 @@ class ThanksTests(Base):
         self.wrote(ago=timedelta(minutes=2))
         self.assertEqual(thanks.thank_branch(self.branch), 0)
 
-    def test_due_in_the_half_hour_before_closing(self):
+    def test_due_from_half_an_hour_before_closing_until_three_and_a_half_hours_after(self):
         self.branch.opening_time, self.branch.closing_time = time(8, 0), time(18, 0)
         self.branch.save()
         at = lambda day, hour, minute: timezone.make_aware(datetime(2026, 11, day, hour, minute))
         self.assertTrue(thanks.due(self.branch, at(11, 17, 40)))     # Wednesday
         self.assertFalse(thanks.due(self.branch, at(11, 17, 20)))
-        self.assertFalse(thanks.due(self.branch, at(11, 18, 5)))
+        self.assertTrue(thanks.due(self.branch, at(11, 18, 5)))      # closed: late customers (24 Nov 2026)
+        self.assertTrue(thanks.due(self.branch, at(11, 21, 25)))
+        self.assertFalse(thanks.due(self.branch, at(11, 21, 35)))
         self.assertFalse(thanks.due(self.branch, at(15, 17, 40)))    # Sunday
 
 

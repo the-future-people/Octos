@@ -232,6 +232,13 @@ def step(conversation, trigger, now):
             held = _hold(conversation, trigger, belief)
             if held:
                 return None, held
+            # Two minutes on: if the attendant dealt with it meanwhile, Octos
+            # stays out. Adodo's job was made a second before Octos asked
+            # her to send her files again (24 Nov 2026).
+            from apps.communications.services.settled import team_dealt_with
+            done = team_dealt_with(conversation, trigger.created_at)
+            if done:
+                return None, f'held for the attendant, who dealt with it: {done}'
         elif belief.texture == 'greeting' and opened:
             if not _greeted_unsure(conversation, now):
                 return unsure_greeting(conversation, trigger, now), NOT_SURE_REASON

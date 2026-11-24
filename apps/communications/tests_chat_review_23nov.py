@@ -59,9 +59,10 @@ class UsernameThanksTests(TestCase):
         Conversation.objects.filter(pk=self.chat.pk).update(contact_user_id='GH.5450', contact_username='k_kwarteng')
         self.chat.refresh_from_db()
         inbound(self.chat, 'WESTLAND.pdf', ago=timedelta(hours=4))
-        alerts = patch('apps.notifications.services.notify_many')
-        alerts.start()
-        self.addCleanup(alerts.stop)
+        for p in (patch('apps.notifications.services.notify_many'),
+                  patch.object(thanks, 'AFTER_SERVED', timedelta(0))):    # jobs here are made just now
+            p.start()
+            self.addCleanup(p.stop)
 
     def thanked(self):
         return list(self.chat.messages.filter(kind=thanks.KIND).values_list('body', flat=True))

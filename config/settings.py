@@ -430,7 +430,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.jobs.tasks.expire_proformas',
         'schedule': crontab(hour=2, minute=15),
     },
-    # End-of-day thank-you, half an hour before each branch closes (14 Nov 2026).
+    # End-of-day thank-you, from half an hour before each branch closes; late
+    # customers three hours after they were served (14 and 24 Nov 2026).
     'thanks-before-closing': {
         'task': 'apps.storefront.tasks.send_thanks',
         'schedule': crontab(minute='*/5'),

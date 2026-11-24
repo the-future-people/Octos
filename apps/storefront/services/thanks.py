@@ -21,6 +21,12 @@ Mc James, Kweku, S.K. Doh, Sylvia) were served, sent their receipts, and
 never thanked: the thank-you looked for a chat by phone number only. Now
 it thanks chats: every chat a customer served today writes from, and every
 chat a job made today was linked to, whether or not it has a number.
+
+24 Nov 2026 (Khofi): someone served late hears from us about three hours
+later, even after we've closed. Loretta paid at 7:29pm and Nene at 7:27pm,
+after the last run, and were never thanked. Now each chat is thanked at
+whichever is later: half an hour before closing, or three hours after
+their last job. Runs go on until three and a half hours after closing.
 """
 import logging
 from datetime import timedelta
@@ -33,17 +39,19 @@ KIND = 'thanks'
 BEFORE_CLOSING = timedelta(minutes=30)
 ONCE_IN = timedelta(days=7)
 BUSY = timedelta(minutes=15)
+AFTER_SERVED = timedelta(hours=3)          # never sooner than this after their last job
+LATE = timedelta(hours=3, minutes=30)      # runs go on this long after closing
 
 
 def due(branch, now=None):
-    """Within the last half hour before this branch closes today."""
+    """From half an hour before this branch closes today until three and a half hours after."""
     from apps.organization.services import hours
 
     now = timezone.localtime(now or timezone.now())
     if not hours.is_trading_day(branch, now.date()):
         return False
     closes = hours.closing_at(branch, now.date(), now.tzinfo)
-    return closes - BEFORE_CLOSING <= now < closes
+    return closes - BEFORE_CLOSING <= now < closes + LATE
 
 
 def thank_all(now=None):
@@ -99,7 +107,7 @@ def chats_served_today(branch, day):
     owing = set(today.filter(payment_state=Job.Payment.UNPAID, customer__isnull=False)
                 .values_list('customer', flat=True))
     for customer in served_today(branch, day):
-        job = today.filter(customer=customer).order_by('-pk').first()
+        job = today.filter(customer=customer).order_by('-created_at').first()
         add(thread_for(customer.phone) or thread_for(customer.secondary_phone), customer, job)
     linked = (Conversation.objects
               .filter(channel=Conversation.WHATSAPP, branch__isnull=True, jobs__in=today)
@@ -108,7 +116,7 @@ def chats_served_today(branch, day):
         theirs = today.filter(conversations=chat)
         if theirs.filter(payment_state=Job.Payment.UNPAID).exists():
             continue
-        job = theirs.order_by('-pk').first()
+        job = theirs.order_by('-created_at').first()
         customer = chat.customer if chat.customer_id else (job.customer if job.customer_id else None)
         if customer is not None and customer.pk in owing:
             continue
@@ -121,6 +129,8 @@ def thank_branch(branch, now=None):
     day = timezone.localdate(now)
     sent = 0
     for chat, customer, job in chats_served_today(branch, day):
+        if job is not None and now < job.created_at + AFTER_SERVED:
+            continue                     # served late: their turn comes three hours on
         try:
             sent += bool(thank(chat, customer, day, now, job=job))
         except Exception:
