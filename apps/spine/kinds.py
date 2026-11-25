@@ -19,6 +19,8 @@ MESSAGE_REACTED = 'message.reacted'          # a customer reacted (a thumbs-up):
 FILE_RECEIVED = 'file.received'              # a customer's file was saved
 FILE_MEASURED = 'file.measured'              # pages, size, DPI etc. worked out
 FILE_OPENED = 'file.opened'                  # a person opened a customer's file (wired in Layer 2)
+FILE_KEPT = 'file.kept'                      # the customer asked us to keep a file: no 14-day delete (25 Nov 2026)
+FILE_DELETED = 'file.deleted'                # a customer's file left our storage; the record of it stays
 CHAT_OPENED = 'chat.opened'                  # a person had the chat open in the inbox (at most once per 10 minutes)
 
 # Who is handling a conversation

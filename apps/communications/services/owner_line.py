@@ -285,6 +285,13 @@ def answer(pk):
     if message.reply_id.startswith('partner:'):
         from apps.partners.services import review as partners
         partners.tap(message.reply_id)
+    if message.reply_id.startswith('files:'):
+        # Delete files an open job still holds? (25 Nov 2026)
+        from apps.communications.services import customer_files
+        try:
+            customer_files.tap(message.reply_id)
+        except Exception:
+            logger.exception('Files tap %r failed', message.reply_id)
     sent = flush()
     if message.reply_id:
         # A tap is answered by what it opened; "Open" with nothing waiting

@@ -809,3 +809,103 @@ class ConversationPhotosPdfView(APIView):
         response = HttpResponse(out.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{name}"'
         return response
+
+
+# ── Customer files: Keep and Delete (25 Nov 2026) ────────────────────────────
+# services/customer_files.py: kept 14 days unless kept, deleted on request
+# with a reason, never while a job of theirs is open below the BM.
+
+def _file_row(message):
+    from apps.communications.services import customer_files
+    on = customer_files.deletes_on(message)
+    return {
+        'id': message.pk, 'name': message.media_name or 'File', 'pages': message.media_pages,
+        'size': message.media_size, 'kept': bool(message.kept_at),
+        'deletes_on': on.isoformat() if on else None,
+    }
+
+
+class ConversationFilesView(APIView):
+    """
+    GET /api/v1/communications/<id>/files/
+    The customer's files in this chat still in storage, and whether a job of
+    theirs holds them (locked) and whether this person may lift that.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.communications.services import customer_files
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        held = customer_files.open_job(conversation)
+        return Response({
+            'retain_days': customer_files.RETAIN.days,
+            'locked': customer_files.lock_text(held),
+            'may_delete': customer_files.may_delete(request.user),
+            'may_unlock': customer_files.may_unlock(request.user),
+            'reasons': [{'value': k, 'label': v} for k, v in customer_files.REASONS.items()],
+            'files': [_file_row(m) for m in customer_files.chat_files(conversation)],
+        })
+
+
+class ConversationFilesDeleteView(APIView):
+    """POST /api/v1/communications/<id>/files/delete/   {ids, reason, note}"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import customer_files
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        ids = [int(i) for i in request.data.get('ids') or [] if str(i).isdigit()]
+        reason = str(request.data.get('reason') or '')
+        note = str(request.data.get('note') or '').strip()[:150]
+        if reason not in customer_files.REASONS:
+            return Response({'detail': 'Choose why these files are being deleted.'}, status=status.HTTP_400_BAD_REQUEST)
+        if reason == 'other' and not note:
+            return Response({'detail': 'Say why, in a few words.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            done = customer_files.delete_by_hand(conversation, ids, request.user, reason, note)
+        except customer_files.FilesRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_409_CONFLICT)
+        return Response({'deleted': [m.pk for m in done]})
+
+
+class ConversationFilesUnlockView(APIView):
+    """POST /api/v1/communications/<id>/files/unlock/   {ids, reason, note}: ask the owner on his line."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import customer_files
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        ids = [int(i) for i in request.data.get('ids') or [] if str(i).isdigit()]
+        try:
+            asked = customer_files.ask_owner(conversation, ids, request.user,
+                                             str(request.data.get('reason') or ''),
+                                             str(request.data.get('note') or '').strip()[:150])
+        except customer_files.FilesRefused as e:
+            return Response({'detail': str(e)}, status=status.HTTP_409_CONFLICT)
+        if asked is None:
+            return Response({'detail': "Khofi's line isn't set up, so he can't be asked. Ask the BM."},
+                            status=status.HTTP_409_CONFLICT)
+        return Response({'asked': True})
+
+
+class MessageKeepView(APIView):
+    """POST /api/v1/communications/messages/<id>/keep/   {keep: true|false}"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import customer_files
+        message = Message.objects.filter(pk=pk).select_related('conversation').first()
+        if message is None or _visible(request, message.conversation_id) is None:
+            return _not_found()
+        if not message.media_file or message.file_deleted_at:
+            return Response({'detail': 'This file is already gone.'}, status=status.HTTP_409_CONFLICT)
+        keep_it = request.data.get('keep', True) not in (False, 'false', 0, '0')
+        customer_files.keep([message], request.user, keep_it)
+        message.refresh_from_db()
+        return Response(_file_row(message))

@@ -7,6 +7,29 @@ class MessageSerializer(serializers.ModelSerializer):
     # The message this one quotes, and Octos's report on its own messages (8 Nov 2026).
     reply_preview = serializers.SerializerMethodField()
     report = serializers.SerializerMethodField()
+    # Customer files (25 Nov 2026): kept, the day it's deleted, or the record of its deletion.
+    file_keep = serializers.SerializerMethodField()
+
+    def get_file_keep(self, obj):
+        from apps.communications.services import customer_files
+        if obj.file_deleted_at:
+            who = obj.file_deleted_by.first_name if obj.file_deleted_by_id else 'Octos'
+            return {'deleted': {'at': obj.file_deleted_at.isoformat(), 'by': who,
+                                'reason': obj.file_delete_reason, 'sha256': obj.file_sha256}}
+        if not obj.media_file or obj.kind in customer_files.OUR_KINDS:
+            return None
+        if obj.direction != Message.INBOUND and not obj.sent_by_id:
+            return None
+        # Whether a job of theirs holds the chat's files, worked out once per chat.
+        locks = self.context.setdefault('_file_locks', {}) if hasattr(self.context, 'setdefault') else {}
+        if obj.conversation_id not in locks:
+            locks[obj.conversation_id] = customer_files.lock_text(customer_files.open_job(obj.conversation))
+        locked = locks[obj.conversation_id]
+        if obj.kept_at:
+            who = obj.kept_by.first_name if obj.kept_by_id else 'Octos'
+            return {'kept': {'at': obj.kept_at.isoformat(), 'by': who}, 'locked': locked}
+        on = customer_files.deletes_on(obj)
+        return {'deletes_on': on.isoformat() if on else None, 'locked': locked}
 
     def get_reply_preview(self, obj):
         q = obj.reply_to
@@ -35,10 +58,10 @@ class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
         fields = [
-            'id', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
+            'id', 'conversation', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
             'body', 'media_url', 'media_file', 'media_id', 'media_name', 'media_mime',
             'media_size', 'media_pages', 'media_info', 'sent_by', 'sent_by_name',
-            'reply_to', 'reply_preview', 'report',
+            'reply_to', 'reply_preview', 'report', 'file_keep',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',
         ]

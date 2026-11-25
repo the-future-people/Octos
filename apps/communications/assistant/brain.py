@@ -156,6 +156,13 @@ TOOL_SPECS = [
         }, 'required': ['order']},
     },
     {
+        'name': 'keep_files',
+        'description': ('The customer asked us to keep the files they sent for next time. We normally delete '
+                        'customer files 14 days after they arrive; this keeps every file they have sent in this '
+                        'chat until they ask us to delete them.'),
+        'input_schema': {'type': 'object', 'properties': {}},
+    },
+    {
         'name': 'pay_at_counter',
         'description': ('For an order you prepared and the customer agreed to, when they would rather pay when '
                         'they collect at the counter instead of by the link. It goes to the front desk with a '
@@ -785,6 +792,11 @@ def _run_tool(name, args, ctx):
     if name == 'send_payment_link':
         from apps.communications.assistant import ordering
         return ordering.send_payment_link(ctx.conversation, str(args.get('order') or ''))
+    if name == 'keep_files':
+        from apps.communications.services.customer_files import keep_chat
+        kept = keep_chat(ctx.conversation)
+        return {'success': True, 'kept': kept,
+                'say': 'Tell them warmly we will keep their files for next time, until they ask us to delete them.'}
     if name == 'pay_at_counter':
         from apps.communications.assistant import ordering
         return ordering.pay_at_counter(ctx.conversation, str(args.get('order') or ''))
@@ -990,7 +1002,10 @@ def _history(conversation):
                 what += ', black and white' if counter.is_grey(info['colour_mode']) else ', colour'
             if info.get('word'):
                 what += ', a Word file'
-            if not m.media_file:
+            if m.file_deleted_at:
+                # Deleted (25 Nov 2026): after 14 days, or because they asked.
+                what += ', deleted from our storage, so we no longer have it: ask them to send it again if they want it printed'
+            elif not m.media_file:
                 what += ', not saved yet'
             else:
                 what += f', file {m.pk}'

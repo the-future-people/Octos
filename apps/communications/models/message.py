@@ -122,6 +122,19 @@ class Message(AuditModel):
                   "WhatsApp keeps media for about 30 days.",
     )
 
+    # ── Customer files: kept 14 days, unless kept (25 Nov 2026) ──────
+    # services/customer_files.py. Kept: the customer asked us to save it.
+    # Deleted: the file is gone from storage, but this record of it stays,
+    # with a fingerprint that proves which file it was.
+    kept_at = models.DateTimeField(null=True, blank=True)
+    kept_by = models.ForeignKey('accounts.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name='+', help_text='Empty when Octos kept it at the customer\'s word.')
+    file_deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    file_deleted_by = models.ForeignKey('accounts.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='+', help_text='Empty when Octos deleted it after 14 days.')
+    file_delete_reason = models.CharField(max_length=200, blank=True)
+    file_sha256 = models.CharField(max_length=64, blank=True)
+
     # Sender
     sent_by = models.ForeignKey(
         'accounts.CustomUser',

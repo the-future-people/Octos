@@ -14,7 +14,7 @@ Every figure comes from the Eye's own services (apps/eye/services), so the
 owner's phone and the Eye can never disagree.
 """
 import re
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Q
@@ -293,6 +293,12 @@ def brief(day=None, greeting=None):
     today_rows = [('Jobs due', due), ('Machines up', f'{up} of {total}')]
     if owed:
         today_rows.append(('Owed to us', amount(owed)))
+    # The nightly 14-day clean-up of customer files, in one line (25 Nov 2026).
+    from apps.communications.services.customer_files import cleared_since
+    midnight = timezone.make_aware(datetime.combine(day, time.min)) if not isinstance(day, datetime) else day
+    cleared = cleared_since(midnight)
+    if cleared:
+        today_rows.append(('Old customer files deleted', cleared))
     if n_cuts:
         today_rows.append((f'Discounts · {n_cuts}', amount(off)))
 

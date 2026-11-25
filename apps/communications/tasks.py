@@ -138,3 +138,10 @@ def run_sandbox(case_id):
     case = SandboxCase.objects.filter(pk=case_id).first()
     if case is not None and case.status == SandboxCase.QUEUED:
         sandbox.run(case)
+
+
+@shared_task
+def clean_customer_files():
+    """Every night at 2:41: customer files older than 14 days, unless kept or still on an open job (25 Nov 2026)."""
+    from apps.communications.services.customer_files import clean
+    return {'deleted': clean()}

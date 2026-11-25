@@ -436,6 +436,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.storefront.tasks.send_thanks',
         'schedule': crontab(minute='*/5'),
     },
+    # Customer files older than 14 days, unless kept (25 Nov 2026).
+    'clean-customer-files': {
+        'task': 'apps.communications.tasks.clean_customer_files',
+        'schedule': crontab(hour=2, minute=41),
+    },
     # Pays at the counter: the shelf at closing, cancelled a week on (24 Nov 2026).
     'tidy-counter-orders': {
         'task': 'apps.jobs.tasks.tidy_counter_orders',
@@ -566,3 +571,9 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # The counter QR's own secret (11 Nov 2026): separate from SECRET_KEY so rotating
 # that never invalidates printed QRs. Changing this means reprinting every QR.
 COUNTER_QR_SECRET = os.environ.get('COUNTER_QR_SECRET', '')
+
+
+# Customer files are deleted 14 days after they arrive, unless kept
+# (communications/services/customer_files.py, 25 Nov 2026). Nothing is
+# deleted before this date, so older files can be marked Keep first.
+FILE_CLEANUP_STARTS = os.environ.get('FILE_CLEANUP_STARTS', '2026-11-28')
