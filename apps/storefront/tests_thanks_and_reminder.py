@@ -168,6 +168,25 @@ class PaymentReminderTests(Base):
         self.wrote("I'll pay tomorrow", ago=timedelta(hours=1))
         self.assertEqual(payment_reminder.remind_all(), 1)
 
+    def test_settled_by_the_team_another_way_is_left_alone(self):
+        """Loretta paid by MoMo, her job was made by hand, her receipt sent; asked again next morning."""
+        from apps.communications.models import Message
+        self.wrote('Yes please', ago=timedelta(hours=2, minutes=50))
+        receipt = Message.objects.create(conversation=self.conv, direction=Message.OUTBOUND, channel=Message.WHATSAPP,
+                                         body='Hello Loretta, here is your receipt', kind='receipt')
+        Message.objects.filter(pk=receipt.pk).update(created_at=timezone.now() - timedelta(hours=2, minutes=30))
+        self.assertEqual(payment_reminder.remind_all(), 0)
+        self.assertFalse(self.sent(payment_reminder.KIND).exists())
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.payment_reminded_at)        # settled: never asked later either
+
+    def test_a_job_made_for_the_chat_after_the_link_settles_it(self):
+        from apps.jobs.models import Job
+        self.wrote(ago=timedelta(hours=4))
+        job = Job.objects.create(branch=self.branch, job_type=Job.INSTANT, title='Printing', status=Job.COMPLETE)
+        self.conv.jobs.add(job)
+        self.assertEqual(payment_reminder.remind_all(), 0)
+
     def test_an_order_not_taken_on_whatsapp_is_left_alone(self):
         self.wrote(ago=timedelta(hours=4))
         OnlineOrder.objects.filter(pk=self.order.pk).update(notes='')

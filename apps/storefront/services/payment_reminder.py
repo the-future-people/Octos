@@ -11,8 +11,9 @@ carries a link itself: an old link is easy to ignore, a question isn't.
 Once per order, ever, and once per chat (20 Nov 2026): when a customer
 changed their order and a link went out for each, only the newest order
 is asked about, and never twice in a day. Not sent once the order is paid or cancelled, when
-the customer already said no after the link, or mid-conversation (the
-next run catches it). "I'll pay tomorrow" isn't a no, so it still gets
+the customer already said no after the link, when the team settled it
+another way after the link (a person replied, a job was made, a receipt
+went out: 25 Nov 2026), or mid-conversation (the next run catches it). "I'll pay tomorrow" isn't a no, so it still gets
 the reminder. WhatsApp only, inside the 24-hour window; never SMS.
 """
 import logging
@@ -81,6 +82,13 @@ def remind(order, now):
              .exclude(status=OnlineOrder.Status.ABANDONED).exists())
     reminded = conversation.messages.filter(kind=KIND, created_at__gte=now - timedelta(hours=20)).exists()
     if newer or reminded:
+        OnlineOrder.objects.filter(pk=order.pk, payment_reminded_at__isnull=True).update(payment_reminded_at=now)
+        return None
+    # The team settled it some other way (25 Nov 2026): Loretta paid by
+    # MoMo, the job was made by hand and her receipt sent at 7:30pm, and next
+    # morning she was asked whether she still wanted the order.
+    from apps.communications.services.settled import team_dealt_with
+    if team_dealt_with(conversation, order.updated_at):
         OnlineOrder.objects.filter(pk=order.pk, payment_reminded_at__isnull=True).update(payment_reminded_at=now)
         return None
     said = conversation.messages.filter(is_internal_note=False)
