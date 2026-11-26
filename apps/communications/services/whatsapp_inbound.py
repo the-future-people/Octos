@@ -412,8 +412,14 @@ def _media_details(message):
 
 
 def _keep_media(message):
-    """Fetch the customer's file once the message is committed, before WhatsApp deletes it."""
+    """
+    Fetch the customer's file once the message is committed, before WhatsApp
+    deletes it. Marked as fetching until it is saved or fails, so Octos waits
+    for it instead of telling them it never came (26 Nov 2026).
+    """
     from apps.communications.tasks import fetch_whatsapp_media
+    Message.objects.filter(pk=message.pk, media_file='').update(media_info={'fetching': True})
+    message.media_info = {'fetching': True}
     transaction.on_commit(lambda: fetch_whatsapp_media.delay(message.pk))
 
 

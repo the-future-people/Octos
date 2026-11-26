@@ -69,6 +69,9 @@ GOODBYE_WORDS = {
     # "You're welcome" after a receipt (24 Nov 2026) got a thank-you and a
     # request for her number.
     'youre', 'your', 'are', 'welcome', 'my', 'pleasure', 'most',
+    # "Wooow thank you" after a receipt (Angela, 26 Nov 2026) got an
+    # introduction and "Enjoy your printing".
+    'wow', 'oh', 'awesome', 'amazing', 'nice', 'lovely', 'excellent',
 }
 # "No please", "no thank you", "not now": a no to Octos's question (23 Nov 2026).
 DECLINE_WORDS = {
@@ -1012,6 +1015,11 @@ def _history(conversation):
             if m.file_deleted_at:
                 # Deleted (25 Nov 2026): after 14 days, or because they asked.
                 what += ', deleted from our storage, so we no longer have it: ask them to send it again if they want it printed'
+            elif not m.media_file and info.get('failed'):
+                what += ", couldn't be fetched from WhatsApp: ask them to send it again"
+            elif not m.media_file and info.get('fetching'):
+                # On its way, never "it didn't come through" (Fiifi, 26 Nov 2026).
+                what += ', still arriving from WhatsApp, not openable yet: it did come through, say it is loading'
             elif not m.media_file:
                 what += ', not saved yet'
             else:
@@ -1148,14 +1156,19 @@ RETRY_SECONDS = 10
 
 def _still_reading(conversation_id):
     """
-    A file sent in the last 3 minutes is still being measured. Never longer:
-    a measurement that never finished must not hold Octos back for good.
+    A file sent in the last 3 minutes is still being fetched from WhatsApp
+    or measured. Never longer: a file that never arrived must not hold Octos
+    back for good. Fetching counts too (26 Nov 2026): Fiifi was told a file
+    "hasn't come through" a minute after he sent it, while it was on its way.
     """
     from datetime import timedelta
+    from django.db.models import Q
     from django.utils import timezone
+    fetching = Q(media_file='') & Q(media_info__fetching=True)
     return Message.objects.filter(
+        Q(media_info__measuring=True) | fetching,
         conversation_id=conversation_id, direction=Message.INBOUND,
-        created_at__gte=timezone.now() - timedelta(minutes=3), media_info__measuring=True,
+        created_at__gte=timezone.now() - timedelta(minutes=3), file_deleted_at__isnull=True,
     ).exists()
 
 

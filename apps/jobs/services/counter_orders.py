@@ -209,6 +209,30 @@ def waiting(branch=None):
     return jobs.filter(branch=branch) if branch is not None else jobs
 
 
+def waiting_for(customer_id, branch=None):
+    """
+    Their orders waiting at the counter (26 Nov 2026): staff made a second
+    job for Fiifi's files while his pickup code 5039 was still waiting.
+    The customer on the job, or on a chat the job is linked to.
+    """
+    from django.db.models import Q
+    return (waiting(branch).filter(Q(customer_id=customer_id) | Q(conversations__customer_id=customer_id))
+            .distinct().order_by('created_at'))
+
+
+def replace(job, actor):
+    """A new job made at the counter takes its place: cancelled, saying why and by whom."""
+    from apps.jobs.models import Job
+    from apps.jobs.status_engine import JobStatusEngine
+    if job.status != Job.AWAITING_ARRIVAL or not job.counter_code:
+        raise CounterRefused(f'{job.job_number} is not waiting at the counter.')
+    who = (getattr(actor, 'full_name', '') or getattr(actor, 'email', '') or 'staff').strip()
+    with transaction.atomic():
+        JobStatusEngine.advance(job=job, to_status=Job.CANCELLED, actor=actor,
+                                notes=f'Code {job.counter_code}: replaced by a new job made at the counter by {who}.')
+    return job
+
+
 def here(job, now=None):
     """They came: off the shelf if it was there, and on the attendant's screen as here now."""
     from apps.jobs.models import Job

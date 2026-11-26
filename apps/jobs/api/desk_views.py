@@ -229,6 +229,36 @@ class DeskCashierView(_DeskAction):
         return f'{job.job_number} is with the cashier: GHS {job.estimated_cost or 0:,.2f}.'
 
 
+class DeskReplaceView(_DeskAction):
+    """POST /api/v1/jobs/<id>/desk/replace/   a new job takes this waiting counter order's place"""
+    def act(self, request, job):
+        counter_orders.replace(job, request.user)
+        return f'Code {job.counter_code} cancelled: the new job replaces it.'
+
+
+class DeskWaitingForView(APIView):
+    """
+    GET /api/v1/jobs/desk/waiting-for/?customer=<id>
+    Their orders waiting at the counter, for the job screen to say so before
+    a second job is made for the same files (26 Nov 2026).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        branch, err = _branch_or_400(request)
+        if err:
+            return err
+        try:
+            customer = int(request.query_params.get('customer') or 0)
+        except ValueError:
+            customer = 0
+        if not customer:
+            return Response({'jobs': []})
+        now = timezone.now()
+        jobs = counter_orders.waiting_for(customer, branch).select_related('branch', 'customer')
+        return Response({'jobs': [_row(job, request.user, now) for job in jobs]})
+
+
 class DeskShelfView(APIView):
     """
     GET /api/v1/jobs/desk/shelf/?q=4821

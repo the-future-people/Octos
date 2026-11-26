@@ -226,3 +226,25 @@ must be.
 - The halted alert now names the job and says since when, and the Eye shows
   the same words. A cancelled job drops out.
 - Not done here: names on the staff screens (a mock first, as agreed).
+
+# Customer chats of 25 and 26 Nov (26 Nov 2026)
+
+Reviewed with Khofi. Grace's GHS 2 was an envelope added at the counter:
+the quote was right. Shop status (lights out and the rest) is mocked
+separately and waits for his look.
+
+- [x] "Wooow thank you", "awesome thanks": goodbyes (GOODBYE_WORDS)
+- [x] A file still arriving from WhatsApp: Octos waits for it (_still_reading),
+      and the chat line says it's loading, never that it didn't come
+- [x] Arriving mid-chat ("Im here" after sending a file): the welcome says the
+      attendant has the file and the chat, instead of asking for files
+- [x] A second job for an order already waiting at the counter: the job screen
+      shows the code with "Use code" or "This new job replaces it" (cancelled
+      once the new job saves). desk/waiting-for/, <id>/desk/replace/
+
+## Review
+- 7 new tests (tests_chat_review_26nov); full suite before delivery.
+- A file is marked fetching when its download is queued (whatsapp_inbound._keep_media);
+  Octos waits only on that mark. Waiting on any file without a copy held up 11
+  older tests whose files never get one, and would hold a chat whose file record
+  was made some other way.

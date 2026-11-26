@@ -57,6 +57,8 @@ urlpatterns = [
     # Front desk: the attendant's Work tab (14 Nov 2026)
     path('desk/queue/',             desk_views.DeskQueueView.as_view(),   name='desk-queue'),
     path('desk/shelf/',             desk_views.DeskShelfView.as_view(),   name='desk-shelf'),
+    path('desk/waiting-for/',       desk_views.DeskWaitingForView.as_view(), name='desk-waiting-for'),
+    path('<int:pk>/desk/replace/',  desk_views.DeskReplaceView.as_view(), name='desk-replace'),
     path('<int:pk>/desk/here/',     desk_views.DeskHereView.as_view(),    name='desk-here'),
     path('<int:pk>/desk/cashier/',  desk_views.DeskCashierView.as_view(), name='desk-cashier'),
     path('<int:pk>/desk/take/',     desk_views.DeskTakeView.as_view(),    name='desk-take'),

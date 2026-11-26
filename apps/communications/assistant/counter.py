@@ -396,11 +396,37 @@ def ack_text(conversation, branch, now=None):
     where = name[:-7] if name.endswith(' Branch') else name
     first = _first_name(conversation)
     shop = f'Farhat {where}' if where else 'Farhat'
+    sent = _files_sent(conversation, now)
     if is_regular(conversation, now):
-        return _welcome_back(conversation, first, shop, now)
+        return _welcome_back(conversation, first, shop, now, sent)
     hello = f'Hi {first} \U0001F44B' if first else 'Hi \U0001F44B'
+    if sent:
+        return f'{hello} Welcome to {shop}. {_have_them(sent)}'
     return (f"{hello} Welcome to {shop}. Hand your files to the attendant, "
             f"or drop them here and they'll pick them up.")
+
+
+def _files_sent(conversation, now=None):
+    """
+    Files they already sent in this chat in the last 3 hours (26 Nov 2026):
+    Grace had sent her photo and agreed the price, said "Im here", and was
+    told to hand her files over or drop them here.
+    """
+    from apps.communications.models import Message
+    from apps.jobs.models import Job
+    since = (now or timezone.now()) - timedelta(hours=3)
+    # Not ones already made into a job: that visit is done.
+    last_job = Job.objects.filter(conversations=conversation, created_at__gte=since).order_by('-created_at').first()
+    if last_job is not None:
+        since = last_job.created_at
+    return (Message.objects.filter(conversation=conversation, direction=Message.INBOUND, created_at__gte=since,
+                                   file_deleted_at__isnull=True)
+            .exclude(media_id='').count())
+
+
+def _have_them(count):
+    things = 'your file' if count == 1 else 'your files'
+    return f'The attendant has {things} and our chat, and will take it from here.'
 
 
 ACK_REASON = 'counter visit started'
@@ -428,7 +454,7 @@ def _day_part(now):
     return 'Good morning' if hour < 12 else ('Good afternoon' if hour < 17 else 'Good evening')
 
 
-def _welcome_back(conversation, first, shop, now):
+def _welcome_back(conversation, first, shop, now, sent=0):
     """A different welcome each visit: the count of earlier ones picks it, so it never repeats back to back."""
     from apps.communications.models import AssistantRun
     you = f', {first}' if first else ''
@@ -439,7 +465,8 @@ def _welcome_back(conversation, first, shop, now):
         f'Hey{you}, good to see you again \U0001F60A',
     )
     seen = AssistantRun.objects.filter(conversation=conversation, reason=ACK_REASON).count()
-    return f'{openings[seen % len(openings)]} {FILES_LINES[seen % len(FILES_LINES)]}'
+    line = _have_them(sent) if sent else FILES_LINES[seen % len(FILES_LINES)]
+    return f'{openings[seen % len(openings)]} {line}'
 
 
 def _first_name(conversation):
