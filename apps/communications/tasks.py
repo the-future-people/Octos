@@ -51,12 +51,18 @@ def answer_whatsapp(conversation_id, trigger_id):
     from apps.communications.assistant import brain
     brain.respond(conversation_id, trigger_id)
 
-@shared_task(bind=True, max_retries=5, default_retry_delay=60)
+# Seconds before each next try (26 Nov 2026). It was a minute every time,
+# and the first try was failing on most files and the second working: every
+# file opened at 62 or 123 seconds, a 0.0 MB Word file the same as 21 MB.
+FETCH_AGAIN = (3, 10, 30, 60, 120)
+
+
+@shared_task(bind=True, max_retries=len(FETCH_AGAIN))
 def fetch_whatsapp_media(self, message_id):
     """
     Keep a customer's file before WhatsApp deletes it. A network failure
-    tries again, a minute apart; a file that is gone or too big is logged
-    and left (the inbox says it wasn't saved).
+    tries again soon, then less often (FETCH_AGAIN); a file that is gone or
+    too big is logged and left (the inbox says it wasn't saved).
     """
     import requests
     from apps.communications.services import whatsapp_media
@@ -66,10 +72,15 @@ def fetch_whatsapp_media(self, message_id):
         logger.warning('WhatsApp media for message %s cannot be kept', message_id, exc_info=True)
         whatsapp_media.mark_failed(message_id, 'gone')
     except requests.RequestException as exc:
+        # What WhatsApp answered, so a failing first try can be told apart
+        # (a status, a reset connection), never the token or the link.
+        answer = getattr(getattr(exc, 'response', None), 'status_code', None)
+        logger.warning('WhatsApp media for message %s, try %s: %s%s', message_id, self.request.retries + 1,
+                       type(exc).__name__, f' {answer}' if answer else '')
         if self.request.retries >= self.max_retries:
             whatsapp_media.mark_failed(message_id, 'network')
             raise
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc, countdown=FETCH_AGAIN[self.request.retries])
     except Exception:
         # Anything else (a bug, the database refusing) must never leave staff
         # watching "Receiving the file..." for ever (15 Nov 2026).

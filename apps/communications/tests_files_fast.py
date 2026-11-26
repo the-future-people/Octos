@@ -91,6 +91,35 @@ class LongNamesAndFailuresTests(TestCase):
         self.assertTrue(self.msg.media_file.name.endswith('.pdf'))
         self.assertTrue(self.msg.media_name.startswith('Company Law'))     # the customer's name, kept whole
 
+    def test_a_failed_try_comes_again_in_seconds_not_a_minute(self):
+        """26 Nov 2026: every file opened at 62 or 123 seconds, a retry a minute apart."""
+        import requests
+        from celery.exceptions import Retry
+        from apps.communications import tasks
+        reset = requests.ConnectionError('reset by peer')
+        waits = []
+        for tried in range(len(tasks.FETCH_AGAIN)):
+            with patch.object(whatsapp_media, 'fetch', side_effect=reset), \
+                    patch.object(tasks.fetch_whatsapp_media, 'retry', side_effect=Retry) as again:
+                tasks.fetch_whatsapp_media.push_request(retries=tried)
+                try:
+                    with self.assertRaises(Retry):
+                        tasks.fetch_whatsapp_media.run(self.msg.pk)
+                finally:
+                    tasks.fetch_whatsapp_media.pop_request()
+            waits.append(again.call_args.kwargs['countdown'])
+        self.assertEqual(waits, [3, 10, 30, 60, 120])
+        # Out of tries: the inbox is told it wasn't saved.
+        with patch.object(whatsapp_media, 'fetch', side_effect=reset):
+            tasks.fetch_whatsapp_media.push_request(retries=len(tasks.FETCH_AGAIN))
+            try:
+                with self.assertRaises(requests.ConnectionError):
+                    tasks.fetch_whatsapp_media.run(self.msg.pk)
+            finally:
+                tasks.fetch_whatsapp_media.pop_request()
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.media_info, {'failed': 'network'})
+
     def test_a_failure_tells_the_inbox(self):
         from apps.communications.tasks import fetch_whatsapp_media
         with patch.object(whatsapp_media, 'fetch', side_effect=ValueError('database said no')):
