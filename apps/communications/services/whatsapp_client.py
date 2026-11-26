@@ -232,6 +232,14 @@ def send_document(phone, content, filename, caption='', mime='application/pdf'):
     return _send(phone, {'type': 'document', 'document': document})
 
 
+def send_video(phone, content, filename, caption='', mime='video/mp4'):
+    """A video (25 Nov 2026): plays in the chat. WhatsApp takes MP4 or 3GPP up to 16 MB."""
+    video = {'id': upload_media(content, filename, mime)}
+    if caption:
+        video['caption'] = caption
+    return _send(phone, {'type': 'video', 'video': video})
+
+
 def _is_user_id(value):
     """Meta's business-scoped user id (GH.1114480144784115), not a phone number."""
     import re

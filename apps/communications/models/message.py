@@ -135,6 +135,12 @@ class Message(AuditModel):
     file_delete_reason = models.CharField(max_length=200, blank=True)
     file_sha256 = models.CharField(max_length=64, blank=True)
 
+    # A quote staff sent from the inbox (25 Nov 2026): the order it priced,
+    # so the chat shows it as a card that follows the order (waiting, paid,
+    # at the counter). services/quotes.py.
+    order = models.ForeignKey('storefront.OnlineOrder', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='chat_messages')
+
     # Sender
     sent_by = models.ForeignKey(
         'accounts.CustomUser',

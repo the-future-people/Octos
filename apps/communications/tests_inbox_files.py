@@ -58,6 +58,45 @@ class InboxFilesTests(TestCase):
         sent = self.conv.messages.get(message_type=Message.IMAGE)
         self.assertTrue(sent.media_file.name.endswith('.png'))
 
+    # Photo, document or video, as staff choose (25 Nov 2026).
+
+    def test_a_picture_chosen_as_a_document_goes_as_it_is(self):
+        photo = SimpleUploadedFile('Roll-up final artwork.jpg', jpeg(), content_type='image/jpeg')
+        response = self.reply([photo], send_as=['document'])
+        self.assertEqual(response.status_code, 201, response.content)
+        sent = self.conv.messages.get(message_type=Message.DOCUMENT)
+        self.assertEqual((sent.media_name, sent.media_mime), ('Roll-up final artwork.jpg', 'image/jpeg'))
+        self.assertEqual(sent.media_size, len(jpeg()))               # not converted, not shrunk
+
+    def test_a_video_plays_in_the_chat(self):
+        clip = SimpleUploadedFile('banner.mp4', b'\x00\x00\x00\x18ftypmp42', content_type='video/mp4')
+        response = self.reply([clip], send_as=['video'])
+        self.assertEqual(response.status_code, 201, response.content)
+        sent = self.conv.messages.get(message_type=Message.VIDEO)
+        self.assertEqual(sent.media_mime, 'video/mp4')
+
+    def test_a_video_whatsapp_cannot_play_goes_as_a_document(self):
+        clip = SimpleUploadedFile('banner.mov', b'moov', content_type='video/quicktime')
+        self.assertEqual(self.reply([clip], send_as=['video']).status_code, 201)
+        self.assertTrue(self.conv.messages.filter(message_type=Message.DOCUMENT, media_name='banner.mov').exists())
+
+    def test_each_file_goes_its_own_way(self):
+        photo = SimpleUploadedFile('proof.jpg', jpeg(), content_type='image/jpeg')
+        art = SimpleUploadedFile('art.jpg', jpeg(), content_type='image/jpeg')
+        self.assertEqual(self.reply([photo, art], send_as=['photo', 'document']).status_code, 201)
+        self.assertEqual(self.conv.messages.filter(message_type=Message.IMAGE).count(), 1)
+        self.assertEqual(self.conv.messages.filter(message_type=Message.DOCUMENT, media_name='art.jpg').count(), 1)
+
+    def test_a_video_is_delivered_as_a_video(self):
+        from apps.communications.services import whatsapp_outbound
+        clip = SimpleUploadedFile('banner.mp4', b'\x00\x00\x00\x18ftypmp42', content_type='video/mp4')
+        self.reply([clip], send_as=['video'])
+        sent = self.conv.messages.get(message_type=Message.VIDEO)
+        with patch('apps.communications.services.whatsapp_client.send_video', return_value='wamid.V') as video:
+            whatsapp_outbound.deliver(sent.pk)
+        video.assert_called_once()
+        self.assertEqual(video.call_args.kwargs['mime'], 'video/mp4')
+
     def test_a_note_keeps_the_file_for_staff_and_sends_nothing(self):
         pdf = SimpleUploadedFile('approval.pdf', b'%PDF-1.4 ok', content_type='application/pdf')
         response = self.reply([pdf], body='Approved by phone', is_internal_note='true')

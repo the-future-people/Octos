@@ -9,6 +9,14 @@ class MessageSerializer(serializers.ModelSerializer):
     report = serializers.SerializerMethodField()
     # Customer files (25 Nov 2026): kept, the day it's deleted, or the record of its deletion.
     file_keep = serializers.SerializerMethodField()
+    # A quote staff sent from the inbox (25 Nov 2026): its card follows the order.
+    quote = serializers.SerializerMethodField()
+
+    def get_quote(self, obj):
+        if obj.kind != 'quote' or not obj.order_id:
+            return None
+        from apps.communications.services.quotes import card
+        return card(obj)
 
     def get_file_keep(self, obj):
         from apps.communications.services import customer_files
@@ -61,7 +69,7 @@ class MessageSerializer(serializers.ModelSerializer):
             'id', 'conversation', 'direction', 'channel', 'message_type', 'status', 'error', 'kind',
             'body', 'media_url', 'media_file', 'media_id', 'media_name', 'media_mime',
             'media_size', 'media_pages', 'media_info', 'sent_by', 'sent_by_name',
-            'reply_to', 'reply_preview', 'report', 'file_keep',
+            'reply_to', 'reply_preview', 'report', 'file_keep', 'quote',
             'external_id', 'call_duration', 'caller_id',
             'is_internal_note', 'created_at',
         ]

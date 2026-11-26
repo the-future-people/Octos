@@ -1190,3 +1190,6 @@ Internal detail belongs in the log, not on the screen.
 ## 23 Nov 2026
 - In a PowerShell move loop, work out each file's destination inside the loop (`$target = Join-Path ...`) and stop the loop if it comes out empty. A failed `Join-Path` left an old `$dest` behind, and 20 files overwrote print-octos/src/partners/usePartner.js.
 - A fix for "customer X wasn't served" must cover every way a customer reaches us: by phone number, and by a WhatsApp username with no number. The thank-you only looked chats up by phone, so five username customers were never thanked.
+
+## 25 Nov 2026
+- Test a new Octos tool the way Octos calls it, in order (prepare_order, then pay_at_counter), not only the service on a state set up by hand. be21a's tests built AWAITING_PAYMENT orders, so nobody saw that a freshly prepared (DRAFT) order was refused at the counter.

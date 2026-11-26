@@ -487,6 +487,9 @@ class ConversationAtCounterView(APIView):
 # ── Files in replies, and starting a chat (7 Nov 2026, Khofi) ─────────────
 MAX_ATTACHMENT = 16 * 1024 * 1024        # what we accept; WhatsApp's own limits are higher
 MAX_PHOTO = 5 * 1024 * 1024              # WhatsApp's limit for an image sent as a photo
+MAX_VIDEO = 16 * 1024 * 1024             # WhatsApp's limit for a video that plays in the chat
+VIDEO_MIMES = ('video/mp4', 'video/3gpp')
+SEND_AS = ('photo', 'document', 'video')
 
 
 def _as_png(content):
@@ -502,9 +505,22 @@ def _as_png(content):
         return None
 
 
-def _send_file(conversation, user, content, name, mime):
-    """One file to the customer: a photo as a photo when it can be, anything else as a document."""
+def _send_file(conversation, user, content, name, mime, send_as=None):
+    """
+    One file to the customer, the way staff chose (25 Nov 2026): a photo as
+    a picture, a video that plays, or anything as a document, exactly as it
+    is (full quality: for artwork to print). With no choice: a picture as a
+    photo when it can be, anything else as a document. A photo or video
+    WhatsApp can't take as one goes as a document.
+    """
     from apps.communications.services import whatsapp_outbound
+    if send_as == 'document':
+        return _caption_optional(lambda body: whatsapp_outbound.send_text(
+            conversation, body, sent_by=user, document=content, filename=name,
+            document_mime=mime or 'application/octet-stream'), name)
+    if send_as == 'video' and mime in VIDEO_MIMES and len(content) <= MAX_VIDEO:
+        return _caption_optional(lambda body: whatsapp_outbound.send_text(
+            conversation, body, sent_by=user, video=content, filename=name, video_mime=mime), name)
     if mime in ('image/jpeg', 'image/png', 'image/webp') and len(content) <= MAX_PHOTO:
         png = content if mime == 'image/png' else _as_png(content)
         if png is not None and len(png) <= MAX_PHOTO:
@@ -539,23 +555,28 @@ def _reply_with_files(request, conversation, files):
         return Response({'detail': 'Files can only be sent on WhatsApp. Save it as a note instead.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
+    # How each file goes, in the order they came: photo, document or video.
+    ways = request.data.getlist('send_as') if hasattr(request.data, 'getlist') else []
     made = []
     try:
-        for f in files:
+        for i, f in enumerate(files):
+            send_as = ways[i] if i < len(ways) and ways[i] in SEND_AS else None
             content, name = f.read(), f.name
             mime = (f.content_type or 'application/octet-stream').split(';')[0]
             if is_note:
                 note = Message(
                     conversation=conversation, direction=Message.OUTBOUND, channel=Message.SYSTEM,
                     sent_by=request.user, is_internal_note=True, body=text or name,
-                    message_type=Message.IMAGE if mime.startswith('image/') else Message.DOCUMENT,
+                    message_type=(Message.IMAGE if mime.startswith('image/') and send_as != 'document'
+                                  else Message.VIDEO if mime.startswith('video/') and send_as != 'document'
+                                  else Message.DOCUMENT),
                     media_name=name, media_mime=mime, media_size=len(content),
                 )
                 note.media_file.save(name, ContentFile(content), save=False)
                 note.save()
                 made.append(note)
             else:
-                made.append(_send_file(conversation, request.user, content, name, mime))
+                made.append(_send_file(conversation, request.user, content, name, mime, send_as))
         if text and not is_note:
             made.append(whatsapp_outbound.send_text(conversation, text, sent_by=request.user,
                                                     reply_to=_quoted_in(conversation, request.data.get('reply_to'))))
@@ -909,3 +930,62 @@ class MessageKeepView(APIView):
         customer_files.keep([message], request.user, keep_it)
         message.refresh_from_db()
         return Response(_file_row(message))
+
+
+# ── A quote from the inbox (25 Nov 2026) ─────────────────────────────────────
+# services/quotes.py. The panel prices as it is built (price), then sends it
+# with a payment link, for the counter with a pickup code, or as a proforma.
+
+class QuoteServicesView(APIView):
+    """GET /api/v1/communications/quote/services/   what can be quoted, with what each price needs"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.communications.services import quotes
+        return Response({'services': quotes.catalogue()})
+
+
+class ConversationQuotePriceView(APIView):
+    """POST /api/v1/communications/<id>/quote/price/   {lines}: the price as it stands, nothing saved"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import quotes
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        lines = request.data.get('lines')
+        if not isinstance(lines, list):
+            return Response({'detail': 'lines must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(quotes.preview(conversation, lines))
+
+
+class ConversationQuoteSendView(APIView):
+    """
+    POST /api/v1/communications/<id>/quote/send/
+    {lines, how: link|counter|proforma, pdf: bool, customer: {...} for a proforma to someone new}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from apps.communications.services import quotes
+        conversation = _visible(request, pk)
+        if conversation is None:
+            return _not_found()
+        lines = request.data.get('lines')
+        if not isinstance(lines, list) or not lines:
+            return Response({'detail': 'Add a line first.'}, status=status.HTTP_400_BAD_REQUEST)
+        customer = request.data.get('customer')
+        result = quotes.send(conversation, request.user, lines, str(request.data.get('how') or ''),
+                             pdf=request.data.get('pdf', True) not in (False, 'false', 0, '0'),
+                             customer=customer if isinstance(customer, dict) else None)
+        if result.get('needs_customer_details'):
+            return Response({'needs_customer': True,
+                             'detail': 'A proforma goes to a registered customer. Add their name to register them.'},
+                            status=status.HTTP_409_CONFLICT)
+        if not result.get('success'):
+            return Response({'detail': result.get('error') or 'The quote could not be sent.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        messages = result.pop('messages', [])
+        return Response({**result, 'messages': MessageSerializer(messages, many=True).data},
+                        status=status.HTTP_201_CREATED)

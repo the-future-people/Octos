@@ -119,7 +119,12 @@ def reserve(order, conversation=None, now=None):
             return job
     if order.is_paid or order.status in (OnlineOrder.Status.PAID, OnlineOrder.Status.CONVERTED):
         raise CounterRefused('This order is already paid for.')
-    if order.status != OnlineOrder.Status.AWAITING_PAYMENT or not order.line_items:
+    # An order just prepared is still a DRAFT: no link was ever sent, the
+    # customer went straight to "I'll pay when I come" (25 Nov 2026: this
+    # refused every such order, and only ones sent a link first got through).
+    if order.status not in (OnlineOrder.Status.DRAFT, OnlineOrder.Status.AWAITING_PAYMENT) or not order.line_items:
+        raise CounterRefused('There is no agreed order to keep for the counter.')
+    if order.status == OnlineOrder.Status.DRAFT and order.expires_at and order.expires_at <= now:
         raise CounterRefused('There is no agreed order to keep for the counter.')
     if not order.branch_id:
         raise CounterRefused('The order has no branch.')
@@ -129,6 +134,13 @@ def reserve(order, conversation=None, now=None):
     customer, known = known_customer(order, conversation, now)
     total = sum((Decimal(str(line.get('total') or '0')) for line in order.line_items), Decimal('0'))
     ahead = may_print_ahead(total, customer, known)
+    if ahead and order.promised_for is None:
+        # The ready time is fixed when a link goes out; with no link, now.
+        from apps.storefront.services.conversion import promise_for
+        promised = promise_for(order)
+        if promised is not None:
+            OnlineOrder.objects.filter(pk=order.pk).update(promised_for=promised)
+            order.promised_for = promised
 
     for attempt in range(5):
         try:

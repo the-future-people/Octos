@@ -34,7 +34,7 @@ from apps.communications.models import Message
 logger = logging.getLogger(__name__)
 
 
-def prepare_order(conversation, lines, accept_warnings=False, branches=()):
+def prepare_order(conversation, lines, accept_warnings=False, branches=(), taken_by=None):
     from apps.jobs.models import Service
     from apps.jobs.services.availability import can_make, counts_pages, sheets_for
     from apps.storefront.batch_commit import _attach_copies
@@ -106,7 +106,7 @@ def prepare_order(conversation, lines, accept_warnings=False, branches=()):
     with transaction.atomic():
         order = OnlineOrder.objects.create(
             lead=lead, branch=branch, line_items=priced, full_total=total, total=total,
-            notes=f'Taken by Octos on WhatsApp (conversation {conversation.pk}).',
+            notes=_notes(conversation, taken_by),
         )
         order.touch_expiry()
         order.save(update_fields=['expires_at'])
@@ -242,6 +242,19 @@ def pay_at_counter(conversation, order_number, now=None):
     return {'success': True, 'code': job.counter_code, 'printed_ahead': False, 'total': total,
             'say': ("Tell them warmly it's no problem: their order is prepared and we'll print it as soon as they "
                     "arrive; they just show this code at the counter and pay there. Don't offer the link again.")}
+
+
+def _notes(conversation, taken_by=None):
+    """
+    The order's marker: payment reminders, the desk and chat_orders find a
+    WhatsApp order by these words. A quote staff sent from the inbox
+    (25 Nov 2026) carries the same marker, and says who sent it.
+    """
+    marker = f'Taken by Octos on WhatsApp (conversation {conversation.pk}).'
+    if taken_by is None:
+        return marker
+    who = (getattr(taken_by, 'full_name', '') or getattr(taken_by, 'email', '') or 'staff').strip()
+    return f'{marker} Quoted by {who} in the inbox.'
 
 
 def _lead_for(conversation):

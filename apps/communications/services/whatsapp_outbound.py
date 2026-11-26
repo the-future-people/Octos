@@ -57,7 +57,7 @@ class WindowClosed(Exception):
 
 
 def send_text(conversation, body, sent_by=None, kind='', image=None, filename='card.png', document=None,
-              document_mime='application/pdf', reply_to=None):
+              document_mime='application/pdf', reply_to=None, video=None, video_mime='video/mp4'):
     """
     Queue free text to the customer. Returns the QUEUED Message.
     sent_by is the staff member, or None when Octos is the sender.
@@ -76,7 +76,8 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
         conversation=conversation,
         direction=Message.OUTBOUND,
         channel=Message.WHATSAPP,
-        message_type=Message.IMAGE if image else (Message.DOCUMENT if document else Message.TEXT),
+        message_type=(Message.IMAGE if image else Message.DOCUMENT if document
+                      else Message.VIDEO if video else Message.TEXT),
         reply_to=reply_to,
         status=Message.QUEUED,
         body=body,
@@ -90,6 +91,14 @@ def send_text(conversation, body, sent_by=None, kind='', image=None, filename='c
         Message.objects.filter(pk=message.pk).update(
             media_file=message.media_file.name, media_name=filename,
             media_mime=document_mime, media_size=len(document),
+        )
+
+    if video:
+        # A video staff chose to send as one (25 Nov 2026): it plays in the chat.
+        message.media_file.save(filename, ContentFile(video), save=False)
+        Message.objects.filter(pk=message.pk).update(
+            media_file=message.media_file.name, media_name=filename,
+            media_mime=video_mime, media_size=len(video),
         )
 
     if image:
@@ -231,6 +240,11 @@ def deliver(message_id):
                 content = handle.read()
             wamid = whatsapp_client.send_image(phone, content, os.path.basename(message.media_file.name),
                                                caption=message.body)
+        elif message.message_type == Message.VIDEO and message.media_file:
+            with message.media_file.open('rb') as handle:
+                content = handle.read()
+            wamid = whatsapp_client.send_video(phone, content, message.media_name or os.path.basename(message.media_file.name),
+                                               caption=message.body, mime=message.media_mime or 'video/mp4')
         else:
             quoted = message.reply_to.external_id if message.reply_to_id and message.reply_to else None
             wamid = (whatsapp_client.send_text(phone, message.body, reply_to=quoted) if quoted

@@ -136,3 +136,52 @@ takes the order either way; nothing reaches the floor unless it's paid or agreed
   when Octos took it; it never alerts or escalates before then.
 - Octos's replies are checked for the pickup code like prices and times (checker CODE).
 - octos-web: Work tab checked on screen at desktop and phone width with sample jobs.
+
+# Quote in the chat (25 Nov 2026)
+
+Mock agreed: claude.ai Design "Quote in the chat". Staff build a quote beside
+the chat and send it without leaving it, on the same foundations as Octos's
+orders, so payment, the front desk, reminders and receipts work unchanged.
+
+## Decisions
+- Prices only from the engine (price_lines / ProformaEngine), never typed.
+- Three ways: payment link (default), pay at the counter (pickup code),
+  proforma PDF. Tick "Attach the quote as a PDF" (on by default) for the first two.
+- Pay at the counter for staff follows Octos's rule (counter_orders.reserve:
+  known customer, never a no-show, up to GHS 50 is printed ahead; otherwise on
+  arrival). Khofi didn't change it; asked in the delivery note.
+- Proformas are issued by the Octos account (the engine's roles), noting who asked.
+- Sending a quote takes the chat over from Octos, like any staff reply.
+
+## Backend (be21f)
+- [x] 1. Fix: reserve() refused a DRAFT order, so Octos's pay_at_counter right
+         after prepare_order failed ("no agreed order"). Accept an open DRAFT too.
+- [x] 2. prepare_order(taken_by=user): notes say who quoted, chat marker unchanged
+- [x] 3. Message.order (FK to OnlineOrder), migration
+- [x] 4. services/quotes.py: services list, preview (lines, total, ready), send
+- [x] 5. Quote PDF (jobs/pdf/quote_pdf.py), house style
+- [x] 6. send_proforma(sent_by, asked_by) for staff
+- [x] 7. API: GET quote/services/, POST <id>/quote/price/, POST <id>/quote/send/
+- [x] 8. Serializer: quote card data (lines, total, status, code, ready)
+- [x] 9. Tests
+
+## Frontend (octos-web)
+- [x] 10. QuotePanel.jsx: search a service, its spec fields, add-ons as chips,
+          file from this chat, more lines, live price, ready time, three sends,
+          PDF tick, customer details when a proforma needs them, Open in Proformas
+- [x] 11. Inbox: Quote button by the paperclip (computer) and in "+" (phone);
+          panel beside the chat, full screen on a phone; quote card in the thread
+
+## Verify
+- [x] 12. Full test run; build; screenshots of panel and card on computer and phone
+
+## Review (25 Nov 2026)
+- be21f backend: 15 new tests (tests_quotes); full suite run before delivery.
+- The DRAFT fix matters beyond the panel: until now Octos's own "pay when I
+  come" only worked if a payment link had gone out first.
+- Quote PDF checked by eye (rendered to PNG): per-copy unit price, so
+  quantity x unit price reads as the line total.
+- Panel and card checked in a harness on a computer (1440, 1680) and an
+  iPhone 13: the card widens on a phone so the order number and lines fit.
+- be21d (video sends) was never pushed; its four files ride with be21f,
+  because views.py carries both.

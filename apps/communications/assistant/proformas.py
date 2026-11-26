@@ -91,10 +91,15 @@ def _raw_lines(lines):
     return raw
 
 
-def send_proforma(conversation, lines, customer_details=None):
+def send_proforma(conversation, lines, customer_details=None, sent_by=None):
     """
     Issue a proforma for these lines and send its PDF in this chat.
     Returns what happened, for Octos to tell the customer in its own words.
+
+    sent_by: a person who sent it from the inbox's Quote panel (25 Nov
+    2026). Still issued by the Octos account, whose prices only ever come
+    from the engine (the rule PROFORMA_ROLES guards), noting who asked; the
+    message in the chat is theirs.
     """
     from apps.jobs.pdf.proforma_pdf import build_proforma_pdf
     from apps.jobs.services.proforma_engine import ProformaEngine
@@ -125,7 +130,8 @@ def send_proforma(conversation, lines, customer_details=None):
             customer=customer, raw_lines=raw, actor=actor,
             contact_person=(details.get('contact_person') or '').strip(),
             contact_phone=conversation.contact_phone,
-            notes='Issued by Octos on WhatsApp.')
+            notes=(f'Sent by {sent_by.full_name or sent_by.email} from the WhatsApp inbox.' if sent_by
+                   else 'Issued by Octos on WhatsApp.'))
         proforma = engine.issue(proforma, actor=actor)
     except (ValueError, PermissionError) as refused:
         return {'error': str(refused)}
@@ -135,7 +141,8 @@ def send_proforma(conversation, lines, customer_details=None):
     valid = proforma.valid_until.strftime('%-d %B %Y') if hasattr(proforma.valid_until, 'strftime') else str(proforma.valid_until)
     caption = f'Proforma {proforma.proforma_number}: {total}, valid until {valid}.'
     try:
-        whatsapp_outbound.send_text(conversation, caption, document=pdf, filename=f'{proforma.proforma_number}.pdf')
+        whatsapp_outbound.send_text(conversation, caption, document=pdf, filename=f'{proforma.proforma_number}.pdf',
+                                    sent_by=sent_by, kind='proforma' if sent_by else '')
         sent = True
     except Exception:
         logger.exception('Could not send proforma %s', proforma.proforma_number)

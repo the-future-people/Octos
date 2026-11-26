@@ -41,7 +41,7 @@ REASONS = {
     'other':   'Something else',
 }
 OCTOS_REASON = 'Deleted by Octos after 14 days'
-OUR_KINDS = ('receipt', 'proforma', 'preview')
+OUR_KINDS = ('receipt', 'proforma', 'preview', 'quote_pdf')
 
 
 class FilesRefused(Exception):
