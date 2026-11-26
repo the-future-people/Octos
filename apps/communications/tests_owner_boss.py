@@ -503,18 +503,18 @@ class OnlyTheBossWebhookTests(WebhookTestCase):
         boss_reply.assert_not_called()
 
     def test_his_number_reaches_the_boss_line_and_no_chat(self):
-        with patch('apps.communications.tasks.answer_owner.delay') as answer, \
+        with patch('apps.communications.tasks.answer_owner.apply_async') as answer, \
                 self.captureOnCommitCallbacks(execute=True):
             self.deliver(delivery(text('Buddy how is it going', wamid='wamid.B1', sender=OWNER_WA)))
         self.assertFalse(Conversation.objects.exists())
-        answer.assert_called_once_with(OwnerMessage.objects.get().pk)
+        answer.assert_called_once_with((OwnerMessage.objects.get().pk,), countdown=4)
 
     def test_with_a_username_he_is_still_known_by_his_number(self):
         payload = delivery({'from': 'GH.abc123', 'id': 'wamid.U1', 'timestamp': '1762270000',
                             'type': 'text', 'text': {'body': 'how far'}})
         payload['entry'][0]['changes'][0]['value']['contacts'] = [
             {'profile': {'name': 'Khofi', 'username': 'khofi'}, 'user_id': 'GH.abc123', 'wa_id': OWNER_WA}]
-        with patch('apps.communications.tasks.answer_owner.delay'):
+        with patch('apps.communications.tasks.answer_owner.apply_async'):
             self.deliver(payload)
         self.assertFalse(Conversation.objects.exists())
         self.assertEqual(OwnerMessage.objects.get().body, 'how far')

@@ -559,7 +559,14 @@ def show_typing_for(message_id):
         _show_typing(message)
 
 def _plain(message):
-    return re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (message.body or '').strip().lower()))
+    """
+    Lower case, spaces tidied, the closing dots gone, and a letter typed
+    three or more times kept once: "Thank youuu" (Loretta, 24 Nov 2026) and
+    "okkk" are "thank you" and "ok". No English word has a letter three
+    times running, so nothing real is changed.
+    """
+    text = re.sub(r'\s+', ' ', re.sub(r'[\s.!]+$', '', (message.body or '').strip().lower()))
+    return re.sub(r'([a-z])\1{2,}', r'\1', text)
 
 
 def _only_emoji(text):

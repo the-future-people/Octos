@@ -227,8 +227,17 @@ def receive(raw):
     except IntegrityError:
         return False
     from apps.communications.tasks import answer_owner
-    transaction.on_commit(lambda: answer_owner.delay(message.pk))
+    if reply_id or message.media_id:
+        transaction.on_commit(lambda: answer_owner.delay(message.pk))
+    else:
+        # Words wait a moment for the next ones (26 Nov 2026): "No i think i
+        # get it now" and "its correct", a second apart, got two answers.
+        transaction.on_commit(lambda: answer_owner.apply_async((message.pk,), countdown=GATHER))
     return True
+
+
+# Seconds his words wait for more before Octos answers them together.
+GATHER = 4
 
 
 # What he can send that Octos keeps to look at: the photo itself, not just its caption.
@@ -293,6 +302,9 @@ def answer(pk):
         except Exception:
             logger.exception('Files tap %r failed', message.reply_id)
     sent = flush()
+    if not message.reply_id and OwnerMessage.objects.filter(
+            direction=OwnerMessage.IN, reply_id='', created_at__gt=message.created_at).exists():
+        return                                   # he wrote again: that one answers both
     if message.reply_id:
         # A tap is answered by what it opened; "Open" with nothing waiting
         # gets today so far rather than silence.
@@ -411,7 +423,9 @@ def _job(digits):
         rows.append(('Promised', timezone.localtime(job.estimated_ready_at).strftime('%a %d %b %H:%M')))
     if job.promise_state in ('AT_RISK', 'LATE', 'BROKEN'):
         rows.append(('Promise', job.promise_state.replace('_', ' ').lower()))
-    lines = [f'🔎 `{job.job_number}`', job.title + (f' · {customer}' if customer else ''), table(rows)]
+    from apps.jobs.services.job_names import job_name
+    lines = [f'🔎 *{job_name(job)}*', job.title + (f' · {customer}' if customer else ''), table(rows),
+             f'_{job.job_number}_']
     if job.discount_amount:
         lines.append(f'> 🏷️ {amount(job.discount_amount)} off · {job.discount_reason}')
     return tell(OwnerMessage.ANSWER, '\n'.join(lines))
@@ -425,7 +439,7 @@ def _decide(reply_id):
     cut = PriceCut.objects.select_related('job', 'proforma', 'asked_by').filter(pk=cut_id or 0).first()
     if cut is None or owner is None:
         return tell(OwnerMessage.ANSWER, "I couldn't find that discount any more.")
-    label = cut.job.job_number if cut.job_id else cut.proforma.proforma_number
+    label = _job_name(cut.job) if cut.job_id else cut.proforma.proforma_number
     asker = cut.asked_by.first_name if cut.asked_by_id else 'The manager'
     try:
         if action == 'approve':
@@ -463,7 +477,7 @@ def _say_tap(reply_id):
 
 def _cut_message(cut):
     target = cut.job or cut.proforma
-    label = cut.job.job_number if cut.job_id else cut.proforma.proforma_number
+    label = _job_name(cut.job) if cut.job_id else cut.proforma.proforma_number
     customer = target.customer.full_name if getattr(target, 'customer_id', None) else ''
     pct = (cut.before_total - cut.new_total) / cut.before_total * 100 if cut.before_total else 0
     rows = [('Price', amount(cut.before_total)), ('Asked', amount(cut.new_total)), ('Off', f'{pct:.1f}%')]
@@ -472,7 +486,7 @@ def _cut_message(cut):
     else:
         rows.append(('Cost', 'not all set'))
     who = cut.asked_by.full_name if cut.asked_by_id else 'The manager'
-    lines = ['⚠️ *A discount is waiting for you*', RULE, f'`{label}`']
+    lines = ['⚠️ *A discount is waiting for you*', RULE, f'*{label}*']
     if customer:
         lines.append(customer)
     lines += [table(rows), RULE, f'{who}: _"{cut.reason}"_']
@@ -484,7 +498,7 @@ def _cut_message(cut):
 @_safely
 def price_cut_waiting(cut):
     body, buttons = _cut_message(cut)
-    label = cut.job.job_number if cut.job_id else cut.proforma.proforma_number
+    label = _job_name(cut.job) if cut.job_id else cut.proforma.proforma_number
     return tell(OwnerMessage.URGENT, body, buttons=buttons, key=f'cut:{cut.pk}', ref=f'cut:{cut.pk}',
                 knock=f'A discount on {label} is waiting for your OK: GHS {cut.new_total:,.2f}.')
 
@@ -556,6 +570,11 @@ def _unanswered(conversation, limit=3):
     return theirs
 
 
+def _job_name(job):
+    from apps.jobs.services.job_names import job_name
+    return job_name(job)
+
+
 def _clip(text, limit=160):
     text = re.sub(r'\s+', ' ', text).strip()
     return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
@@ -565,10 +584,12 @@ def _clip(text, limit=160):
 def job_slipping(job, word, when):
     customer = job.customer.full_name if job.customer_id else ''
     heading = '🔴 *Past its promise*' if word == 'late' else '🟠 *At risk of running late*'
-    body = (f'{heading}\n`{job.job_number}` · {job.title}' + (f' · {customer}' if customer else '')
+    from apps.jobs.services.job_names import job_name
+    name = job_name(job)
+    body = (f'{heading}\n*{name}*' + (f' · {customer}' if customer else '')
             + f'\n> Now about {when}')
     return tell(OwnerMessage.URGENT, body, key=f'promise:{job.pk}:{word}:{timezone.localdate():%Y%m%d}',
-                knock=f'{job.job_number} is {word}: now about {when}.')
+                knock=f'{name} is {word}: now about {when}.')
 
 
 @_safely

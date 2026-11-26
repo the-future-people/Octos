@@ -25,6 +25,9 @@ REF = re.compile(r'\bref(?:erence)?\.?\s*(?:no\.?\s*)?#?\s*(\d{2,})\b', re.IGNOR
 # A pickup code (24 Nov 2026): a wrong one sends a customer to the counter
 # with a number nobody has.
 CODE = re.compile(r'\bcode(?:\s+is)?\s*:?\s*(\d{4,6})\b', re.IGNORECASE)
+# A job by its short number (26 Nov 2026): "#5286", "job 5286". Jobs are
+# now named that way, so a wrong one points at somebody else's job.
+JOB = re.compile(r'(?:(?<![\w&])#|\bjob\s+(?:no\.?\s*|number\s*)?#?)(\d{3,6})\b', re.IGNORECASE)
 
 
 def unverified(reply, facts):
@@ -44,6 +47,9 @@ def unverified(reply, facts):
     for ref in sorted(set(REF.findall(reply))):
         if ref not in facts:
             problems.append(f'ref {ref}')
+    for job in sorted(set(JOB.findall(reply))):
+        if job not in (facts or ''):
+            problems.append(f'job #{job}')
     for code in sorted(set(CODE.findall(reply))):
         if not re.search(rf'\b{code}\b', facts or ''):
             problems.append(f'code {code}')

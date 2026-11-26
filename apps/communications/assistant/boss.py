@@ -103,7 +103,9 @@ He reads you on his phone between other things. A lot at once is hard to digest;
 - If you said earlier that you couldn't see something and now you can, you've been given a new look-up since: say "I can see it now, boss" and give the answer. Never "I was wrong" or "I should have checked properly" for that, even when he asks "are you sure?".
 - When he asks for the full list or the details, then give them in full.
 - Short lines, a blank line between the parts. No headings, no long paragraphs.
-- *Bold* only for the one figure that matters most. Job numbers in backticks, like `WL-06112`.
+- *Bold* only for the one figure that matters most.
+- Call a job by its name as the look-up gives it ("Kwabena's Flexy Banner (#5286)"), or "#5286" once it's clear which job. The full number (FP-WLB-2026-05286) only when he asks for it.
+- A job number you put in a draft or an approved message, check first with find_job that it is that customer's and that job. Never offer one you haven't checked.
 - An emoji or two where a person would use one. Never a wall of them.
 - Like this, for "Has Kingsford issued any invoice today?":
   "No formal invoices today, boss.
@@ -122,6 +124,7 @@ NEVER GUESS
 - Times are Accra time.
 
 WHAT YOU CAN DO
+- You can look up the price list (price_list, then price): the same price a customer or the counter gets. When he asks what something costs, look it up; never say you can't see the price list.
 - You can look at anything on the floor: who's in and on the till, the payment queue, today's jobs and who took them, production, money, who owes us, stock on the shelf, any job or customer, any member of staff's work, WhatsApp chats and what customers said, machines, discounts waiting. A customer with no chat, or who hasn't written in 24 hours, can still be reached: never tell him you have no way to message them. reach_customer gives the approved messages word for word; show him the one that fits (quote it exactly), and send it with send_approved only when he says yes. Once they reply, you can write to them freely. Only offer messages reach_customer lists as approved: one still with Meta can't go yet, so say so. You CAN send receipts (find_receipt shows exactly what goes, send_receipt sends it on his yes) and statements, to anyone with a number, whether or not they ever wrote. What a customer owes is one picture: statement gives jobs owed from before, new work and the total due, the same as the statement they receive. When he says a customer's old invoice was delivered but never recorded, record_owed puts it where money owed shows; then send_statement on his word. A customer paying part pays the job they point to: never say a payment clears the oldest first. You can open the files in a chat too (open_file, with the file_id from read_chat): the text of PDFs and Word files, and photos. When the answer is in a file (was the correction made, what did they send), open it before you answer, and never tell him you can't read a file you haven't tried. If a file can't be opened, say so plainly.
 - When he sends you a photo, video or GIF himself (the chat shows "[he sent a photo, photo_id N]") and asks what it is or whether we can make it, call look_at_photo with that photo_id. A photo he sends is his own: never go looking in customer chats for it. Tell him what it is, whether we can make it and why, how, the price guide exactly as it comes (none if it gives none) with what it assumes, and what would firm it up. If he says he sent a photo and the chat shows none, say it hasn't reached you and ask him to send it again.
 - "Invoice" can mean two things at Farhat: a job taken at the counter (its ticket goes to the cashier) or a formal invoice or proforma. When he asks about invoices, staff_activity gives both: say which is which, briefly.
@@ -224,8 +227,24 @@ TOOL_SPECS = [
          'which': {'type': 'string', 'enum': list(look.JOB_LISTS)}, **BRANCH}, 'required': ['which']}},
     {'name': 'find_job',
      'description': ("A job by its number (any part of it, like 06112), or a customer's recent jobs by "
-                     'name or phone number: status, stage, price, paid, balance, promise, who took it.'),
+                     'name or phone number: status, stage, price, paid, balance, promise, who took it, and '
+                     'every line of the job (what, pages, sides, copies, size, price; finishing under its line).'),
      'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
+    {'name': 'price_list',
+     'description': ('Price list: services matching what he names ("A4 black and white both sides", '
+                     '"flexy banner", "binding"), each with its code, what its price needs and its add-ons.'),
+     'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
+    {'name': 'price',
+     'description': ('The price of a service from the price list, the same price a customer and the counter '
+                     'get: service code (from price_list), its specifications (keys from its needs, e.g. '
+                     'pages, width_in, height_in), quantity and add-on codes. If something is missing, the '
+                     'result says what.'),
+     'input_schema': {'type': 'object', 'properties': {
+         'service_code': {'type': 'string'},
+         'specifications': {'type': 'object'},
+         'quantity': {'type': 'integer', 'minimum': 1},
+         'addon_codes': {'type': 'array', 'items': {'type': 'string'}},
+     }, 'required': ['service_code']}},
     {'name': 'money_report',
      'description': ('Money collected in a period, by payment method and by branch; jobs taken and finished; '
                      'promises kept; discounts given; what is owed to us right now; and compared_with: the '
@@ -391,6 +410,16 @@ def _run_tool(name, args, sent):
         return look.job_list(args.get('which', ''), args.get('branch', ''))
     if name == 'find_job':
         return look.find_job(str(args.get('query') or ''))
+    if name in ('price_list', 'price'):
+        # The customer side's own price list (26 Nov 2026): he asked what a
+        # double-sided A4 costs and Octos had no way to tell him.
+        from apps.communications.assistant import tools as prices
+        if name == 'price_list':
+            return prices.find_services(str(args.get('query') or ''))
+        from apps.organization.models import Branch
+        return prices.quote(str(args.get('service_code') or ''), args.get('specifications') or {},
+                            args.get('quantity') or 1, args.get('addon_codes') or (),
+                            branches=list(Branch.objects.filter(is_active=True, is_trading=True)))
     if name == 'money_report':
         return look.money_report(args.get('period', 'today'), args.get('branch', ''))
     if name == 'whatsapp_chats':
@@ -593,11 +622,18 @@ def follow_up(what, set_at, now=None, kind='CHECK'):
     else:
         ask = (f'[Octos reminder, not a new message from the boss: at {when_set} he asked you to check back on '
                f'this: "{what}". Look now and report in a line or two. If nothing has changed, say so briefly.]')
+    # Already settled since he asked ("the lights are back", and the customer
+    # told): nothing to say (26 Nov 2026, a reminder that came after).
+    ask = ask[:-1] + (f' If the chat since he asked shows this is already settled (he told you, or it is done), '
+                      f'reply with exactly {QUIET} and nothing else.]')
     if turns and turns[-1]['role'] == 'user':
         turns[-1]['content'] += '\n\n' + ask
     else:
         turns.append({'role': 'user', 'content': ask})
-    return _answer(turns, told, None, now, f'{kind.lower()} {what!r}')
+    return _answer(turns, told, None, now, f'{kind.lower()} {what!r}', quiet_ok=True)
+
+
+QUIET = 'QUIET'
 
 
 def reply(message, now=None):
@@ -612,7 +648,7 @@ def reply(message, now=None):
     return _answer(turns, told, message, now, f'message {message.pk}')
 
 
-def _answer(turns, told, message, now, label):
+def _answer(turns, told, message, now, label, quiet_ok=False):
     started = time.monotonic()
     usage = {'input': 0, 'output': 0, 'cache_read': 0}
     calls, sent = [], []
@@ -632,6 +668,9 @@ def _answer(turns, told, message, now, label):
             if problems:
                 logger.warning("Boss's line: withheld a reply with unverified %s: %r", problems, text)
                 text = UNVERIFIED
+        if quiet_ok and text.strip().strip('.').upper() == QUIET:
+            logger.info("Boss's line: %s already settled, nothing sent", label)
+            return ''
         if not text and not sent:
             text = "I'm here, boss 👋 What do you want me to check?"
         if text:

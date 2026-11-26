@@ -20,6 +20,8 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.jobs.services.job_names import job_name
+
 ZERO = Decimal('0')
 DEAD = ('DRAFT', 'CANCELLED', 'VOIDED')
 SHORT_METHODS = {'Mobile Money': 'MoMo', 'Paid Online': 'Online', 'Credit Account': 'Credit'}
@@ -157,12 +159,45 @@ def jobs_for(ids, start, end):
     }
 
 
+def last_open_days(day):
+    """
+    (the day the brief reports, the day it is compared with) (26 Nov 2026).
+    Usually yesterday, against the open day before it. After a closed day
+    (Monday after Sunday), the last open day, against the same weekday a
+    week earlier: "Collected Saturday" and "on last Saturday", never
+    "GHS 0.00, down 100%" for a Sunday nobody worked.
+    """
+    from apps.organization.models import Branch
+    from apps.organization.services import hours
+    trading = list(Branch.objects.filter(is_active=True, is_trading=True))
+
+    def open_on(d):
+        return not trading or any(hours.is_trading_day(b, d) for b in trading)
+
+    def back(d):
+        for _ in range(7):
+            d -= timedelta(days=1)
+            if open_on(d):
+                return d
+        return d
+
+    yday = back(day)
+    if yday == day - timedelta(days=1):
+        return yday, back(yday)
+    return yday, yday - timedelta(days=7)
+
+
 def _kept(j):
     return f"{j['kept_pct']}%" if j['kept_pct'] is not None else '–'
 
 
 def _jobs_table(j):
-    return table([('Jobs taken', j['taken']), ('Finished', j['finished']), ('Promises kept', _kept(j))])
+    # Promises kept only when some job had a ready time to keep: at the
+    # counter none do, and "–" every day said nothing (26 Nov 2026).
+    rows = [('Jobs taken', j['taken']), ('Finished', j['finished'])]
+    if j['kept_pct'] is not None:
+        rows.append(('Promises kept', _kept(j)))
+    return table(rows)
 
 
 def discounts_for(start, end):
@@ -175,7 +210,7 @@ def discounts_for(start, end):
     total, rows = ZERO, []
     for c in cuts:
         total += c.amount or ZERO
-        what = c.job.job_number if c.job_id else c.proforma.proforma_number
+        what = job_name(c.job) if c.job_id else c.proforma.proforma_number
         rows.append((what, c.amount or ZERO, c.reason))
     return len(rows), total, rows
 
@@ -273,14 +308,14 @@ def brief(day=None, greeting=None):
     """
     from apps.eye.services import periods
     day = day or timezone.localdate()
-    yday, before = day - timedelta(days=1), day - timedelta(days=2)
+    yday, before = last_open_days(day)
     sc = _company()
     ids = sc.branch_ids
     start, end = periods.bounds(yday, yday)
     p_start, p_end = periods.bounds(before, before)
     collected, methods = money_for(ids, start, end)
     prev, _ = money_for(ids, p_start, p_end)
-    note = _change(collected, prev, f'{before:%A}')
+    note = _change(collected, prev, f'last {before:%A}' if (yday - before).days == 7 else f'{before:%A}')
     j = jobs_for(ids, start, end)
     n_cuts, off, _ = discounts_for(start, end)
     due = due_on(ids, day)
@@ -306,7 +341,8 @@ def brief(day=None, greeting=None):
         greeting or f'☀️ *Good morning, {name}*',
         f'_Morning brief · {_short_day(day)}_',
         RULE,
-        hero('Collected yesterday', ghs(collected), note),
+        hero('Collected yesterday' if yday == day - timedelta(days=1) else f'Collected {yday:%A}',
+             ghs(collected), note),
         _jobs_table(j),
         RULE,
         methods and '💳 *How it was paid* · GHS',
@@ -333,14 +369,16 @@ def brief(day=None, greeting=None):
     card = {
         'kicker': 'Morning brief', 'date': _day_name(day),
         'greeting': f'Good morning, {name}',
-        'hero': {'label': f'Collected yesterday, {_short_day(yday)}', 'value': ghs(collected), 'note': note},
+        'hero': {'label': (f'Collected yesterday, {_short_day(yday)}' if yday == day - timedelta(days=1)
+                           else f'Collected {_short_day(yday)}'), 'value': ghs(collected), 'note': note},
         'tiles': [('Jobs taken', str(j['taken'])), ('Finished', str(j['finished'])), ('Promises kept', _kept(j))],
         'sections': sections,
         'footer': 'Reply "today" any time for the latest',
     }
-    caption = (f'☀️ Good morning, {name}. Yesterday {ghs(collected)} collected; '
+    said = 'Yesterday' if yday == day - timedelta(days=1) else f'{yday:%A}'
+    caption = (f'☀️ Good morning, {name}. {said} {ghs(collected)} collected; '
                f'{due} job{"s" if due != 1 else ""} due today.')
-    knock = (f'Your morning brief for {_short_day(day)} is ready. Yesterday {ghs(collected)} collected, '
+    knock = (f'Your morning brief for {_short_day(day)} is ready. {said} {ghs(collected)} collected, '
              f'{due} jobs due today.')
     return {'text': text, 'card': card, 'caption': caption, 'knock': knock}
 

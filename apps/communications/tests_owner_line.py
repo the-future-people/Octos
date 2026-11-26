@@ -40,7 +40,9 @@ def meta():
             patch(f'{CLIENT}.send_image', side_effect=_wamids('I')) as send_image, \
             patch(f'{CLIENT}.send_buttons', side_effect=_wamids('B')) as send_buttons, \
             patch('apps.communications.tasks.deliver_owner_message.delay', side_effect=owner_line.deliver), \
-            patch('apps.communications.tasks.answer_owner.delay', side_effect=owner_line.answer):
+            patch('apps.communications.tasks.answer_owner.delay', side_effect=owner_line.answer), \
+            patch('apps.communications.tasks.answer_owner.apply_async',
+                  side_effect=lambda args, **kw: owner_line.answer(*args)):
         yield SimpleNamespace(text=send_text, template=send_template, image=send_image, buttons=send_buttons)
 
 
@@ -271,13 +273,13 @@ class UrgentTests(Base):
 class WebhookTests(WebhookTestCase):
 
     def test_his_messages_never_become_a_chat(self):
-        with patch('apps.communications.tasks.answer_owner.delay') as answer, \
+        with patch('apps.communications.tasks.answer_owner.apply_async') as answer, \
                 self.captureOnCommitCallbacks(execute=True):
             self.deliver(delivery(text('today', wamid='wamid.OWN1', sender=OWNER_WA)))
         self.assertFalse(Conversation.objects.exists())
         got = OwnerMessage.objects.get()
         self.assertEqual((got.direction, got.body), (OwnerMessage.IN, 'today'))
-        answer.assert_called_once_with(got.pk)
+        answer.assert_called_once_with((got.pk,), countdown=owner_line.GATHER)
 
     def test_a_tapped_button_keeps_its_id(self):
         tap = {'from': OWNER_WA, 'id': 'wamid.OWN2', 'timestamp': '1762270000', 'type': 'interactive',

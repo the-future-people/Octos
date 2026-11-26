@@ -1041,15 +1041,25 @@ class PriceCalculateView(APIView):
             key: value for key, value in request.query_params.items()
             if key not in reserved
         }
-        for key in ('width_in', 'height_in', 'pages'):
+        if specs.get('pages'):
+            try:
+                specs['pages'] = int(specs['pages'])
+            except ValueError:
+                return Response({'detail': 'pages must be a whole number.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        # A size as measured, 2.5 or 36.75 inches (26 Nov 2026): it was cut
+        # to a whole number. Only the money is rounded, by quote_line.
+        from decimal import Decimal, InvalidOperation
+        for key in ('width_in', 'height_in'):
             if specs.get(key):
                 try:
-                    specs[key] = int(specs[key])
-                except ValueError:
-                    return Response(
-                        {'detail': f'{key} must be a whole number.'},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    size = Decimal(str(specs[key]))
+                except InvalidOperation:
+                    size = None
+                if size is None or not size.is_finite() or size <= 0:
+                    return Response({'detail': f'{key} must be a size in inches, like 2.5.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                specs[key] = float(size.quantize(Decimal('0.01')))
         specs['is_color'] = is_color
 
         from apps.jobs.pricing_engine import quote_line

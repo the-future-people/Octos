@@ -258,8 +258,9 @@ class StorefrontAPITests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.data['total'], '568.75')
-        self.assertEqual(response.data['line_items'][0]['total'], '568.75')
+        # 568.75 to the nearest 50 pesewas (26 Nov 2026).
+        self.assertEqual(response.data['total'], '569.00')
+        self.assertEqual(response.data['line_items'][0]['total'], '569.00')
 
     def test_a_line_without_its_dimensions_is_refused(self):
         created = self._client().post('/api/v1/storefront/orders/', {}, format='json').data

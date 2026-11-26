@@ -185,3 +185,44 @@ orders, so payment, the front desk, reminders and receipts work unchanged.
   iPhone 13: the card widens on a phone so the order number and lines fit.
 - be21d (video sends) was never pushed; its four files ride with be21f,
   because views.py carries both.
+
+# Octos on the owner's line, week of 23 Nov (26 Nov 2026)
+
+Assessed with Khofi from the line's export (Mon 23 to Thu 26). Agreed:
+Monday's brief shows Saturday; area prices round to the nearest 50 pesewas;
+sizes take decimals; the test job 05286 is cancelled (console); jobs get a
+readable name in Octos and the reports, the full number kept everywhere it
+must be.
+
+## Backend (be21g)
+- [x] 1. Stretched letters ("Thank youuu", "okkk") read as the plain word (brain._plain)
+- [x] 2. Octos on his line: the price list (find_services, quote: the customer side's own)
+- [x] 3. find_job: every line of the job (what, pages, sides, copies, price)
+- [x] 4. Two quick messages, one answer: text waits 4s; a newer message answers both
+- [x] 5. A reminder already settled on the line stays quiet
+- [x] 6. Prompt: check a job number before it goes in a draft; call jobs by name
+- [x] 7. Readable job names: jobs/services/job_names.py ("Kwabena's banner (#5286)");
+         in boss look-ups, the job card, slipping alerts, discount cards, reports;
+         checker holds a "#5286"/"job 5286" no look-up gave
+- [x] 8. Reports: Monday shows Saturday against the Saturday before; promises row
+         hidden when no job had a ready time; open cash sheets only at trading
+         branches; halted jobs say since when, and a cancelled job is no alert
+- [x] 9. Area prices round to the nearest GHS 0.50, a piece at a time (quote_line)
+- [x] 10. The price view takes decimal sizes (2.5 in)
+- [x] 11. Tests
+
+## Frontend (octos-web)
+- [x] 12. NewJobModal: width and height take decimals, kept as typed
+
+## Verify
+- [x] 13. Full suite, build, a look at the size field
+
+## Review (26 Nov 2026)
+- be21g: 16 new tests (tests_owner_week_26nov); three older tests updated to
+  the new rules (568.75 is now 569.00; Octos's price tools on the owner's
+  line are named price_list and price, apart from the customer side's).
+- Octos's tools on his line keep their own names: the same price list,
+  reached through price_list and price.
+- The halted alert now names the job and says since when, and the Eye shows
+  the same words. A cancelled job drops out.
+- Not done here: names on the staff screens (a mock first, as agreed).

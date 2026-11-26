@@ -23,6 +23,8 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.jobs.services.job_names import job_name
+
 ZERO = Decimal('0')
 DEAD = ('DRAFT', 'CANCELLED', 'VOIDED')
 LIST_LIMIT = 15
@@ -236,7 +238,10 @@ def branch_pulse(branch=''):
 
 
 def _job_row(job, now):
+    # 'name' is how he is told about it (26 Nov 2026); 'job' is the full
+    # number, for looking it up again and only said when he asks for it.
     row = {
+        'name': job_name(job),
         'job': job.job_number,
         'what': job.title,
         'customer': job.customer.full_name if job.customer_id else 'walk-in',
@@ -360,8 +365,35 @@ def find_job(query):
             row['promise'] = job.promise_state.replace('_', ' ').lower()
         if job.discount_amount:
             row['discount'] = f'{ghs(job.discount_amount)} off · {job.discount_reason}'
+        row['lines'] = job_lines(job)
         rows.append(row)
     return {'found': len(rows), 'jobs': rows}
+
+
+def job_lines(job):
+    """
+    Every line of the job, add-ons under what they finish (26 Nov 2026):
+    Fiifi was told "90 pages, 1 copy" for GHS 267.00, the total of three
+    files, because only the title ("... and 2 more") could be seen.
+    """
+    out = []
+    for line in job.line_items.select_related('service').order_by('position', 'pk'):
+        specs = line.specifications or {}
+        row = {'what': line.label or (line.service.display_name or line.service.name if line.service_id else 'Item'),
+               'copies': line.quantity, 'price': ghs(line.line_total)}
+        if line.pages and line.pages > 1:
+            row['pages'] = line.pages
+        if line.sides:
+            row['sides'] = line.get_sides_display() if hasattr(line, 'get_sides_display') else line.sides
+        if line.is_color:
+            row['colour'] = True
+        if specs.get('width_in') and specs.get('height_in'):
+            row['size'] = f"{specs['width_in']} x {specs['height_in']} in"
+        if line.parent_id:
+            row['finishing_for_line'] = line.parent_id
+        row['line'] = line.pk
+        out.append(row)
+    return out
 
 
 # ── Money ──────────────────────────────────────────────────────────────────
@@ -499,7 +531,7 @@ def who_owes(branch=''):
         who = job.customer.full_name if job.customer_id else f'walk-in on {job.job_number}'
         row = people.setdefault(who, {'customer': who, 'owes': ZERO, 'jobs': []})
         row['owes'] += due
-        row['jobs'].append({'job': job.job_number, 'what': job.title, 'balance': ghs(due),
+        row['jobs'].append({'name': job_name(job), 'job': job.job_number, 'what': job.title, 'balance': ghs(due),
                             'stage': job.get_work_state_display() if job.work_state else job.get_status_display(),
                             'taken': when(job.created_at, now)})
     rows = sorted(people.values(), key=lambda r: -r['owes'])
@@ -759,7 +791,7 @@ def staff_activity(person, period='today'):
     job_total = sum((j.estimated_cost or ZERO) for j in jobs)
     out['jobs_taken'] = {
         'count': jobs.count(), 'total_value': ghs(job_total),
-        'latest': [{'job': j.job_number, 'what': j.title,
+        'latest': [{'name': job_name(j), 'job': j.job_number, 'what': j.title,
                     'customer': j.customer.full_name if j.customer_id else 'walk-in',
                     'price': ghs(j.estimated_cost), 'status': j.get_status_display(),
                     'at': when(j.created_at, now)} for j in jobs[:8]],
@@ -937,7 +969,8 @@ def statement(customer):
     now = timezone.now()
 
     def row(j):
-        return {'job': j.job_number, 'what': j.title, 'amount': ghs(j.estimated_cost), 'paid': ghs(j.amount_paid),
+        return {'name': job_name(j), 'job': j.job_number, 'what': j.title, 'amount': ghs(j.estimated_cost),
+                'paid': ghs(j.amount_paid),
                 'balance': ghs(j.balance_due), 'delivered': when(j.handed_over_at, now) if j.handed_over_at else None,
                 'taken': when(j.created_at, now)}
     return {'customer': c.display_name, 'phone': c.phone,

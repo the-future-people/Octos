@@ -1760,7 +1760,8 @@ class AreaPricingTests(JobsFixtureMixin, TestCase):
             'width_in': 168, 'height_in': 150, 'quantity': 1,
         })
         self.assertEqual(ok.status_code, 200, ok.content)
-        self.assertEqual(ok.data['total'], Decimal('568.75'))
+        # 175 sq ft is 568.75, to the nearest 50 pesewas (26 Nov 2026).
+        self.assertEqual(ok.data['total'], Decimal('569.00'))
         self.assertEqual(ok.data['area_sqft'], Decimal('175'))
 
     def test_the_price_endpoint_refuses_an_area_service_with_no_dimensions(self):

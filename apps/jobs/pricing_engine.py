@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from apps.jobs.models import PricingRule
 
 
@@ -16,6 +16,11 @@ def square_feet(width_in, height_in) -> Decimal:
     return (
         Decimal(str(width_in)) * Decimal(str(height_in))
     ) / Decimal('144')
+
+def to_half(amount) -> Decimal:
+    """To the nearest 50 pesewas: 69.54 -> 69.50, 84.43 -> 84.50, 69.75 -> 70.00."""
+    return ((Decimal(str(amount)) * 2).quantize(Decimal('1'), rounding=ROUND_HALF_UP) / 2).quantize(Decimal('0.01'))
+
 
 def quote_line(service, branch, specifications=None, quantity=1) -> dict:
     """
@@ -55,13 +60,20 @@ def quote_line(service, branch, specifications=None, quantity=1) -> dict:
         if not result['success']:
             return result
 
-        total      = result['total']
-        unit_price = (total / Decimal(str(quantity))).quantize(Decimal('0.01'))
         rule       = PricingEngine(service, branch).rule
         floor      = rule.minimum_price or Decimal('0')
         one_piece  = Decimal(str(area)) * rule.base_price
         applied    = bool(floor and one_piece * quantity < floor)
+        # To the nearest 50 pesewas, a piece at a time, so two pieces cost
+        # twice one (26 Nov 2026: 59.50 for one roll-up, 119.01 for two).
+        # The size stays exactly as given; only the money is rounded.
+        if applied:
+            total = to_half(result['total'])
+        else:
+            total = to_half(result['total'] / Decimal(str(quantity))) * quantity
+        unit_price = (total / Decimal(str(quantity))).quantize(Decimal('0.01'))
         result.update({
+            'total'          : total,
             'area_sqft'      : area,
             'unit_price'     : unit_price,
             'minimum_applied': applied,

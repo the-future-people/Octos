@@ -59,11 +59,18 @@ def compute(scope, day=None) -> list:
             out.append(_a(RED, 'breakdowns', f'{names.get(mid, "A machine")}: {len(moments)} breakdowns this month',
                           '', None, 'machines', mid))
 
-    # Jobs halted more than a day.
+    # Jobs halted more than a day: since when, by name (26 Nov 2026, a
+    # test job said "halted over a day" in eight reports running). A job
+    # cancelled or voided is no longer halted work.
+    from apps.jobs.services.job_names import job_name
     for h in (JobHalt.objects.filter(job__branch_id__in=ids, resumed_at__isnull=True,
                                      halted_at__lt=now - timedelta(days=1))
-              .select_related('job__branch')):
-        out.append(_a(RED, 'halted_long', f'{h.job.job_number} halted over a day',
+              .exclude(job__status__in=['CANCELLED', 'VOIDED'])
+              .select_related('job__branch', 'job__customer')):
+        since = timezone.localtime(h.halted_at)
+        days = (timezone.localdate() - since.date()).days
+        out.append(_a(RED, 'halted_long',
+                      f'{job_name(h.job)} halted since {since.day} {since:%b}, {days} days',
                       h.job.branch.name, h.halted_at, 'jobs', h.job_id))
 
     # Jobs past their promise.
@@ -83,7 +90,10 @@ def compute(scope, day=None) -> list:
     # Today only: sheets left open, people absent, repeated lateness.
     if day == today:
         local = timezone.localtime()
-        for s in DailySalesSheet.objects.filter(branch_id__in=ids, date=today, status='OPEN').select_related('branch'):
+        # Only where the day is run on Octos: a branch not trading yet has a
+        # sheet nobody opens or closes (26 Nov 2026, five every night).
+        for s in (DailySalesSheet.objects.filter(branch_id__in=ids, branch__is_trading=True, date=today,
+                                                 status='OPEN').select_related('branch')):
             from apps.organization.services import hours
             closing = timezone.make_aware(datetime.combine(today, hours.hours_on(s.branch, today)[1]))
             if local > closing + timedelta(minutes=30):
