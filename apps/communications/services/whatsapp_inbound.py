@@ -224,6 +224,14 @@ def _receive(message, profile_name, who=None):
     from apps.communications.services import owner_watch
     owner_watch.customer_wrote(conversation, message)
 
+    # A link to a file (Drive, Dropbox, OneDrive, WeTransfer): opened and
+    # kept as their file, which this message's answer waits for (27 Nov 2026).
+    if message.body and not message.media_id:
+        from apps.communications.services import shared_links
+        try:
+            shared_links.open_links(conversation, message)
+        except Exception:
+            logger.warning('Links in message %s could not be queued', message.pk, exc_info=True)
     wake_octos(conversation, message, pause=8)
     if message.media_id:
         _keep_media(message)

@@ -42,6 +42,11 @@ class Message(AuditModel):
     # photos. Shown in the inbox, never answered, never read by Octos.
     UNSUPPORTED = 'unsupported'
     QUIET_KINDS = (REACTION, UNSUPPORTED)
+    # A file Octos opened from a link the customer sent (27 Nov 2026):
+    # read like any file, but never the message to answer. The customer's
+    # message with the link is, and it waits for this file to arrive.
+    FROM_LINK = 'from_link'
+    NOT_TRIGGERS = QUIET_KINDS + (FROM_LINK,)
 
     # Message Type
     TEXT = 'TEXT'

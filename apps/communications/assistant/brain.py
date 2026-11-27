@@ -376,7 +376,7 @@ def _stepped_in(conversation, trigger):
     later = conversation.messages.filter(created_at__gt=trigger.created_at, is_internal_note=False)
     if later.filter(direction=Message.OUTBOUND, sent_by__isnull=False).exists():
         return 'a person replied while Octos was writing'
-    if later.filter(direction=Message.INBOUND).exclude(kind__in=Message.QUIET_KINDS).exists():
+    if later.filter(direction=Message.INBOUND).exclude(kind__in=Message.NOT_TRIGGERS).exists():
         return 'the customer wrote again while Octos was writing; that message will be answered'
     return None
 
@@ -442,7 +442,7 @@ def follow_up(conversation_id, now=None):
             or conversation.handled_by != Conversation.OCTOS:
         return None
     trigger = (conversation.messages.filter(direction=Message.INBOUND, is_internal_note=False)
-               .exclude(kind__in=Message.QUIET_KINDS).order_by('-created_at').first())
+               .exclude(kind__in=Message.NOT_TRIGGERS).order_by('-created_at').first())
     if trigger is None:
         return None
     run = AssistantRun(conversation=conversation, trigger=trigger, mode=mode, model=settings.OCTOS_ASSISTANT_MODEL)
@@ -500,7 +500,7 @@ def _silence(conversation, trigger, now):
     # A reaction (a thumbs-up on a receipt) is never the message waiting for
     # an answer: it neither starts a reply nor hides the question before it
     # (Henry, 13 Nov 2026).
-    last = visible.filter(direction=Message.INBOUND).exclude(kind__in=Message.QUIET_KINDS).first()
+    last = visible.filter(direction=Message.INBOUND).exclude(kind__in=Message.NOT_TRIGGERS).first()
     if last is None:
         return 'nobody is waiting for an answer'
     if trigger is not None and last.pk != trigger.pk:
@@ -1012,9 +1012,13 @@ def _history(conversation):
                 what += ', black and white' if counter.is_grey(info['colour_mode']) else ', colour'
             if info.get('word'):
                 what += ', a Word file'
+            if m.kind == Message.FROM_LINK:
+                what += f", opened by us from the {info.get('from') or 'shared'} link they sent"
             if m.file_deleted_at:
                 # Deleted (25 Nov 2026): after 14 days, or because they asked.
                 what += ', deleted from our storage, so we no longer have it: ask them to send it again if they want it printed'
+            elif not m.media_file and info.get('failed') and m.kind == Message.FROM_LINK:
+                what += LINK_FAILED.get(info['failed'], LINK_FAILED['private'])
             elif not m.media_file and info.get('failed'):
                 what += ", couldn't be fetched from WhatsApp: ask them to send it again"
             elif not m.media_file and info.get('fetching'):
@@ -1154,6 +1158,17 @@ LOCK_SECONDS = 180    # longer than any run; a crashed worker's lock expires by 
 RETRY_SECONDS = 10
 
 
+# A link we couldn't open, said so Octos asks for the right thing (27 Nov 2026).
+LINK_FAILED = {
+    'private': (": we couldn't open the link (it's private or needs a sign-in): ask them to share it "
+                "so anyone with the link can view it, or to send the file itself here"),
+    'needs_sign_in': ": the link needs its owner's sign-in: ask them to send the file itself here",
+    'gone': ": the link no longer works: ask them to send it again, or the file itself",
+    'too_big': ": the file behind the link is over 100 MB: ask how they'd like to get it to us",
+    'not_a_file': ": the link isn't a file we can print: ask them to send the file itself here",
+}
+
+
 def _still_reading(conversation_id):
     """
     A file sent in the last 3 minutes is still being fetched from WhatsApp
@@ -1172,6 +1187,33 @@ def _still_reading(conversation_id):
     ).exists()
 
 
+READER_WAIT = 180    # seconds a person reading the chat has to answer before Octos does
+READER_RETRY = 20
+
+
+def _being_read(conversation_id, trigger_id):
+    """
+    A person has this chat open in the inbox, in shop hours, and the
+    customer's message is under READER_WAIT old, and nobody handed the chat
+    back to Octos since it came. Out of hours an open chat is someone
+    keeping an eye on it, not serving (15 Nov 2026), so Octos answers then.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from apps.communications.services.opened import in_focus
+    if not trigger_id or not in_focus(conversation_id):
+        return False
+    now = timezone.now()
+    if not counter.shop_open(now):
+        return False
+    trigger = Message.objects.select_related('conversation').filter(pk=trigger_id).first()
+    if trigger is None or now - trigger.created_at >= timedelta(seconds=READER_WAIT):
+        return False
+    if counter.bare_greeting(trigger) or counter.no_words(trigger):
+        return False        # the counter's own rule keeps quiet on these, and records why
+    return not taken_back_since(trigger.conversation, trigger)
+
+
 def respond(conversation_id, *args, **kwargs):
     """
     One run at a time per chat (14 Nov 2026). Two messages landing together
@@ -1187,10 +1229,17 @@ def respond(conversation_id, *args, **kwargs):
         trigger_id = args[0] if args else kwargs.get('trigger_id')
         answer_whatsapp.apply_async((conversation_id, trigger_id), countdown=RETRY_SECONDS)
         return None
+    trigger_id = args[0] if args else kwargs.get('trigger_id')
+    if _being_read(conversation_id, trigger_id):
+        # Someone at Farhat is reading this chat right now: theirs to answer
+        # (Khofi, 27 Nov 2026). Octos looks again shortly, and answers only
+        # if nobody has after READER_WAIT, so a chat left open strands no one.
+        from apps.communications.tasks import answer_whatsapp
+        answer_whatsapp.apply_async((conversation_id, trigger_id), countdown=READER_RETRY)
+        return None
     key = f'octos_run:{conversation_id}'
     if not cache.add(key, True, LOCK_SECONDS):
         from apps.communications.tasks import answer_whatsapp
-        trigger_id = args[0] if args else kwargs.get('trigger_id')
         answer_whatsapp.apply_async((conversation_id, trigger_id), countdown=RETRY_SECONDS)
         return None
     _writing(conversation_id, True)

@@ -51,6 +51,24 @@ def answer_whatsapp(conversation_id, trigger_id):
     from apps.communications.assistant import brain
     brain.respond(conversation_id, trigger_id)
 
+@shared_task(bind=True, max_retries=3)
+def fetch_shared_link(self, message_id):
+    """
+    Open a link the customer sent and keep its file (27 Nov 2026). A dropped
+    connection tries again soon; a private or dead link is said in the chat.
+    """
+    import requests
+    from apps.communications.services import shared_links
+    try:
+        shared_links.fetch(message_id)
+    except requests.RequestException as exc:
+        if self.request.retries >= self.max_retries:
+            from apps.communications.models import Message
+            shared_links.failed(Message.objects.get(pk=message_id), 'gone')
+            raise
+        raise self.retry(exc=exc, countdown=FETCH_AGAIN[self.request.retries])
+
+
 # Seconds before each next try (26 Nov 2026). It was a minute every time,
 # and the first try was failing on most files and the second working: every
 # file opened at 62 or 123 seconds, a 0.0 MB Word file the same as 21 MB.

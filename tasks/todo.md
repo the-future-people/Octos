@@ -248,3 +248,36 @@ separately and waits for his look.
   Octos waits only on that mark. Waiting on any file without a copy held up 11
   older tests whose files never get one, and would hold a chat whose file record
   was made some other way.
+
+# Shared links and a chat being read (27 Nov 2026)
+
+Ekd sent two Adobe Acrobat links; Octos asked for the PDFs (the 24 Nov rule)
+while Khofi was reading the chat, and Kingsford opened the links himself.
+Khofi: Octos should open links and read them; a chat being read keeps Octos
+quiet. The link "did nothing" when clicked: not reproduced (opens on phone
+and computer in a portal-like page); asked which device and which link.
+
+- [x] 1. services/shared_links.py: Google Drive and Docs, Dropbox, OneDrive,
+         WeTransfer turned into a direct download; HTML back means private.
+         Adobe Acrobat and Canva need a sign-in: left to the team.
+- [x] 2. A link that can be opened becomes the customer's file in the chat
+         (a document message, fetching until saved), measured like any file;
+         Octos is woken for it once it's in (or failed)
+- [x] 3. whatsapp_media.keep(): the save-and-measure half of fetch, shared
+- [x] 4. Prompt: links we can open arrive as files; links we can't (Adobe,
+         Canva, private): the team opens them, Octos asks only what's missing
+         and promises no price
+- [x] 5. A chat open in the inbox (shop hours): Octos waits up to 3 minutes for
+         the person reading; nobody replies, it answers
+- [x] 6. Tests
+
+## Review (27 Nov 2026)
+- 11 new tests (tests_links_and_reading); the 24 Nov shared-link test now
+  checks the new rule.
+- The link's file is a FROM_LINK message: read by Octos like any file, never
+  the message answered (Message.NOT_TRIGGERS). The customer's message with
+  the link is answered, after waiting for the file (fetching, 3 min at most).
+- The reading wait covers messages with words only; greetings and files
+  keep the counter's own rule (quiet at once, recorded).
+- Live links can't be fetched from the sandbox: Google Drive, Dropbox,
+  OneDrive and WeTransfer to be tried for real once deployed.

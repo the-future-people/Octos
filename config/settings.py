@@ -564,6 +564,7 @@ CORS_ALLOWED_ORIGINS = [
 # The worker runs 8 at once and listens to both: -Q celery,fast.
 CELERY_TASK_ROUTES = {
     'apps.communications.tasks.fetch_whatsapp_media': {'queue': 'fast'},
+    'apps.communications.tasks.fetch_shared_link': {'queue': 'fast'},
     'apps.communications.tasks.deliver_whatsapp': {'queue': 'fast'},
 }
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1

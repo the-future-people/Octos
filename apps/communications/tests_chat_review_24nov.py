@@ -146,5 +146,7 @@ class SharedLinkRuleTests(TestCase):
 
     def test_octos_asks_for_the_file_without_talking_about_itself(self):
         from apps.communications.assistant import prompt
-        self.assertIn('A link to a shared document (Adobe Acrobat', prompt.RULES)
-        self.assertIn("Never say you can't open links", prompt.RULES)
+        # 27 Nov 2026: links we can open arrive as files; Adobe and Canva go
+        # to the team, and the customer is never asked for the file instead.
+        self.assertIn('we open Google Drive, Dropbox, OneDrive and WeTransfer links ourselves', prompt.RULES)
+        self.assertIn('Never ask them to send the file instead', prompt.RULES)

@@ -52,7 +52,15 @@ def fetch(message_id):
         return message  # already kept, or nothing to keep
 
     content, mime = download(message.media_id)
-    mime = message.media_mime or mime
+    return keep(message, content, message.media_mime or mime)
+
+
+def keep(message, content, mime):
+    """
+    Save a customer's file on its message, tell every screen, then measure it.
+    A WhatsApp file (fetch) and a file opened from a link the customer sent
+    (shared_links, 27 Nov 2026) go the same way from here.
+    """
     name = _file_name(message, mime)
     path = default_storage.save(
         f'communications/media/{timezone.now():%Y/%m}/{name}', ContentFile(content),
@@ -75,7 +83,7 @@ def fetch(message_id):
         )
         _announce(message)
     message.refresh_from_db()
-    logger.info('Kept WhatsApp media for message %s: %s, %s bytes', message.pk, path, len(content))
+    logger.info('Kept the file for message %s: %s, %s bytes', message.pk, path, len(content))
     return message
 
 
