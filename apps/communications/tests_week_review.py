@@ -474,11 +474,13 @@ class VoiceNoteTests(TestCase):
         again = inbound(self.chat, message_type=Message.AUDIO, media_id='m-v2')
         self.assertEqual(self.step(again), (None, 'voice note: asked them to type already'))
 
-    def test_a_person_with_the_chat_open_has_it(self):
+    def test_a_person_with_the_chat_open_has_it_first(self):
+        # Octos holds while the chat is open (brain._being_read, 27 Nov 2026).
+        from apps.communications.assistant import brain
         voice = inbound(self.chat, message_type=Message.AUDIO, media_id='m-v3')
         with patch('apps.communications.services.opened.in_focus', return_value=True), \
                 patch('apps.communications.assistant.counter.shop_open', return_value=True):
-            self.assertEqual(counter.step(self.chat, voice, timezone.now()), (None, 'a person has this chat open'))
+            self.assertTrue(brain._being_read(self.chat.pk, voice.pk))
 
 
 class RegularTests(TestCase):

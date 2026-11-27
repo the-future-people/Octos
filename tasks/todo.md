@@ -287,3 +287,14 @@ and computer in a portal-like page); asked which device and which link.
 - [x] Cause: one 60 s timeout for connecting and reading the download; a dead address sat out the minute
 - [x] Connecting gets 5 s, reading 30 s between pieces (whatsapp_media.WAIT_FOR_*), test in tests_files_fast
 - [ ] After deploy: run the files-today check again; slow files should be gone or ~5-10 s
+
+# An open chat holds Octos, it never silences it (27 Nov 2026)
+Gifty (6 files), Moro ("Hi" + ticket), Joanbaby (photo): "a person has this chat
+open", then nothing for 6-13 minutes. The counter rule stood down for good on a
+greeting or a file; Khofi chose "wait, then answer".
+- [x] counter.step: the open-chat skip removed
+- [x] brain._being_read: greetings and files held too (3 min from the message, shop hours)
+- [x] After the hold, the usual guards: a person who wrote, files already handled, a job made
+- [x] Deleted at the customer's word: never-saved files marked too; fetch skips deleted files (Lorrey)
+- [x] Tests: tests_open_chat_27nov (5), focus/octos_update/week_review moved to the new rule
+- [ ] After deploy: a file sent to an open chat with nobody replying gets Octos's answer at ~3 min

@@ -204,16 +204,12 @@ def step(conversation, trigger, now):
             branch = _branch(named)
             _visit(conversation, branch, now)
             return ack_text(conversation, branch, now) + _order_waiting(conversation, branch, now), ACK_REASON
-    # Someone at Farhat has this chat open right now: a greeting or a file is
-    # theirs to pick up, so Octos stays quiet (14 Nov 2026). Questions with
-    # words still go on, so nobody is left unanswered by a chat left open.
-    from apps.communications.services.opened import in_focus
-    # Only while the shop is open (15 Nov 2026): out of hours, whoever has
-    # the chat open is keeping an eye on it, not serving. Octos answers.
+    # Someone at Farhat having this chat open no longer silences Octos here
+    # (27 Nov 2026). It stood down for good on a greeting or a file, so with
+    # a chat open on a screen Gifty's six files and Moro's "Hi" got nothing
+    # for ten minutes. Now brain.respond holds every message while a chat is
+    # open, and Octos answers if nobody has written to them in 3 minutes.
     from apps.communications.assistant.brain import taken_back_since
-    if opened and (bare_greeting(trigger) or no_words(trigger)) and in_focus(conversation.pk) \
-            and not taken_back_since(conversation, trigger):
-        return None, 'a person has this chat open'
     # Where is the customer? A belief, not a timer (Layer 2, Step 2.2).
     from apps.spine import presence
     belief = presence.for_message(conversation, trigger, now, opened)

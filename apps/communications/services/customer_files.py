@@ -242,7 +242,23 @@ def delete(conversation, messages, actor, reason, note='', *, unlocked_by=None):
                    payload={'message': message.pk, 'name': message.media_name, 'pages': message.media_pages,
                             'size': message.media_size, 'sha256': sha, 'copies': gone})
         done.append(message)
+    if reason == 'asked':
+        _never_fetch(conversation, now, actor, words)
     return done
+
+
+def _never_fetch(conversation, now, actor, words):
+    """
+    Files of theirs we never managed to save are marked deleted too, so a
+    later try can't bring one back after we told them their files are gone
+    (27 Nov 2026: Lorrey's loan agreement failed to arrive, she asked for her
+    files deleted, and fetching it again would have stored it).
+    """
+    from apps.communications.models import Message
+    (Message.objects.filter(conversation=conversation, direction=Message.INBOUND, media_file='',
+                            file_deleted_at__isnull=True, created_at__lte=now)
+     .filter(Q(media_id__gt='') | Q(kind=Message.FROM_LINK))
+     .update(file_deleted_at=now, file_deleted_by=actor, file_delete_reason=words))
 
 
 def delete_by_hand(conversation, ids, actor, reason, note=''):

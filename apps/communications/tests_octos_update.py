@@ -116,14 +116,15 @@ class CounterTests(Base):
         self.assertEqual(run.decision, AssistantRun.SKIPPED)
         self.assertEqual(self.sent().count(), 1)
 
-    def test_a_greeting_and_a_file_are_left_alone_when_staff_have_the_chat_open(self):
+    def test_a_greeting_and_a_file_wait_while_staff_have_the_chat_open(self):
+        # Held, no longer left for good (27 Nov 2026): tests_open_chat_27nov.
         hi = self.customer('Hi')
         photo = self.customer(file=True)
         cache.set(opened._focus_key(self.conv.pk), True, opened.FOCUS_SECONDS)
         self.addCleanup(cache.delete, opened._focus_key(self.conv.pk))
         for trigger in (hi, photo):
-            run = self.respond(Model(says(text('x'))), trigger)
-            self.assertEqual(run.decision, AssistantRun.SKIPPED)
+            with patch('apps.communications.tasks.answer_whatsapp.apply_async'):
+                self.assertIsNone(self.respond(Model(says(text('x'))), trigger))
         self.assertFalse(self.sent().exists())
 
     def test_phrases(self):

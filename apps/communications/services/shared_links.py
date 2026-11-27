@@ -202,7 +202,7 @@ def fetch(message_id):
     """The worker's half: download the link's file onto its message, then wake Octos for it."""
     from apps.communications.services import whatsapp_media
     message = Message.objects.select_related('conversation').get(pk=message_id)
-    if message.media_file:
+    if message.media_file or message.file_deleted_at:
         return message
     url = (message.media_info or {}).get('link')
     try:

@@ -1197,6 +1197,8 @@ def _being_read(conversation_id, trigger_id):
     customer's message is under READER_WAIT old, and nobody handed the chat
     back to Octos since it came. Out of hours an open chat is someone
     keeping an eye on it, not serving (15 Nov 2026), so Octos answers then.
+    Greetings and files too (27 Nov 2026): they were left to the person for
+    good, and a chat open on a screen meant files got no word at all.
     """
     from datetime import timedelta
     from django.utils import timezone
@@ -1209,8 +1211,6 @@ def _being_read(conversation_id, trigger_id):
     trigger = Message.objects.select_related('conversation').filter(pk=trigger_id).first()
     if trigger is None or now - trigger.created_at >= timedelta(seconds=READER_WAIT):
         return False
-    if counter.bare_greeting(trigger) or counter.no_words(trigger):
-        return False        # the counter's own rule keeps quiet on these, and records why
     return not taken_back_since(trigger.conversation, trigger)
 
 

@@ -59,8 +59,8 @@ def fetch(message_id):
     While measuring, media_info says so, and Octos waits for it (brain).
     """
     message = Message.objects.get(pk=message_id)
-    if message.media_file or not message.media_id:
-        return message  # already kept, or nothing to keep
+    if message.media_file or not message.media_id or message.file_deleted_at:
+        return message  # already kept, nothing to keep, or deleted at their word
 
     content, mime = download(message.media_id)
     return keep(message, content, message.media_mime or mime)

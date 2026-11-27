@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 
-from apps.communications.assistant import counter
+from apps.communications.assistant import brain, counter
 from apps.communications.models import AssistantRun
 from apps.communications.services import opened
 from apps.communications.tests import CommunicationsTestBase, make_conversation
@@ -37,11 +37,16 @@ class FocusTests(Base):
         self.assertTrue(model.calls)
         self.assertEqual(run.decision, AssistantRun.REPLIED)
 
-    def test_shop_open_an_open_chat_still_keeps_octos_quiet(self):
+    def test_shop_open_an_open_chat_holds_octos_back(self):
+        # Held while someone reads, no longer silenced for good (27 Nov 2026):
+        # tests_open_chat_27nov has what happens when nobody writes.
         self.focus()
-        with patch(OPEN, return_value=True):
-            run = self.respond(Model(says(text('x'))), self.customer(file=True))
-        self.assertEqual(run.decision, AssistantRun.SKIPPED)
+        model = Model(says(text('x')))
+        with patch(OPEN, return_value=True), \
+                patch('apps.communications.tasks.answer_whatsapp.apply_async') as again:
+            self.assertIsNone(self.respond(model, self.customer(file=True)))
+        self.assertFalse(model.calls)
+        self.assertEqual(again.call_args.kwargs['countdown'], brain.READER_RETRY)
 
     def test_shop_open_a_file_after_saying_what_for_is_answered(self):
         self.customer('Ignore that one, use a different one')
