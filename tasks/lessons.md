@@ -1193,3 +1193,11 @@ Internal detail belongs in the log, not on the screen.
 
 ## 25 Nov 2026
 - Test a new Octos tool the way Octos calls it, in order (prepare_order, then pay_at_counter), not only the service on a state set up by hand. be21a's tests built AWAITING_PAYMENT orders, so nobody saw that a freshly prepared (DRAFT) order was refused at the counter.
+
+## Delays in round numbers are a timeout until proven otherwise (27 Nov 2026)
+Files opened at 62 and 124 seconds. On 26 Nov I blamed the 60-second retry and
+shortened it (be21h); the delays stayed exactly the same, because the minute was
+the download's own timeout (TIMEOUT * 3, used for connecting and reading alike)
+spent on an address that never answered. Rule: when a delay lands on a round
+number, list every timeout and countdown on that path before changing any, and
+give connecting its own short timeout (a connection opens in seconds or never).

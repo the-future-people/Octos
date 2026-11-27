@@ -28,6 +28,17 @@ from django.utils.text import get_valid_filename
 from apps.communications.models import Message
 from apps.communications.services.whatsapp_client import API_VERSION, TIMEOUT
 
+# How long to wait (27 Nov 2026). Files opened at 62 and 124 seconds, a 2 KB
+# photo the same as a 3 MB scan, with the queue empty: one wait of 60 seconds
+# was used for connecting and reading alike, and when WhatsApp's file server
+# handed out an address that never answered, the download sat out the whole
+# minute before trying the next one (two dead addresses, two minutes). A
+# connection either opens within seconds or never does, so it gets 5; once
+# connected, the file may go quiet for up to 30 seconds between pieces.
+CONNECT = 5
+WAIT_FOR_INFO = (CONNECT, TIMEOUT)
+WAIT_FOR_FILE = (CONNECT, 30)
+
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 100 * 1024 * 1024  # WhatsApp's own ceiling for a document
@@ -121,7 +132,7 @@ def download(media_id):
     headers = {'Authorization': f'Bearer {token}'}
 
     meta = requests.get(f'https://graph.facebook.com/{API_VERSION}/{media_id}',
-                        headers=headers, timeout=TIMEOUT)
+                        headers=headers, timeout=WAIT_FOR_INFO)
     if meta.status_code in (400, 404):
         raise MediaError(f'media {media_id} is gone ({meta.status_code})')
     meta.raise_for_status()
@@ -129,7 +140,7 @@ def download(media_id):
     if int(info.get('file_size') or 0) > MAX_BYTES:
         raise MediaError(f"media {media_id} is {info.get('file_size')} bytes, over the limit")
 
-    body = requests.get(info['url'], headers=headers, timeout=TIMEOUT * 3)
+    body = requests.get(info['url'], headers=headers, timeout=WAIT_FOR_FILE)
     body.raise_for_status()
     return body.content, info.get('mime_type', '')
 

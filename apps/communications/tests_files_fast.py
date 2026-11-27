@@ -127,3 +127,19 @@ class LongNamesAndFailuresTests(TestCase):
                 fetch_whatsapp_media(self.msg.pk)
         self.msg.refresh_from_db()
         self.assertEqual(self.msg.media_info, {'failed': 'error'})
+
+
+class ADeadAddressCostsSecondsTests(TestCase):
+    """27 Nov 2026: files opened at 62 and 124 seconds, the queue empty."""
+
+    @override_settings(WHATSAPP_ACCESS_TOKEN='t')
+    def test_connecting_gives_up_in_seconds_not_a_minute(self):
+        info = type('R', (), {'status_code': 200, 'raise_for_status': lambda s: None,
+                              'json': lambda s: {'url': 'https://lookaside.fbsbx.com/x', 'mime_type': 'image/jpeg'}})()
+        body = type('R', (), {'status_code': 200, 'raise_for_status': lambda s: None, 'content': b'jpg'})()
+        with patch('apps.communications.services.whatsapp_media.requests.get', side_effect=[info, body]) as get:
+            self.assertEqual(whatsapp_media.download('m-1'), (b'jpg', 'image/jpeg'))
+        for call in get.call_args_list:
+            connect, read = call.kwargs['timeout']
+            self.assertLessEqual(connect, 5)
+            self.assertLessEqual(read, 30)

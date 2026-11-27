@@ -281,3 +281,9 @@ and computer in a portal-like page); asked which device and which link.
   keep the counter's own rule (quiet at once, recorded).
 - Live links can't be fetched from the sandbox: Google Drive, Dropbox,
   OneDrive and WeTransfer to be tried for real once deployed.
+
+# Files at 62 and 124 seconds again (27 Nov 2026)
+- [x] Today's files: 8 of 16 slow, all at ~60 or ~120 s, queue empty, worker idle
+- [x] Cause: one 60 s timeout for connecting and reading the download; a dead address sat out the minute
+- [x] Connecting gets 5 s, reading 30 s between pieces (whatsapp_media.WAIT_FOR_*), test in tests_files_fast
+- [ ] After deploy: run the files-today check again; slow files should be gone or ~5-10 s
